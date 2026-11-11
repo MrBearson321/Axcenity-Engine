@@ -7,6 +7,7 @@
 use axcenity_script::{ApiEntry, ApiKind};
 use eframe::egui::text::{LayoutJob, TextFormat};
 
+use super::docs::{self, DocAction};
 use super::*;
 
 /// How many search results are listed at once.
@@ -44,6 +45,8 @@ pub(super) struct Reference {
 enum Nav {
     Results,
     Open(usize),
+    /// A page of the documentation that explains the entry.
+    Doc(usize),
 }
 
 impl Reference {
@@ -61,7 +64,9 @@ impl Reference {
         }
     }
 
-    pub(super) fn show(&mut self, ui: &mut egui::Ui) {
+    /// Draws the page. Returns a documentation page to open, when one of an
+    /// entry's "Read more" pages is clicked.
+    pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<DocAction> {
         self.load();
         let palette = theme::palette(ui.ctx());
         ui.label(
@@ -104,8 +109,10 @@ impl Reference {
         match nav {
             Some(Nav::Results) => self.open = None,
             Some(Nav::Open(index)) => self.open = Some(index),
+            Some(Nav::Doc(page)) => return Some(DocAction::Open(page, None)),
             None => {}
         }
+        None
     }
 }
 
@@ -363,6 +370,16 @@ fn entry_page(
     } else {
         ui.add(egui::Label::new(doc_text(&entry.doc, palette)).wrap());
     }
+    let name = entry.qualified_name();
+    if let Some(example) = axcenity_script::api_example(&name) {
+        ui.add_space(theme::space::L);
+        widgets::section_label(ui, "Example");
+        ui.add_space(4.0);
+        docs::markdown::code_block(ui, index, "lua", example, palette);
+    }
+    if let Some(page) = read_more(ui, &name, palette) {
+        nav = Some(Nav::Doc(page));
+    }
 
     if entry.owner.is_empty() {
         // Classes inherit Instance's members, which are listed on its page.
@@ -401,6 +418,34 @@ fn entry_page(
         }
     }
     nav
+}
+
+/// "Read more": the documentation pages that name the entry, as links.
+/// Returns the one clicked.
+fn read_more(ui: &mut egui::Ui, name: &str, palette: &Palette) -> Option<usize> {
+    let pages = docs::markdown::pages_mentioning(name);
+    if pages.is_empty() {
+        return None;
+    }
+    let library = docs::library();
+    let mut clicked = None;
+    ui.add_space(theme::space::L);
+    widgets::section_label(ui, "Read more");
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        for &page in pages {
+            let title = &library.pages[page].title;
+            if ui
+                .link(RichText::new(title).color(palette.accent_text))
+                .on_hover_text("Open in the Documentation")
+                .clicked()
+            {
+                clicked = Some(page);
+            }
+            ui.add_space(theme::space::M);
+        }
+    });
+    clicked
 }
 
 /// A description with its `code` in the code font.

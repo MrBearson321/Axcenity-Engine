@@ -221,10 +221,18 @@ fn the_reference_draws_results_and_an_open_entry() {
         .iter()
         .position(|entry| entry.owner.is_empty() && entry.name == "Part")
         .unwrap();
+    // Part.Touched has a usage example and pages that explain it.
+    let touched = entries
+        .iter()
+        .position(|entry| entry.qualified_name() == "Part.Touched")
+        .unwrap();
+    assert!(axcenity_script::api_example("Part.Touched").is_some());
+    assert!(!docs::markdown::pages_mentioning("Part.Touched").is_empty());
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
     for (name, query, open) in [
         ("start-reference-search", "Size", None),
         ("start-reference-entry", "Part", Some(part)),
+        ("start-reference-example", "Touched", Some(touched)),
     ] {
         let mut start = StartScreen {
             page: Page::Reference,
@@ -357,7 +365,7 @@ fn the_learn_window_shows_tutorials_and_the_reference_over_a_project() {
     start.learn.open = Some(0);
     let sample = learn::find_sample(learn::TUTORIALS[0].sample).unwrap();
     let ctx = theme::test_context();
-    for page in [Page::Learn, Page::Reference] {
+    for page in [Page::Learn, Page::Docs, Page::Reference] {
         start.page = page;
         for _ in 0..3 {
             let _ = crate::theme::run(&ctx, Default::default(), |ui| {
@@ -432,16 +440,33 @@ fn the_global_assets_page_lists_the_library_with_a_models_files_as_one_card() {
 
 #[test]
 fn the_learn_page_says_build_game() {
-    let notes: Vec<&str> = learn::TOPICS.iter().map(|&(_, _, note)| note).collect();
+    let library = docs::library();
+    let chapters: Vec<&docs::library::Page> = learn::chapters(library)
+        .into_iter()
+        .map(|(_, page)| &library.pages[page])
+        .collect();
     assert!(
-        notes.iter().any(|note| note.contains("File > Build Game")),
-        "{notes:?}"
+        chapters.iter().any(|page| {
+            page.blocks
+                .iter()
+                .any(|block| format!("{block:?}").contains("File > Build Game"))
+        }),
+        "a chapter of the learning path says how to build a game"
     );
     let tutorials = learn::TUTORIALS
         .iter()
         .flat_map(|tutorial| tutorial.steps.iter().map(|step| step.text));
-    for text in notes.iter().copied().chain(tutorials) {
+    for text in tutorials {
         assert!(!text.contains("Export Game"), "{text}");
+    }
+    for page in &library.pages {
+        for block in &page.blocks {
+            assert!(
+                !format!("{block:?}").contains("Export Game"),
+                "{}",
+                page.path
+            );
+        }
     }
 }
 
@@ -724,6 +749,7 @@ fn a_folded_sidebar_keeps_every_page_as_an_icon_and_gives_the_page_its_room() {
         "Projects",
         "Global Assets",
         "Learn",
+        "Documentation",
         "API Reference",
         "Settings",
     ] {
@@ -749,13 +775,14 @@ fn the_top_bar_lists_the_same_pages_across_the_top() {
         layout: NavLayout::TopBar,
         folded: false,
     };
-    for width in [800.0, 1400.0] {
+    for width in [800.0, 900.0, 1400.0] {
         let drawn = draw_with_nav(top, width);
         let mut lefts = Vec::new();
         for page in [
             "Projects",
             "Global Assets",
             "Learn",
+            "Documentation",
             "API Reference",
             "Settings",
         ] {

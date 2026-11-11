@@ -15,6 +15,7 @@ use crate::host::{Host, Outgoing};
 use crate::message::{MemberId, ToClient, ToHost};
 use crate::op::{NodeSpec, Op};
 use crate::role::Role;
+use crate::wire;
 
 pub(crate) struct Net {
     pub host: Host,
@@ -133,6 +134,8 @@ impl Net {
         let Some(message) = self.up[i].pop_front() else {
             return false;
         };
+        // Every message goes through its bytes, as on the network.
+        let message = wire::decode_to_host(&wire::encode_to_host(&message)).expect("reads back");
         let out = self.host.receive(member(i), message);
         self.route(out);
         true
@@ -143,6 +146,8 @@ impl Net {
         let Some(message) = self.down[i].pop_front() else {
             return false;
         };
+        let message =
+            wire::decode_to_client(&wire::encode_to_client(&message)).expect("reads back");
         self.clients[i].receive(&mut self.worlds[i], message);
         self.flush(i);
         true

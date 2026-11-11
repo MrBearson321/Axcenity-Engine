@@ -3,7 +3,10 @@
 //!
 //! The scene is drawn into an HDR target. Bloom blurs the bright parts, then
 //! the composite pass writes the window or the editor's viewport texture, or
-//! with FXAA on an LDR target that FXAA then smooths into the output.
+//! with FXAA on an LDR target that FXAA then smooths into the output. While
+//! the render scale is below 1, both stay at the scene's size and an
+//! FSR 1-style upscale and sharpen (`upscale.wgsl`) take the picture to the
+//! output's.
 
 use super::gpu::{create_depth_view, target_bytes};
 use super::grading::GradingPass;
@@ -11,7 +14,8 @@ use super::lens::{DepthOfFieldPass, DepthOfFieldTarget};
 use super::temporal::{SceneViews, TemporalPasses, TemporalTargets, TemporalUse};
 use super::{
     BLOOM_LEVELS, DEPTH_FORMAT, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget,
-    OcclusionPasses, OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
+    OcclusionPasses, OcclusionTargets, PostPasses, PostUniform, TargetsAlive, UPSCALE_FORMAT,
+    UpscaleTarget,
 };
 
 impl PostPasses {
@@ -69,9 +73,20 @@ impl PostPasses {
             mapped_at_creation: false,
         });
 
+        let upscale_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("upscale"),
+            entries: &[texture_entry(0)],
+        });
+
         let grading = GradingPass::new(device);
-        let shader = device.create_shader_module(wgpu::include_wgsl!("../post.wgsl"));
-        let pipeline = |label, layouts: &[&wgpu::BindGroupLayout], entry, format, blend| {
+        let post_shader = device.create_shader_module(wgpu::include_wgsl!("../post.wgsl"));
+        let upscale_shader = device.create_shader_module(wgpu::include_wgsl!("../upscale.wgsl"));
+        let pipeline_of = |shader: &wgpu::ShaderModule,
+                           label,
+                           layouts: &[&wgpu::BindGroupLayout],
+                           entry,
+                           format,
+                           blend| {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
                 bind_group_layouts: &super::gpu::some(layouts),
@@ -81,7 +96,7 @@ impl PostPasses {
                 label: Some(label),
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
                     buffers: &[],
@@ -90,7 +105,7 @@ impl PostPasses {
                 depth_stencil: None,
                 multisample: Default::default(),
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: shader,
                     entry_point: Some(entry),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -102,6 +117,19 @@ impl PostPasses {
                 multiview_mask: None,
                 cache: None,
             })
+        };
+        let pipeline = |label, layouts: &[&wgpu::BindGroupLayout], entry, format, blend| {
+            pipeline_of(&post_shader, label, layouts, entry, format, blend)
+        };
+        let upscale = |label, entry, format| {
+            pipeline_of(
+                &upscale_shader,
+                label,
+                &[&upscale_layout],
+                entry,
+                format,
+                None,
+            )
         };
         let add = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::One,
@@ -148,6 +176,16 @@ impl PostPasses {
                 None,
             ),
             fxaa: pipeline("FXAA", &[&layout], "fs_fxaa", color_format, None),
+            fxaa_for_upscale: pipeline(
+                "FXAA for upscaling",
+                &[&layout],
+                "fs_fxaa",
+                FXAA_FORMAT,
+                None,
+            ),
+            easu: upscale("upscale", "fs_easu", UPSCALE_FORMAT),
+            rcas: upscale("sharpen upscaled", "fs_rcas", color_format),
+            upscale_layout,
             grading,
             depth_of_field: DepthOfFieldPass::new(device),
             sampler,
@@ -199,26 +237,56 @@ impl PostPasses {
         }
         let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
         let groups = [&targets.composite_group, self.grading.group()];
-        let Some(fxaa) = &targets.fxaa else {
+        let upscale = targets.upscale.as_ref();
+        // The finished picture goes to the output, or while the scene is
+        // smaller, to be upscaled into it.
+        let (finished, composite, fxaa_pipeline) = match upscale {
+            Some(upscale) => (
+                &upscale.view,
+                &self.composite_for_fxaa,
+                &self.fxaa_for_upscale,
+            ),
+            None => (target, &self.composite, &self.fxaa),
+        };
+        match &targets.fxaa {
+            None => fullscreen_pass(encoder, "composite", finished, clear, composite, &groups),
+            Some(fxaa) => {
+                fullscreen_pass(
+                    encoder,
+                    "composite",
+                    &fxaa.view,
+                    clear,
+                    &self.composite_for_fxaa,
+                    &groups,
+                );
+                fullscreen_pass(
+                    encoder,
+                    "FXAA",
+                    finished,
+                    clear,
+                    fxaa_pipeline,
+                    &[&fxaa.group],
+                );
+            }
+        }
+        if let Some(upscale) = upscale {
             fullscreen_pass(
                 encoder,
-                "composite",
+                "upscale",
+                &upscale.upscaled,
+                clear,
+                &self.easu,
+                &[&upscale.source_group],
+            );
+            fullscreen_pass(
+                encoder,
+                "sharpen upscaled",
                 target,
                 clear,
-                &self.composite,
-                &groups,
+                &self.rcas,
+                &[&upscale.upscaled_group],
             );
-            return;
-        };
-        fullscreen_pass(
-            encoder,
-            "composite",
-            &fxaa.view,
-            clear,
-            &self.composite_for_fxaa,
-            &groups,
-        );
-        fullscreen_pass(encoder, "FXAA", target, clear, &self.fxaa, &[&fxaa.group]);
+        }
     }
 }
 
@@ -401,12 +469,63 @@ impl FrameTargets {
             .map(|level| group(&post.layout, &levels[level], None))
             .collect();
         let composite_group = group(&post.composite_layout, scene, Some(&levels[0]));
+        // Upscaled only when the scene is smaller than the output; a render
+        // scale above 1 is scaled down by the composite pass's sampler.
+        let upscaled = width < output.0 && height < output.1;
+        // FXAA smooths the picture at the size it's drawn at.
+        let finished_size = if upscaled { (width, height) } else { output };
         let fxaa = fxaa.then(|| {
-            let view = texture("tone mapped (FXAA)", output, FXAA_FORMAT, 1);
+            let view = texture("tone mapped (FXAA)", finished_size, FXAA_FORMAT, 1);
             FxaaTarget {
                 group: group(&post.layout, &view, None),
                 view,
                 _alive: alive.fxaa.clone(),
+            }
+        });
+        let upscale = upscaled.then(|| {
+            let one_texture = |view: &wgpu::TextureView| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("upscale"),
+                    layout: &post.upscale_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    }],
+                })
+            };
+            let target =
+                |label, (width, height): (u32, u32), view_formats: &[wgpu::TextureFormat]| {
+                    bytes.set(bytes.get() + target_bytes((width, height, 1), UPSCALE_FORMAT, 1));
+                    device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d {
+                            width: width.max(1),
+                            height: height.max(1),
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: UPSCALE_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats,
+                    })
+                };
+            let finished = target("finished (to upscale)", (width, height), &[FXAA_FORMAT]);
+            let view = finished.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(FXAA_FORMAT),
+                ..Default::default()
+            });
+            let source = finished.create_view(&wgpu::TextureViewDescriptor::default());
+            let upscaled = target("upscaled", output, &[])
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            UpscaleTarget {
+                view,
+                source_group: one_texture(&source),
+                upscaled_group: one_texture(&upscaled),
+                upscaled,
+                _alive: alive.upscale.clone(),
             }
         });
         let depth_bytes = target_bytes((width, height, 1), DEPTH_FORMAT, samples);
@@ -424,6 +543,7 @@ impl FrameTargets {
             msaa,
             depth_view: create_depth_view(device, width, height, samples),
             fxaa,
+            upscale,
             occlusion,
             depth_of_field,
             temporal,

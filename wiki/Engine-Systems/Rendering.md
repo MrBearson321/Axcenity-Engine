@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [render, render-types]
-source: [crates/render/src/lib.rs, crates/render/src/renderer.rs, crates/render/src/renderer/scene.rs, crates/render/src/renderer/lighting.rs, crates/render/src/renderer/culling.rs, crates/render/src/renderer/lod.rs, crates/render/src/renderer/gpu.rs, crates/render/src/renderer/parallel.rs, crates/render/src/renderer/texture_budget.rs, crates/render/src/renderer/surface_shaders.rs, crates/render/src/renderer/gpu_timer.rs, crates/render/src/draw_list.rs, crates/render/src/shader.wgsl, crates/render-types/src/graphics.rs]
+source: [crates/render/src/lib.rs, crates/render/src/upscale.wgsl, crates/render/src/renderer.rs, crates/render/src/renderer/scene.rs, crates/render/src/renderer/lighting.rs, crates/render/src/renderer/culling.rs, crates/render/src/renderer/lod.rs, crates/render/src/renderer/gpu.rs, crates/render/src/renderer/parallel.rs, crates/render/src/renderer/texture_budget.rs, crates/render/src/renderer/surface_shaders.rs, crates/render/src/renderer/gpu_timer.rs, crates/render/src/draw_list.rs, crates/render/src/shader.wgsl, crates/render-types/src/graphics.rs]
 docs: [docs/rendering.md, docs/rendering/pipeline.md, docs/rendering/models.md, docs/rendering/shadows.md, docs/rendering/lights.md, docs/rendering/settings.md, docs/rendering/performance.md, docs/rendering/temporal.md, docs/rendering/post.md, crates/render/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -88,7 +88,7 @@ Since rendering Phase 1 (PR #83): frame rate with 1% lows, CPU- or GPU-bound, pe
 
 ## Configuration
 
-`GraphicsSettings` (per machine: editor settings, player `graphics.json`; scripts via `UserGameSettings`): shadow quality and distance, post-processing, render scale, texture quality and budget, anti-aliasing (Off, FXAA, MSAA 2×/4×, TAA), ambient occlusion, reflection quality, contact shadows, volumetric fog, real-time GI, decals, motion blur. `docs/rendering/settings.md` has the preset table.
+`GraphicsSettings` (per machine: editor settings, player `graphics.json`; scripts via `UserGameSettings`): shadow quality and distance, post-processing, render scale (below 100% upscaled with an FSR 1-style EASU and RCAS pair, `upscale.wgsl`), texture quality and budget, anti-aliasing (Off, FXAA, MSAA 2×/4×, TAA), ambient occlusion, reflection quality, contact shadows, volumetric fog, real-time GI, decals, motion blur. `docs/rendering/settings.md` has the preset table.
 
 ## Testing
 

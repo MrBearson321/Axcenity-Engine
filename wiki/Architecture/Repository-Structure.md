@@ -29,7 +29,7 @@ What each top-level folder holds and who reads it. Crate responsibilities are in
 | `assets/` | The engine's own branding, fonts and textures | Not a project's `assets/` |
 | `packaging/` | Installers and packages per OS, `stage.py`, release-notes template | Checked by `scripts/check-packages.py` |
 | `scripts/` | `check-platform.sh`, `check-platform.ps1`, `check-packages.py` | The local stand-in for CI |
-| `documentation/`, `gitbook-docs.yaml` | GitBook site scaffold | Placeholder (`documentation/README.md` is "# Page") |
+| `documentation/`, `gitbook-docs.yaml` | User documentation: the Learn chapters (`learn/`), reference pages (`reference/`) and the generated API pages (`api/`); the same files are the editor's Learn and Documentation pages and the GitBook site | Checked by the editor's `start::docs::tests`; `api/` regenerated with `cargo run -p axcenity-script --bin lua-definitions` (`docs/editor/learn-and-docs.md`) |
 | `.claude/skills/` | Repo skills for agents: `implement`, `organize`, `research` | See [Contribution workflow](../Development/Contribution-Workflow.md) |
 | `.config/` | `nextest.toml` (timeouts, GPU test group), `hakari.toml` | |
 | `.github/workflows/` | `ci.yml`, `release.yml` | Disabled in repo settings on purpose |

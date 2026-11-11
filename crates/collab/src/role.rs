@@ -3,7 +3,7 @@
 //! not new checks.
 
 /// A member's role in a collaborative project.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Role {
     /// Full control: content, members, settings, ending the session.
     Owner,
