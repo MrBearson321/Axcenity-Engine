@@ -8,6 +8,17 @@ use axcenity_render::Camera;
 use axcenity_render::glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+/// The part shapes the workloads build with: `PartType::ALL` as it was when
+/// they were made, so a new shape doesn't change what's measured and
+/// results stay comparable.
+const SHAPES: [PartType; 5] = [
+    PartType::Block,
+    PartType::Ball,
+    PartType::Cylinder,
+    PartType::Wedge,
+    PartType::Capsule,
+];
+
 /// What a measurement draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Workload {
@@ -281,7 +292,7 @@ fn town() -> World {
             }
             // Props in the yard: every shape.
             for prop in 0..12 {
-                let shape = seq.pick(&PartType::ALL);
+                let shape = seq.pick(&SHAPES);
                 let size = 1.0 + seq.next() * 2.0;
                 part(
                     &mut world,
@@ -360,7 +371,7 @@ fn geometry() -> World {
         let column = index % 200;
         let row = (index / 200) % 50;
         let layer = index / 10_000;
-        let shape = PartType::ALL[(index % PartType::ALL.len() as u32) as usize];
+        let shape = SHAPES[(index % SHAPES.len() as u32) as usize];
         part(
             &mut world,
             shape,
@@ -396,7 +407,7 @@ fn materials() -> World {
             for step in 0..16 {
                 let id = part(
                     &mut world,
-                    PartType::ALL[step % PartType::ALL.len()],
+                    SHAPES[step % SHAPES.len()],
                     v(
                         m as f32 * 5.0 - 40.0,
                         1.0 + step as f32 * 2.1,

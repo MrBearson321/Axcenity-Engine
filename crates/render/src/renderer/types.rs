@@ -573,6 +573,7 @@ pub(super) enum MeshKey {
     Sphere,
     Cylinder,
     Wedge,
+    CornerWedge,
     Custom(u64),
 }
 
@@ -583,6 +584,7 @@ impl MeshKey {
             Shape::Sphere => MeshKey::Sphere,
             Shape::Cylinder => MeshKey::Cylinder,
             Shape::Wedge => MeshKey::Wedge,
+            Shape::CornerWedge => MeshKey::CornerWedge,
             Shape::Mesh(mesh) => MeshKey::Custom(mesh.key()),
         }
     }
@@ -594,6 +596,7 @@ pub(super) struct Meshes {
     pub(super) sphere: GpuMesh,
     pub(super) cylinder: GpuMesh,
     pub(super) wedge: GpuMesh,
+    pub(super) corner_wedge: GpuMesh,
 }
 
 impl Meshes {
@@ -604,6 +607,7 @@ impl Meshes {
             MeshKey::Sphere => Some(&self.sphere),
             MeshKey::Cylinder => Some(&self.cylinder),
             MeshKey::Wedge => Some(&self.wedge),
+            MeshKey::CornerWedge => Some(&self.corner_wedge),
             MeshKey::Custom(_) => None,
         }
     }

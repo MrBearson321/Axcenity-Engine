@@ -209,14 +209,15 @@ fn the_tab_and_the_preview_draw() {
     app.open_sequence(INTRO);
     app.sequencer.doc.as_mut().unwrap().keys.playhead = 10.0;
     let folder_out = std::path::PathBuf::from(snapshots);
-    crate::snapshot::snapshot(
-        &folder_out.join("sequencer-tab.png"),
-        egui::vec2(900.0, 700.0),
-        vec![Vec::new(); 3],
-        |ui| {
+    // Wide, and narrow enough that the transport bar takes two rows.
+    for (name, size) in [
+        ("sequencer-tab.png", egui::vec2(900.0, 700.0)),
+        ("sequencer-tab-narrow.png", egui::vec2(420.0, 700.0)),
+    ] {
+        crate::snapshot::snapshot(&folder_out.join(name), size, vec![Vec::new(); 3], |ui| {
             egui::CentralPanel::default().show(ui, |ui| app.sequencer_pane(ui));
-        },
-    );
+        });
+    }
     for (time, name) in [
         (4.0, "sequencer-preview-4s.png"),
         (10.0, "sequencer-preview-10s.png"),

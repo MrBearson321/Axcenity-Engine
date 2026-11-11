@@ -1274,7 +1274,6 @@ fn each_primitive_is_inserted_in_front_of_the_camera_on_the_floor() {
     let ray = (toward - eye).normalize();
     let ground = eye + ray * (eye.y / -ray.y);
     let mut shapes = Vec::new();
-    let mut tops = vec![0.0];
     for (n, what) in Insertable::PARTS.into_iter().enumerate() {
         let part = inserted(&mut app, what, None);
         assert_eq!(app.world.get(part).unwrap().parent(), Some(workspace));
@@ -1289,14 +1288,23 @@ fn each_primitive_is_inserted_in_front_of_the_camera_on_the_floor() {
             // one goes on top of them or on the Floor just in front.
             assert!(across < 6.0, "{what:?} at {at:?}, {across} from {ground}");
         }
-        // Resting on the Floor or on a part inserted before it: never
-        // inside anything, so it doesn't fall or jump when Play starts.
+        // Resting on the Floor or on the parts inserted before it (on a
+        // wedge's slope, tilted with it): never inside anything, so it
+        // doesn't fall or jump when Play starts.
         let bottom = at.y - size.y / 2.0;
-        assert!(
-            tops.iter().any(|top| (bottom - top).abs() < 1e-3),
-            "{what:?}: bottom {bottom}, tops {tops:?}"
-        );
-        tops.push(at.y + size.y / 2.0);
+        if n == 0 {
+            assert!(bottom.abs() < 1e-3, "on the Floor: bottom {bottom}");
+        }
+        assert!(bottom > -1e-3, "{what:?} is in the Floor: bottom {bottom}");
+        let pose = crate::gizmo::Pose::of(app.world.get(part).unwrap()).unwrap();
+        let obb = crate::snapping::Obb::of(pose);
+        for other in crate::snapping::obstacles(&app.world, &[part]) {
+            assert!(
+                !crate::snapping::overlap(&obb, &other.obb, -crate::snapping::PENETRATION),
+                "{what:?} is inside {:?}",
+                name(&app, other.id)
+            );
+        }
         shapes.push(property(&app, part, "Shape"));
         let label = format!("Insert {}", name(&app, part));
         assert_eq!(app.history.undo_label(), Some(label.as_str()));
@@ -1308,11 +1316,14 @@ fn each_primitive_is_inserted_in_front_of_the_camera_on_the_floor() {
             shape(PartType::Block),
             shape(PartType::Ball),
             shape(PartType::Cylinder),
-            shape(PartType::Wedge)
+            shape(PartType::Wedge),
+            shape(PartType::CornerWedge),
+            shape(PartType::Capsule)
         ]
     );
-    // They're in the world, so the viewport draws them.
-    assert_eq!(drawn_parts(&app), 3 + 4);
+    // They're in the world, so the viewport draws them (a capsule is three
+    // pieces: a cylinder and a ball at each end).
+    assert_eq!(drawn_parts(&app), 3 + 6 + 2);
     // A picture of the pile, as the camera sees it.
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         crate::snapshot::snapshot_rendered(
@@ -1343,6 +1354,63 @@ fn each_primitive_is_inserted_in_front_of_the_camera_on_the_floor() {
     assert_eq!(app.selected, None);
     app.redo();
     assert_eq!(children(&app, workspace).last(), Some(&part));
+}
+
+/// The six part shapes side by side, drawn by the real renderer: each is
+/// picked where it's drawn, and with `AXCENITY_SNAPSHOTS` the picture is
+/// saved to check the Corner Wedge's faces by eye.
+#[test]
+fn every_part_shape_is_drawn_and_picked_where_it_is() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    let mut parts = Vec::new();
+    for (n, what) in Insertable::PARTS.into_iter().enumerate() {
+        let part = inserted(&mut app, what, None);
+        let x = n as f32 * 5.0 - 12.5;
+        for (property, value) in [
+            ("Position", vector(x, 1.5, -8.0)),
+            // A capsule as long as it's wide would look like a ball.
+            (
+                "Size",
+                if what == Insertable::Part(PartType::Capsule) {
+                    vector(4.5, 2.0, 2.0)
+                } else {
+                    vector(3.0, 3.0, 3.0)
+                },
+            ),
+            ("Anchored", Value::Bool(true)),
+            ("BlueprintTexture", Value::Bool(false)),
+            ("Color", Value::Color3(Color3::new(0.85, 0.55, 0.3))),
+        ] {
+            app.world.set_property(part, property, value).unwrap();
+        }
+        parts.push(part);
+    }
+    // Looking from the front right, above, so the corner wedge's point
+    // (back right) and both its slopes show.
+    app.viewport
+        .look_at(Vec3::new(10.0, 12.0, 12.0), Vec3::new(0.0, 1.0, -8.0));
+    for (n, part) in parts.iter().enumerate() {
+        let x = n as f32 * 5.0 - 12.5;
+        // Straight down onto the part's middle back, where every shape is.
+        let ray = axcenity_scene::Ray {
+            origin: Vec3::new(x + 0.5, 20.0, -7.5),
+            direction: Vec3::NEG_Y,
+        };
+        let hit = axcenity_scene::pick_hit(&app.world, ray, None).unwrap();
+        assert_eq!(hit.part, *part, "{n}");
+    }
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        crate::snapshot::snapshot_rendered(
+            &std::path::PathBuf::from(folder).join("part-shapes.png"),
+            egui::vec2(640.0, 320.0),
+            vec![Vec::new(); 3],
+            |ui, render_state| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    app.scene_pane(ui, Some(render_state));
+                });
+            },
+        );
+    }
 }
 
 #[test]

@@ -161,7 +161,7 @@ fn a_global_asset_shows_in_every_project_and_is_copied_in_when_used() {
     assert!(second.join("assets/models/Hero/Hero.fbx").is_file());
     assert_eq!(browser.use_here("assets/models/Hero/Hero.fbx"), Ok(0));
     // A prop, or a project file that isn't global, copies nothing.
-    assert_eq!(browser.use_here("Table"), Ok(0));
+    assert_eq!(browser.use_here("Crate"), Ok(0));
 
     // The Global chip shows only global assets; the panel draws them.
     browser.category = Category::Global;

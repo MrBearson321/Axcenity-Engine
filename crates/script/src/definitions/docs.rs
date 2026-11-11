@@ -1989,7 +1989,7 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Part,
         "Shape",
-        "Block, Ball, Cylinder (along X) or Wedge.",
+        "Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).",
     ),
     (
         ClassName::Part,

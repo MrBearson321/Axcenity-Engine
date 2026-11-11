@@ -17,6 +17,16 @@ impl AnimationStudio {
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
     ) {
+        // The transport's keys first, before any widget of the clip's can
+        // take Space or an arrow.
+        if self.wants_transport_keys(ui.ctx()) {
+            let commands = ui.input_mut(transport::keys);
+            if let Some(doc) = self.clip.playback() {
+                for command in commands {
+                    transport::apply(doc, command);
+                }
+            }
+        }
         self.clip.drawn = Some((ui.max_rect(), ui.ctx().cumulative_pass_nr()));
         match root {
             Root::Followed(object) => self.clip.objects.follow_within(world, object, select),
@@ -30,7 +40,8 @@ impl AnimationStudio {
             self.act(pick, project, assets, world, output, actions);
         }
 
-        let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
+        let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS)
+            * self.clip.rate.0;
         let playing = match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
                 doc.tick(dt);
@@ -484,10 +495,16 @@ impl AnimationStudio {
         }
     }
 
-    /// The take clip's timeline with its imported keys under it, or the
-    /// property clip's dope sheet. Returns true if Convert to keys was
+    /// The transport, then the take clip's timeline with its imported keys
+    /// under it, or the property clip's dope sheet. Returns true if Convert to keys was
     /// pressed.
     pub(super) fn clip_timeline(&mut self, ui: &mut egui::Ui, assets: &Assets) -> bool {
+        let rate = &mut self.clip.rate;
+        if let Some(doc) = self.clip.doc.as_mut().map(Clip::playback)
+            && let Some(command) = transport::bar(ui, doc, rate)
+        {
+            transport::apply(doc, command);
+        }
         self.key_status(ui, assets);
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {

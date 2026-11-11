@@ -29,7 +29,7 @@ How Part properties map onto these (decided in Phase 3):
 
 Transparency: opaque items are drawn first. Then see-through items are drawn, farthest to nearest by their centers, with blending on and depth writes off. Overlapping see-through items can still blend in the wrong order; that's accepted for now.
 
-Built-in primitives are block, sphere, cylinder and wedge (a Part shaped `Capsule` is drawn as a cylinder between two spheres, `scene::draw_list::part_pieces`, Phase 41), plus imported glTF and FBX models (MeshParts, Phase 17; see Imported models). Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
+Built-in primitives are block, sphere, cylinder, wedge and corner wedge (`mesh::corner_wedge`: full bottom, rising to a point over the back right corner; a Part shaped `Capsule` is drawn as a cylinder between two spheres, `scene::draw_list::part_pieces`, Phase 41), plus imported glTF and FBX models (MeshParts, Phase 17; see Imported models). Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
 
 1. PBR shading with a sun and ambient light (implemented)
 2. Sun shadows (implemented in Phase 30)

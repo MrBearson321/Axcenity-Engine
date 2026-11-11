@@ -16,6 +16,7 @@ use std::time::SystemTime;
 use axcenity_project::Template;
 use eframe::egui::{self, CornerRadius, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 
+mod backdrop;
 mod cards;
 mod dialogs;
 pub(crate) mod docs;
@@ -24,6 +25,7 @@ mod learn;
 mod nav;
 mod pages;
 mod reference;
+mod tilt;
 
 use cards::*;
 use dialogs::*;
@@ -332,18 +334,13 @@ impl StartScreen {
         let mut action = None;
         let ctx = ui.ctx().clone();
         let full = ui.available_rect_before_wrap();
-        let (page, settings) = self.navigation(ui, full, projects.len(), brand);
+        // Under the navigation too, so it stays put while the sidebar slides.
+        backdrop::paint(ui, full);
+        let (room, settings) = self.navigation(ui, full, projects.len(), brand);
+        let page = room.page;
         if settings {
             action = Some(StartAction::Settings);
         }
-        let palette = theme::palette(&ctx);
-        widgets::atmosphere(ui, page);
-        let dot = if palette.dark { 0.035 } else { 0.06 };
-        widgets::dot_grid(
-            &ui.painter_at(page),
-            page,
-            palette.text_strong.gamma_multiply(dot),
-        );
         let now = ctx.input(|input| input.time);
         if self.arrived.is_none_or(|(shown, _)| shown != self.page) {
             self.arrived = Some((self.page, now));
@@ -358,8 +355,8 @@ impl StartScreen {
             .auto_shrink(false)
             .show(&mut content, |ui| {
                 ui.add_space(PAGE_MARGIN - 4.0 + (1.0 - arrival) * PAGE_RISE);
-                let width = (ui.available_width() - 2.0 * PAGE_MARGIN).min(MAX_PAGE_WIDTH);
-                let margin = (ui.available_width() - width) / 2.0;
+                let width = room.width;
+                let margin = (room.left - ui.max_rect().left()).max(0.0);
                 ui.horizontal(|ui| {
                     ui.add_space(margin);
                     ui.vertical(|ui| {
@@ -445,7 +442,10 @@ impl StartScreen {
         ui.add_space(6.0);
         let width = ui.available_width();
         let columns = Template::BLANK.len() as f32;
-        let template_width = ((width - CARD_SPACING * (columns - 1.0)) / columns).max(200.0);
+        // Rounded down, so rounding never pushes the last card onto a new row.
+        let template_width = ((width - CARD_SPACING * (columns - 1.0)) / columns)
+            .floor()
+            .max(200.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING);
             for template in Template::BLANK {
@@ -462,7 +462,7 @@ impl StartScreen {
         let columns = ((width + CARD_SPACING) / (MIN_GAME_CARD_WIDTH + CARD_SPACING))
             .floor()
             .clamp(1.0, Template::GAMES.len() as f32);
-        let game_width = (width - CARD_SPACING * (columns - 1.0)) / columns;
+        let game_width = ((width - CARD_SPACING * (columns - 1.0)) / columns).floor();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING);
             for template in Template::GAMES {
