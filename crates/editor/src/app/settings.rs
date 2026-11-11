@@ -27,12 +27,14 @@ pub(super) enum SettingsPage {
     Accessibility,
     /// Update checks (`app/updates.rs`).
     Updates,
+    /// MCP clients working in this window (`app/mcp/live.rs`).
+    Ai,
     /// Only in a debug editor run from the source tree (`engine.rs`).
     Engine,
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 8] = [
+    const ALL: [SettingsPage; 9] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
@@ -40,6 +42,7 @@ impl SettingsPage {
         SettingsPage::Shortcuts,
         SettingsPage::Accessibility,
         SettingsPage::Updates,
+        SettingsPage::Ai,
         SettingsPage::Engine,
     ];
 
@@ -52,6 +55,7 @@ impl SettingsPage {
             SettingsPage::Shortcuts => "Shortcuts",
             SettingsPage::Accessibility => "Accessibility",
             SettingsPage::Updates => "Updates",
+            SettingsPage::Ai => "AI connections",
             SettingsPage::Engine => "Engine",
         }
     }
@@ -65,6 +69,7 @@ impl SettingsPage {
             SettingsPage::Shortcuts => icons::KEYBOARD,
             SettingsPage::Accessibility => icons::EYE,
             SettingsPage::Updates => icons::ARROW_CIRCLE_UP,
+            SettingsPage::Ai => icons::ROBOT,
             SettingsPage::Engine => icons::HAMMER,
         }
     }
@@ -145,6 +150,7 @@ impl EditorApp {
                                     accessibility_page(ui, &mut appearance);
                                 }
                                 SettingsPage::Updates => self.updates_page(ui),
+                                SettingsPage::Ai => self.ai_page(ui),
                                 SettingsPage::Engine => self.engine_page(ui),
                             });
                         });
@@ -777,6 +783,12 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
             "Automatic checks",
             &["Check for updates", "Update check", "New version"],
             "How often the editor looks for a new release, and Check now.",
+        ),
+        setting(
+            Ai,
+            "Allow AI connections",
+            &["MCP", "Claude Code", "Cursor", "Codex", "AI agent"],
+            "Let AI clients work in this window instead of a copy without one.",
         ),
     ]
 };
@@ -1735,7 +1747,10 @@ mod tests {
                 Some(folder)
                     if matches!(
                         page,
-                        SettingsPage::Appearance | SettingsPage::Graphics | SettingsPage::Updates
+                        SettingsPage::Appearance
+                            | SettingsPage::Graphics
+                            | SettingsPage::Updates
+                            | SettingsPage::Ai
                     ) =>
                 {
                     crate::snapshot::snapshot(

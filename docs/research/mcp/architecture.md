@@ -48,11 +48,15 @@ AI client ──stdio──▶ axcenity-editor --mcp <project>
 - **Headless host**: `EditorApp::new(Some(project))` with no window, exactly as the editor's tests run it. It writes `.axcenity/mcp-headless.lock` (PID, client). It never saves unless `project_save` is called.
 - **Two writers**: a headless host checks for a live endpoint before each write; if the editor has since opened the project, it refuses writes ("The editor has this project open; restart the MCP server to connect to it"). The editor, opening a project with a headless lock whose PID is alive, says "An AI session is editing this project without the editor" and offers to open anyway. No silent last-write-wins.
 
+As built (step 3.4, `editor/src/app/mcp/live.rs`): the setting is the editor's, not per project (saved with its other settings, off by default), and applies to whichever project is open. The token is 128 bits from the standard library's randomly seeded hasher (no new dependency). The editor warns in Output when it opens a project with a headless lock, without a PID check or an "open anyway" choice (a lock left by a crashed server only causes a needless warning). The headless host probes the endpoint (a hello with `probe`) before each write rather than only checking the file, so a stale file doesn't block it.
+
 ### 3.3 Threading in the live editor
 
 All editor state is on the egui main thread. The host thread parses and schema-checks JSON-RPC, then sends `(Request, reply_sender)` over a channel and calls `egui::Context::request_repaint()` so an idle editor wakes. At the start of `EditorApp::update` the main thread drains the queue within a time budget (4 ms per frame, then the rest waits a frame) and replies. Long work (erosion, tests, Play for N seconds) starts the editor's existing background jobs. A call answers within 45 s (Codex times tool calls out at 60 s, Claude Desktop at 240 s); work that isn't done by then returns a `job` handle and the agent calls again with it, which every client can do. Progress notifications are sent where the client supports them. Writes during Play or a viewport drag are refused with `busy`, as `EditorApp::act` already ignores them.
 
 Read requests also go through the main thread; that keeps one consistent view and no locks around `World`. If profiling shows idle-frame cost, the drain is skipped when the queue is empty (one atomic load).
+
+As built (step 3.4): each connection has its own `rmcp` thread and job channel, drained at the start of `EditorApp::frame` (after loading and files changed on disk) within 4 ms. There are no `job` handles yet: a long call (`game_run` for 60 s, erosion) holds the window until it ends. Every write is refused with `busy` while the editor plays; a viewport drag isn't checked (the call runs between frames, and the drag's own step follows it). All live sessions share one change log, each change tagged with its session, so `history changes` splits "by you" from the user's and other clients'.
 
 ### 3.4 Transport and dependencies
 

@@ -8,10 +8,10 @@ use serde_json::{Value, json};
 use super::super::EditorApp;
 use super::super::tests::copy_of_example;
 use super::refs::id_text;
-use super::{Host, TOOLS, run, tools_for};
+use super::{Headless, TOOLS, run, tools_for};
 
 struct Opened {
-    app: Host,
+    app: Headless,
     folder: std::path::PathBuf,
 }
 
@@ -26,13 +26,13 @@ fn open(example: &str, test: &str) -> Opened {
     let app = EditorApp::new(Some(&folder));
     assert!(app.project.is_some(), "{example} opens");
     Opened {
-        app: Host::new(app, Mode::Edit),
+        app: Headless::new(app, Mode::Edit),
         folder,
     }
 }
 
 /// Calls `tool` with `args` as a client would: arguments checked first.
-fn call(app: &mut Host, tool: &str, args: Value) -> Result<String, ToolError> {
+fn call(app: &mut Headless, tool: &str, args: Value) -> Result<String, ToolError> {
     let spec = TOOLS
         .iter()
         .find(|entry| entry.spec.name == tool)
@@ -40,14 +40,14 @@ fn call(app: &mut Host, tool: &str, args: Value) -> Result<String, ToolError> {
         .spec;
     let args = Args::new(args.as_object().cloned().unwrap_or_default());
     args.check(spec)?;
-    run(app, spec, &args, Some("test"))
+    run(&mut app.host(), spec, &args, Some("test"))
 }
 
-fn ok(app: &mut Host, tool: &str, args: Value) -> String {
+fn ok(app: &mut Headless, tool: &str, args: Value) -> String {
     call(app, tool, args).unwrap_or_else(|error| panic!("{tool} failed: {error}"))
 }
 
-fn add(host: &mut Host, class: ClassName, name: &str, parent: InstanceId) -> InstanceId {
+fn add(host: &mut Headless, class: ClassName, name: &str, parent: InstanceId) -> InstanceId {
     let world = &mut host.app.world;
     let id = world.create(class).unwrap();
     world.set_name(id, name).unwrap();
@@ -360,7 +360,7 @@ fn every_tool_is_short_flat_and_in_budget() {
 
 #[test]
 fn project_info_without_a_project_says_so() {
-    let mut app = Host::new(EditorApp::new(None), Mode::Edit);
+    let mut app = Headless::new(EditorApp::new(None), Mode::Edit);
     // No project: project_info explains instead of panicking.
     let error = call(&mut app, "project_info", json!({})).unwrap_err();
     assert_eq!(error.code, Code::NotFound);
@@ -374,7 +374,7 @@ fn token(error: &ToolError) -> String {
     fix[start..start + 6].to_owned()
 }
 
-fn objects(host: &Host) -> usize {
+fn objects(host: &Headless) -> usize {
     let world = &host.app.world;
     world.descendants_iter(world.root()).count()
 }
@@ -1291,7 +1291,7 @@ fn game_run_runs_the_game_tests() {
 }
 
 /// The ground's height at `x`, `z` on the only terrain.
-fn ground(host: &Host, x: f32, z: f32) -> f32 {
+fn ground(host: &Headless, x: f32, z: f32) -> f32 {
     let world = &host.app.world;
     let id = world
         .descendants_iter(world.workspace())
@@ -2169,7 +2169,7 @@ fn a_resource_reads_the_same_as_its_tool() {
         .find(|tool| tool.spec.name == "object_get")
         .unwrap()
         .spec;
-    let read = run(host, spec, &Args::new(args), Some("test")).unwrap();
+    let read = run(&mut host.host(), spec, &Args::new(args), Some("test")).unwrap();
     assert_eq!(
         read,
         ok(host, "object_get", json!({"id": "Workspace/Block"}))
@@ -2234,4 +2234,192 @@ fn check_reports_the_project_and_prints_client_configs_with_full_paths() {
         report.contains("\nFAIL --allow-import /no/such/folder: not a folder"),
         "{report}"
     );
+}
+
+/// A client of the open editor, as the relay connects it: JSON-RPC lines
+/// over the editor's loopback connection.
+struct LiveClient {
+    writer: std::net::TcpStream,
+    lines: std::io::Lines<std::io::BufReader<std::net::TcpStream>>,
+    next: u64,
+}
+
+impl LiveClient {
+    fn connect(folder: &std::path::Path, mode: Mode) -> LiveClient {
+        let hello = super::live::Hello {
+            profile: Profile::Standard,
+            mode,
+            import_folders: Vec::new(),
+            probe: false,
+        };
+        let stream = super::live::connect(folder, &hello)
+            .expect("the editor says ok")
+            .expect("the editor is listening");
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let mut client = LiveClient {
+            writer: stream.try_clone().unwrap(),
+            lines: std::io::BufRead::lines(std::io::BufReader::new(stream)),
+            next: 0,
+        };
+        let init = client.request(
+            "initialize",
+            json!({"protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": {"name": "Live Test", "version": "1"}}),
+        );
+        assert_eq!(init["result"]["serverInfo"]["name"], "axcenity", "{init}");
+        client.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+        client
+    }
+
+    fn send(&mut self, message: Value) {
+        use std::io::Write;
+        writeln!(self.writer, "{message}").unwrap();
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Value {
+        self.next += 1;
+        let id = self.next;
+        self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        loop {
+            let line = self.lines.next().expect("the editor answers").unwrap();
+            let message: Value = serde_json::from_str(&line).unwrap();
+            if message["id"] == id {
+                return message;
+            }
+        }
+    }
+
+    /// A tool's text, and whether it was an error.
+    fn call(&mut self, tool: &str, args: Value) -> (String, bool) {
+        let answer = self.request("tools/call", json!({"name": tool, "arguments": args}));
+        let result = &answer["result"];
+        (
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            result["isError"] == true,
+        )
+    }
+}
+
+#[test]
+fn the_open_editor_runs_a_clients_calls_between_frames_as_undo_steps() {
+    use super::live::{ENDPOINT_FILE, Live, editor_listening};
+    use std::sync::mpsc;
+
+    let folder = copy_of_example("hello-part", "mcp-live");
+    let mut app = EditorApp::new(Some(&folder));
+    assert!(app.project.is_some());
+    assert!(!editor_listening(&folder));
+    let mut live = Live::start(&folder, axcenity_mcp::Waker(std::sync::Arc::new(|| {}))).unwrap();
+    assert!(folder.join(ENDPOINT_FILE).exists());
+    assert!(editor_listening(&folder));
+
+    // The client: creates a wall, waits while the user adds a crate, then
+    // asks what changed. A second client may only read.
+    let (said, heard) = mpsc::channel::<String>();
+    let (go, wait) = mpsc::channel::<()>();
+    let client_folder = folder.clone();
+    let client = std::thread::spawn(move || {
+        let mut client = LiveClient::connect(&client_folder, Mode::Edit);
+        let (created, failed) =
+            client.call("object_create", json!({"kind": "Block", "name": "Wall"}));
+        assert!(!failed, "{created}");
+        said.send(created).unwrap();
+        wait.recv().unwrap();
+        let (changes, _) = client.call("history", json!({"action": "changes"}));
+        let mut reader = LiveClient::connect(&client_folder, Mode::Read);
+        let refused = reader.call("object_create", json!({"kind": "Block"}));
+        (changes, refused)
+    });
+    // The editor's frames: each drains the calls waiting.
+    let started = std::time::Instant::now();
+    while !client.is_finished() {
+        assert!(started.elapsed().as_secs() < 60, "the client finished");
+        live.drain(&mut app);
+        if let Ok(created) = heard.try_recv() {
+            assert!(created.contains("\"Wall\""), "{created}");
+            let workspace = app.world.workspace();
+            let crate_id = app.world.create(ClassName::Part).unwrap();
+            app.world.set_name(crate_id, "Crate").unwrap();
+            app.world.set_parent(crate_id, Some(workspace)).unwrap();
+            go.send(()).unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let (changes, (refused, failed)) = client.join().unwrap();
+    // The wall is in the editor's own world, as an undo step of its own.
+    let workspace = app.world.workspace();
+    assert!(app.world.find_first_child(workspace, "Wall").is_some());
+    assert!(
+        app.history
+            .undo_labels()
+            .iter()
+            .any(|label| label.starts_with("AI (Live Test)")),
+        "{:?}",
+        app.history.undo_labels()
+    );
+    assert!(changes.contains("by you:"), "{changes}");
+    assert!(changes.contains("Part \"Wall\""), "{changes}");
+    assert!(changes.contains("by others"), "{changes}");
+    assert!(changes.contains("Part \"Crate\""), "{changes}");
+    assert!(failed && refused.contains("read"), "{refused}");
+    // Both clients are listed until their connections end.
+    let names: Vec<String> = live.clients().into_iter().map(|c| c.name).collect();
+    assert!(names.len() <= 2, "{names:?}");
+
+    // A stale token is refused; stopping removes the endpoint.
+    {
+        use std::io::{BufRead, Write};
+        let text = std::fs::read_to_string(folder.join(ENDPOINT_FILE)).unwrap();
+        let port = serde_json::from_str::<Value>(&text).unwrap()["port"]
+            .as_u64()
+            .unwrap();
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port as u16)).unwrap();
+        writeln!(stream, "{}", json!({"token": "old"})).unwrap();
+        let mut answer = String::new();
+        std::io::BufReader::new(stream)
+            .read_line(&mut answer)
+            .unwrap();
+        assert!(answer.starts_with("no wrong token"), "{answer}");
+    }
+    drop(live);
+    assert!(!folder.join(ENDPOINT_FILE).exists());
+    assert!(!editor_listening(&folder));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_ai_connections_setting_starts_and_stops_listening_for_the_open_project() {
+    use super::live::{ENDPOINT_FILE, HEADLESS_FILE, editor_listening};
+
+    let folder = copy_of_example("hello-part", "mcp-live-setting");
+    std::fs::create_dir_all(folder.join(".axcenity")).unwrap();
+    std::fs::write(folder.join(HEADLESS_FILE), "{}").unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    let ctx = crate::theme::test_context();
+    // Off: nothing listens, but a windowless server's mark is warned about.
+    app.ai_frame(&ctx);
+    assert!(app.ai.live.is_none());
+    assert!(
+        app.output
+            .lines()
+            .iter()
+            .any(|line| line.text.contains("without the window")),
+        "warned"
+    );
+    app.ai.allowed = true;
+    app.ai_frame(&ctx);
+    assert!(app.ai.live.is_some(), "{:?}", app.ai.error);
+    assert!(editor_listening(&folder));
+    // The page draws with the project's port and the Claude Code line.
+    let _ = crate::theme::run(&ctx, Default::default(), |ui| app.ai_page(ui));
+    app.ai.allowed = false;
+    app.ai_frame(&ctx);
+    assert!(app.ai.live.is_none());
+    assert!(!folder.join(ENDPOINT_FILE).exists());
+    let _ = std::fs::remove_dir_all(&folder);
 }

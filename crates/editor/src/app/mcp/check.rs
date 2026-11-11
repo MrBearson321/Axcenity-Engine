@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use axcenity_mcp::{Args, Profile, text::estimate_tokens, tools_list_json};
 
-use super::{Host, INSTRUCTIONS, LOG_FILE, Options, TOOLKIT_VERSION, project_info, tools_for};
+use super::{Headless, INSTRUCTIONS, LOG_FILE, Options, TOOLKIT_VERSION, project_info, tools_for};
 use crate::app::EditorApp;
 
 /// The report for `options`, and whether nothing failed.
@@ -26,8 +26,8 @@ pub(super) fn report(options: &Options, exe: &Path) -> (String, bool) {
     let app = EditorApp::new(Some(&folder));
     let opened = app.project.is_some();
     if opened {
-        let mut host = Host::new(app, options.mode);
-        match project_info::call(&mut host, &Args::default()) {
+        let mut headless = Headless::new(app, options.mode);
+        match project_info::call(&mut headless.host(), &Args::default()) {
             Ok(info) => {
                 for line in info.lines() {
                     note("ok", line.to_owned());
@@ -175,6 +175,16 @@ fn client_lines(exe: &Path, folder: &Path, options: &Options) -> String {
         format!("  args = [{json_args}]"),
     ]
     .join("\n")
+}
+
+/// The line that adds the server for `folder` to Claude Code, with this
+/// binary's path: for the Settings page.
+pub(crate) fn claude_code_command(folder: &Path) -> String {
+    format!(
+        "claude mcp add axcenity -- {} --mcp {}",
+        shell(&this_binary().display().to_string()),
+        shell(&folder.display().to_string())
+    )
 }
 
 /// The binary clients should start: this one.
