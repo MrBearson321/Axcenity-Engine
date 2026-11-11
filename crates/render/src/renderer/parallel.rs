@@ -5,8 +5,63 @@
 //! keeps the input's order, so a frame comes out the same however the work
 //! was shared. Small jobs stay on the calling thread: waking the others
 //! takes about a tenth of a millisecond each time, more than the work.
+//!
+//! The work runs on the renderer's own pool of at most [`MAX_THREADS`]
+//! threads, not rayon's global one. The global pool has a thread per
+//! logical CPU (32 on a 16-core desktop; on Windows whatever the process's
+//! affinity), and a frame's planning spread that thin spends more waking
+//! and waiting than it saves (docs/rendering/performance.md, "The
+//! renderer's own threads"). Cooking and terrain textures keep the global
+//! pool, where more threads do help. `AXCENITY_RENDER_THREADS` sets the
+//! number; 0 uses the global pool as before.
+
+use std::sync::OnceLock;
 
 use rayon::prelude::*;
+
+/// The most threads a frame's planning is shared among unless
+/// `AXCENITY_RENDER_THREADS` says.
+pub const MAX_THREADS: usize = 12;
+
+/// The renderer's pool, made the first time a job is shared. `None` runs
+/// on rayon's global pool: asked for with `AXCENITY_RENDER_THREADS=0`, or
+/// when the threads couldn't be started.
+fn pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let threads = thread_count(
+            std::env::var("AXCENITY_RENDER_THREADS").ok().as_deref(),
+            std::thread::available_parallelism().map_or(1, usize::from),
+        )?;
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .thread_name(|index| format!("render {index}"))
+            .build()
+            .ok()
+    })
+    .as_ref()
+}
+
+/// How many threads the renderer's pool has: `asked` if it's a number (0
+/// for none: the global pool), otherwise the `cpus`, at most
+/// [`MAX_THREADS`].
+fn thread_count(asked: Option<&str>, cpus: usize) -> Option<usize> {
+    match asked.and_then(|value| value.trim().parse::<usize>().ok()) {
+        Some(0) => None,
+        Some(threads) => Some(threads),
+        None => Some(cpus.clamp(1, MAX_THREADS)),
+    }
+}
+
+/// Runs `job` on the renderer's pool (or the global one). Called from a
+/// thread of some pool already (a caller's own, as the tests' one-thread
+/// pool), the job stays in that pool.
+fn shared<R: Send>(job: impl FnOnce() -> R + Send) -> R {
+    match pool() {
+        Some(pool) if rayon::current_thread_index().is_none() => pool.install(job),
+        _ => job(),
+    }
+}
 
 /// The most items one thread takes at a time.
 const PART: usize = 512;
@@ -30,7 +85,7 @@ pub(super) fn map_parts<'a, T: Sync, R: Send>(
     if !worth_sharing(items.len()) {
         return vec![f(items)];
     }
-    items.par_chunks(PART).map(f).collect()
+    shared(|| items.par_chunks(PART).map(f).collect())
 }
 
 /// `f` of each of `items`, in order, each its own job for the threads if
@@ -43,7 +98,7 @@ pub(super) fn map_each<'a, T: Sync, R: Send>(
     if !share || items.len() <= 1 {
         return items.iter().map(f).collect();
     }
-    items.par_iter().with_min_len(1).map(f).collect()
+    shared(|| items.par_iter().with_min_len(1).map(f).collect())
 }
 
 /// `f` of each index below `count`, in order, shared among the threads.
@@ -51,11 +106,13 @@ pub(super) fn map_indexes<R: Send>(count: usize, f: impl Fn(usize) -> R + Sync +
     if !worth_sharing(count) {
         return (0..count).map(f).collect();
     }
-    (0..count)
-        .into_par_iter()
-        .with_min_len(PART)
-        .map(f)
-        .collect()
+    shared(|| {
+        (0..count)
+            .into_par_iter()
+            .with_min_len(PART)
+            .map(f)
+            .collect()
+    })
 }
 
 /// Sorts `items`, which are all different, so the result is the same
@@ -64,7 +121,7 @@ pub(super) fn sort_unstable<T: Ord + Send>(items: &mut [T]) {
     if !worth_sharing(items.len()) {
         items.sort_unstable();
     } else {
-        items.par_sort_unstable();
+        shared(|| items.par_sort_unstable());
     }
 }
 
@@ -96,7 +153,24 @@ pub(super) fn write_pieces<T: bytemuck::Pod + Sync>(
         jobs.into_iter()
             .for_each(|(to, from)| to.copy_from_slice(from));
     } else {
-        jobs.into_par_iter()
-            .for_each(|(to, from)| to.copy_from_slice(from));
+        shared(|| {
+            jobs.into_par_iter()
+                .for_each(|(to, from)| to.copy_from_slice(from));
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pool_has_at_most_twelve_threads_unless_asked() {
+        assert_eq!(thread_count(None, 32), Some(MAX_THREADS));
+        assert_eq!(thread_count(None, 4), Some(4));
+        assert_eq!(thread_count(None, 0), Some(1));
+        assert_eq!(thread_count(Some("20"), 32), Some(20));
+        assert_eq!(thread_count(Some(" 0 "), 32), None, "0: the global pool");
+        assert_eq!(thread_count(Some("lots"), 32), Some(MAX_THREADS));
     }
 }
