@@ -66,7 +66,17 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             );
         }
         (Some(target), None) => {
-            let found = find(host, target)?;
+            let found = find(host, target).map_err(|error| {
+                if error.code == Code::NotFound && text.is_some() && edits.is_none() {
+                    // Small models give a new script a path under a part.
+                    error.with_fix(
+                        "to make a new script give name and side, not path; \
+                         scripts go in their service, not under parts",
+                    )
+                } else {
+                    error
+                }
+            })?;
             if axcenity_project::is_block_script(&found.path)
                 || axcenity_blocks::ui_graph::is_ui_graph(&found.path)
             {
@@ -122,6 +132,14 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
         }
     };
     if before.as_deref() == Some(after.as_str()) {
+        // Resending broken code changes nothing: say it's still broken.
+        if let Some(error) = check(&path, &after) {
+            return Err(ToolError::new(
+                Code::BadValue,
+                format!("{path} is already like that, so it still has a {error}"),
+            )
+            .with_fix("change the code at that line; the same text again changes nothing"));
+        }
         return Ok(format!("{path} is already like that · nothing changed"));
     }
     checkpoint(host, &folder);
@@ -146,13 +164,21 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
     );
     app.history.seal();
     host.session.last_undo = Some(label.clone());
-    let mut out = format!(
-        "{} {path} ({} lines) · {} · undo {}",
+    let wrote = format!(
+        "{} {path} ({} lines)",
         if new { "created" } else { "wrote" },
         after.lines().count(),
-        check(&path, &after).unwrap_or_else(|| "syntax ok".to_owned()),
-        quoted(&label)
     );
+    // A syntax error leads, so a model doesn't take the write as done.
+    let mut out = match check(&path, &after) {
+        None => format!("{wrote} · syntax ok · undo {}", quoted(&label)),
+        Some(error) => format!(
+            "{error} · the script won't run\n{wrote} · undo {}\n\
+             fix: change that line (script_write with path {} and edits)",
+            quoted(&label),
+            quoted(&path)
+        ),
+    };
     for warning in warnings(&path, &after) {
         out.push('\n');
         out.push_str(&warning);

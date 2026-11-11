@@ -131,7 +131,17 @@ pub fn resolve(world: &World, text: &str) -> Result<InstanceId, ToolError> {
                     .filter_map(|&child| world.get(child).map(|c| c.name()))
                     .collect();
                 let near = closest(name, names.iter().copied(), 3);
-                let fix = if near.is_empty() {
+                // A bare name (`"Block"`) usually means an object deeper
+                // down: name where the ones called exactly that are.
+                let elsewhere: Vec<String> = world
+                    .descendants_iter(root)
+                    .filter(|&id| world.get(id).is_some_and(|c| c.name() == name))
+                    .take(3)
+                    .map(|id| format!("{} (ID {})", quoted(&self::path(world, id)), id_text(id)))
+                    .collect();
+                let fix = if !elsewhere.is_empty() {
+                    format!("did you mean {}?", elsewhere.join(" or "))
+                } else if near.is_empty() {
                     format!("scene_inspect with root \"{here}\" lists what's in it")
                 } else {
                     let options: Vec<String> = near
@@ -221,6 +231,20 @@ mod tests {
         assert_eq!(
             resolve(&world, "Lightning").unwrap_err().fix.as_deref(),
             Some("did you mean \"Lighting\"?")
+        );
+    }
+
+    #[test]
+    fn a_bare_name_points_to_the_object_called_that() {
+        let (world, _, door) = world_with_a_house();
+        let error = resolve(&world, "Door").unwrap_err();
+        assert_eq!(error.code, Code::NotFound);
+        assert_eq!(
+            error.fix,
+            Some(format!(
+                "did you mean \"Workspace/House/Door\" (ID {})?",
+                id_text(door)
+            ))
         );
     }
 

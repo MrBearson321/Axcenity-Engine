@@ -211,7 +211,7 @@ fn search(
                 })
         })
         .collect();
-    let header = format!(
+    let mut header = format!(
         "{} {} under {}",
         matches.len(),
         if matches.len() == 1 {
@@ -221,6 +221,23 @@ fn search(
         },
         path(world, root)
     );
+    // Small models search a name as a tag: say when that's what happened.
+    if let Some(tag) = tag
+        && matches.is_empty()
+        && world.tagged_iter(tag).next().is_none()
+    {
+        let named = world
+            .descendants_iter(root)
+            .filter(|&id| world.get(id).is_some_and(|i| i.name() == tag))
+            .count();
+        header.push_str(&format!("\nno object has the tag {}", quoted(tag)));
+        if named > 0 {
+            header.push_str(&format!(
+                "; {named} {} named that: search with name instead",
+                if named == 1 { "is" } else { "are" }
+            ));
+        }
+    }
     let lines = matches
         .iter()
         .map(|&id| format!("{}  {}", label(world, id), path(world, id)))
