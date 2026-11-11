@@ -164,6 +164,8 @@ pub(super) enum Command {
     LightCones,
     ViewCube,
     Grid,
+    MovementGuide,
+    ViewportSettings,
     ViewMode(ViewMode),
     Overlay(Overlay),
     NewRibbonTab,
@@ -613,7 +615,7 @@ impl EditorApp {
             add(
                 Command::Theme(choice),
                 &format!("Theme: {label}"),
-                "View",
+                "Settings",
                 &[label],
                 None,
                 Ok(()),
@@ -622,7 +624,7 @@ impl EditorApp {
         add(
             Command::Appearance,
             "Appearance…",
-            "View",
+            "Settings",
             &[],
             None,
             Ok(()),
@@ -689,18 +691,41 @@ impl EditorApp {
         add(
             Command::LightCones,
             "Light Cones",
-            "View",
+            "Viewport",
             &[],
             None,
             Ok(()),
         );
-        add(Command::ViewCube, "View Cube", "View", &[], None, Ok(()));
-        add(Command::Grid, "Grid", "View", &[], None, Ok(()));
+        add(
+            Command::ViewCube,
+            "View Cube",
+            "Viewport",
+            &[],
+            None,
+            Ok(()),
+        );
+        add(Command::Grid, "Grid", "Viewport", &[], None, Ok(()));
+        add(
+            Command::MovementGuide,
+            "Movement Guide",
+            "Viewport",
+            &["Move overlay", "Distance", "Snap guide"],
+            None,
+            Ok(()),
+        );
+        add(
+            Command::ViewportSettings,
+            "Viewport Settings…",
+            "Viewport",
+            &[],
+            None,
+            Ok(()),
+        );
         for mode in ViewMode::all() {
             add(
                 Command::ViewMode(mode),
                 &format!("View Mode: {}", mode.label()),
-                "View",
+                "Viewport › View Mode",
                 &[mode.label()],
                 None,
                 Ok(()),
@@ -710,7 +735,7 @@ impl EditorApp {
             add(
                 Command::Overlay(overlay),
                 &format!("Overlay: {}", overlay.label()),
-                "View › Overlays",
+                "Viewport › Overlays",
                 &[overlay.label()],
                 None,
                 Ok(()),
@@ -1100,6 +1125,11 @@ impl EditorApp {
             Command::LightCones => self.light_cones = !self.light_cones,
             Command::ViewCube => self.view_cube = !self.view_cube,
             Command::Grid => self.grid = !self.grid,
+            Command::MovementGuide => self.move_guide = !self.move_guide,
+            Command::ViewportSettings => {
+                self.settings.open = true;
+                self.settings.page = settings::SettingsPage::Viewport;
+            }
             Command::ViewMode(mode) => self.view_mode = mode,
             Command::Overlay(overlay) => {
                 let flag = overlay.flag(&mut self.overlays);

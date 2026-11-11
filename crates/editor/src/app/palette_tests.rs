@@ -165,7 +165,8 @@ fn every_ribbon_and_menu_command_can_be_run_from_the_palette() {
     let menus: &[(&str, &[&str])] = &[
         ("File", &["Build Game"]),
         ("Edit", &["Undo History"]),
-        ("View", &["View Mode", "Layout"]),
+        ("View", &["Layout"]),
+        ("Viewport", &["View Mode"]),
         ("Debug", &[]),
         ("Help", &[]),
     ];

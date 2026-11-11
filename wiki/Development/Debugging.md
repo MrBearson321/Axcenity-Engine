@@ -21,7 +21,7 @@ Tools for finding out why something misbehaves. For slowness see [Profiling](../
 | Breakpoints | Click a script tab's gutter, then Play | Pauses the whole game before the line; call stack, locals and upvalues; Continue (F5), Step Over (F10), Step Into (F11), Step Out (Shift+F11); watch expressions |
 | Pause on errors | Ribbon > Clients > Pause on errors (off by default) | A script error pauses Play at the failed line with its call stack and locals |
 | Live Properties | Select during Play | Values update every frame; edits change the game world (Keep to carry them back) |
-| Visual-debug overlays | View > Overlays | Colliders, recent raycasts, bounds, sound emitters, navmesh, agent paths, culling |
+| Visual-debug overlays | Viewport > Overlays | Colliders, recent raycasts, bounds, sound emitters, navmesh, agent paths, culling |
 | Several clients | Game group: Clients, Network (latency, jitter, loss) | Each device's world; Profiler Network section |
 | Player F9 console | Editor Play, project-folder runs, or built games with `--dev` / the project setting | Log (by level and side), Lua on either side, Stats (frame laps) |
 | Player logs | `latest.log` in the game's data folder; panic hook writes the crash message | What happened on someone else's machine |
@@ -37,7 +37,7 @@ Tools for finding out why something misbehaves. For slowness see [Profiling](../
 | `World::check_index` | Debug game tests run it every 60 frames |
 | `AXCENITY_RETAINED_DRAW_LIST=off` | Draw from scratch to rule out a stale retained item |
 | `AXCENITY_NET_JSON=1` | Send the network wire as JSON to read it |
-| View > View Mode | Editor debug views: wireframe, normals, overdraw and more (`debug-views` feature) |
+| Viewport > View Mode | Editor debug views: wireframe, normals, overdraw and more (`debug-views` feature) |
 | `AXCENITY_SNAPSHOTS=<folder>` | Drawing tests save what they draw |
 | `shoot_project` | Screenshots of a project from named views (`AXCENITY_SHOT_*`) |
 | `dump_every_example` | `--ignored` with `AXCENITY_DUMP=<file>`: each example's output and part positions after three seconds |
