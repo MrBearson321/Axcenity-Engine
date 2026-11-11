@@ -160,6 +160,9 @@ pub enum ToolboxAction {
     MakeMaterial { set: String, name: String },
     /// Show the Downloaded / Imported Assets tab.
     OpenInventory,
+    /// Install a shared `.axcenity-plugin` into the project's plugins (or
+    /// the user's Plugins folder when no project is open).
+    ImportPlugin(PathBuf),
 }
 
 #[derive(Clone)]
@@ -553,7 +556,9 @@ impl ToolboxPanel {
         responsive::toolbar(ui, |ui| {
             self.view_choice(ui);
             responsive::room_for(ui, 60.0);
-            self.packs_menu(ui);
+            if let Some(packs::PackAction::ImportPlugin(file)) = self.packs_menu(ui) {
+                actions.push(ToolboxAction::ImportPlugin(file));
+            }
             if self.view == View::Search {
                 responsive::room_for(ui, 120.0);
                 self.source_choice(ui);

@@ -57,6 +57,22 @@ impl EditorApp {
             }
             ToolboxAction::MakeMaterial { set, name } => self.make_material(&set, &name),
             ToolboxAction::OpenInventory => self.open_inventory(),
+            ToolboxAction::ImportPlugin(file) => {
+                let origin = if self.project.is_some() {
+                    axcenity_plugins::Origin::Project
+                } else {
+                    axcenity_plugins::Origin::User
+                };
+                self.install_plugin_package(&file, origin);
+                if let Some(notice) = self.plugins.notice.take() {
+                    if notice.starts_with("Could not") {
+                        self.output.error(notice);
+                    } else {
+                        self.output.info(notice);
+                    }
+                }
+                self.layout.open(Pane::Plugins);
+            }
         }
     }
 

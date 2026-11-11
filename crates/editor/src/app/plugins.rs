@@ -446,7 +446,7 @@ impl EditorApp {
     /// The Plugins panel.
     pub(in crate::app) fn plugins_pane(&mut self, ui: &mut egui::Ui) {
         let project = self.project.as_ref().map(|project| project.folder.clone());
-        match crate::plugins::show(ui, &self.plugins, project.as_deref()) {
+        match crate::plugins::show(ui, &mut self.plugins, project.as_deref()) {
             Some(PluginAction::Enable(index, enabled)) => {
                 let key = self.plugins.entries[index].found.key.clone();
                 self.plugins.set_enabled(&key, enabled);
@@ -459,7 +459,98 @@ impl EditorApp {
             }
             Some(PluginAction::Reload(index)) => self.reload_plugin(index),
             Some(PluginAction::Rescan) => self.load_plugins(),
+            Some(PluginAction::Create { name, origin }) => self.create_plugin(&name, origin),
+            Some(PluginAction::Install { archive, origin }) => {
+                self.install_plugin_package(&archive, origin)
+            }
+            Some(PluginAction::Export { index, file }) => self.export_plugin(index, &file),
             None => {}
+        }
+    }
+
+    /// Scaffolds a new plugin folder and reloads the list.
+    fn create_plugin(&mut self, name: &str, origin: axcenity_plugins::Origin) {
+        let parent = match origin {
+            axcenity_plugins::Origin::Project => self
+                .project
+                .as_ref()
+                .map(|project| project.folder.join(axcenity_plugins::PLUGINS_FOLDER)),
+            axcenity_plugins::Origin::User => self.plugins.user_folder(),
+        };
+        let Some(parent) = parent else {
+            self.plugins.notice =
+                Some("Open a project, or set the editor data folder, to create a plugin.".into());
+            return;
+        };
+        match axcenity_plugins::scaffold(&parent, name) {
+            Ok(folder) => {
+                self.plugins.notice = Some(format!(
+                    "Created {}.",
+                    folder.file_name().unwrap_or_default().to_string_lossy()
+                ));
+                self.load_plugins();
+            }
+            Err(err) => self.plugins.notice = Some(format!("Could not create the plugin: {err}")),
+        }
+    }
+
+    /// Installs a `.axcenity-plugin` into the project or user plugins folder.
+    pub(in crate::app) fn install_plugin_package(
+        &mut self,
+        archive: &std::path::Path,
+        origin: axcenity_plugins::Origin,
+    ) {
+        let parent = match origin {
+            axcenity_plugins::Origin::Project => self
+                .project
+                .as_ref()
+                .map(|project| project.folder.join(axcenity_plugins::PLUGINS_FOLDER)),
+            axcenity_plugins::Origin::User => self.plugins.user_folder(),
+        };
+        let Some(parent) = parent else {
+            self.plugins.notice =
+                Some("Open a project, or set the editor data folder, to install a plugin.".into());
+            return;
+        };
+        match axcenity_plugins::preview(archive).and_then(|preview| {
+            let permissions = if preview.permissions.is_empty() {
+                "no special permissions".to_owned()
+            } else {
+                preview.permissions.join(", ")
+            };
+            axcenity_plugins::install(archive, &parent).map(|folder| (preview, folder, permissions))
+        }) {
+            Ok((preview, folder, permissions)) => {
+                self.plugins.notice = Some(format!(
+                    "Installed {} v{} ({permissions}) into {}.",
+                    preview.name,
+                    preview.version,
+                    folder.display()
+                ));
+                self.load_plugins();
+            }
+            Err(err) => {
+                self.plugins.notice = Some(format!("Could not install the plugin: {err}"));
+            }
+        }
+    }
+
+    /// Packs a plugin folder into a `.axcenity-plugin` for sharing.
+    fn export_plugin(&mut self, index: usize, file: &std::path::Path) {
+        let Some(entry) = self.plugins.entries.get(index) else {
+            return;
+        };
+        match axcenity_plugins::pack(&entry.found.folder, file) {
+            Ok(()) => {
+                self.plugins.notice = Some(format!(
+                    "Exported {} to {}.",
+                    entry.found.name(),
+                    file.display()
+                ));
+            }
+            Err(err) => {
+                self.plugins.notice = Some(format!("Could not export the plugin: {err}"));
+            }
         }
     }
 

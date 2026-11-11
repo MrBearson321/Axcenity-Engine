@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-11 | Editor architecture, Toolbox | Plugin toolkit: `.axcenity-plugin` packs, scaffold/export, Toolbox Import plugin; start-screen rail crossfade and atmosphere | Cursor |
 | 2026-11-11 | MCP server | `render_stats` tool for the open editor | Claude |
 | 2026-11-11 | MCP server, threading model | MCP step 3.4: clients work in the open editor (Settings ▸ AI connections, loopback listener, relay, shared change log); the page also caught up with steps 4–6 (#116–#133) | Claude |
 | 2026-11-11 | System inventory, roadmap | Team Create TC2: the World's edit journal, `collab::capture`, the editor's session (`app/team.rs`) | Claude |

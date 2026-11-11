@@ -77,9 +77,18 @@ fn pack_file_name(collection: &str) -> String {
     format!("{slug}.axcenity-pack.json")
 }
 
+/// What the Packs menu asked for beyond asset packs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackAction {
+    /// Install a `.axcenity-plugin` into the open project's `plugins/`.
+    ImportPlugin(std::path::PathBuf),
+}
+
 impl ToolboxPanel {
-    /// The Packs menu: Import pack…, and Export collection… in a collection.
-    pub(super) fn packs_menu(&mut self, ui: &mut egui::Ui) {
+    /// The Packs menu: Import pack…, Import plugin…, and Export collection…
+    /// in a collection. Returns a plugin import when the creator picked one.
+    pub(super) fn packs_menu(&mut self, ui: &mut egui::Ui) -> Option<PackAction> {
+        let mut action = None;
         ui.menu_button("Packs", |ui| {
             if ui
                 .button("Import pack…")
@@ -97,6 +106,22 @@ impl ToolboxPanel {
                     self.import_pack_file(ui.ctx(), &file);
                 }
             }
+            if ui
+                .button("Import plugin…")
+                .on_hover_text(
+                    "Install a .axcenity-plugin shared by another creator into this \
+                     project's plugins folder (or your Plugins folder with no project).",
+                )
+                .clicked()
+            {
+                ui.close();
+                if let Some(file) = rfd::FileDialog::new()
+                    .add_filter("Axcenity plugin", &["axcenity-plugin"])
+                    .pick_file()
+                {
+                    action = Some(PackAction::ImportPlugin(file));
+                }
+            }
             if let View::Collection(name) = self.view.clone()
                 && ui.button("Export collection…").clicked()
             {
@@ -110,6 +135,7 @@ impl ToolboxPanel {
                 }
             }
         });
+        action
     }
 
     fn import_pack_file(&mut self, ctx: &egui::Context, file: &Path) {

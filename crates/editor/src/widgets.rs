@@ -398,17 +398,36 @@ pub fn nav_item(
     response
 }
 
-/// [`nav_item`] folded to its icon: a square the sidebar's width, centred,
-/// highlighted the same way. `title` names it for screen readers; give it a
-/// tooltip, since the title doesn't show.
-pub fn nav_icon(ui: &mut egui::Ui, icon: &str, title: &str, selected: bool) -> egui::Response {
+/// A sidebar page item that folds without a hard cut: `open` 0 centres the
+/// icon, 1 shows the title beside it, and values in between lerp the
+/// highlight and fade the label so the rail doesn't pop mid-slide.
+pub fn nav_rail(
+    ui: &mut egui::Ui,
+    icon: &str,
+    title: &str,
+    count: Option<usize>,
+    selected: bool,
+    open: f32,
+) -> egui::Response {
+    let open = open.clamp(0.0, 1.0);
     let palette = theme::palette(ui.ctx());
     let width = ui.available_width();
-    let (row, response) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click());
+    let height = 34.0 - 4.0 * open;
+    let (row, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title)
     });
-    let rect = Rect::from_center_size(row.center(), vec2(36.0_f32.min(width), 34.0));
+    let chip = Rect::from_center_size(row.center(), vec2(36.0_f32.min(width), height));
+    let highlight = Rect {
+        min: egui::pos2(
+            chip.min.x + (row.min.x - chip.min.x) * open,
+            chip.min.y + (row.min.y - chip.min.y) * open,
+        ),
+        max: egui::pos2(
+            chip.max.x + (row.max.x - chip.max.x) * open,
+            chip.max.y + (row.max.y - chip.max.y) * open,
+        ),
+    };
     let hovered = response.hovered();
     let t = theme::ease(ui.ctx(), response.id.with("hover"), hovered || selected);
     if t > 0.0 {
@@ -418,31 +437,164 @@ pub fn nav_icon(ui: &mut egui::Ui, icon: &str, title: &str, selected: bool) -> e
             palette.control_hover
         };
         ui.painter()
-            .rect_filled(rect, theme::radius::CONTROL, fill.gamma_multiply(t));
+            .rect_filled(highlight, theme::radius::CONTROL, fill.gamma_multiply(t));
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
-            rect,
+            highlight,
             theme::radius::CONTROL,
             palette.focus_stroke(),
             egui::StrokeKind::Inside,
         );
     }
-    let color = if selected {
-        palette.accent
-    } else if hovered {
+    let color = if selected || hovered {
         palette.text_strong
     } else {
         palette.text_secondary
     };
+    let icon_color = if selected { palette.accent } else { color };
+    let icon_open = row.left_center() + vec2(18.0, 0.0);
+    let icon_folded = row.center();
+    let icon_pos = egui::pos2(
+        icon_folded.x + (icon_open.x - icon_folded.x) * open,
+        icon_folded.y + (icon_open.y - icon_folded.y) * open,
+    );
+    let icon_size = theme::size::ICON_MEDIUM + 2.0 * (1.0 - open);
     ui.painter().text(
-        rect.center(),
+        icon_pos,
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(theme::size::ICON_MEDIUM + 2.0),
-        color,
+        FontId::proportional(icon_size),
+        icon_color,
     );
+    // Labels stay readable past the halfway fold, then fade out before the
+    // rail is too narrow for them to sit beside the icon.
+    let label = smoothstep(0.28, 0.72, open);
+    if label > 0.01 {
+        ui.painter().text(
+            row.left_center() + vec2(34.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            title,
+            FontId::new(type_scale::BODY, theme::medium_family()),
+            color.gamma_multiply(label),
+        );
+        if let Some(count) = count {
+            ui.painter().text(
+                row.right_center() - vec2(10.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                count.to_string(),
+                FontId::proportional(type_scale::SMALL),
+                palette.text_weak.gamma_multiply(label),
+            );
+        }
+    }
     response
+}
+
+/// Hermite smoothstep from 0 to 1 between `edge0` and `edge1`.
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge1 <= edge0 {
+        return if x >= edge1 { 1.0 } else { 0.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Soft atmosphere behind a start page: two quiet accent pools in the
+/// corners (static) and a larger pointer-led wash (only while the pointer
+/// is over `rect`, so an idle window isn't woken on a timer). Off with
+/// Reduce motion for the pointer wash; the corner pools stay.
+pub fn atmosphere(ui: &egui::Ui, rect: Rect) {
+    let palette = theme::palette(ui.ctx());
+    let painter = ui.painter_at(rect);
+    let accent = palette.accent;
+    let ink = palette.text_strong;
+    let corner = |center: egui::Pos2, radius: f32, color: Color32, alpha: f32| {
+        soft_pool(&painter, center, radius, color.gamma_multiply(alpha));
+    };
+    // Static pools: a little colour without motion.
+    let (a_dark, a_light) = if palette.dark {
+        (0.055, 0.03)
+    } else {
+        (0.045, 0.035)
+    };
+    corner(
+        egui::pos2(
+            rect.right() - rect.width() * 0.12,
+            rect.top() + rect.height() * 0.18,
+        ),
+        rect.width().min(rect.height()) * 0.55,
+        accent,
+        if palette.dark { a_dark } else { a_light },
+    );
+    corner(
+        egui::pos2(
+            rect.left() + rect.width() * 0.08,
+            rect.bottom() - rect.height() * 0.1,
+        ),
+        rect.width().min(rect.height()) * 0.42,
+        ink,
+        if palette.dark { 0.03 } else { 0.025 },
+    );
+    // A faint rising band across the middle, still static.
+    let band = Rect::from_min_max(
+        egui::pos2(rect.left(), rect.center().y - 80.0),
+        egui::pos2(rect.right(), rect.center().y + 80.0),
+    );
+    painter.rect_filled(
+        band,
+        0,
+        accent.gamma_multiply(if palette.dark { 0.018 } else { 0.022 }),
+    );
+
+    if ui.ctx().global_style().animation_time <= 0.0 {
+        return;
+    }
+    let id = egui::Id::new("start atmosphere pointer");
+    let over = ui.rect_contains_pointer(rect);
+    if over && let Some(pointer) = ui.ctx().pointer_latest_pos() {
+        ui.ctx().data_mut(|data| data.insert_temp(id, pointer));
+    }
+    let strength = theme::ease(ui.ctx(), id.with("strength"), over);
+    if strength <= 0.0 {
+        return;
+    }
+    let Some(center) = ui.ctx().data(|data| data.get_temp::<egui::Pos2>(id)) else {
+        return;
+    };
+    soft_pool(
+        &painter,
+        center,
+        280.0,
+        ink.gamma_multiply(if palette.dark { 0.07 } else { 0.05 } * strength),
+    );
+    soft_pool(
+        &painter,
+        center + egui::vec2(90.0, -40.0),
+        140.0,
+        accent.gamma_multiply(if palette.dark { 0.06 } else { 0.04 } * strength),
+    );
+}
+
+/// A soft radial pool as a triangle fan, for atmosphere and spotlights.
+fn soft_pool(painter: &egui::Painter, center: egui::Pos2, radius: f32, color: Color32) {
+    const SEGMENTS: u32 = 48;
+    if color.a() == 0 || radius <= 0.0 {
+        return;
+    }
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, color);
+    for segment in 0..=SEGMENTS {
+        let angle = segment as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(
+            center + radius * egui::Vec2::angled(angle),
+            Color32::TRANSPARENT,
+        );
+    }
+    for segment in 0..SEGMENTS {
+        mesh.add_triangle(0, segment + 1, segment + 2);
+    }
+    painter.add(mesh);
 }
 
 /// A tab in a top bar: an icon, the name if `shown`, and an optional count,
@@ -1120,6 +1272,11 @@ mod tests {
                     egui::Id::new("card"),
                     1.0,
                 );
+                atmosphere(ui, ui.max_rect());
+                ui.horizontal(|ui| {
+                    let _ = nav_rail(ui, icons::SQUARES_FOUR, "Projects", Some(3), true, 1.0);
+                    let _ = nav_rail(ui, icons::GEAR_SIX, "Settings", None, false, 0.0);
+                });
             });
         };
         let moved = vec![egui::Event::PointerMoved(pointer)];

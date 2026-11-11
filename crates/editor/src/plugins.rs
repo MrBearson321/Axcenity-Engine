@@ -2,6 +2,10 @@
 //! dock tabs' UI state, what's saved for them in the editor's data, and the
 //! Plugins panel. Running them, undo and the ribbon are `app/plugins.rs`;
 //! the plugin API is the `plugins` crate (`docs/editor/plugins.md`).
+//!
+//! The panel is also the creator toolkit: New Plugin… scaffolds a folder,
+//! Export packs a `.axcenity-plugin` for sharing, and Import installs one
+//! (the Toolbox Packs menu offers the same import).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -107,6 +111,19 @@ pub struct Plugins {
     /// Dock tab numbers, by plugin key and widget id, kept for the session
     /// so a reloaded plugin's tab stays where it was.
     pane_ids: BTreeMap<(String, String), u64>,
+    /// The New Plugin… form, while it's open.
+    new_plugin: Option<NewPlugin>,
+    /// A status line under the toolbar (scaffold / import / export).
+    pub notice: Option<String>,
+}
+
+/// What's typed in the New Plugin… form.
+struct NewPlugin {
+    name: String,
+    /// Into the project's `plugins/` when a project is open; otherwise the
+    /// user's `Plugins` folder.
+    into_project: bool,
+    error: Option<String>,
 }
 
 impl Plugins {
@@ -194,10 +211,20 @@ pub enum PluginAction {
     Reload(usize),
     /// Look for plugins again, in both folders.
     Rescan,
+    /// Scaffold a new plugin folder.
+    Create { name: String, origin: Origin },
+    /// Install a `.axcenity-plugin` into the project or user plugins folder.
+    Install { archive: PathBuf, origin: Origin },
+    /// Pack the plugin at this index into the given file.
+    Export { index: usize, file: PathBuf },
 }
 
 /// Draws the Plugins panel: each plugin, whether it's on, and its errors.
-pub fn show(ui: &mut egui::Ui, plugins: &Plugins, project: Option<&Path>) -> Option<PluginAction> {
+pub fn show(
+    ui: &mut egui::Ui,
+    plugins: &mut Plugins,
+    project: Option<&Path>,
+) -> Option<PluginAction> {
     let palette = theme::palette(ui.ctx());
     let mut action = None;
     ui.horizontal(|ui| {
@@ -206,18 +233,118 @@ pub fn show(ui: &mut egui::Ui, plugins: &Plugins, project: Option<&Path>) -> Opt
         {
             action = Some(PluginAction::Rescan);
         }
+        if widgets::icon_button(ui, icons::PLUS, "New Plugin…", false)
+            .on_hover_text("Scaffold a plugin folder with plugin.json and init.lua")
+            .clicked()
+        {
+            plugins.new_plugin = Some(NewPlugin {
+                name: String::new(),
+                into_project: project.is_some(),
+                error: None,
+            });
+        }
+        if widgets::icon_button(ui, icons::DOWNLOAD_SIMPLE, "Import plugin…", false)
+            .on_hover_text("Install a .axcenity-plugin shared by another creator")
+            .clicked()
+            && let Some(file) = rfd::FileDialog::new()
+                .add_filter("Axcenity plugin", &["axcenity-plugin"])
+                .pick_file()
+        {
+            let origin = if project.is_some() {
+                Origin::Project
+            } else {
+                Origin::User
+            };
+            action = Some(PluginAction::Install {
+                archive: file,
+                origin,
+            });
+        }
         ui.label(RichText::new("Lua plugins for the editor").color(palette.text_weak));
     });
+    if let Some(notice) = &plugins.notice {
+        ui.label(RichText::new(notice).small().color(palette.success));
+    }
     widgets::divider(ui);
+
+    if let Some(form) = &mut plugins.new_plugin {
+        let mut create = false;
+        let mut cancel = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.strong("New Plugin");
+            ui.label(
+                RichText::new("A folder with plugin.json and a starter init.lua.")
+                    .small()
+                    .color(palette.text_weak),
+            );
+            ui.horizontal(|ui| {
+                ui.label("Name");
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut form.name)
+                        .desired_width(180.0)
+                        .hint_text("Align to Grid"),
+                );
+                if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    create = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(project.is_some(), |ui| {
+                    ui.radio_value(&mut form.into_project, true, "This project");
+                });
+                ui.radio_value(&mut form.into_project, false, "Your plugins");
+            });
+            if let Some(error) = &form.error {
+                ui.label(RichText::new(error).small().color(palette.error));
+            }
+            ui.horizontal(|ui| {
+                if ui
+                    .add(widgets::button(
+                        widgets::Role::Primary,
+                        None,
+                        "Create",
+                        &palette,
+                    ))
+                    .clicked()
+                {
+                    create = true;
+                }
+                if ui
+                    .add(widgets::button(
+                        widgets::Role::Ghost,
+                        None,
+                        "Cancel",
+                        &palette,
+                    ))
+                    .clicked()
+                {
+                    cancel = true;
+                }
+            });
+        });
+        if cancel {
+            plugins.new_plugin = None;
+        } else if create {
+            let name = form.name.trim().to_owned();
+            if name.is_empty() {
+                form.error = Some("Give the plugin a name.".to_owned());
+            } else if form.into_project && project.is_none() {
+                form.error = Some("Open a project to put the plugin there.".to_owned());
+            } else {
+                let origin = if form.into_project {
+                    Origin::Project
+                } else {
+                    Origin::User
+                };
+                plugins.new_plugin = None;
+                action = Some(PluginAction::Create { name, origin });
+            }
+        }
+        widgets::divider(ui);
+    }
+
     if plugins.entries.is_empty() {
         ui.add_space(12.0);
-        ui.vertical_centered(|ui| {
-            ui.label(
-                RichText::new(icons::PUZZLE_PIECE)
-                    .size(22.0)
-                    .color(palette.text_muted),
-            );
-        });
         let mut places = Vec::new();
         if let Some(project) = project {
             places.push(
@@ -230,12 +357,15 @@ pub fn show(ui: &mut egui::Ui, plugins: &Plugins, project: Option<&Path>) -> Opt
         if let Some(user) = plugins.user_folder() {
             places.push(user.display().to_string());
         }
-        ui.label(
-            RichText::new(format!(
-                "No plugins. A plugin is a folder with a plugin.json and an init.lua, in {}.",
+        widgets::empty_state(
+            ui,
+            icons::PUZZLE_PIECE,
+            "No plugins yet",
+            &format!(
+                "Create one with New Plugin…, import a .axcenity-plugin, or add a folder with plugin.json and init.lua in {}.",
                 places.join(" or ")
-            ))
-            .color(palette.text_weak),
+            ),
+            None,
         );
         return action;
     }
@@ -261,6 +391,32 @@ pub fn show(ui: &mut egui::Ui, plugins: &Plugins, project: Option<&Path>) -> Opt
                             );
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::icon_button(
+                                ui,
+                                icons::EXPORT,
+                                "Export .axcenity-plugin…",
+                                false,
+                            )
+                            .on_hover_text("Pack this plugin to share through the Toolbox")
+                            .clicked()
+                            {
+                                let stem = entry
+                                    .found
+                                    .folder
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "plugin".to_owned());
+                                if let Some(file) = rfd::FileDialog::new()
+                                    .set_file_name(format!(
+                                        "{stem}{}",
+                                        axcenity_plugins::PLUGIN_PACKAGE_SUFFIX
+                                    ))
+                                    .add_filter("Axcenity plugin", &["axcenity-plugin"])
+                                    .save_file()
+                                {
+                                    action = Some(PluginAction::Export { index, file });
+                                }
+                            }
                             if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Reload", false)
                                 .clicked()
                             {

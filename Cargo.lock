@@ -897,6 +897,7 @@ dependencies = [
  "mlua",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

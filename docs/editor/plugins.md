@@ -9,7 +9,14 @@ Lua plugins that extend the editor (Phase 54). Editor-only: built games and the 
 - `require("name")` in a plugin loads `name.lua` from the plugin's folder (once). Any `.css` in the folder styles the plugin's dock tabs, never the game.
 - `plugins/` is never packed into a built game (`project::pack_game`) and its stylesheets aren't the project's (`project::find_stylesheets` skips it). The platform check scripts check that `axcenity-player` doesn't depend on `axcenity-plugins` (`scripts/check-platform.sh`).
 - Plugins start when a project opens (and again when the world is replaced, such as the world file reloading). A plugin reloads when its `plugin.json`, `.lua` or `.css` files change on disk (two watchers, one per folder); a new or removed folder makes the editor look for plugins again. A plugin whose dock UI vanished (a Console command's undo swaps the whole world) starts again.
-- **Plugins panel** (View ▸ Panels, or the Plugins ribbon tab when no plugin has a toolbar): each plugin's name, version, where it is, whether it may use project files, an on/off box, Reload, and its errors (the last 20). Which plugins are off, and every plugin's settings, are kept in `Plugins.json` in the editor's data folder, by the plugin's key (`project/<folder>` or `user/<folder>`).
+- **Plugins panel** (View ▸ Panels, or the Plugins ribbon tab when no plugin has a toolbar): each plugin's name, version, where it is, whether it may use project files, an on/off box, Reload, Export, and its errors (the last 20). **New Plugin…** scaffolds a folder with `plugin.json` and a starter `init.lua` (in the project's `plugins/` or the user's `Plugins`). **Import plugin…** installs a shared package. Which plugins are off, and every plugin's settings, are kept in `Plugins.json` in the editor's data folder, by the plugin's key (`project/<folder>` or `user/<folder>`).
+
+## Creating and sharing
+
+- A shared plugin is a zip of the plugin folder with the suffix `.axcenity-plugin` (`plugins::bundle`: `pack`, `preview`, `install`, `scaffold`). It may only contain `plugin.json`, `.lua` and `.css` (flat in the zip, or under one top folder). Unsafe paths and other file kinds are refused.
+- **Export** on a plugin in the Plugins panel writes that package. Creators send the file (or put it beside asset packs); there is no hosted plugin store yet.
+- **Import** is in the Plugins panel and in the Toolbox's **Packs ▸ Import plugin…** menu: the package unpacks into the open project's `plugins/` (or the user's `Plugins` with no project), then the editor rescans and opens the Plugins panel. A folder that already exists is left alone.
+- `examples/hello-plugins` remains the worked reference; New Plugin… writes the same shape of starter.
 
 ## The plugin API
 
