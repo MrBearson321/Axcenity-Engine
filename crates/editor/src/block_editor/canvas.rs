@@ -246,7 +246,8 @@ pub(super) fn finish_drag(
         egui::Order::Tooltip,
         egui::Id::new("dragged blocks"),
     ));
-    // Where the blocks would snap: a grey shadow, as in Scratch.
+    // Where the blocks would snap: a faint accent-tinted outline.
+    let accent = theme::palette(ui.ctx()).accent;
     if let Some((place, _)) = &stack_target {
         let shadow = Rect::from_min_size(
             *place,
@@ -255,16 +256,18 @@ pub(super) fn finish_drag(
                 drag.size.y.max(ROW_HEIGHT * z),
             ),
         );
-        layer.rect_filled(
+        layer.add(egui::epaint::RectShape::new(
             shadow,
             radius(CORNER * z),
-            Color32::from_gray(128).gamma_multiply(0.45),
-        );
+            accent.gamma_multiply(0.22),
+            Stroke::new(1.5_f32, accent.gamma_multiply(0.8)),
+            egui::StrokeKind::Inside,
+        ));
     }
     if let Some((rect, _, _)) = &slot_target {
         layer.rect_stroke(
             rect.expand(2.0),
-            radius(rect.height() * 0.5),
+            radius(FIELD_CORNER * z + 2.0),
             Stroke::new(2.5_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
