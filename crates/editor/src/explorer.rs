@@ -110,6 +110,9 @@ pub struct Explorer {
     /// The hover text of the warning badge after each script that uses an API
     /// from the other side. The app fills it in each frame.
     pub warnings: HashMap<InstanceId, String>,
+    /// Rows other Team Create members have selected, with their colours.
+    /// The app fills it in each frame.
+    pub others: HashMap<InstanceId, Vec<egui::Color32>>,
     /// The text in Filter: while it isn't blank, only the Instances whose
     /// name or class has it in them show, with the branches above them.
     pub filter: String,
@@ -315,6 +318,7 @@ impl Explorer {
             scroll_to: None,
             renaming: None,
             warnings: HashMap::new(),
+            others: HashMap::new(),
             filter: String::new(),
             keys: Vec::new(),
             anchor: None,
@@ -799,6 +803,17 @@ impl Explorer {
                 let row_shape = row_rect.shrink2(egui::vec2(2.0, 0.0));
                 ui.painter()
                     .set(background, egui::Shape::rect_filled(row_shape, 4, fill));
+                // A bar in each colour of the others who have it selected.
+                if let Some(colors) = self.others.get(&row.id) {
+                    for (i, color) in colors.iter().take(3).enumerate() {
+                        let x = row_shape.right() - 3.0 - i as f32 * 4.0;
+                        let bar = egui::Rect::from_x_y_ranges(
+                            x..=x + 3.0,
+                            row_shape.y_range().shrink(3.0),
+                        );
+                        ui.painter().rect_filled(bar, 1.5, *color);
+                    }
+                }
                 if ring_row == Some(row.id) {
                     ui.painter().rect_stroke(
                         row_shape,

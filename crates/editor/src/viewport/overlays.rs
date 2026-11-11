@@ -11,13 +11,25 @@ pub(super) fn paint_selection_box(
     selected: InstanceId,
     eye: Vec3,
 ) {
-    let Some(lines) = occluders.visible_box_edges(selected, eye) else {
-        return;
-    };
+    paint_box(ui, rect, screen, occluders, selected, eye, SELECTION_COLOR);
+}
+
+/// Outlines `id`'s box in `color`, as the selection box is; returns the
+/// highest point drawn, for a name tag.
+fn paint_box(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    screen: &Screen,
+    occluders: &axcenity_scene::Occluders,
+    id: InstanceId,
+    eye: Vec3,
+    color: egui::Color32,
+) -> Option<egui::Pos2> {
+    let lines = occluders.visible_box_edges(id, eye)?;
     let painter = ui.painter_at(rect);
     // A soft glow under the line keeps it readable on any background.
-    let glow = egui::Stroke::new(SELECTION_WIDTH + 3.0, SELECTION_COLOR.gamma_multiply(0.25));
-    let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
+    let glow = egui::Stroke::new(SELECTION_WIDTH + 3.0, color.gamma_multiply(0.25));
+    let stroke = egui::Stroke::new(SELECTION_WIDTH, color);
     let lines: Vec<_> = lines
         .into_iter()
         .filter_map(|(a, b)| screen.line(a, b))
@@ -25,9 +37,56 @@ pub(super) fn paint_selection_box(
     for line in &lines {
         painter.line_segment(*line, glow);
     }
-    for line in lines {
-        painter.line_segment(line, stroke);
+    for line in &lines {
+        painter.line_segment(*line, stroke);
     }
+    lines
+        .iter()
+        .flatten()
+        .copied()
+        .min_by(|a, b| a.y.total_cmp(&b.y))
+}
+
+/// What another Team Create member has selected: outlined in their colour,
+/// with their name over the first one.
+pub(super) fn paint_member_selection(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    screen: &Screen,
+    occluders: &axcenity_scene::Occluders,
+    eye: Vec3,
+    member: &MemberSelection,
+) {
+    let mut top = None;
+    for &id in &member.selection {
+        if let Some(point) = paint_box(ui, rect, screen, occluders, id, eye, member.color) {
+            top.get_or_insert(point);
+        }
+    }
+    let Some(top) = top else {
+        return;
+    };
+    let painter = ui.painter_at(rect);
+    let font = egui::FontId::proportional(11.0);
+    let galley = painter.layout_no_wrap(member.name.clone(), font, egui::Color32::WHITE);
+    let tag = egui::Rect::from_min_size(
+        top + egui::vec2(-4.0, -galley.size().y - 8.0),
+        galley.size() + egui::vec2(8.0, 4.0),
+    );
+    painter.rect_filled(tag, 3.0, member.color.gamma_multiply(0.9));
+    let dark = {
+        let [r, g, b, _] = member.color.to_array();
+        0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b) > 150.0
+    };
+    painter.galley(
+        tag.min + egui::vec2(4.0, 2.0),
+        galley,
+        if dark {
+            egui::Color32::BLACK
+        } else {
+            egui::Color32::WHITE
+        },
+    );
 }
 
 /// The light whose icon is under `pointer`, the nearest if several are.

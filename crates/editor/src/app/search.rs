@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 18] = [
+const TOOL_PANES: [Pane; 19] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -348,6 +348,7 @@ const TOOL_PANES: [Pane; 18] = [
     Pane::Toolbox,
     Pane::Inventory,
     Pane::VersionExplorer,
+    Pane::TeamCreate,
 ];
 
 /// Other words people search for a command by, matched like its name.
@@ -428,6 +429,10 @@ fn command_description(command: &Command) -> String {
         Command::VersionHistory => {
             "See the project's saved checkpoints and restore one, or compare it with now."
         }
+        Command::ShareTeamCreate => {
+            "Host a Team Create session for this project and make an invite link."
+        }
+        Command::JoinTeamCreate => "Join someone's Team Create session with their invite link.",
         Command::SaveCheckpoint => "Keep a named copy of the project as it is now.",
         Command::BackUpProject => "Write a zip of the whole project.",
         Command::Input => {

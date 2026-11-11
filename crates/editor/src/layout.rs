@@ -102,6 +102,10 @@ pub enum Pane {
     /// issues and what changed between two versions (`version_explorer.rs`).
     /// Starts closed; Help > Version Explorer opens it.
     VersionExplorer,
+    /// Team Create: sharing, joining, who's here, invites and roles
+    /// (`app/team_panel.rs`). Starts closed; File > Share with Team Create
+    /// and the title bar chip open it.
+    TeamCreate,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -112,7 +116,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 24] = [
+    pub const CLOSABLE: [Pane; 25] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -137,6 +141,7 @@ impl Pane {
         Pane::Toolbox,
         Pane::Inventory,
         Pane::VersionExplorer,
+        Pane::TeamCreate,
     ];
 
     pub fn label(self) -> &'static str {
@@ -166,6 +171,7 @@ impl Pane {
             Pane::Toolbox => "Toolbox",
             Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
+            Pane::TeamCreate => "Team Create",
             Pane::Script(_) => "Script",
             Pane::Plugin(_) => "Plugin",
         }
@@ -198,6 +204,7 @@ impl Pane {
             Pane::Toolbox => icons::TOOLBOX,
             Pane::Inventory => icons::TRAY_ARROW_DOWN,
             Pane::VersionExplorer => icons::GIT_BRANCH,
+            Pane::TeamCreate => icons::USERS_THREE,
             Pane::Script(_) => icons::CODE,
             Pane::Plugin(_) => icons::PUZZLE_PIECE,
         }
@@ -307,6 +314,7 @@ impl Layout {
             | Pane::Plugins
             | Pane::LodInspector
             | Pane::VersionExplorer
+            | Pane::TeamCreate
             | Pane::Plugin(_) => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
         };
@@ -328,6 +336,7 @@ impl Layout {
                 | Pane::Levels
                 | Pane::Plugins
                 | Pane::VersionExplorer
+                | Pane::TeamCreate
                 | Pane::Plugin(_),
                 None,
             ) => {
@@ -646,6 +655,7 @@ mod tests {
                     | Pane::Toolbox
                     | Pane::Inventory
                     | Pane::VersionExplorer
+                    | Pane::TeamCreate
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;
