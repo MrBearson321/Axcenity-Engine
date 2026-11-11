@@ -94,6 +94,15 @@ impl Args {
             .map(|items| items.iter().filter_map(Value::as_str).collect())
     }
 
+    /// A [`Kind::Pairs`] argument's pairs, if it's there.
+    pub fn pairs(&self, name: &str, first: &str, second: &str) -> Option<Vec<(&str, &str)>> {
+        let items = self.get(name)?.as_array()?;
+        items
+            .iter()
+            .map(|item| Some((item.get(first)?.as_str()?, item.get(second)?.as_str()?)))
+            .collect()
+    }
+
     pub fn vector3(&self, name: &str) -> Option<[f64; 3]> {
         let items = self.get(name)?.as_array()?;
         Some([items[0].as_f64()?, items[1].as_f64()?, items[2].as_f64()?])
@@ -131,6 +140,15 @@ fn fits(kind: Kind, value: &Value) -> bool {
             .as_array()
             .is_some_and(|items| items.len() == 3 && items.iter().all(Value::is_number)),
         Kind::Object => value.is_object(),
+        Kind::Pairs(first, second) => value.as_array().is_some_and(|items| {
+            items.iter().all(|item| {
+                item.get(first).is_some_and(Value::is_string)
+                    && item.get(second).is_some_and(Value::is_string)
+            })
+        }),
+        Kind::Objects => value
+            .as_array()
+            .is_some_and(|items| items.iter().all(Value::is_object)),
     }
 }
 
@@ -144,6 +162,10 @@ fn describe(kind: Kind) -> String {
         Kind::Strings => "a list of strings, like [\"17\",\"Workspace/Door\"]".into(),
         Kind::Vector3 => "three numbers, like [0,5,0]".into(),
         Kind::Object => "an object, like {\"Anchored\":true}".into(),
+        Kind::Pairs(first, second) => {
+            format!("a list like [{{\"{first}\":\"…\",\"{second}\":\"…\"}}]")
+        }
+        Kind::Objects => "a list of objects, like [{\"op\":\"create\"}]".into(),
     }
 }
 
@@ -228,5 +250,56 @@ mod tests {
         assert_eq!(a.limit(50, 500), 500);
         assert_eq!(args(json!({"limit": 0})).limit(50, 500), 1);
         assert_eq!(args(json!({})).limit(50, 500), 50);
+    }
+}
+
+#[cfg(test)]
+mod pairs_tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::{Class, Param, Profile, ToolSpec};
+
+    const EDITS: ToolSpec = ToolSpec {
+        name: "edit",
+        title: "Edit",
+        summary: "Edits.",
+        profile: Profile::Lite,
+        class: Class::Modify,
+        idempotent: false,
+        params: &[Param::optional("edits", Kind::Pairs("find", "replace"), "")],
+    };
+
+    #[test]
+    fn pairs_are_lists_of_two_named_strings() {
+        let good = Args::new(
+            json!({"edits": [{"find": "a", "replace": "b"}]})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        );
+        assert_eq!(good.check(&EDITS), Ok(()));
+        assert_eq!(
+            good.pairs("edits", "find", "replace"),
+            Some(vec![("a", "b")])
+        );
+        let bad = Args::new(
+            json!({"edits": [{"find": "a"}]})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        );
+        let error = bad.check(&EDITS).unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("[{\"find\":\"…\",\"replace\":\"…\"}]"),
+            "{error}"
+        );
+        let schema = serde_json::Value::Object(EDITS.input_schema()).to_string();
+        assert!(
+            schema.contains(r#""required":["find","replace"]"#),
+            "{schema}"
+        );
     }
 }

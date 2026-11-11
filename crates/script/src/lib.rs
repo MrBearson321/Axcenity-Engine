@@ -2070,6 +2070,20 @@ pub fn run_edit_command(world: &mut World, source: &str) -> Result<EditCommand, 
     })
 }
 
+/// The first syntax error in `source`, the code of the script at `path`,
+/// as Luau reports it (`path:line: message`), or `None` when it compiles.
+/// Compiles only, with the scripts' own compiler: nothing runs.
+pub fn syntax_error(path: &str, source: &str) -> Option<String> {
+    let lua = Lua::new();
+    lua.set_compiler(sandbox::compiler());
+    lua.load(source)
+        .set_name(format!("@{path}"))
+        .set_mode(mlua::chunk::ChunkMode::Text)
+        .into_function()
+        .err()
+        .map(|error| errors::error_message(&error))
+}
+
 /// Every global name a script has, for the Console's autocomplete.
 pub fn global_names() -> Vec<&'static str> {
     sandbox::global_names()

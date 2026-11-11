@@ -5,7 +5,7 @@
 //! white, since the material carries its color; one drop is one undo step.
 
 use axcenity_assets::{MATERIAL_SUFFIX, MATERIALS_FOLDER, material_json};
-use axcenity_core::{ClassName, Color3, InstanceId, Value};
+use axcenity_core::{ClassName, Color3, InstanceId, Value, World};
 
 use super::EditorApp;
 use axcenity_project as project;
@@ -14,6 +14,31 @@ use super::texture_set::property_changes;
 use crate::asset_browser::{AssetEntry, display_name, prefab_file_stem};
 use crate::history;
 use crate::tree;
+
+/// Draws the part `id` in the material file at `path`: its
+/// `MaterialVariant`, and a Part's `Color` white, since the material
+/// carries its color. False, with nothing changed, for anything but a
+/// part or MeshPart.
+pub(super) fn take_material(world: &mut World, id: InstanceId, path: &str) -> bool {
+    let Some(class) = world.get(id).map(|instance| instance.class()) else {
+        return false;
+    };
+    if !class.is_base_part() {
+        return false;
+    }
+    let _ = world.set_property(id, "MaterialVariant", Value::String(path.to_owned()));
+    if matches!(
+        class,
+        ClassName::Part
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone
+            | ClassName::ReverbZone
+    ) {
+        let _ = world.set_property(id, "Color", Value::Color3(Color3::new(1.0, 1.0, 1.0)));
+    }
+    true
+}
 
 impl EditorApp {
     /// Draws `hit` in the material file `entry`. With no hit (a
@@ -31,27 +56,9 @@ impl EditorApp {
     pub(super) fn use_material(&mut self, path: &str, name: &str, targets: Vec<InstanceId>) {
         let mut properties = Vec::new();
         for id in targets {
-            let Some(class) = self.world.get(id).map(|instance| instance.class()) else {
-                continue;
-            };
-            if !class.is_base_part() {
-                continue;
-            }
             let before = history::snapshot(&self.world, id);
-            let _ = self
-                .world
-                .set_property(id, "MaterialVariant", Value::String(path.to_owned()));
-            if matches!(
-                class,
-                ClassName::Part
-                    | ClassName::Seat
-                    | ClassName::VehicleSeat
-                    | ClassName::DamageZone
-                    | ClassName::ReverbZone
-            ) {
-                let _ =
-                    self.world
-                        .set_property(id, "Color", Value::Color3(Color3::new(1.0, 1.0, 1.0)));
+            if !take_material(&mut self.world, id, path) {
+                continue;
             }
             properties.extend(property_changes(
                 id,

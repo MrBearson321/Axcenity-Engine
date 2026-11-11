@@ -11,7 +11,7 @@ use axcenity_mcp::{
 };
 use axcenity_script::{ApiEntry, ApiKind};
 
-use super::super::EditorApp;
+use super::Host;
 use super::LIMIT;
 use super::refs::quoted;
 use super::values::{show, type_name};
@@ -19,7 +19,7 @@ use super::values::{show, type_name};
 pub const SPEC: ToolSpec = ToolSpec {
     name: "docs",
     title: "Engine docs",
-    summary: "Reference for a class (its properties with types and defaults), one property, or a search of the script API.",
+    summary: "Look up a class's properties, one property, or search the script API.",
     profile: Profile::Lite,
     class: Class::Read,
     idempotent: true,
@@ -55,8 +55,15 @@ fn first_sentence(text: &str, max: usize) -> String {
     }
 }
 
-pub fn call(_app: &mut EditorApp, args: &Args) -> Outcome {
+pub fn call(_host: &mut Host, args: &Args) -> Outcome {
     if let Some(name) = args.str("class") {
+        // Services and value types the scene never holds (RunService,
+        // Vector3) are only in the script API reference.
+        if ClassName::from_name(name).is_none()
+            && let Some(page) = api_page(name, args.str("property"))
+        {
+            return Ok(page);
+        }
         let class = find_class(name)?;
         return match args.str("property") {
             Some(property) => Ok(property_page(class, property)?),
@@ -72,9 +79,48 @@ pub fn call(_app: &mut EditorApp, args: &Args) -> Outcome {
     }
     let classes: Vec<&str> = ClassName::ALL.iter().map(|class| class.as_str()).collect();
     Ok(format!(
-        "docs: give class (its properties), class + property, or query (search the script API).\nclasses: {}",
-        classes.join(", ")
+        "docs: give class (its properties), class + property, or query (search the script API).\nclasses: {}\nobject_create kinds: {}",
+        classes.join(", "),
+        super::object_create::offered().join(", ")
     ))
+}
+
+/// A class, type or library of the script API (`RunService`, `Vector3`,
+/// `task`) and its members, or one member: `None` if there's none called
+/// `name`.
+fn api_page(name: &str, member: Option<&str>) -> Option<String> {
+    let entries = reference();
+    let owner = entries.iter().find(|entry| {
+        entry.owner.is_empty()
+            && entry.name == name
+            && matches!(
+                entry.kind,
+                ApiKind::Class | ApiKind::Type | ApiKind::Library
+            )
+    })?;
+    let members: Vec<&ApiEntry> = entries
+        .iter()
+        .filter(|entry| entry.owner == owner.name)
+        .collect();
+    if let Some(member) = member {
+        let found = members.iter().find(|entry| entry.name == member)?;
+        let mut text = format!("{} {}", found.kind.label(), found.signature);
+        if !found.doc.is_empty() {
+            text.push_str(&format!("\n{}", found.doc));
+        }
+        return Some(text);
+    }
+    let mut text = owner.name.clone();
+    if !owner.doc.is_empty() {
+        text.push_str(&format!(": {}", first_sentence(&owner.doc, 200)));
+    }
+    for entry in members {
+        text.push_str(&format!("\n  {} {}", entry.kind.label(), entry.signature));
+        if !entry.doc.is_empty() {
+            text.push_str(&format!(" · {}", first_sentence(&entry.doc, 80)));
+        }
+    }
+    Some(text)
 }
 
 fn find_class(name: &str) -> Result<ClassName, ToolError> {

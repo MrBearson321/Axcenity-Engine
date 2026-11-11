@@ -136,9 +136,11 @@ async fn a_2025_client_lists_tools_with_their_annotations_and_flat_schemas() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["scene_inspect", "object_delete"]);
     assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
-    assert_eq!(tools[0]["annotations"]["destructiveHint"], false);
+    // Defaults aren't repeated: a read-only tool's other hints mean nothing.
+    assert!(tools[0]["annotations"]["destructiveHint"].is_null());
     assert_eq!(tools[0]["annotations"]["openWorldHint"], false);
     assert_eq!(tools[1]["annotations"]["destructiveHint"], true);
+    assert!(tools[1]["annotations"]["readOnlyHint"].is_null());
     assert_eq!(
         tools[1]["inputSchema"],
         json!({
