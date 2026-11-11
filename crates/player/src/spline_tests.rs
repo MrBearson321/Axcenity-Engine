@@ -20,6 +20,8 @@ struct Game {
     physics: Physics,
     camera: Option<axcenity_script::GameCamera>,
     printed: Vec<String>,
+    /// The example's copy, which its assets load from.
+    _copy: super::tests::TempCopy,
 }
 
 impl Game {
@@ -36,6 +38,7 @@ impl Game {
             physics: Physics::new(),
             camera: None,
             printed: Vec::new(),
+            _copy: folder,
         };
         let printed = game.take_printed();
         game.printed = printed;
