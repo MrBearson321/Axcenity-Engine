@@ -61,6 +61,10 @@ pub const VARIANTS: &[(&str, &str)] = &[
         "single-sided-match",
         "double-sided materials whose `file: material` name holds AXCENITY_PROFILE_MATCH drawn one-sided",
     ),
+    (
+        "thin-ground-cover",
+        "Thin far ground cover on (small painted plants thin out with distance)",
+    ),
     ("no-msaa", "anti-aliasing off"),
     ("no-ao", "ambient occlusion off"),
 ];
@@ -146,6 +150,7 @@ fn vary_settings(name: &str, settings: &mut GraphicsSettings) {
         "no-msaa" => settings.anti_aliasing = Some(AntiAliasing::Off),
         "no-ao" => settings.ambient_occlusion = Some(AmbientOcclusion::Off),
         "shadows-high" => settings.shadow_quality = Some(ShadowQuality::High),
+        "thin-ground-cover" => settings.thin_far_ground_cover = Some(true),
         _ => {}
     }
 }
@@ -369,7 +374,10 @@ fn profile_project() {
             }
             if let Some(out) = &out {
                 renderer.set_graphics(settings);
-                renderer.render(list).unwrap();
+                // New settings take a frame to apply, and fades a few more.
+                for _ in 0..16 {
+                    renderer.render(list).unwrap();
+                }
                 device.poll(wgpu::PollType::Wait).unwrap();
                 save_png(
                     &out.join(format!("{}-{name}.png", parts[0])),

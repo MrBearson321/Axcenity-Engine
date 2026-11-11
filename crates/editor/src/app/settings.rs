@@ -1194,6 +1194,29 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
+            found_label(ui, "Thin far ground cover");
+            let label = |on: Option<bool>| match on {
+                Some(on) => on_off(on).to_owned(),
+                None => format!("Preset ({})", on_off(preset.thin_far_ground_cover())),
+            };
+            egui::ComboBox::from_id_salt("thin far ground cover")
+                .selected_text(label(settings.thin_far_ground_cover))
+                .show_ui(ui, |ui| {
+                    for choice in [None, Some(true), Some(false)] {
+                        ui.selectable_value(
+                            &mut settings.thin_far_ground_cover,
+                            choice,
+                            label(choice),
+                        );
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Fewer grass tufts and pebbles far away, where dozens overlap on each pixel. \
+                     Off at Ultra.",
+                );
+            ui.end_row();
+
             found_label(ui, "Real-time GI");
             let label = |on: Option<bool>| match on {
                 Some(on) => on_off(on).to_owned(),
@@ -1332,6 +1355,11 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         "Contact shadows: on (small gaps the shadow maps miss)"
     } else {
         "Contact shadows: off"
+    });
+    ui.label(if effective.thin_far_ground_cover {
+        "Far ground cover: thinned (fewer small plants far away)"
+    } else {
+        "Far ground cover: full"
     });
     ui.label(if effective.realtime_gi {
         "Real-time GI: on (light probe volumes traced again, two probes a frame)"
@@ -1741,6 +1769,7 @@ mod tests {
             ambient_occlusion: Some(AmbientOcclusion::Low),
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(false),
+            thin_far_ground_cover: Some(true),
             realtime_gi: Some(true),
             volumetric_fog: Some(true),
             cloud_quality: Some(CloudQuality::Ultra),

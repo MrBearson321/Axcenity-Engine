@@ -515,6 +515,10 @@ pub struct GraphicsSettings {
     /// Short shadows found on screen, for the gaps the shadow maps miss.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contact_shadows: Option<bool>,
+    /// Fewer small painted plants (grass, pebbles) far from the camera,
+    /// where dozens overlap on each pixel. Off at Ultra, on at the others.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thin_far_ground_cover: Option<bool>,
     /// Light probe volumes kept up to date as the world's light changes,
     /// a few probes each frame. Off at every preset.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -671,6 +675,13 @@ impl GraphicsSettings {
             .unwrap_or(self.quality >= Quality::High)
     }
 
+    /// Whether small painted plants thin out with distance: the override,
+    /// or the preset's (off at Ultra, on below it).
+    pub fn thin_far_ground_cover(&self) -> bool {
+        self.thin_far_ground_cover
+            .unwrap_or(self.quality < Quality::Ultra)
+    }
+
     /// Whether light probe volumes are traced again as the light changes:
     /// the override, or off (every preset's).
     pub fn realtime_gi(&self) -> bool {
@@ -823,6 +834,8 @@ impl GraphicsSettings {
             reflection_quality,
             // Like ambient occlusion, it reads only the prepass.
             contact_shadows: self.contact_shadows(),
+            // Leaves work out; every GPU can do it.
+            thin_far_ground_cover: self.thin_far_ground_cover(),
             realtime_gi,
             volumetric_fog,
             // Every GPU can draw it: it's worked out in the sky's pixels.
@@ -903,6 +916,8 @@ pub struct EffectiveGraphics {
     pub ambient_occlusion: AmbientOcclusion,
     pub reflection_quality: ReflectionQuality,
     pub contact_shadows: bool,
+    /// Whether small painted plants thin out with distance.
+    pub thin_far_ground_cover: bool,
     /// Whether light probe volumes are traced again as the light changes.
     pub realtime_gi: bool,
     /// Whether fog shows the sun's shadows and lamps' light (needs the
@@ -1319,6 +1334,16 @@ mod tests {
     }
 
     #[test]
+    fn far_ground_cover_thins_below_ultra_unless_overridden() {
+        let thins =
+            Quality::ALL.map(|quality| GraphicsSettings::preset(quality).thin_far_ground_cover());
+        assert_eq!(thins, [true, true, true, false]);
+        let mut ultra = GraphicsSettings::preset(Quality::Ultra);
+        ultra.thin_far_ground_cover = Some(true);
+        assert!(ultra.thin_far_ground_cover());
+    }
+
+    #[test]
     fn settings_round_trip_through_json() {
         let settings = GraphicsSettings {
             quality: Quality::Medium,
@@ -1333,6 +1358,7 @@ mod tests {
             ambient_occlusion: Some(AmbientOcclusion::Off),
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(true),
+            thin_far_ground_cover: Some(false),
             realtime_gi: Some(true),
             volumetric_fog: Some(false),
             cloud_quality: Some(CloudQuality::Low),
@@ -1612,6 +1638,7 @@ mod tests {
                         ambient_occlusion: Some(AmbientOcclusion::Low),
                         reflection_quality: None,
                         contact_shadows: post,
+                        thin_far_ground_cover: post,
                         realtime_gi: post,
                         volumetric_fog: post,
                         cloud_quality: Some(CloudQuality::Medium),
@@ -1632,6 +1659,10 @@ mod tests {
                         assert_eq!(effective.texture_budget, 200 << 20);
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
+                        assert_eq!(
+                            effective.thin_far_ground_cover,
+                            settings.thin_far_ground_cover()
+                        );
                         assert!(effective.reflection_quality <= settings.reflection_quality());
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
                         assert!(effective.realtime_gi <= settings.realtime_gi());

@@ -425,6 +425,20 @@ What it says:
 
 So the bright bands in the overdraw view are grass seen at a low angle, 6 to 12 layers where each grass model covers anything and 40 to 50 where they all overlap along the horizon. The canopy is a small share. What a grass layer costs is its corners and the depth tests (the alpha sample of the depth fill and the prepass), not lighting; leaving all painted foliage out saved 1.7–2.9 ms of GPU, a third of it their shadows. Fewer layers there means fewer tufts far away (density by distance), which changes how full the ground looks; a choice for the project or the preset, not a fix.
 
+### Thinning far ground cover (a graphics setting)
+
+**Thin far ground cover** (`GraphicsSettings::thin_far_ground_cover`; off at Ultra, on at Low, Medium and High; the editor's Graphics settings) leaves out more of the small painted plants (a box half-diagonal under 3 studs: grass, pebbles, litter) the farther they are: all of them up to 35% of their cull distance, down to a third of them where the cull distance's fade begins (`renderer/lod.rs`, `thin_distance`). Each plant is picked by its ID, so the same ones go and come back, and each fades out by dither over 8% of its cull distance before its own distance, so there's no line where density drops.
+
+Measured with `profile_project`'s `thin-ground-cover` at Ultra 2560 × 1440 against the setting off, on the desktop above (milliseconds; pictures compared pixel by pixel):
+
+| Scene, camera | GPU frame | CPU planning | Pixels changed (more than 8 of 255) |
+|---|---|---|---|
+| Temperate Dry Patch, demo / ground | −0.05 / −0.03 | −0.40 / −0.58 | none / none |
+| General Store Roadside, overview / low | −0.12 / −0.06 | −0.06 / −0.02 | 0.38% / 0.22% |
+| Abandoned Farmhouse, front / wide | +0.05 / −0.04 | −0.40 / −0.42 | none / 0.035% |
+
+**It isn't a meaningful saving.** A plant's cull distance comes from its size (120 studs per stud), so a 2.4-stud grass tuft is drawn to 290 studs and only starts thinning at 100: the patches' grass is all nearer than that, and far plants are a few pixels each and cost little on the GPU. Thinning the grass that does cost (the patch's 40–50 layers between 20 and 100 studs) means thinning grass close enough to see.
+
 ### Shadows on the patch, cascade by cascade
 
 `RenderStats::cascade_times` (graphics timer stamps before each of the sun's cascades and after the last, inside the Shadows pass; shown in `fps full`, the Profiler's Graphics tab and `profile_project`) with `cascade_casters` and `cascade_triangles`. Demo camera, Ultra 2560 × 1440:

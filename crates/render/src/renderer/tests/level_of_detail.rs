@@ -279,3 +279,34 @@ fn foliage_fades_out_near_its_cull_distance_and_is_culled_past_it() {
     let stats = renderer.stats();
     assert_eq!((stats.items_drawn, stats.items_culled), (0, 1));
 }
+
+#[test]
+fn far_ground_cover_thins_with_the_setting_and_comes_back_without_it() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = renderer(&device, &queue, 32);
+    // 400 small plants 80 studs away, with a 100-stud cull distance.
+    let items = (1..=400u64)
+        .map(|id| DrawItem {
+            id,
+            cull_distance: 100.0,
+            ..item(Shape::Block, Vec3::new(0.0, 0.0, -80.0), 0.5)
+        })
+        .collect();
+    let mut list = list_of(items);
+    list.shadows.enabled = false;
+    let drawn = |renderer: &mut TextureRenderer, thin: bool| {
+        let mut settings = with_occlusion(crate::AmbientOcclusion::Off);
+        settings.thin_far_ground_cover = Some(thin);
+        renderer.set_graphics(&settings);
+        renderer.render(&list).unwrap();
+        renderer.stats().items_drawn
+    };
+    assert_eq!(drawn(&mut renderer, false), 400);
+    let thinned = drawn(&mut renderer, true);
+    // 80% of the cull distance is most of the way to a third.
+    assert!((100..300).contains(&thinned), "{thinned}");
+    assert_eq!(drawn(&mut renderer, false), 400);
+}

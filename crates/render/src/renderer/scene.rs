@@ -808,7 +808,10 @@ impl ScenePipeline {
             draws,
             culled: past_cull_distance,
             submitted: items_submitted,
-        } = self.lods.resolve(list, self.frame, reach.as_ref());
+        } = {
+            self.lods.thin_ground_cover = self.graphics.thin_far_ground_cover;
+            self.lods.resolve(list, self.frame, reach.as_ref())
+        };
         // Each draw's material binding, worked out once for the uploads
         // and the plan: it reads every map setting of the item.
         let uses = FrameUses::of(&draws);

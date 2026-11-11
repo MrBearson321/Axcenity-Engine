@@ -37,6 +37,41 @@ const CULL_FADE: f32 = 0.1;
 /// keeps them seated on the ground past this.
 const SHADOW_REACH: f32 = 0.35;
 
+/// Thinning far ground cover (the graphics setting): small painted plants
+/// start thinning out at this share of their cull distance...
+const THIN_FROM: f32 = 0.35;
+/// ...and are down to this share of them by their cull distance's fade.
+const THIN_TO: f32 = 0.35;
+/// Each plant fades out over this share of its cull distance, before its
+/// own distance (see [`thin_distance`]).
+const THIN_FADE: f32 = 0.08;
+/// Only items whose box's half diagonal is under this many studs thin out:
+/// grass, small plants and pebbles, not bushes or trees.
+const THIN_RADIUS: f32 = 3.0;
+
+/// The distance, as a share of its cull distance, past which a small
+/// painted plant `id` is left out while far ground cover thins: `None`
+/// for one that's always kept. Plants are picked by their ID, so the same
+/// ones go and come back, and their share falls evenly from all of them at
+/// [`THIN_FROM`] to [`THIN_TO`] of them where the cull distance's fade
+/// begins.
+pub(super) fn thin_distance(id: u64) -> Option<f32> {
+    // splitmix64, so neighbouring IDs spread out.
+    let mut x = id.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^= x >> 31;
+    let pick = (x >> 40) as f32 / (1u64 << 24) as f32;
+    if pick < THIN_TO {
+        return None;
+    }
+    // The kept share at distance d is 1 - (1 - THIN_TO) * t, with t going
+    // from 0 at THIN_FROM to 1 where the cull fade begins: this plant goes
+    // where that share falls to its pick.
+    let t = (1.0 - pick) / (1.0 - THIN_TO);
+    Some(THIN_FROM + t * (1.0 - CULL_FADE - THIN_FROM))
+}
+
 /// An item not drawn for this many frames has its level forgotten.
 const FORGET_FRAMES: u64 = 600;
 
@@ -146,6 +181,8 @@ pub(super) struct LodStates {
     /// The editor's LOD preview: the item with this [`DrawItem::id`] is
     /// drawn at this level whatever its size, with no fade.
     pub(super) forced: Option<(u64, usize)>,
+    /// The graphics setting: small painted plants thin out with distance.
+    pub(super) thin_ground_cover: bool,
 }
 
 /// What [`LodStates::resolve`] gives a frame.
@@ -191,6 +228,7 @@ impl LodStates {
         let camera = &list.camera;
         let states = &self.states;
         let forced = self.forced;
+        let thin = self.thin_ground_cover;
         let mut parts = map_parts(&list.items, |items| {
             let mut part = Part {
                 draws: Vec::with_capacity(items.len()),
@@ -198,7 +236,7 @@ impl LodStates {
                 ..Part::default()
             };
             for item in items {
-                resolve_item(states, item, camera, frame, forced, &mut part);
+                resolve_item(states, item, camera, frame, (forced, thin), &mut part);
             }
             part
         });
@@ -231,7 +269,7 @@ impl LodStates {
                         continue;
                     }
                 }
-                resolve_item(states, item, camera, frame, forced, &mut part);
+                resolve_item(states, item, camera, frame, (forced, thin), &mut part);
             }
             part
         }));
@@ -266,7 +304,7 @@ fn resolve_item<'a>(
     item: &'a DrawItem,
     camera: &Camera,
     frame: u64,
-    forced: Option<(u64, usize)>,
+    (forced, thin): (Option<(u64, usize)>, bool),
     part: &mut Part<'a>,
 ) {
     let mut draw = Draw::of(item);
@@ -277,7 +315,21 @@ fn resolve_item<'a>(
             part.culled += 1;
             return;
         }
-        let fade = (item.cull_distance - distance) / (item.cull_distance * CULL_FADE);
+        let mut fade = (item.cull_distance - distance) / (item.cull_distance * CULL_FADE);
+        // Far ground cover thins: this plant's own distance, faded into.
+        if thin
+            && item.id != 0
+            && item.resting_ball().1 < THIN_RADIUS
+            && let Some(share) = thin_distance(item.id)
+        {
+            let gone = share * item.cull_distance;
+            let thinned = (gone - distance) / (item.cull_distance * THIN_FADE);
+            if thinned <= 0.0 {
+                part.culled += 1;
+                return;
+            }
+            fade = fade.min(thinned);
+        }
         draw.fade = fade.min(OPAQUE);
         draw.casts_shadow &= distance <= item.cull_distance * SHADOW_REACH;
     }
@@ -403,13 +455,96 @@ mod tests {
                 decal_role: Default::default(),
             };
             let mut part = Part::default();
-            resolve_item(&FxHashMap::default(), &item, &camera, 0, None, &mut part);
+            resolve_item(
+                &FxHashMap::default(),
+                &item,
+                &camera,
+                0,
+                (None, false),
+                &mut part,
+            );
             part.draws.first().map(|draw| draw.casts_shadow)
         };
         assert_eq!(casts(20.0, 100.0), Some(true), "near");
         assert_eq!(casts(50.0, 100.0), Some(false), "drawn with no shadow");
         assert_eq!(casts(150.0, 100.0), None, "past its cull distance");
         assert_eq!(casts(5000.0, 0.0), Some(true), "no cull distance: always");
+    }
+
+    #[test]
+    fn far_ground_cover_thins_evenly_to_its_share_and_the_same_plants_go() {
+        let ids = 1..=20_000u64;
+        let kept_at = |share: f32| {
+            ids.clone()
+                .filter(|&id| thin_distance(id).is_none_or(|gone| gone > share))
+                .count() as f32
+                / 20_000.0
+        };
+        // All of them until it starts, about a third by the cull fade.
+        assert_eq!(kept_at(THIN_FROM - 0.01), 1.0);
+        let end = 1.0 - CULL_FADE;
+        assert!(
+            (kept_at(end - 0.001) - THIN_TO).abs() < 0.02,
+            "{}",
+            kept_at(end - 0.001)
+        );
+        // Halfway between, about halfway between.
+        let middle = (THIN_FROM + end) / 2.0;
+        let expected = 1.0 - (1.0 - THIN_TO) * 0.5;
+        assert!(
+            (kept_at(middle) - expected).abs() < 0.02,
+            "{}",
+            kept_at(middle)
+        );
+        // A plant's distance is its own every time.
+        assert_eq!(thin_distance(42), thin_distance(42));
+    }
+
+    #[test]
+    fn only_small_painted_plants_thin_and_only_with_the_setting() {
+        let camera = Camera {
+            position: glam::Vec3::ZERO,
+            look_at: glam::Vec3::NEG_Z,
+            fov_y_degrees: 70.0,
+        };
+        // A plant that goes early, far enough for that.
+        let id = (1..)
+            .find(|&id| thin_distance(id).is_some_and(|gone| gone < 0.5))
+            .unwrap();
+        let drawn = |size: f32, thin: bool| {
+            let item = DrawItem {
+                shape: Shape::Block,
+                transform: glam::Mat4::from_scale_rotation_translation(
+                    glam::Vec3::splat(size),
+                    glam::Quat::IDENTITY,
+                    glam::Vec3::new(0.0, 0.0, -80.0),
+                ),
+                material: Default::default(),
+                uv_tile: 0.0,
+                casts_shadow: true,
+                id,
+                cull_distance: 100.0,
+                skin: None,
+                sway: None,
+                decal_role: Default::default(),
+            };
+            let mut part = Part::default();
+            resolve_item(
+                &FxHashMap::default(),
+                &item,
+                &camera,
+                0,
+                (None, thin),
+                &mut part,
+            );
+            !part.draws.is_empty()
+        };
+        assert!(
+            !drawn(1.0, true),
+            "a small plant past its own distance goes"
+        );
+        assert!(drawn(1.0, false), "with the setting off it stays");
+        assert!(drawn(4.0, true), "a bush stays");
     }
 
     #[test]
