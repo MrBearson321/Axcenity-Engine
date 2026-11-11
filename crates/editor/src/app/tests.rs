@@ -613,6 +613,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::VersionExplorer => app
                             .version_explorer
                             .show(ui, &axcenity_release::BuildInfo::current()),
+                        Pane::TeamCreate => app.team_create_pane(ui),
                         Pane::Scene | Pane::Script(_) | Pane::Plugin(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));

@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 18] = [
+const TOOL_PANES: [Pane; 19] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -348,6 +348,7 @@ const TOOL_PANES: [Pane; 18] = [
     Pane::Toolbox,
     Pane::Inventory,
     Pane::VersionExplorer,
+    Pane::TeamCreate,
 ];
 
 /// Other words people search for a command by, matched like its name.

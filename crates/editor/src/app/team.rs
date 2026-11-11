@@ -211,9 +211,81 @@ pub(crate) struct Team {
     ended: bool,
     /// When this editor last said what it's doing.
     presence_sent: Option<std::time::Instant>,
+    /// Why the connection is down, or why the host refused this editor.
+    problem: Option<String>,
+    /// The host's address, as the panel names it.
+    address: String,
+    /// The newest invite link this editor made, to copy again.
+    invite: Option<String>,
+}
+
+/// How a session is going, for the panel and the title bar chip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TeamStatus {
+    /// Signing in, or waiting for the session's World.
+    Joining,
+    /// In step with the host, with `waiting` edits not yet confirmed.
+    Connected { waiting: usize },
+    /// The connection dropped; editing goes on and `waiting` edits are kept.
+    Reconnecting { why: String, waiting: usize },
+    /// The host refused this editor: the session is over for it.
+    Refused(String),
 }
 
 impl Team {
+    /// How the session is going.
+    pub(crate) fn status(&self) -> TeamStatus {
+        let waiting = self.client.as_ref().map_or(0, Client::pending);
+        if self.ended {
+            return TeamStatus::Refused(self.problem.clone().unwrap_or_default());
+        }
+        match &self.client {
+            Some(client) if client.is_online() => TeamStatus::Connected { waiting },
+            _ => match &self.problem {
+                Some(why) => TeamStatus::Reconnecting {
+                    why: why.clone(),
+                    waiting,
+                },
+                None => TeamStatus::Joining,
+            },
+        }
+    }
+
+    /// This editor's role, once let in.
+    pub(crate) fn client_role(&self) -> Option<Role> {
+        self.client.as_ref().map(Client::role)
+    }
+
+    /// This editor's member, once let in.
+    pub(crate) fn me(&self) -> Option<MemberId> {
+        self.client.as_ref().map(Client::member)
+    }
+
+    /// Everyone in the project, as the host last said.
+    pub(crate) fn roster(&self) -> &[axcenity_collab::Collaborator] {
+        self.client.as_ref().map_or(&[], Client::roster)
+    }
+
+    /// What another connected member is doing.
+    pub(crate) fn presence(&self, member: MemberId) -> Option<&Presence> {
+        self.client.as_ref()?.presences().get(&member)
+    }
+
+    /// Every other connected member's presence.
+    pub(crate) fn presences(&self) -> impl Iterator<Item = (MemberId, &Presence)> {
+        self.client
+            .iter()
+            .flat_map(|client| client.presences().iter().map(|(&m, p)| (m, p)))
+    }
+
+    pub(crate) fn address(&self) -> &str {
+        &self.address
+    }
+
+    pub(crate) fn invite(&self) -> Option<&str> {
+        self.invite.as_deref()
+    }
+
     pub(crate) fn client(&self) -> &Client {
         self.client.as_ref().expect("joined")
     }
@@ -252,6 +324,9 @@ impl EditorApp {
             link: Link::Hub(hub),
             ended: false,
             presence_sent: None,
+            problem: None,
+            address: String::new(),
+            invite: None,
         });
         self.team_frame();
     }
@@ -339,6 +414,9 @@ impl EditorApp {
             },
             ended: false,
             presence_sent: None,
+            problem: None,
+            address: invite.host.clone(),
+            invite: Some(invite.link()),
         });
         Ok(invite)
     }
@@ -369,8 +447,68 @@ impl EditorApp {
             },
             ended: false,
             presence_sent: None,
+            problem: None,
+            address: invite.host.clone(),
+            invite: None,
         });
         Ok(())
+    }
+
+    /// A new invite for `role`, when this editor hosts; its link.
+    pub(crate) fn make_team_invite(&mut self, role: Role) -> Option<String> {
+        let team = self.team.as_mut()?;
+        let link = team.hosting()?.lock().invite(role, INVITE_LIFETIME_SECONDS).link();
+        team.invite = Some(link.clone());
+        Some(link)
+    }
+
+    /// Revokes every invite not used yet, when this editor hosts.
+    pub(crate) fn revoke_team_invites(&mut self) {
+        if let Some(hosting) = self.team.as_ref().and_then(Team::hosting) {
+            hosting.lock().revoke_invites();
+            if let Some(team) = &mut self.team {
+                team.invite = None;
+            }
+            self.output
+                .info("Team Create: invites not used yet no longer work");
+        }
+    }
+
+    /// Changes a member's role, when this editor hosts.
+    pub(crate) fn set_team_role(&mut self, member: MemberId, role: Role) {
+        if let Some(hosting) = self.team.as_ref().and_then(Team::hosting) {
+            hosting.lock().set_role(member, role);
+        }
+    }
+
+    /// Takes a member out of the project, when this editor hosts: they're
+    /// disconnected and their key no longer gets in.
+    pub(crate) fn remove_team_member(&mut self, member: MemberId) {
+        if let Some(hosting) = self.team.as_ref().and_then(Team::hosting) {
+            hosting.lock().remove(member);
+        }
+    }
+
+    /// Leaves the session (or ends it, when this editor hosts). The World
+    /// stays as it is, for this editor alone.
+    pub(crate) fn leave_team_session(&mut self) {
+        let Some(team) = self.team.take() else {
+            return;
+        };
+        let hosted = team.hosting().is_some();
+        // Dropping the hosting ends the session for everyone.
+        drop(team);
+        self.world.stop_recording_edits();
+        self.history.set_shared(false);
+        self.output.info(if hosted {
+            "Team Create: you ended the session"
+        } else {
+            "Team Create: you left the session; your copy stays open here"
+        });
+    }
+
+    pub(crate) fn team(&self) -> Option<&Team> {
+        self.team.as_ref()
     }
 
     pub(crate) fn in_team_session(&self) -> bool {
@@ -400,6 +538,7 @@ impl EditorApp {
                 RemoteEvent::Admitted { member, role } => {
                     let client = team.client.get_or_insert_with(|| Client::new(member));
                     client.connect();
+                    team.problem = None;
                     self.output
                         .info(format!("Team Create: joined the session as {role:?}"));
                 }
@@ -408,6 +547,7 @@ impl EditorApp {
                     if let Some(client) = &mut team.client {
                         client.disconnected();
                     }
+                    team.problem = Some(why.clone());
                     self.output.warning(format!(
                         "Team Create: {why}; trying again in {} s (your edits are kept)",
                         retry.as_secs()
@@ -415,6 +555,7 @@ impl EditorApp {
                 }
                 RemoteEvent::Refused(reason) => {
                     team.ended = true;
+                    team.problem = Some(reason.clone());
                     self.output.error(format!("Team Create: {reason}"));
                 }
             }

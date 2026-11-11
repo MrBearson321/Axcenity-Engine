@@ -69,6 +69,7 @@ mod spline_content;
 mod splines;
 mod tags;
 pub(crate) mod team;
+mod team_panel;
 mod terrain;
 mod texture_set;
 mod to_terrain;
@@ -211,6 +212,8 @@ pub struct EditorApp {
     /// A session to start once the project opens (`--team-host`,
     /// `--team-join`).
     team_start: Option<team::TeamStart>,
+    /// The Team Create panel's own state (`app/team_panel.rs`).
+    team_panel: team_panel::TeamPanel,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
     tool: Tool,
@@ -526,6 +529,7 @@ impl DockViewer<'_> {
                 .app
                 .version_explorer
                 .show(ui, &axcenity_release::BuildInfo::current()),
+            Pane::TeamCreate => self.app.team_create_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -859,6 +863,7 @@ impl EditorApp {
             history: History::new(),
             team: None,
             team_start: None,
+            team_panel: Default::default(),
             tool: Tool::default(),
             snap: Snap::default(),
             modes: Modes::default(),
