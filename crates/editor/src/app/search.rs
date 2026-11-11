@@ -469,6 +469,10 @@ fn command_description(command: &Command) -> String {
         Command::LightCones => "Show every light's cone, not only the selected one's.",
         Command::ViewCube => "The cube in the viewport's corner that turns the camera to a face.",
         Command::Grid => "Lines and distances in studs on the baseplate, while editing.",
+        Command::MovementGuide => {
+            "While moving, resizing or turning a part: the guide line, snap points and distance."
+        }
+        Command::ViewportSettings => "Every viewport guide and overlay, with the grid's strength.",
         Command::Overlay(_) => "Draw a debugging overlay over the viewport.",
         Command::NewRibbonTab => "Make your own ribbon tab from any of the ribbon's groups.",
         Command::RibbonTab(tab) => return format!("Show the ribbon's {} tab.", tab_label(*tab)),

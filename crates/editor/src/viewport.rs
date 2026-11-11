@@ -350,6 +350,10 @@ pub struct ViewportScene<'a> {
     pub view_cube: bool,
     /// Whether the measuring grid is drawn while editing.
     pub grid: bool,
+    /// Whether the movement guide (`move_overlay`: the line along a move,
+    /// the snap points and the distance) is drawn. Moving works the same
+    /// either way.
+    pub move_guide: bool,
     /// How solid its lines are, as a multiple of the usual soft look.
     pub grid_strength: f32,
     /// Editor-only visual-debug overlays (View > Overlays).
@@ -981,6 +985,7 @@ impl Viewport {
             light_cones,
             view_cube: show_cube,
             grid: show_grid,
+            move_guide,
             grid_strength,
             overlays,
             view_mode,
@@ -1492,7 +1497,7 @@ impl Viewport {
             }
         }
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
-        if let Some(report) = self.drag_report() {
+        if move_guide && let Some(report) = self.drag_report() {
             move_overlay::paint(&ui.painter_at(rect), &screen, rect, report);
         }
         if let (Some(brush), Some(point)) = (brush, terrain.and_then(|t| t.point)) {
