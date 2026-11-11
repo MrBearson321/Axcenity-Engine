@@ -28,7 +28,7 @@ flowchart LR
   M1 --> L7[L7 ✓]
   M12[M12 ✓] --> L5[L5 open]
   M12 --> L8[L8 deferred]
-  M12 --> L6[L6 / G11 open]
+  M12 --> L6[L6 / G11 in progress]
 ```
 
 | Item | What | Status | PR / evidence |
@@ -53,7 +53,7 @@ flowchart LR
 | L3 | Faster Vector3, opt-in native code | **Part 1 done**; native `vector` **on hold** ([ADR-0015](../Architecture/Architecture-Decisions/ADR-0015-Native-Vector-On-Hold.md)) | #58 |
 | L4 | Parallel read / serial write | Query bounds instead of threads (#59); 16-core measurement gave physics and rendering **own pools of ≤12 threads** (#86, #88). Stage-level parallelism still open | #59, #86, #88 |
 | L5 | GPU-driven path | **Open**, after M12; the gap analysis puts it in "future, with triggers" | — |
-| L6 | Split `editor` (now G11) | **Open**, after M12 | — |
+| L6 | Split `editor` (now G11) | **In progress**: `editor-kit` | G11 PR 1 |
 | L7 | `gameplay` crate behind `GameSystem` | **Done** (Debris, Abilities, Tools, Health and Humanoids, dialogues and quests); Players stays in `script` ([ADR-0019](../Architecture/Architecture-Decisions/ADR-0019-Gameplay-Systems-Through-GameSystem.md)) | #68, #72, #77, #82, #85 |
 | L8 | Render graph | **Deferred** ([ADR-0009](../Architecture/Architecture-Decisions/ADR-0009-No-Render-Graph-Yet.md)) | — |
 
@@ -73,7 +73,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
 | G9 | Upscaling (FSR 1-class) | Stage 1 (spatial EASU + RCAS below 100% render scale) in review; stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |
-| G11 | Split the editor (L6) | Planned, after M12 |
+| G11 | Split the editor (L6) | In progress: `editor-kit` (#162), the Toolbox tab in `editor-toolbox` (#164), Graphics Benchmark in `editor-benchmark`; Model Studio after the animation work |
 | G12 | Cooked-only games, read the pack in place | Planned |
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
 | G14–G16 | Run without a player; physics debug views; humanoid retargeting | Planned |

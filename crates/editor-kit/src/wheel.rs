@@ -10,7 +10,7 @@ use eframe::egui::{self, Event, InputState, MouseWheelUnit, TouchPhase, Vec2};
 /// How far the wheel turned this frame, in points: a line is egui's
 /// default line height for scrolling, a page the window's height, and with
 /// Shift held all of it is sideways (as egui scrolls).
-pub(crate) fn raw(input: &InputState) -> Vec2 {
+pub fn raw(input: &InputState) -> Vec2 {
     let line = egui::InputOptions::default().line_scroll_speed;
     input
         .events
@@ -40,7 +40,7 @@ pub(crate) fn raw(input: &InputState) -> Vec2 {
 
 /// Takes this frame's wheel, smoothed or not, so nothing drawn after
 /// (a scroll area, the camera) also acts on it.
-pub(crate) fn take(input: &mut InputState) {
+pub fn take(input: &mut InputState) {
     input
         .events
         .retain(|event| !matches!(event, Event::MouseWheel { .. }));

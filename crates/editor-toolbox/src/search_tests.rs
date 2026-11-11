@@ -216,7 +216,7 @@ fn draw_with(panel: &mut ToolboxPanel, width: f32, name: &str, folded: bool) -> 
     }
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = PathBuf::from(folder).join(format!("toolbox-{name}-{width}.png"));
-        crate::snapshot::snapshot(&path, size, vec![Vec::new(); 3], &mut draw);
+        axcenity_editor_kit::snapshot::snapshot(&path, size, vec![Vec::new(); 3], &mut draw);
     }
     drawn
 }

@@ -59,8 +59,8 @@ use axcenity_toolbox::{
 };
 use eframe::egui;
 
-use crate::theme::{self, icons};
-use crate::{responsive, widgets};
+use axcenity_editor_kit::theme::{self, icons};
+use axcenity_editor_kit::{responsive, widgets};
 
 mod drawer;
 pub mod install;
@@ -69,7 +69,7 @@ mod packs;
 mod search_tests;
 mod views;
 
-pub(crate) use drawer::size_text;
+pub use drawer::size_text;
 use install::{DownloadResult, Installed, download};
 pub use views::View;
 
@@ -166,7 +166,7 @@ pub enum ToolboxAction {
 }
 
 #[derive(Clone)]
-pub(crate) struct Listing {
+pub struct Listing {
     name: String,
     category: String,
     maps: Vec<String>,
@@ -184,7 +184,7 @@ pub(crate) struct Listing {
 impl Listing {
     /// A search result from one of the Toolbox's sources, or a record from
     /// the library.
-    pub(crate) fn from_record(record: AssetRecord) -> Self {
+    pub fn from_record(record: AssetRecord) -> Self {
         let kept = record.clone();
         // Poly Haven and Openverse list files only in the full record.
         let lookup = record.variants.is_empty() && record.provider != AMBIENTCG.info().key;

@@ -1,40 +1,8 @@
 use axcenity_render::{AntiAliasing, GraphicsSettings, Quality, ShadowQuality};
 
-use axcenity_render::wgpu;
-
 use super::report::REPORT_VERSION;
 use super::*;
-
-/// A device to run on, or `None` (the test is skipped) without a GPU.
-fn device() -> Option<(wgpu::Device, wgpu::Queue, wgpu::AdapterInfo)> {
-    let instance = axcenity_render::adapters::instance();
-    let adapter = pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
-    // Timestamps where the adapter has them, as the editor asks.
-    let features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: features,
-        ..Default::default()
-    }))
-    .ok()?;
-    Some((device, queue, adapter.get_info()))
-}
-
-/// Runs a whole benchmark with a few frames each.
-pub(crate) fn quick_report() -> Option<Report> {
-    let Some((device, queue, info)) = device() else {
-        eprintln!("skipped: no graphics adapter on this machine");
-        return None;
-    };
-    let mut run = Run::start(&device, &queue, &info, (320, 180), Plan::QUICK);
-    for _ in 0..100 {
-        match run.step() {
-            Progress::Running => continue,
-            Progress::Finished(report) => return Some(*report),
-            Progress::Failed(error) => panic!("{error}"),
-        }
-    }
-    panic!("the run never finished");
-}
+use crate::testing::{device, quick_report};
 
 #[test]
 fn a_run_measures_each_preset_then_the_heavier_tests() {
@@ -241,7 +209,7 @@ fn the_window_draws_before_during_and_after_a_run() {
 
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = std::path::Path::new(&folder).join("graphics-benchmark.png");
-        crate::snapshot::snapshot(
+        axcenity_editor_kit::snapshot::snapshot(
             &path,
             egui::vec2(720.0, 800.0),
             vec![Vec::new(), Vec::new()],
