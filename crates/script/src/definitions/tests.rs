@@ -598,3 +598,97 @@ fn the_reference_lists_what_the_definitions_declare_in_their_words() {
         );
     }
 }
+
+#[test]
+fn every_example_names_a_real_entry_and_compiles() {
+    let names: BTreeSet<String> = api_reference()
+        .iter()
+        .map(ApiEntry::qualified_name)
+        .collect();
+    let mut seen = BTreeSet::new();
+    for (name, code) in examples::EXAMPLES {
+        assert!(
+            names.contains(*name),
+            "the example for `{name}` names nothing"
+        );
+        assert!(seen.insert(*name), "`{name}` has two examples");
+        if let Some(error) = crate::syntax_error(name, code) {
+            panic!("the example for `{name}` doesn't compile: {error}\n{code}");
+        }
+    }
+    assert!(api_example("task.wait").is_some_and(|code| code.contains("task.wait(1)")));
+    assert_eq!(api_example("Part.NoSuchThing"), None);
+}
+
+/// The pages in `documentation/api/` and the API section of the summary are
+/// what the generator writes now, and no page is left from something that
+/// was removed.
+#[test]
+fn api_pages_are_up_to_date() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let folder = root.join(API_DOCS_PATH);
+    let pages = api_markdown();
+    let mut stale = Vec::new();
+    for (name, text) in &pages {
+        let saved = std::fs::read_to_string(folder.join(name))
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        if saved != *text {
+            stale.push(name.clone());
+        }
+    }
+    let generated: BTreeSet<&str> = pages.iter().map(|(name, _)| name.as_str()).collect();
+    let mut on_disk = Vec::new();
+    markdown_files(&folder, "", &mut on_disk);
+    for name in on_disk {
+        if !generated.contains(name.as_str()) {
+            stale.push(format!("{name} (nothing generates it)"));
+        }
+    }
+    let summary = std::fs::read_to_string(root.join(SUMMARY_PATH))
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    if !summary.ends_with(&api_summary()) {
+        stale.push(SUMMARY_PATH.to_owned());
+    }
+    assert!(
+        stale.is_empty(),
+        "the API pages are out of date with the script API; run `{REGENERATE}`: {stale:?}"
+    );
+}
+
+fn markdown_files(folder: &Path, prefix: &str, files: &mut Vec<String>) {
+    let Ok(read) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for item in read.flatten() {
+        let name = item.file_name().to_string_lossy().into_owned();
+        let path = format!("{prefix}{name}");
+        if item.path().is_dir() {
+            markdown_files(&item.path(), &format!("{path}/"), files);
+        } else if name.ends_with(".md") {
+            files.push(path);
+        }
+    }
+}
+
+#[test]
+fn the_api_summary_replaces_only_its_own_section() {
+    let summary = "# Table of contents\n\n## Learn\n\n* [A](a.md)\n\n## API reference\n\n* [old](api/README.md)\n";
+    let new = with_api_summary(summary);
+    assert!(new.starts_with("# Table of contents\n\n## Learn\n\n* [A](a.md)\n\n## API reference"));
+    assert!(new.ends_with(&api_summary()));
+    assert!(!new.contains("[old]"));
+    assert_eq!(with_api_summary(&new), new);
+    let pages = api_markdown();
+    let part = pages
+        .iter()
+        .find(|(name, _)| name == "classes/Part.md")
+        .map(|(_, text)| text.as_str())
+        .unwrap_or_default();
+    assert!(part.contains("#### Touched"), "{part}");
+    assert!(
+        part.contains("pad.Touched:Connect"),
+        "Part.Touched's example is on its page"
+    );
+}

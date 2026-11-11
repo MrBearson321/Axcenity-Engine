@@ -1,8 +1,9 @@
 //! The start screen shown while no project is open: a sidebar (or top bar,
-//! `nav`) with the wordmark, the Projects, Global Assets, Learn and API Reference pages and
-//! Settings (global assets are in `global`, the tutorials in `learn`, the
-//! reference in `reference`; the last two also
-//! show over an open project in Help > Learn); on Projects, a
+//! `nav`) with the wordmark, the Projects, Global Assets, Learn,
+//! Documentation and API Reference pages and Settings (global assets are in
+//! `global`, the learning path and tutorials in `learn`, the documentation in
+//! `docs`, the reference in `reference`; the last three also show over an
+//! open project in Help > Learn); on Projects, a
 //! header with New and Open Project, templates to start from, and the
 //! tracked projects as cards (or a list) with thumbnails, a search box and
 //! sorting. Also the New Project, Project Settings, Version History and
@@ -17,6 +18,7 @@ use eframe::egui::{self, CornerRadius, FontId, Rect, RichText, Sense, Stroke, po
 
 mod cards;
 mod dialogs;
+pub(crate) mod docs;
 mod global;
 mod learn;
 mod nav;
@@ -25,6 +27,7 @@ mod reference;
 
 use cards::*;
 use dialogs::*;
+use docs::{DocAction, Docs};
 use global::GlobalPage;
 use learn::{Learn, LearnAction, SampleState};
 pub use nav::{NavLayout, StartNav};
@@ -160,6 +163,7 @@ enum Page {
     Projects,
     Global,
     Learn,
+    Docs,
     Reference,
 }
 
@@ -242,6 +246,7 @@ pub struct StartScreen {
     notice: Option<String>,
     global: GlobalPage,
     learn: Learn,
+    docs: Docs,
     reference: Reference,
     /// The page last shown and when it arrived, for its entrance.
     arrived: Option<(Page, f64)>,
@@ -371,7 +376,18 @@ impl StartScreen {
                                     action = Some(StartAction::OpenSample(sample));
                                 }
                             }
-                            Page::Reference => self.reference.show(ui),
+                            Page::Docs => {
+                                let picked = self.docs.show(ui);
+                                if let Some(sample) = self.follow_doc(picked) {
+                                    action = Some(StartAction::OpenSample(sample));
+                                }
+                            }
+                            Page::Reference => {
+                                let picked = self.reference.show(ui);
+                                if let Some(sample) = self.follow_doc(picked) {
+                                    action = Some(StartAction::OpenSample(sample));
+                                }
+                            }
                         }
                     });
                 });
@@ -597,14 +613,45 @@ impl StartScreen {
         match action? {
             LearnAction::OpenSample(folder) => Some(folder),
             LearnAction::LookUp(name) => {
-                self.reference.look_up(name);
+                self.reference.look_up(&name);
                 self.page = Page::Reference;
+                None
+            }
+            LearnAction::Doc(index, anchor) => {
+                self.docs.open(index, anchor);
+                self.page = Page::Docs;
                 None
             }
         }
     }
 
-    /// Help > Learn: the Learn and API Reference pages in a window over the
+    /// Does what the Documentation page asked for. Returns a sample to open.
+    fn follow_doc(&mut self, action: Option<DocAction>) -> Option<PathBuf> {
+        match action? {
+            DocAction::OpenSample(name) => learn::find_sample(&name),
+            DocAction::LookUp(name) => {
+                self.reference.look_up(&name);
+                self.page = Page::Reference;
+                None
+            }
+            // A Learn chapter opens in Learn, any other page in Documentation.
+            DocAction::Open(index, anchor) => {
+                let chapter = learn::chapters(docs::library())
+                    .iter()
+                    .any(|&(_, page)| page == index);
+                if chapter {
+                    self.learn.open_chapter(index, anchor);
+                    self.page = Page::Learn;
+                } else {
+                    self.docs.open(index, anchor);
+                    self.page = Page::Docs;
+                }
+                None
+            }
+        }
+    }
+
+    /// Help > Learn: the Learn, Documentation and API Reference pages in a window over the
     /// open project, at the same place as on the start screen. `project` is
     /// the open project's folder. Returns a tutorial's sample to open.
     pub fn learn_window(
@@ -628,8 +675,9 @@ impl StartScreen {
                     ui,
                     &mut page,
                     &[
-                        (Page::Learn, Some(icons::BOOK_OPEN), "Tutorials"),
-                        (Page::Reference, Some(icons::BOOKS), "API Reference"),
+                        (Page::Learn, Some(icons::BOOK_OPEN), "Learn"),
+                        (Page::Docs, Some(icons::FILE_TEXT), "Docs"),
+                        (Page::Reference, Some(icons::BOOKS), "API"),
                     ],
                 );
                 self.page = page;
@@ -640,7 +688,20 @@ impl StartScreen {
                     .show(ui, |ui| {
                         ui.add_space(4.0);
                         match self.page {
-                            Page::Reference => self.reference.show(ui),
+                            Page::Reference => {
+                                let picked = self.reference.show(ui);
+                                self.follow_doc(picked);
+                            }
+                            Page::Docs => {
+                                let picked = self.docs.show(ui);
+                                if let Some(folder) = self.follow_doc(picked) {
+                                    let blocked = playing
+                                        || project.is_some_and(|open| same_folder(open, &folder));
+                                    if !blocked {
+                                        sample = Some(folder);
+                                    }
+                                }
+                            }
                             _ => {
                                 let picked = self.learn.show(ui, |folder| {
                                     if playing {
