@@ -365,10 +365,10 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
                 "{key} is read-only: it's where the constraint's attachments are now"
             )))
         }
-        key if class.is_some_and(|class| crate::ability::read_only(class, key).is_some()) => {
+        key if class.is_some_and(|class| crate::system::read_only(lua, class, key).is_some()) => {
             let class = class.expect("checked above");
             Err(mlua::Error::runtime(
-                crate::ability::read_only(class, key).expect("checked above"),
+                crate::system::read_only(lua, class, key).expect("checked above"),
             ))
         }
         "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
@@ -481,6 +481,17 @@ impl ClassMethods {
                 .or_insert(function);
         }
         Self(by_class)
+    }
+
+    /// Adds `methods`; a name `class` already has keeps the one it had.
+    pub(crate) fn extend(&mut self, methods: Vec<(ClassName, &'static str, Function)>) {
+        for (class, name, function) in methods {
+            self.0
+                .entry(class)
+                .or_default()
+                .entry(name)
+                .or_insert(function);
+        }
     }
 
     fn get(&self, class: ClassName, name: &str) -> Option<&Function> {

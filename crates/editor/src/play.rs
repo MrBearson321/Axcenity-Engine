@@ -233,7 +233,7 @@ impl Session {
     /// The player's Abilities and their cooldowns (Phase 76), for the
     /// ability bar the viewport draws.
     pub fn ability_bar(&self) -> Vec<axcenity_core::ability::AbilitySlot> {
-        self.sim.scripts.ability_bar(&self.sim.world)
+        axcenity_gameplay::ability_bar(&self.sim.scripts, &self.sim.world)
     }
 
     /// The active quests (Phase 77), for the quest tracker the viewport

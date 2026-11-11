@@ -11,7 +11,6 @@ use axcenity_render_types::{Capabilities, GraphicsSettings};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
-use crate::ability::AbilityEvent;
 use crate::camera::{Camera, CameraState, GameCamera};
 use crate::client::{LoadingScreenRemoved, LocalPlayer};
 use crate::errors::error_message;
@@ -154,10 +153,6 @@ impl Context {
         methods.extend(
             crate::ownership::methods(&lua)
                 .expect("creating the network ownership methods only fails when out of memory"),
-        );
-        methods.extend(
-            crate::ability::methods(&lua)
-                .expect("creating Ability methods only fails when out of memory"),
         );
         methods.extend(
             crate::health::methods(&lua)
@@ -623,33 +618,6 @@ impl Context {
                     }
                     HealthEvent::Died { health } if exists(health) => {
                         events::fire(&self.lua, events::Owner::Instance(health), "Died", ());
-                    }
-                    _ => {}
-                }
-            }
-        });
-    }
-
-    /// Fires Abilities' `Activated`, `Ended` and `CooldownChanged`
-    /// (Phase 76), for those still there.
-    pub fn fire_ability_events(&self, world: &mut World, ability_events: &[AbilityEvent]) {
-        with_world(&self.lua, world, || {
-            let exists =
-                |id: InstanceId| instance::world(&self.lua).is_ok_and(|world| world.contains(id));
-            for event in ability_events {
-                match *event {
-                    AbilityEvent::Activated { ability, player } if exists(ability) => {
-                        let player = player.filter(|&id| exists(id)).map(instance::LuaInstance);
-                        let owner = events::Owner::Instance(ability);
-                        events::fire(&self.lua, owner, "Activated", player);
-                    }
-                    AbilityEvent::Ended { ability, cancelled } if exists(ability) => {
-                        let owner = events::Owner::Instance(ability);
-                        events::fire(&self.lua, owner, "Ended", cancelled);
-                    }
-                    AbilityEvent::CooldownChanged { ability, left } if exists(ability) => {
-                        let owner = events::Owner::Instance(ability);
-                        events::fire(&self.lua, owner, "CooldownChanged", left);
                     }
                     _ => {}
                 }

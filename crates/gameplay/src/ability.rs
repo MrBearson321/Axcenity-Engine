@@ -8,7 +8,7 @@
 //! stops it. Activating spends the cost, starts the cooldown and, for an
 //! ability with a `Duration`, gives the character its `GrantsTags` until it
 //! ends. Only the server activates: a LocalScript's `Activate()` and the
-//! player's `ActivationKey` send a request ([`MessageKind::Activate`]), and
+//! player's `ActivationKey` send a request ((`MessageKind::Activate`)), and
 //! the server checks it again, so a modified client can't skip a cooldown.
 //!
 //! An **Effect** is active while its Parent is a Model in the Workspace
@@ -35,12 +35,8 @@ use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use mlua::{FromLua, Function, Lua};
 
-use crate::client::LocalPlayer;
-use crate::health::{self, HealthEvent};
-use crate::instance::{LuaInstance, destroyed, world_mut};
-use crate::remote::{Message, MessageKind, Outbox};
-use crate::sides::Side;
-use crate::types::type_name;
+use axcenity_script::system::{self, HealthEvent, destroyed, type_name};
+use axcenity_script::{LuaInstance, Side, lent_world as world, lent_world_mut as world_mut};
 
 /// Something an Ability did, waiting to fire on both sides.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -217,7 +213,7 @@ pub fn holders(world: &World, ability: InstanceId) -> Vec<InstanceId> {
         }
         Some(ClassName::Model) => {
             let mut holders = vec![parent];
-            holders.extend(crate::players::player_of(world, parent));
+            holders.extend(system::player_of(world, parent));
             holders
         }
         _ => Vec::new(),
@@ -351,13 +347,13 @@ fn is_health_value(world: &World, place: &Place) -> Option<InstanceId> {
 }
 
 /// Sets `place` to `to`, as setting it from a script would: a Health's
-/// `Health` through [`health::set_health`].
+/// `Health` through [`system::set_health`].
 fn write(world: &mut World, place: &Place, to: f64) -> Vec<HealthEvent> {
     if !to.is_finite() {
         return Vec::new();
     }
     if let Some(health) = is_health_value(world, place) {
-        return health::set_health(world, health, to);
+        return system::set_health(world, health, to);
     }
     match place {
         Place::Property(id, name) => {
@@ -390,9 +386,9 @@ fn change(
             let by = amount * stacks;
             if let Some(health) = is_health_value(world, place) {
                 let events = if by < 0.0 {
-                    health::damage(world, health, -by, Some(source))
+                    system::damage(world, health, -by, Some(source))
                 } else {
-                    health::heal(world, health, by)
+                    system::heal(world, health, by)
                 };
                 let after = read(world, place).unwrap_or(now);
                 return (after - now, events);
@@ -827,8 +823,7 @@ fn shared(lua: &Lua) -> mlua::Result<SharedAbilities> {
 }
 
 fn side(lua: &Lua) -> Side {
-    lua.app_data_ref::<Side>()
-        .map_or(Side::Server, |side| *side)
+    system::side(lua)
 }
 
 fn ability_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<InstanceId> {
@@ -842,24 +837,11 @@ fn ability_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<Instan
         })
 }
 
-/// A client asking the server to activate `ability`.
-pub(crate) fn send_request(lua: &Lua, ability: InstanceId, player: InstanceId) {
-    if let Some(mut outbox) = lua.app_data_mut::<Outbox>() {
-        outbox.0.push(Message {
-            to: Side::Server,
-            remote: ability,
-            player,
-            kind: MessageKind::Activate,
-            args: Vec::new(),
-        });
-    }
-}
-
 /// `ability:CanActivate()`, `Activate()` and `Cancel()`, and
 /// `model:ApplyEffect(effect)`.
 pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
     let can = lua.create_function(|lua, this: LuaInstance| {
-        let world = crate::instance::world(lua)?;
+        let world = world(lua)?;
         world.get(this.0).ok_or_else(destroyed)?;
         Ok(match can_activate(&world, this.0) {
             Ok(()) => (true, None),
@@ -879,7 +861,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
             // A LocalScript asks the server, which checks again; the bar
             // sweeps at once.
             Side::Client => {
-                let Some(player) = lua.app_data_ref::<LocalPlayer>().map(|p| p.0) else {
+                let Some(player) = system::local_player(lua) else {
                     return Ok(false);
                 };
                 if !belongs_to(&world, this.0, player) || can_activate(&world, this.0).is_err() {
@@ -887,7 +869,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
                 }
                 shared.0.borrow_mut().predict(&world, this.0);
                 drop(world);
-                send_request(lua, this.0, player);
+                system::send_activation(lua, this.0, player);
                 Ok(true)
             }
         }

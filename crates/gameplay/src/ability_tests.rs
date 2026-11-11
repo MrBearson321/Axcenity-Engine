@@ -4,7 +4,9 @@ use axcenity_assets::{Assets, Cell, ColumnType, DataTable};
 use axcenity_core::input::{Action, InputEvent, InputKind, parse_binding};
 use axcenity_core::{ClassName, InstanceId, KeyCode, Value, World};
 
-use super::*;
+use axcenity_script::{OutputKind, ScriptRuntime};
+
+use crate::{ability_bar, script_runtime, step_abilities};
 
 const FRAME: f64 = 1.0 / 60.0;
 
@@ -86,7 +88,7 @@ impl Game {
             .set_attribute(character, "Mana", Some(Value::Number(100.0)))
             .unwrap();
         let (_, target_health) = model(&mut world, "Target");
-        let mut runtime = ScriptRuntime::new();
+        let mut runtime = script_runtime();
         let mut map = axcenity_core::input::InputMap::default();
         map.actions.push(Action {
             name: "Fireball".to_owned(),
@@ -113,7 +115,7 @@ impl Game {
     fn frame(&mut self, events: &[InputEvent]) {
         let world = &mut self.world;
         self.runtime.input_events(world, events);
-        self.runtime.step_abilities(world, FRAME);
+        step_abilities(&mut self.runtime, world, FRAME);
         self.runtime.step(world, FRAME);
         self.runtime.step_health(world, FRAME);
     }
@@ -179,7 +181,7 @@ fn a_fireball_costs_20_mana_cools_down_for_3_seconds_and_cant_activate_while_stu
     assert_eq!(game.target(), 75.0, "the script's damage");
     let left = number(&game.world, ability, "CooldownLeft");
     assert!(left > 2.9 && left <= 3.0, "{left}");
-    let bar = game.runtime.ability_bar(&game.world);
+    let bar = ability_bar(&game.runtime, &game.world);
     assert_eq!(bar.len(), 1);
     assert_eq!(bar[0].key, "Q");
     assert!(
@@ -193,7 +195,7 @@ fn a_fireball_costs_20_mana_cools_down_for_3_seconds_and_cant_activate_while_stu
     game.tap(KeyCode::Q);
     assert_eq!(game.mana(), 80.0);
     assert_eq!(game.target(), 75.0);
-    let half = game.runtime.ability_bar(&game.world)[0].sweep();
+    let half = ability_bar(&game.runtime, &game.world)[0].sweep();
     assert!(half > 0.55 && half < 0.7, "{half}");
 
     // Held down, it activates once per press.
@@ -467,7 +469,7 @@ fn abilities_and_effects_are_made_from_data_table_rows() {
     assets.put_data_table("assets/data/spells.data.json", table);
 
     let mut world = World::new();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     runtime.set_assets(assets);
     start(
         &mut world,

@@ -250,7 +250,7 @@ fn tools(ctx: &mut FrameCtx) {
 /// input step ends the frame here.
 fn abilities(ctx: &mut FrameCtx) {
     let sim = ctx.io.sim();
-    sim.scripts.step_abilities(&mut sim.world, ctx.seconds);
+    axcenity_gameplay::step_abilities(&mut sim.scripts, &mut sim.world, ctx.seconds);
     ctx.io.flush_output();
     end_frame_if_paused(ctx);
 }
