@@ -46,6 +46,7 @@ mod refs;
 mod scene_inspect;
 mod script_read;
 mod script_write;
+mod terrain_edit;
 mod values;
 
 #[cfg(test)]
@@ -194,6 +195,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &project_save::SPEC,
         call: project_save::call,
+    },
+    Tool {
+        spec: &terrain_edit::SPEC,
+        call: terrain_edit::call,
     },
 ];
 

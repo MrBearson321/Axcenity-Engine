@@ -1289,3 +1289,170 @@ fn game_run_runs_the_game_tests() {
         "lists the spec files"
     );
 }
+
+/// The ground's height at `x`, `z` on the only terrain.
+fn ground(host: &Host, x: f32, z: f32) -> f32 {
+    let world = &host.app.world;
+    let id = world
+        .descendants_iter(world.workspace())
+        .find(|&id| world.terrain(id).is_some())
+        .expect("a terrain");
+    let placement = axcenity_terrain::Placement::of(world.get(id).unwrap()).unwrap();
+    placement
+        .ground_y(world.terrain(id).unwrap(), x, z)
+        .unwrap()
+}
+
+#[test]
+fn terrain_edit_sculpts_paints_and_scatters_as_undo_steps() {
+    let mut opened = open("hello-part", "mcp-terrain");
+    let host = &mut opened.app;
+    assert!(ground(host, 0.0, 0.0).abs() < 0.01);
+    // Raise lifts the middle by about `amount`, as one undo step.
+    let raised = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "tool": "raise", "at": [0, 0, 0], "amount": 10}),
+    );
+    assert!(
+        raised.contains("undo \"AI (test): Raise Terrain\""),
+        "{raised}"
+    );
+    let height = ground(host, 0.0, 0.0);
+    assert!((height - 10.0).abs() < 0.5, "{height}: {raised}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(ground(host, 0.0, 0.0).abs() < 0.01);
+    // A line of stamps makes a ridge about as high.
+    ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [-60, 0, 40], "to": [60, 0, 40], "amount": 6}),
+    );
+    let middle = ground(host, 0.0, 40.0);
+    assert!((middle - 6.0).abs() < 1.5, "{middle}");
+    // Flatten goes to `at`'s y.
+    ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "tool": "flatten", "at": [0, 3, 40], "radius": 20, "strength": 1}),
+    );
+    let flat = ground(host, 0.0, 40.0);
+    assert!(flat < middle && flat > 2.0, "{flat}");
+    // Paint by layer name; a wrong one lists them.
+    let painted = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "paint", "layer": "rock", "at": [10, 0, 10]}),
+    );
+    assert!(painted.contains("Paint Rock"), "{painted}");
+    let wrong = call(
+        host,
+        "terrain_edit",
+        json!({"action": "paint", "layer": "Lava", "at": [10, 0, 10]}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::NotFound);
+    assert!(wrong.to_string().contains("Grass, Dirt, Rock"), "{wrong}");
+    // Foliage: a built-in prop scattered, then taken away.
+    let trees = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "foliage", "item": "tree", "at": [0, 0, -50], "radius": 30, "density": 0.05}),
+    );
+    assert!(trees.contains("Paint Tree Foliage"), "{trees}");
+    assert!(!trees.contains(" 0 foliage in all"), "{trees}");
+    let gone = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "foliage", "item": "Tree", "at": [0, 0, -50], "radius": 40, "erase": true}),
+    );
+    assert!(gone.contains(" 0 foliage in all"), "{gone}");
+    let unknown = call(
+        host,
+        "terrain_edit",
+        json!({"action": "foliage", "item": "Unicorn", "at": [0, 0, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(unknown.code, Code::NotFound);
+    // Another action's parameter is a mistake.
+    let mixed = call(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [0, 0, 0], "preset": "island"}),
+    )
+    .unwrap_err();
+    assert_eq!(mixed.code, Code::BadArgs, "{mixed}");
+    // Off the terrain nothing changes and no step is made.
+    let steps = ok(host, "history", json!({}));
+    let off = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [5000, 0, 5000]}),
+    );
+    assert!(off.contains("nothing changed"), "{off}");
+    assert_eq!(ok(host, "history", json!({})), steps);
+}
+
+#[test]
+fn terrain_edit_generates_asking_before_it_replaces_a_landscape() {
+    let mut opened = open("hello-part", "mcp-terrain-generate");
+    let host = &mut opened.app;
+    let args = json!({"action": "generate", "preset": "mountain_range", "seed": 7});
+    let asked = call(host, "terrain_edit", args.clone()).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    assert!(
+        asked.to_string().contains("Mountain Range (seed 7)"),
+        "{asked}"
+    );
+    let mut args = args;
+    args["confirm"] = json!(token(&asked));
+    let text = ok(host, "terrain_edit", args);
+    assert!(
+        text.starts_with("regenerated ") && text.contains(" as Mountain Range "),
+        "{text}"
+    );
+    assert!(text.contains("3 layers"), "{text}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(
+        ground(host, 0.0, 0.0).abs() < 0.01,
+        "undo brings the flat ground back"
+    );
+    // Erosion on a landscape, one step.
+    ok(host, "history", json!({"action": "redo"}));
+    let eroded = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "erode", "kind": "scree"}),
+    );
+    assert!(
+        eroded.contains("undo \"AI (test): Apply Scree Erosion\""),
+        "{eroded}"
+    );
+}
+
+#[test]
+fn terrain_edit_generate_makes_a_terrain_when_there_is_none() {
+    let mut opened = open("hello-material-graph", "mcp-terrain-new");
+    let host = &mut opened.app;
+    let sculpt = call(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [0, 0, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(sculpt.code, Code::NotFound, "{sculpt}");
+    assert!(sculpt.to_string().contains("generate"), "{sculpt}");
+    let before = objects(host);
+    let text = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "generate", "preset": "island", "size": [256, 64, 256]}),
+    );
+    assert!(
+        text.starts_with("made ") && text.contains("Terrain"),
+        "{text}"
+    );
+    assert!(objects(host) > before);
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before, "one step takes it all away");
+}
