@@ -506,7 +506,7 @@ pub fn nav_tab(
             egui::pos2(rect.right() - 6.0, bar_bottom),
         );
         ui.painter()
-            .rect_filled(line, 1.0, palette.accent.gamma_multiply(on));
+            .rect_filled(line, theme::radius::NONE, palette.accent.gamma_multiply(on));
     }
     let color = if selected || hovered {
         palette.text_strong
