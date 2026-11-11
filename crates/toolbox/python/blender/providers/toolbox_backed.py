@@ -153,7 +153,9 @@ class ToolboxBacked:
         tb = self._toolbox()
         if tb is None:
             return super().download(record, resolution, fmt=fmt)
-        fmt = None if record.kind in (HDRI, MODEL) else fmt
+        # A model's own glTF bundle: with no format, the first variant at that
+        # resolution can be a maps-only package (Poly Haven's "1K EXR").
+        fmt = {HDRI: None, MODEL: "gltf"}.get(record.kind, fmt)
         got = self._call(tb.fetch, record.key, res=resolution, fmt=fmt)
         files = [Path(f) for f in got.file_paths()]
         if record.kind == MODEL and not any(f.suffix.lower() in MODEL_SUFFIXES for f in files):
