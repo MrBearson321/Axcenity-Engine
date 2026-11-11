@@ -104,6 +104,9 @@ pub struct BuiltGame {
     /// The game as a zip that keeps the player's executable mark, when one
     /// was written (see [`needs_archive`]).
     pub archive: Option<PathBuf>,
+    /// Why the macOS app bundle couldn't be signed, when signing was tried
+    /// and failed (see [`sign_app`]). The game still runs on this Mac.
+    pub unsigned: Option<String>,
 }
 
 /// Built on Windows for macOS or Linux, the copied player can't be marked
@@ -144,7 +147,8 @@ Categories=Game;\n";
 /// Builds the game in the project at `folder` into `destination` for
 /// `target`, with the player at `player`: cooks textures that aren't yet,
 /// packs `game.axgame` and copies the player beside it (inside
-/// `AxcenityPlayer.app` for macOS), with `LICENSES.txt`. With `archive`,
+/// `AxcenityPlayer.app` for macOS, with the game in `Contents/Resources`),
+/// with `LICENSES.txt`. With `archive`,
 /// also writes those files as `AxcenityPlayer-<os>.zip` in `destination`.
 pub fn build_game(
     folder: &Path,
@@ -168,6 +172,10 @@ pub fn build_game(
         project::pack_game(folder).map_err(|err| format!("could not pack the project: {err}"))?;
 
     let app = destination.join("AxcenityPlayer.app");
+    // In the macOS app, only the player goes in `Contents/MacOS`: codesign
+    // treats every file there as code to sign ("code object is not signed
+    // at all, in subcomponent game.axgame"), so the game and the notices
+    // go in `Contents/Resources`.
     let (bundle, credits) = match target {
         ExportTarget::MacOS => (app.join("Contents/MacOS"), app.join("Contents/Resources")),
         _ => (destination.to_owned(), destination.to_owned()),
@@ -198,7 +206,7 @@ pub fn build_game(
         Contents::Copy(player),
         target != ExportTarget::Windows,
     )?;
-    write(bundle.join("game.axgame"), Contents::Bytes(&game), false)?;
+    write(credits.join("game.axgame"), Contents::Bytes(&game), false)?;
     drop(game);
     match target {
         ExportTarget::MacOS => write(
@@ -224,6 +232,16 @@ pub fn build_game(
         false,
     )?;
 
+    // The copied player keeps only the linker's signature, which seals no
+    // bundle: `codesign --verify --deep --strict` rejects the app ("code
+    // has no resources but signature indicates they must be present").
+    // Signing the whole bundle seals Info.plist and the game with it.
+    let unsigned = if cfg!(target_os = "macos") && target == ExportTarget::MacOS {
+        sign_app(&app).err()
+    } else {
+        None
+    };
+
     let archive = if archive {
         let path = destination.join(format!("AxcenityPlayer-{}.zip", target.directory()));
         write_archive(destination, &written, &path)
@@ -241,7 +259,24 @@ pub fn build_game(
         cooked: report.cooked,
         uncooked: report.failed,
         archive,
+        unsigned,
     })
+}
+
+/// Signs the built macOS app ad hoc (`codesign --sign -`), as
+/// `packaging/macos/build-dmg.sh` does for the editor. Only on a Mac:
+/// elsewhere there's no `codesign`.
+fn sign_app(app: &Path) -> Result<(), String> {
+    let output = std::process::Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(app)
+        .output()
+        .map_err(|err| format!("could not run codesign: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
 }
 
 enum Contents<'a> {
@@ -343,6 +378,9 @@ pub fn build_from_command_line(mut args: impl Iterator<Item = OsString>) -> bool
             if let Some(archive) = &built.archive {
                 println!("zipped, executable mark kept, at {}", archive.display());
             }
+            if let Some(reason) = &built.unsigned {
+                println!("the app isn't signed (codesign: {reason})");
+            }
             true
         }
         Err(err) => {
@@ -431,7 +469,7 @@ mod tests {
         );
         assert!(
             scratch
-                .out("AxcenityPlayer.app/Contents/MacOS/game.axgame")
+                .out("AxcenityPlayer.app/Contents/Resources/game.axgame")
                 .is_file()
         );
         assert!(
@@ -513,8 +551,8 @@ mod tests {
             [
                 "AxcenityPlayer.app/Contents/Info.plist",
                 "AxcenityPlayer.app/Contents/MacOS/AxcenityPlayer",
-                "AxcenityPlayer.app/Contents/MacOS/game.axgame",
                 "AxcenityPlayer.app/Contents/Resources/LICENSES.txt",
+                "AxcenityPlayer.app/Contents/Resources/game.axgame",
             ]
         );
         let mut player = zip
@@ -526,7 +564,7 @@ mod tests {
         assert_eq!(bytes, b"pretend player");
         drop(player);
         let game = zip
-            .by_name("AxcenityPlayer.app/Contents/MacOS/game.axgame")
+            .by_name("AxcenityPlayer.app/Contents/Resources/game.axgame")
             .unwrap();
         assert_eq!(game.unix_mode().unwrap() & 0o777, 0o644);
     }
