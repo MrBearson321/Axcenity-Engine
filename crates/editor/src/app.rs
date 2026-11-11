@@ -975,6 +975,9 @@ impl EditorApp {
             if let Some(text) = storage.get_string(RIBBON_TABS_KEY) {
                 self.ribbon_tabs = RibbonTabs::from_text(&text);
             }
+            if let Some(text) = storage.get_string(start::StartNav::KEY) {
+                self.start.set_nav(start::StartNav::from_text(&text));
+            }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
@@ -1084,6 +1087,7 @@ impl eframe::App for EditorApp {
         storage.set_string(LAYOUT_KEY, self.layout.to_text());
         storage.set_string(layouts::SAVED_LAYOUTS_KEY, self.saved_layouts.to_text());
         storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
+        storage.set_string(start::StartNav::KEY, self.start.nav().to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         let cube = if self.view_cube { "on" } else { "off" };
