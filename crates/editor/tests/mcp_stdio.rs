@@ -155,3 +155,28 @@ fn a_folder_that_isnt_a_project_fails_without_touching_stdout() {
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("could not open the project"));
 }
+
+#[test]
+fn check_prints_a_report_and_client_lines_for_this_binary() {
+    let folder = copy_of_example("hello-touched");
+    let output = Command::new(env!("CARGO_BIN_EXE_axcenity-editor"))
+        .args(["--mcp", "--check"])
+        .arg(&folder)
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&folder);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(
+        text.starts_with("Axcenity MCP check\nok   project "),
+        "{text}"
+    );
+    let exe = std::fs::canonicalize(env!("CARGO_BIN_EXE_axcenity-editor")).unwrap();
+    assert!(text.contains(&format!("{}", exe.display())), "{text}");
+    assert!(text.contains("claude mcp add axcenity -- "), "{text}");
+    let missing = Command::new(env!("CARGO_BIN_EXE_axcenity-editor"))
+        .args(["--mcp", "--check", "/no/such/project"])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+}
