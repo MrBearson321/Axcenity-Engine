@@ -54,6 +54,10 @@ public class Bootstrap : MonoBehaviour
         last = now;
         frame++;
         if (frame == 1) { firstFrameMs = ms; return; }
+        // `XB10k.exe -xb10k-screenshot` saves what the camera shows during
+        // warm-up (outside the measured frames), to check the scene renders.
+        if (frame == Warmup && System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-xb10k-screenshot") >= 0)
+            ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(Application.dataPath), "xb10k-screenshot.png"));
         if (frame <= Warmup + 1) return;
         samples.Add(ms);
         if (samples.Count == Measured) { Report(); Application.Quit(); }
