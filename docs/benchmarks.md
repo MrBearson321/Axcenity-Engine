@@ -337,6 +337,24 @@ Main (`e52292c`) and the branch built into one target folder, copied out, and ru
 
 The 95th percentiles fell about as much (S10k test runner frame 10.18 → 8.11). The other steps didn't move. What's left of Physics is rapier's own step (about 3–4 ms here: the solver about 60% of it, contacts 30%), with about 0.95 ms of Axcenity's work around it: write-back 0.45–0.55 (string-keyed properties, roadmap L1), sync 0.3 (a revision check of every part, every frame) and touches 0.2.
 
+### Physics step, part 2: physics' own threads (L4)
+
+Part 1 measured on the owner's desktop (Ryzen 9 9950X3D, 16 cores and 32 threads, Windows 11), main `e52292c` against the branch, pinned to CPUs 0–15, three alternating rounds: S10k frame 3.71 → 2.47 ms (test runner) and 3.71 → 2.38 (server), XB10k 3.41 → 2.08; Physics about −30% and Heartbeat about −60%; `axcenity-bench-check` printed no `SLOWER` (S10k editor Play 3.32 → 2.11, player 7.24 → 6.07).
+
+The same runs measured rapier's step on 1 to 16 rayon threads (`RAYON_NUM_THREADS`, S10k test runner, Physics median): pinned to 16 logical CPUs, 1 thread 2.5–2.7 ms, 4 threads 1.5–1.8, 8 threads 1.48 (best), 16 threads 1.6–1.8, and rayon's default 1.87. Unpinned, as a game runs: 8 threads 2.0, 12 threads 1.9, 16 threads 2.1, and the default 2.6–2.8. The default is 32 threads there: `std::thread::available_parallelism` reports every logical CPU on Windows, whatever the process's affinity, and one step's work spread over 32 threads costs more in waking and waiting than it gains. So rapier's step runs on physics' own rayon pool of at most 12 threads (`physics/src/threads.rs`, `AXCENITY_PHYSICS_THREADS` to choose; results are the same on any number, `a_pile_lands_the_same_way_on_any_number_of_threads`). The global pool, which the renderer and cooking use, is left as it was.
+
+Same desktop, unpinned, three alternating rounds of 600 frames (medians of the runs' medians, milliseconds; "main" is `e3257295`, part 1 merged):
+
+| Host, S10k | Step | main | own pool | change |
+|---|---|---|---|---|
+| Test runner | Physics | 2.71 [2.69–2.84] | 2.19 [2.17–2.32] | −19% |
+| | **Frame** | **3.37** [3.35–3.49] | **2.81** [2.80–3.01] | **−17%** |
+| | Frame, 95th percentile | 4.52 | 3.92 | −13% |
+| Player (two rounds of 300) | Physics | 2.84–2.97 | 2.27–2.30 | −0.6 ms |
+| | **Frame** | **8.79–8.83** | **8.36–8.37** | **−0.44 ms** |
+
+Every own-pool run beat every main run. With `AXCENITY_PHYSICS_THREADS=8` the test runner's Physics was 2.09–2.12 ms (as good as 12, within noise) and with 16 it was 2.30. The player's Render step also gets faster (2.43 → 2.06 ms) when the global pool is capped too (`RAYON_NUM_THREADS=12`): the renderer's parallel work has the same oversubscription, left for its own change since it also moves cooking and the editor.
+
 ### UI layout (M14)
 
 S10k has no GUI, so the UI is timed on its own: `cargo test -p axcenity-ui --release --test bench_inventory_ui -- --ignored --nocapture` lays out a 500-element inventory (a ScreenGui with a titled panel and a ScrollingFrame of 10 rows of 10 slots, each an icon, a count, a name and a Use button; 499 elements shown) styled by a 16-rule stylesheet with custom properties, descendant selectors and `:hover`/`:active` rules, with the pointer moving over the slots. No GPU. Same cloud container, main (7f29f1a) and the branch built into one target folder and run alternately, three runs each; medians of 5 batches of 60 frames, milliseconds:
