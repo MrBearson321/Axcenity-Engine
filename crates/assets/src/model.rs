@@ -241,17 +241,28 @@ impl Primitive {
             + self.lods.iter().map(Primitive::heap_bytes).sum::<usize>()
     }
 
-    /// The images its material draws with.
+    /// The images its material draws with, its channel textures' too
+    /// (one image may fill several slots).
     pub fn images(&self) -> impl Iterator<Item = &Arc<Image>> {
         let material = &self.material;
-        [
+        let whole = [
             &material.base_color_texture,
             &material.normal_texture,
             &material.emissive_texture,
             &material.specular_texture,
         ]
         .into_iter()
+        .flatten();
+        let channels = [
+            &material.metalness_texture,
+            &material.roughness_texture,
+            &material.occlusion_texture,
+            &material.opacity_texture,
+        ]
+        .into_iter()
         .flatten()
+        .map(|texture| &texture.image);
+        whole.chain(channels)
     }
 
     /// Triangles made by hand (the Model Studio's), in the file's units,
