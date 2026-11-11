@@ -1,0 +1,97 @@
+# The renderer subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "renderer.pbr"
+name = "PBR rendering"
+subsystem = "renderer"
+description = "Physically based materials with texture maps and shadows."
+status = "active"
+docs = "docs/rendering.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/render in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.particles"
+name = "Particles"
+subsystem = "renderer"
+description = "Particle emitters."
+status = "active"
+docs = "docs/rendering/particles.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/scene/src/particles.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.global-illumination"
+name = "Real-time global illumination"
+subsystem = "renderer"
+description = "Real-time GI with reflection and light probes."
+status = "active"
+docs = "docs/rendering/lights.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit e32375f9 (Real-time GI), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.water"
+name = "Water"
+subsystem = "renderer"
+description = "Water surfaces."
+status = "active"
+docs = "docs/rendering/water.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 74b65e7f (Water), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.weather"
+name = "Weather, clouds and fog"
+subsystem = "renderer"
+description = "Weather, volumetric-looking clouds and fog."
+status = "active"
+docs = "docs/rendering/weather.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 4e4e111b (Weather), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.temporal"
+name = "TAA and motion blur"
+subsystem = "renderer"
+description = "Motion vectors, temporal anti-aliasing and motion blur."
+status = "active"
+docs = "docs/rendering/temporal.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit a5ab4034 (Motion Vectors, TAA and Motion Blur), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.decals"
+name = "Decals"
+subsystem = "renderer"
+description = "Decals projected onto surfaces."
+status = "active"
+docs = "docs/rendering/decals.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 24cd566e (Decals), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "renderer.foliage"
+name = "Foliage"
+subsystem = "renderer"
+description = "Painted forests with foliage groups, distance bands and translucent leaves."
+status = "active"
+docs = "docs/rendering/wind.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 3382eb96 (Painted Forests: Foliage Groups, Distance Bands and Translucent Leaves), after v0.1.0-alpha.3"

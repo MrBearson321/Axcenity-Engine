@@ -1,0 +1,13 @@
+# Reconstructed 2026-11-11 from the tag and GitHub's API.
+version = "0.1.0-alpha.2"
+date = "2026-10-21"
+title = "Second alpha tag (release build failed)"
+summary = "The first run of the Release workflow, from this tag, failed, so nothing was published."
+published = false
+note = "Date is the tagged commit's (UTC). Release workflow run of 2026-10-21T03:48Z: failure."
+commit = "b59d2bf4ddbdf27e87be00fe809763af6aead72c"
+
+[formats]
+project = 2
+world = 1
+axgame = 1

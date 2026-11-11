@@ -1,0 +1,6 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "internal"
+subsystem = "gameplay"
+title = "Game systems moved from the script crate to the gameplay crate"
+prs = [68, 72, 77, 82, 85]
+evidence = "reconstructed"
