@@ -4,7 +4,7 @@
 //! every copy must equal the host's, no transaction may have been applied
 //! twice, and no copy may ever have disagreed with the host.
 
-use axcenity_core::{InstanceId, Material, Value, Vector3};
+use axcenity_core::{ClassName, InstanceId, Material, Value, Vector3};
 
 use crate::apply::Note;
 use crate::client::Notice;
@@ -105,16 +105,25 @@ fn run(seed: u64) -> Seen {
         Host::new(world)
     };
     let mut net = Net::with_host(host, &[Role::Owner, Role::Editor, Role::Editor]);
+    // Instances each member is building outside the game.
+    let mut building: Vec<Vec<InstanceId>> = vec![Vec::new(); MEMBERS];
     for _ in 0..300 {
         let roll = rng.below(100);
         let i = rng.below(MEMBERS);
         match roll {
-            0..=34 => {
+            0..=16 => {
                 let ops = random_transaction(&mut net, i, &mut rng);
                 if !ops.is_empty() {
                     // A move into itself is refused locally; that's fine.
                     let _ = net.submit(i, "Edit", ops);
                 }
+            }
+            17..=34 => {
+                // As a tool makes them: straight on the World, then captured.
+                for _ in 0..1 + rng.below(3) {
+                    random_direct_edit(&mut net, i, &mut rng, &mut building);
+                }
+                net.capture(i, "Edit");
             }
             35..=84 => {
                 if rng.chance(50) {
@@ -161,6 +170,7 @@ fn check_no_resync(net: &mut Net, seed: u64, seen: &mut Seen) {
     for client in &mut net.clients {
         for notice in client.take_notices() {
             match notice {
+                Notice::Joined => {}
                 Notice::Resynced => panic!("seed {seed}: a copy disagreed with the host"),
                 Notice::Refused { .. } => seen.refused += 1,
                 Notice::Changed { notes, .. } => {
@@ -203,8 +213,10 @@ fn random_transaction(net: &mut Net, i: usize, rng: &mut Rng) -> Vec<Op> {
 }
 
 fn random_op(net: &mut Net, i: usize, rng: &mut Rng) -> Option<Op> {
-    let doc = net.clients[i].doc()?;
-    let world = &doc.world;
+    if !net.clients[i].is_joined() {
+        return None;
+    }
+    let world = &net.worlds[i];
     let workspace = world.workspace();
     let inside = world.descendants(workspace);
     let parts: Vec<InstanceId> = inside
@@ -219,7 +231,7 @@ fn random_op(net: &mut Net, i: usize, rng: &mut Rng) -> Option<Op> {
     let mut places = inside.clone();
     places.push(workspace);
     let deleted: Vec<InstanceId> = {
-        let mut ids: Vec<_> = doc.graveyard.keys().copied().collect();
+        let mut ids: Vec<_> = net.clients[i].graveyard().keys().copied().collect();
         ids.sort_by_key(|id| id.to_bits());
         ids
     };
@@ -231,13 +243,13 @@ fn random_op(net: &mut Net, i: usize, rng: &mut Rng) -> Option<Op> {
             } else {
                 axcenity_core::ClassName::Model
             };
-            let first = net.clients[i].new_id()?;
+            let first = net.try_new_id(i)?;
             let mut nodes = vec![NodeSpec {
                 class,
                 ..part(first, parent, &format!("N{}", rng.below(50)))
             }];
             if class == axcenity_core::ClassName::Model
-                && let Some(second) = net.clients[i].new_id()
+                && let Some(second) = net.try_new_id(i)
             {
                 nodes.push(part(second, first, "Inside"));
             }
@@ -304,4 +316,143 @@ fn random_op(net: &mut Net, i: usize, rng: &mut Rng) -> Option<Op> {
         },
     };
     Some(op)
+}
+
+/// One edit straight on member `i`'s World, as a tool makes it. Errors
+/// (a move into itself, a stale ID) are ignored, as a tool would refuse
+/// them.
+fn random_direct_edit(net: &mut Net, i: usize, rng: &mut Rng, building: &mut [Vec<InstanceId>]) {
+    if !net.clients[i].is_joined() {
+        return;
+    }
+    let deleted: Vec<InstanceId> = {
+        let mut ids: Vec<_> = net.clients[i].graveyard().keys().copied().collect();
+        ids.sort_by_key(|id| id.to_bits());
+        ids
+    };
+    let world = net.world_mut(i);
+    building[i].retain(|&id| world.contains(id) && world.get(id).unwrap().parent().is_none());
+    let workspace = world.workspace();
+    let inside = world.descendants(workspace);
+    let mut places = inside.clone();
+    places.push(workspace);
+    let parts: Vec<InstanceId> = inside
+        .iter()
+        .copied()
+        .filter(|&id| world.get(id).is_some_and(|x| x.class() == ClassName::Part))
+        .collect();
+    match rng.below(12) {
+        0 => {
+            let Some(parent) = rng.pick(&places) else {
+                return;
+            };
+            let Ok(id) = world.create(ClassName::Part) else {
+                return;
+            };
+            let _ = world.set_name(id, format!("D{}", rng.below(50)));
+            let _ = world.set_parent(id, Some(parent));
+        }
+        1 => {
+            // Built outside the game first; placed (or thrown away) later.
+            let Ok(id) = world.create(ClassName::Model) else {
+                return;
+            };
+            if let Ok(part) = world.create(ClassName::Part) {
+                let _ = world.set_parent(part, Some(id));
+            }
+            let _ = world.add_tag(id, "Prefab");
+            building[i].push(id);
+        }
+        2 => {
+            let Some(id) = rng.pick(&building[i]) else {
+                return;
+            };
+            if rng.chance(25) {
+                let _ = world.destroy(id);
+            } else if let Some(parent) = rng.pick(&places) {
+                let _ = world.set_parent(id, Some(parent));
+            }
+        }
+        3 => {
+            let Some(id) = rng.pick(&inside) else { return };
+            if let Ok(copy) = world.duplicate(id) {
+                let parent = rng.pick(&places).unwrap_or(workspace);
+                let _ = world.set_parent(copy, Some(parent));
+            }
+        }
+        4 => {
+            let Some(id) = rng.pick(&parts) else { return };
+            let material = rng
+                .pick(&[Material::Plastic, Material::Wood, Material::Granite])
+                .unwrap();
+            let _ = world.set_known_property(id, "Material", Value::Material(material));
+            if rng.chance(50) {
+                let _ = world.set_known_property(
+                    id,
+                    "Metalness",
+                    Value::Number(rng.below(3) as f64 / 2.0),
+                );
+            }
+        }
+        5 => {
+            let Some(id) = rng.pick(&parts) else { return };
+            let _ = world.set_known_property(
+                id,
+                "Position",
+                Value::Vector3(Vector3 {
+                    x: rng.below(10) as f32,
+                    y: 1.0,
+                    z: rng.below(10) as f32,
+                }),
+            );
+        }
+        6 => {
+            let Some(id) = rng.pick(&inside) else { return };
+            let _ = world.set_name(id, format!("S{}", rng.below(20)));
+        }
+        7 => {
+            let (Some(id), Some(parent)) = (rng.pick(&inside), rng.pick(&places)) else {
+                return;
+            };
+            if rng.chance(50) {
+                let _ = world.set_parent_at(id, parent, rng.below(3));
+            } else {
+                let _ = world.set_parent(id, Some(parent));
+            }
+        }
+        8 => {
+            if rng.chance(60) {
+                let Some(id) = rng.pick(&inside) else { return };
+                let _ = world.set_parent(id, None);
+            } else {
+                let (Some(id), Some(parent)) = (rng.pick(&deleted), rng.pick(&places)) else {
+                    return;
+                };
+                let _ = world.set_parent(id, Some(parent));
+            }
+        }
+        9 => {
+            let Some(id) = rng.pick(&inside) else { return };
+            let name = rng.pick(&["Damage", "Speed"]).unwrap();
+            let value = rng.chance(70).then(|| Value::Number(rng.below(10) as f64));
+            let _ = world.set_attribute(id, name, value);
+        }
+        10 => {
+            let Some(id) = rng.pick(&inside) else { return };
+            let tag = rng.pick(&["Lava", "Hot", "Big"]).unwrap();
+            if rng.chance(60) {
+                let _ = world.add_tag(id, tag);
+            } else {
+                let _ = world.remove_tag(id, tag);
+            }
+        }
+        _ => {
+            let Some(id) = rng.pick(&parts) else { return };
+            let _ = world.set_known_property(
+                id,
+                "Transparency",
+                Value::Number(rng.below(5) as f64 / 4.0),
+            );
+        }
+    }
 }

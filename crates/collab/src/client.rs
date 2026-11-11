@@ -1,19 +1,32 @@
-//! A collaborator's side of a session: their own copy of the World, kept as
-//! the host's order says, with their unconfirmed edits on top.
+//! A collaborator's side of a session. The World is the editor's own (the
+//! one its tools edit); the client keeps it as the host's order says, with
+//! this member's unconfirmed edits on top.
+//!
+//! Tools edit the World directly. The World keeps an edit journal
+//! ([`World::record_edits`], switched on when the session's World arrives),
+//! and [`Client::capture`] turns what changed into a transaction at the end
+//! of each undo step. Edits can also be sent as ops with
+//! [`Client::submit`]. Every call that takes the World captures what's
+//! outstanding first, so edits never get lost or out of order.
 
 use std::collections::VecDeque;
 
 use axcenity_core::{InstanceId, World};
+use rustc_hash::FxHashSet;
 
-use crate::apply::{self, Doc, Note, Refusal, Undo};
-use crate::ids::{BLOCK_SIZE, IdPool};
+use crate::apply::{self, DocMut, Graveyard, Note, Refusal, Undo};
+use crate::capture;
+use crate::ids::BLOCK_SIZE;
 use crate::message::{MemberId, ToClient, ToHost};
 use crate::op::{Op, Transaction};
 use crate::role::{Capability, Role};
 
-/// Something the editor should tell the user about their own edits.
+/// Something the editor should tell the user about, or act on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notice {
+    /// The World was replaced with the session's (on joining, or after a
+    /// resync): selections and the editor's own undo steps are stale.
+    Joined,
     /// Their transaction applied, but not entirely as made (someone deleted
     /// what it edited, or the parent it used).
     Changed {
@@ -21,7 +34,8 @@ pub enum Notice {
         label: String,
         notes: Vec<Note>,
     },
-    /// The host refused their transaction; it was taken off.
+    /// The host refused their transaction (or their role doesn't allow
+    /// edits); it was taken off.
     Refused {
         client_seq: u64,
         label: String,
@@ -49,16 +63,20 @@ struct Pending {
     undo: Option<Undo>,
 }
 
-/// One member's copy of the session.
+/// One member's side of the session.
 pub struct Client {
     member: MemberId,
-    doc: Option<Doc>,
-    /// The last host transaction applied to `doc`.
+    /// True once the session's World has arrived.
+    joined: bool,
+    graveyard: Graveyard,
+    /// New Instances a tool made that aren't in the game yet (it may still
+    /// be building them); they're sent once placed.
+    unsent: FxHashSet<InstanceId>,
+    /// The last host transaction applied to the World.
     seq: u64,
     role: Role,
     pending: VecDeque<Pending>,
     next_client_seq: u64,
-    ids: IdPool,
     asked_for_ids: bool,
     /// A fresh snapshot was asked for: host transactions until it comes
     /// don't apply to this copy.
@@ -72,12 +90,13 @@ impl Client {
     pub fn new(member: MemberId) -> Client {
         Client {
             member,
-            doc: None,
+            joined: false,
+            graveyard: Graveyard::default(),
+            unsent: FxHashSet::default(),
             seq: 0,
             role: Role::Viewer,
             pending: VecDeque::new(),
             next_client_seq: 1,
-            ids: IdPool::default(),
             asked_for_ids: false,
             awaiting_snapshot: false,
             connection: Connection::Offline,
@@ -90,13 +109,14 @@ impl Client {
         self.member
     }
 
-    /// The copy as the user sees it, once joined.
-    pub fn world(&self) -> Option<&World> {
-        self.doc.as_ref().map(|doc| &doc.world)
+    /// True once the session's World has arrived.
+    pub fn is_joined(&self) -> bool {
+        self.joined
     }
 
-    pub fn doc(&self) -> Option<&Doc> {
-        self.doc.as_ref()
+    /// Deleted Instances (kept detached in the World) and where they were.
+    pub fn graveyard(&self) -> &Graveyard {
+        &self.graveyard
     }
 
     pub fn role(&self) -> Role {
@@ -132,7 +152,7 @@ impl Client {
         self.connection = Connection::Joining;
         self.asked_for_ids = false;
         self.awaiting_snapshot = false;
-        let have = self.doc.as_ref().map(|_| self.seq);
+        let have = self.joined.then_some(self.seq);
         self.outbox.push(ToHost::Hello { have });
     }
 
@@ -143,33 +163,93 @@ impl Client {
         self.outbox.clear();
     }
 
-    /// An ID for a new Instance, from this member's blocks. Asks the host
-    /// for more when half a block is left. `None` when there are none left
-    /// (only while offline for long).
-    pub fn new_id(&mut self) -> Option<InstanceId> {
-        let id = self.ids.take();
-        if self.ids.left() < BLOCK_SIZE / 2 && !self.asked_for_ids && self.is_online() {
-            self.asked_for_ids = true;
-            self.outbox.push(ToHost::NeedIds);
-        }
+    /// An ID from this member's blocks, for a new Instance to make with
+    /// [`World::create_at`] and send in a `CreateTree`. (`World::create`
+    /// takes from the same blocks.) Asks the host for more when half a
+    /// block is left. `None` when there are none left (only while offline
+    /// for long).
+    pub fn new_id(&mut self, world: &mut World) -> Option<InstanceId> {
+        let id = world.take_id();
+        self.ask_for_ids_if_low(world);
         id
     }
 
-    /// Makes an edit: applies it to this copy at once and sends it to the
-    /// host (or keeps it to send after reconnecting). Returns its number.
-    /// An edit that can't apply here (a move into itself) is refused at
-    /// once and never sent.
-    pub fn submit(&mut self, label: impl Into<String>, ops: Vec<Op>) -> Result<u64, Refusal> {
+    /// Turns the World's edits since the last capture into one transaction
+    /// (one undo step, named `label`), applies it as the host will and sends
+    /// it. Returns its number, or `None` if nothing shared changed. Call it
+    /// when a tool finishes an undo step.
+    ///
+    /// If this member may not edit, the edits are taken back and a
+    /// `Refused` notice says so.
+    pub fn capture(&mut self, world: &mut World, label: impl Into<String>) -> Option<u64> {
+        if !self.joined {
+            world.take_edits();
+            return None;
+        }
+        if !world.has_edits() {
+            return None;
+        }
+        let captured = capture::capture(world, &self.graveyard, &mut self.unsent);
+        if captured.ops.is_empty() {
+            return None;
+        }
+        let label = label.into();
+        if !self.role.can(Capability::EditWorld) {
+            // `capture` already put the World back as it was.
+            self.notices.push(Notice::Refused {
+                client_seq: 0,
+                label,
+                reason: Refusal::Permission,
+            });
+            return None;
+        }
+        let result = self.submit_ops(world, label.clone(), captured.ops);
+        self.ask_for_ids_if_low(world);
+        match result {
+            Ok(seq) => Some(seq),
+            Err(reason) => {
+                self.notices.push(Notice::Refused {
+                    client_seq: 0,
+                    label,
+                    reason,
+                });
+                None
+            }
+        }
+    }
+
+    /// Makes an edit from ops: applies it to the World at once and sends it
+    /// to the host (or keeps it to send after reconnecting). Returns its
+    /// number. An edit that can't apply here (a move into itself) is
+    /// refused at once and never sent.
+    pub fn submit(
+        &mut self,
+        world: &mut World,
+        label: impl Into<String>,
+        ops: Vec<Op>,
+    ) -> Result<u64, Refusal> {
         if !self.role.can(Capability::EditWorld) {
             return Err(Refusal::Permission);
         }
-        let Some(doc) = self.doc.as_mut() else {
+        if !self.joined {
             return Err(Refusal::Invalid("not in a session yet".to_owned()));
-        };
-        let applied = apply::apply(doc, &ops, &|_| true)?;
+        }
+        self.capture(world, "Edit");
+        self.submit_ops(world, label.into(), ops)
+    }
+
+    fn submit_ops(
+        &mut self,
+        world: &mut World,
+        label: String,
+        ops: Vec<Op>,
+    ) -> Result<u64, Refusal> {
+        let applied = apply::apply(&mut self.view(world), &ops, &|_| true);
+        world.take_edits();
+        let applied = applied?;
         let transaction = Transaction {
             client_seq: self.next_client_seq,
-            label: label.into(),
+            label,
             ops,
         };
         self.next_client_seq += 1;
@@ -184,11 +264,16 @@ impl Client {
         Ok(client_seq)
     }
 
-    /// Handles one message from the host.
-    pub fn receive(&mut self, message: ToClient) {
+    /// Handles one message from the host. Edits not captured yet are
+    /// captured first (as one step labelled "Edit"); the editor should hold
+    /// messages while a tool is mid-step, such as during a drag.
+    pub fn receive(&mut self, world: &mut World, message: ToClient) {
+        if self.joined && world.has_edits() {
+            self.capture(world, "Edit");
+        }
         match message {
             ToClient::Welcome {
-                world,
+                world: snapshot,
                 graveyard,
                 seq,
                 last_client_seq,
@@ -197,21 +282,28 @@ impl Client {
                 rejected,
             } => {
                 // The old copy is gone, and with it what undoes the pending
-                // edits on it.
+                // edits on it. Blocks of IDs not used yet stay this member's.
                 for pending in &mut self.pending {
                     pending.undo = None;
                 }
-                self.doc = Some(Doc {
-                    world: *world.0,
-                    graveyard,
-                });
+                let blocks = world.id_blocks_left();
+                *world = *snapshot.0;
+                world.make_replica();
+                for (start, len) in blocks {
+                    world.add_id_block(start, len);
+                }
+                if let Some(block) = ids {
+                    world.add_id_block(block.start, block.len);
+                }
+                world.record_edits();
+                self.graveyard = graveyard;
+                self.unsent.clear();
+                self.joined = true;
                 self.awaiting_snapshot = false;
                 self.seq = seq;
                 self.role = role;
-                if let Some(block) = ids {
-                    self.ids.add(block);
-                }
-                self.finish_joining(last_client_seq, &rejected);
+                self.notices.push(Notice::Joined);
+                self.finish_joining(world, last_client_seq, &rejected);
             }
             ToClient::Resumed {
                 last_client_seq,
@@ -219,8 +311,8 @@ impl Client {
                 rejected,
             } => {
                 self.role = role;
-                self.take_pending_off();
-                self.finish_joining(last_client_seq, &rejected);
+                self.take_pending_off(world);
+                self.finish_joining(world, last_client_seq, &rejected);
             }
             ToClient::Accepted {
                 seq,
@@ -229,9 +321,9 @@ impl Client {
                 label,
                 ops,
                 notes,
-            } => self.accepted(seq, author, client_seq, label, ops, notes),
+            } => self.accepted(world, seq, author, client_seq, label, ops, notes),
             ToClient::Rejected { client_seq, reason } => {
-                self.take_pending_off();
+                self.take_pending_off(world);
                 if let Some(at) = self
                     .pending
                     .iter()
@@ -244,18 +336,22 @@ impl Client {
                         reason,
                     });
                 }
-                self.put_pending_on();
+                self.put_pending_on(world);
             }
             ToClient::Ids(block) => {
-                self.ids.add(block);
+                world.add_id_block(block.start, block.len);
                 self.asked_for_ids = false;
             }
             ToClient::RoleChanged(role) => self.role = role,
         }
+        // What applying and undoing did isn't the user's edit.
+        world.take_edits();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn accepted(
         &mut self,
+        world: &mut World,
         seq: u64,
         author: MemberId,
         client_seq: u64,
@@ -263,19 +359,19 @@ impl Client {
         ops: Vec<Op>,
         notes: Vec<Note>,
     ) {
-        if self.doc.is_none() || self.awaiting_snapshot || seq <= self.seq {
+        if !self.joined || self.awaiting_snapshot || seq <= self.seq {
             return;
         }
         if seq != self.seq + 1 {
             self.resync();
             return;
         }
-        self.take_pending_off();
-        let doc = self.doc.as_mut().expect("checked above");
-        match apply::apply(doc, &ops, &|_| true) {
+        self.take_pending_off(world);
+        let mut doc = self.view(world);
+        match apply::apply(&mut doc, &ops, &|_| true) {
             Ok(applied) if applied.notes.is_empty() => {}
             Ok(applied) => {
-                apply::undo(doc, applied.undo);
+                apply::undo(&mut doc, applied.undo);
                 self.resync();
                 return;
             }
@@ -302,13 +398,18 @@ impl Client {
                 });
             }
         }
-        self.put_pending_on();
+        self.put_pending_on(world);
     }
 
     /// The end of `Welcome` or `Resumed`: forget pending edits the host
     /// already handled (accepted ones are in the copy now; refused ones are
     /// reported), put the rest back on, and send them.
-    fn finish_joining(&mut self, last_client_seq: u64, rejected: &[(u64, Refusal)]) {
+    fn finish_joining(
+        &mut self,
+        world: &mut World,
+        last_client_seq: u64,
+        rejected: &[(u64, Refusal)],
+    ) {
         while let Some(front) = self.pending.front() {
             if front.transaction.client_seq > last_client_seq {
                 break;
@@ -323,13 +424,17 @@ impl Client {
                 });
             }
         }
-        self.put_pending_on();
+        self.put_pending_on(world);
         self.connection = Connection::Online;
         for pending in &self.pending {
             self.outbox
                 .push(ToHost::Submit(pending.transaction.clone()));
         }
-        if self.ids.left() < BLOCK_SIZE / 2 {
+        self.ask_for_ids_if_low(world);
+    }
+
+    fn ask_for_ids_if_low(&mut self, world: &World) {
+        if world.ids_left() < BLOCK_SIZE / 2 && !self.asked_for_ids && self.is_online() {
             self.asked_for_ids = true;
             self.outbox.push(ToHost::NeedIds);
         }
@@ -346,14 +451,25 @@ impl Client {
         self.outbox.push(ToHost::Hello { have: None });
     }
 
+    fn view<'a>(&'a mut self, world: &'a mut World) -> DocMut<'a> {
+        DocMut {
+            world,
+            graveyard: &mut self.graveyard,
+        }
+    }
+
     /// Takes every pending edit off the copy, newest first.
-    fn take_pending_off(&mut self) {
-        let Some(doc) = self.doc.as_mut() else {
+    fn take_pending_off(&mut self, world: &mut World) {
+        if !self.joined {
             return;
+        }
+        let mut doc = DocMut {
+            world,
+            graveyard: &mut self.graveyard,
         };
         for pending in self.pending.iter_mut().rev() {
             if let Some(undo) = pending.undo.take() {
-                apply::undo(doc, undo);
+                apply::undo(&mut doc, undo);
             }
         }
     }
@@ -361,12 +477,16 @@ impl Client {
     /// Puts every pending edit back on, oldest first, with the same rules
     /// the host will use. One that no longer applies stays pending, off the
     /// copy, for the host to decide.
-    fn put_pending_on(&mut self) {
-        let Some(doc) = self.doc.as_mut() else {
+    fn put_pending_on(&mut self, world: &mut World) {
+        if !self.joined {
             return;
+        }
+        let mut doc = DocMut {
+            world,
+            graveyard: &mut self.graveyard,
         };
         for pending in &mut self.pending {
-            pending.undo = apply::apply(doc, &pending.transaction.ops, &|_| true)
+            pending.undo = apply::apply(&mut doc, &pending.transaction.ops, &|_| true)
                 .ok()
                 .map(|applied| applied.undo);
         }

@@ -9,7 +9,7 @@ use std::fmt::Write;
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
 
-use crate::apply::{Doc, Refusal};
+use crate::apply::{Doc, Graveyard, Refusal};
 use crate::client::Client;
 use crate::host::{Host, Outgoing};
 use crate::message::{MemberId, ToClient, ToHost};
@@ -19,6 +19,8 @@ use crate::role::Role;
 pub(crate) struct Net {
     pub host: Host,
     pub clients: Vec<Client>,
+    /// Each member's World: the one their editor's tools edit.
+    pub worlds: Vec<World>,
     up: Vec<VecDeque<ToHost>>,
     down: Vec<VecDeque<ToClient>>,
     connected: Vec<bool>,
@@ -46,6 +48,7 @@ impl Net {
         let mut net = Net {
             host,
             clients: (0..roles.len()).map(|i| Client::new(member(i))).collect(),
+            worlds: (0..roles.len()).map(|_| World::new()).collect(),
             up: vec![VecDeque::new(); roles.len()],
             down: vec![VecDeque::new(); roles.len()],
             connected: vec![false; roles.len()],
@@ -56,6 +59,10 @@ impl Net {
             net.connect(i);
         }
         net.settle();
+        // Everyone has joined; tests look at what comes after.
+        for client in &mut net.clients {
+            client.take_notices();
+        }
         net
     }
 
@@ -79,15 +86,41 @@ impl Net {
 
     /// Client `i` makes an edit.
     pub fn submit(&mut self, i: usize, label: &str, ops: Vec<Op>) -> Result<u64, Refusal> {
-        let result = self.clients[i].submit(label, ops);
+        let result = self.clients[i].submit(&mut self.worlds[i], label, ops);
         self.flush(i);
         result
     }
 
     pub fn new_id(&mut self, i: usize) -> InstanceId {
-        let id = self.clients[i].new_id().expect("the client has IDs");
+        self.try_new_id(i).expect("the client has IDs")
+    }
+
+    pub fn try_new_id(&mut self, i: usize) -> Option<InstanceId> {
+        let id = self.clients[i].new_id(&mut self.worlds[i]);
         self.flush(i);
         id
+    }
+
+    /// Member `i`'s World, to edit straight as a tool does.
+    pub fn world_mut(&mut self, i: usize) -> &mut World {
+        &mut self.worlds[i]
+    }
+
+    /// Member `i` finishes an undo step made straight on their World.
+    pub fn capture(&mut self, i: usize, label: &str) -> Option<u64> {
+        let seq = self.clients[i].capture(&mut self.worlds[i], label);
+        self.flush(i);
+        seq
+    }
+
+    /// Member `i`'s copy, as `dump` writes it.
+    pub fn copy(&self, i: usize) -> String {
+        dump(&self.worlds[i], self.clients[i].graveyard())
+    }
+
+    /// The host's document, as `dump` writes it.
+    pub fn host_copy(&self) -> String {
+        dump_doc(self.host.doc())
     }
 
     pub fn set_role(&mut self, i: usize, role: Role) {
@@ -110,7 +143,7 @@ impl Net {
         let Some(message) = self.down[i].pop_front() else {
             return false;
         };
-        self.clients[i].receive(message);
+        self.clients[i].receive(&mut self.worlds[i], message);
         self.flush(i);
         true
     }
@@ -164,11 +197,15 @@ impl Net {
 
     /// Asserts every connected, joined client's copy equals the host's.
     pub fn assert_converged(&self) {
-        let host = dump(self.host.doc());
+        let host = self.host_copy();
         for (i, client) in self.clients.iter().enumerate() {
-            let doc = client.doc().expect("joined");
-            let copy = dump(doc);
+            assert!(client.is_joined(), "client {i} hasn't joined");
+            let copy = self.copy(i);
             if copy != host {
+                if let Ok(dir) = std::env::var("AXCENITY_COLLAB_DUMP") {
+                    let _ = std::fs::write(format!("{dir}/host.txt"), &host);
+                    let _ = std::fs::write(format!("{dir}/copy{i}.txt"), &copy);
+                }
                 panic!(
                     "client {i}'s copy differs from the host's:\n{}",
                     line_diff(&host, &copy)
@@ -213,16 +250,20 @@ fn line_diff(host: &str, copy: &str) -> String {
 /// Everything about a document that must match on every copy: the tree
 /// from `game` down (IDs, classes, names, properties, attributes, tags,
 /// child order), and each deleted Instance with where it was.
-pub(crate) fn dump(doc: &Doc) -> String {
+pub(crate) fn dump(world: &World, graveyard: &Graveyard) -> String {
     let mut out = String::new();
-    dump_tree(&doc.world, doc.world.root(), 0, &mut out);
-    let mut graves: Vec<_> = doc.graveyard.iter().collect();
+    dump_tree(world, world.root(), 0, &mut out);
+    let mut graves: Vec<_> = graveyard.iter().collect();
     graves.sort_by_key(|(id, _)| id.to_bits());
     for (id, place) in graves {
         let _ = writeln!(out, "deleted from {:?}:", place);
-        dump_tree(&doc.world, *id, 1, &mut out);
+        dump_tree(world, *id, 1, &mut out);
     }
     out
+}
+
+pub(crate) fn dump_doc(doc: &Doc) -> String {
+    dump(&doc.world, &doc.graveyard)
 }
 
 fn dump_tree(world: &World, id: InstanceId, depth: usize, out: &mut String) {
@@ -318,6 +359,6 @@ pub(crate) fn restore(id: InstanceId, parent: InstanceId) -> Op {
 
 /// The child of the Workspace named `name` in client `i`'s copy.
 pub(crate) fn find(net: &Net, i: usize, name: &str) -> Option<InstanceId> {
-    let world = net.clients[i].world()?;
+    let world = &net.worlds[i];
     world.find_first_descendant(world.root(), name)
 }

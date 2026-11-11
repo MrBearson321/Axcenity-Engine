@@ -1185,9 +1185,13 @@ impl EditorApp {
             return;
         }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
+            if self.team_refuses_world_swap(false) {
+                return;
+            }
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
                 self.write_package_files(&restored.blobs);
+                self.report_skipped(restored.skipped);
             }
             self.forget_selection_outside_tree();
             // A spline put back makes its road or scatter again at once.
@@ -1242,9 +1246,13 @@ impl EditorApp {
             return;
         }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
+            if self.team_refuses_world_swap(true) {
+                return;
+            }
             if let Some(restored) = self.history.redo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
                 self.write_package_files(&restored.blobs);
+                self.report_skipped(restored.skipped);
             }
             self.forget_selection_outside_tree();
             self.generate_frame();

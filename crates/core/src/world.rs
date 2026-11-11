@@ -24,6 +24,7 @@ use crate::ui_settings::UiSettings;
 /// The save-slot setting the master volume is kept under
 /// ([`World::master_volume`]).
 pub const MASTER_VOLUME_SETTING: &str = "Audio/MasterVolume";
+use crate::journal::{Edit, EditJournal};
 use crate::value::{Value, ValueKind};
 
 /// A handle to an Instance in a [`World`]. It stays valid until the Instance
@@ -324,6 +325,8 @@ pub struct World {
     sound_service: InstanceId,
     text_chat_service: InstanceId,
     changes: ChangeLog,
+    /// Every edit with what it replaced, once [`World::record_edits`] is on.
+    journal: EditJournal,
     /// What was destroyed since the last [`World::take_destroyed`], once a
     /// script runtime asked (see [`World::watch_destroyed`]).
     destroyed: Option<Vec<InstanceId>>,
@@ -498,6 +501,7 @@ impl World {
             sound_service,
             text_chat_service,
             changes: ChangeLog::default(),
+            journal: EditJournal::default(),
             destroyed: None,
             animators: FxHashMap::default(),
             property_animations: FxHashMap::default(),
@@ -678,6 +682,63 @@ impl World {
             .insert(track, AnimationTrackState::new(animator, animation));
         self.animator_mut(animator)?.tracks.push(track);
         Some(track)
+    }
+
+    /// Starts keeping every edit with the value it replaced, for
+    /// [`take_edits`](Self::take_edits) (Team Create). Calling it again
+    /// does nothing.
+    pub fn record_edits(&mut self) {
+        self.journal.recording = true;
+    }
+
+    /// Stops keeping edits, and forgets those kept.
+    pub fn stop_recording_edits(&mut self) {
+        self.journal.recording = false;
+        self.journal.edits.clear();
+    }
+
+    pub fn is_recording_edits(&self) -> bool {
+        self.journal.recording
+    }
+
+    /// True if edits were kept since the last [`take_edits`](Self::take_edits).
+    pub fn has_edits(&self) -> bool {
+        !self.journal.edits.is_empty()
+    }
+
+    /// Removes and returns the edits kept since the last call, oldest first.
+    pub fn take_edits(&mut self) -> Vec<Edit> {
+        std::mem::take(&mut self.journal.edits)
+    }
+
+    /// Runs `f` with the journal paused: its edits aren't kept, and
+    /// Instances it makes get IDs only this computer uses, so Team Create
+    /// never sends them. For what the editor makes for itself, such as the
+    /// pieces SplineMeshes generate.
+    pub fn unrecorded<R>(&mut self, f: impl FnOnce(&mut World) -> R) -> R {
+        let recording = std::mem::replace(&mut self.journal.recording, false);
+        let result = f(self);
+        self.journal.recording = recording;
+        result
+    }
+
+    /// Stores a new Instance. While edits are kept it takes an ID from this
+    /// world's blocks, if it has any, so the Instance can be sent.
+    fn store(&mut self, instance: Instance) -> InstanceId {
+        if self.journal.recording {
+            InstanceId(self.instances.insert(instance))
+        } else {
+            InstanceId(self.instances.insert_unshared(instance))
+        }
+    }
+
+    /// Notes `edit`, if edits are being kept. Callers build the edit only
+    /// when `self.journal.recording` is true, so a world nobody shares
+    /// clones no values.
+    fn journal(&mut self, edit: Edit) {
+        if self.journal.recording {
+            self.journal.edits.push(edit);
+        }
     }
 
     /// Starts keeping a list of every [`Change`] from now on, for
@@ -1011,6 +1072,33 @@ impl World {
         self.instances.make_replica();
     }
 
+    /// Lets this world make Instances at arena indices `start..start + len`
+    /// (generation 0): a block a Team Create host handed this writer. In a
+    /// replica-mode world that keeps edits ([`record_edits`](Self::record_edits)),
+    /// [`create`](Self::create) (and `duplicate` and `copy_from`) take
+    /// these first, so what the user makes can be sent as is; once they run
+    /// out it falls back to IDs only this computer uses.
+    pub fn add_id_block(&mut self, start: u32, len: u32) {
+        self.instances.add_block(start, len);
+    }
+
+    /// How many IDs are left in this world's blocks.
+    pub fn ids_left(&self) -> u32 {
+        self.instances.ids_left()
+    }
+
+    /// What's left of this world's blocks, as `(start, len)`, to carry
+    /// over to a fresh copy of the session's World.
+    pub fn id_blocks_left(&self) -> Vec<(u32, u32)> {
+        self.instances.blocks_left()
+    }
+
+    /// Takes the next ID from this world's blocks without making anything,
+    /// for an Instance to make with [`create_at`](Self::create_at).
+    pub fn take_id(&mut self) -> Option<InstanceId> {
+        self.instances.take_block_id().map(InstanceId)
+    }
+
     /// The first arena index no Instance in this world has had, so IDs from
     /// there up (generation 0) are new everywhere. Team Create's host hands
     /// out blocks of IDs from here for each writer's
@@ -1032,6 +1120,7 @@ impl World {
         if class == ClassName::Terrain {
             self.terrains.insert(id, Arc::new(TerrainData::default()));
         }
+        self.journal(Edit::Created(id));
         Ok(())
     }
 
@@ -1041,10 +1130,11 @@ impl World {
         if class.is_service() {
             return Err(TreeError::Service(class));
         }
-        let id = InstanceId(self.instances.insert(Instance::new(class)));
+        let id = self.store(Instance::new(class));
         if class == ClassName::Terrain {
             self.terrains.insert(id, Arc::new(TerrainData::default()));
         }
+        self.journal(Edit::Created(id));
         Ok(id)
     }
 
@@ -1084,6 +1174,12 @@ impl World {
         }
         let old_parent = instance.parent;
         let old_top = self.service_of(id);
+        let before = self.journal.recording.then(|| {
+            old_parent.and_then(|parent| {
+                let index = self.get(parent)?.children.iter().position(|&c| c == id)?;
+                Some((parent, index))
+            })
+        });
 
         if let Some((new_parent, _)) = new_parent {
             if !self.contains(new_parent) {
@@ -1114,6 +1210,15 @@ impl World {
         let instance = self.instances.get_mut(id.0).expect("checked above");
         instance.parent = new_parent;
         instance.revision += 1;
+        if let Some(before) = before {
+            let after = new_parent.and_then(|parent| {
+                let index = self.get(parent)?.children.iter().position(|&c| c == id)?;
+                Some((parent, index))
+            });
+            if after != before {
+                self.journal(Edit::Parent { id, before });
+            }
+        }
         if old_parent != new_parent {
             self.structure_version += 1;
             self.service_changed(old_top);
@@ -1158,8 +1263,9 @@ impl World {
         let mut copy = original.clone();
         copy.parent = None;
         copy.children.clear();
-        let root = InstanceId(self.instances.insert(copy));
+        let root = self.store(copy);
         self.copy_terrain(id, root);
+        self.journal(Edit::Created(root));
 
         // `descendants` lists parents before their children, so each
         // descendant's parent has already been copied when it's reached.
@@ -1169,13 +1275,14 @@ impl World {
             let parent = copies[&copy.parent.expect("a descendant has a parent")];
             copy.parent = Some(parent);
             copy.children.clear();
-            let new = InstanceId(self.instances.insert(copy));
+            let new = self.store(copy);
             self.instances
                 .get_mut(parent.0)
                 .expect("copied above")
                 .children
                 .push(new);
             self.copy_terrain(old, new);
+            self.journal(Edit::Created(new));
             copies.insert(old, new);
         }
         // An ObjectValue in the copy that points inside the original points
@@ -1225,7 +1332,7 @@ impl World {
             let mut copy = instance.clone();
             copy.parent = parent;
             copy.children.clear();
-            let new = InstanceId(self.instances.insert(copy));
+            let new = self.store(copy);
             if let Some(parent) = parent {
                 self.instances
                     .get_mut(parent.0)
@@ -1236,6 +1343,7 @@ impl World {
             if let Some(data) = source.terrains.get(&old) {
                 self.terrains.insert(new, data.clone());
             }
+            self.journal(Edit::Created(new));
             copies.insert(old, new);
             root.get_or_insert(new);
         }
@@ -1289,6 +1397,12 @@ impl World {
         }
 
         self.set_parent(id, None)?;
+        if self.journal.recording {
+            self.journal(Edit::Destroyed(id));
+            for descendant in self.descendants(id) {
+                self.journal(Edit::Destroyed(descendant));
+            }
+        }
         if let Some(mut destroyed) = self.destroyed.take() {
             destroyed.push(id);
             destroyed.extend(self.descendants(id));
@@ -1313,8 +1427,11 @@ impl World {
         let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
         let name = name.into();
         if instance.name != name {
-            instance.name = name;
+            let before = std::mem::replace(&mut instance.name, name);
             instance.revision += 1;
+            if self.journal.recording {
+                self.journal(Edit::Name { id, before });
+            }
             self.changed(Change::Property {
                 instance: id,
                 name: "Name",
@@ -1388,9 +1505,15 @@ impl World {
         // set (physics writes thousands a frame) allocates nothing.
         let mut changed: [&'static str; 3] = [""; 3];
         let mut count = 0;
+        let recording = self.journal.recording;
+        // What the journal gets: the values replaced (only while recording).
+        let mut replaced: Vec<(&'static str, Value)> = Vec::new();
         if *slot != value {
             changed[0] = key;
             count = 1;
+            if recording {
+                replaced.push((key, slot.clone()));
+            }
         }
         // Read before `value` moves into the slot below.
         let material = value.as_material();
@@ -1411,12 +1534,20 @@ impl World {
                 if let Some(slot) = instance.properties.get_mut(name)
                     && *slot != Value::Number(number)
                 {
-                    *slot = Value::Number(number);
+                    let before = std::mem::replace(slot, Value::Number(number));
+                    if recording {
+                        replaced.push((name, before));
+                    }
                     changed[count] = name;
                     count += 1;
                     instance.revision += 1;
                 }
             }
+        }
+        // Side effects first, so undoing in reverse puts Material back
+        // before Metalness and Roughness (putting Material back resets them).
+        for (name, before) in replaced.into_iter().rev() {
+            self.journal(Edit::Property { id, name, before });
         }
         for &name in &changed[..count] {
             self.changed(Change::Property { instance: id, name });
@@ -1444,14 +1575,20 @@ impl World {
             None => value,
         });
         let instance = self.instances.get_mut(id.0).ok_or(AttributeError::Stale)?;
-        let changed = match value {
-            Some(value) => {
-                instance.attributes.insert(name.to_owned(), value.clone()) != Some(value)
-            }
-            None => instance.attributes.remove(name).is_some(),
+        let before = match value {
+            Some(value) => instance.attributes.insert(name.to_owned(), value.clone()),
+            None => instance.attributes.remove(name),
         };
+        let changed = before.as_ref() != instance.attributes.get(name);
         if changed {
             instance.revision += 1;
+            if self.journal.recording {
+                self.journal(Edit::Attribute {
+                    id,
+                    name: name.to_owned(),
+                    before,
+                });
+            }
             self.changed(Change::Attribute {
                 instance: id,
                 name: name.to_owned(),
@@ -1479,10 +1616,14 @@ impl World {
         if instance.has_tag(tag) {
             return Ok(false);
         }
+        let before = self.journal.recording.then(|| instance.tags.clone());
         instance.tags.push(tag.to_owned());
         instance.revision += 1;
         if in_game {
             self.index.add_tag(tag, id);
+        }
+        if let Some(before) = before {
+            self.journal(Edit::Tags { id, before });
         }
         self.changed(Change::Tag {
             instance: id,
@@ -1499,10 +1640,14 @@ impl World {
         let Some(index) = instance.tags.iter().position(|t| t == tag) else {
             return Ok(false);
         };
+        let before = self.journal.recording.then(|| instance.tags.clone());
         instance.tags.remove(index);
         instance.revision += 1;
         if in_game {
             self.index.remove_tag(tag, id);
+        }
+        if let Some(before) = before {
+            self.journal(Edit::Tags { id, before });
         }
         self.changed(Change::Tag {
             instance: id,

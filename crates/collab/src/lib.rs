@@ -29,6 +29,7 @@
 //! in-memory queue in the tests, WebSocket over TLS later) is the caller's.
 
 pub mod apply;
+pub mod capture;
 pub mod client;
 pub mod host;
 pub mod ids;
@@ -36,6 +37,8 @@ pub mod message;
 pub mod op;
 pub mod role;
 
+#[cfg(test)]
+mod capture_tests;
 #[cfg(test)]
 mod convergence_tests;
 #[cfg(test)]
