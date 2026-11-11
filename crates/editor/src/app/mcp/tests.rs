@@ -1456,3 +1456,78 @@ fn terrain_edit_generate_makes_a_terrain_when_there_is_none() {
     ok(host, "history", json!({"action": "undo"}));
     assert_eq!(objects(host), before, "one step takes it all away");
 }
+
+#[test]
+fn anim_edit_animates_keys_and_lists_a_clip_as_file_undo_steps() {
+    let mut opened = open("hello-part", "mcp-anim");
+    let host = &mut opened.app;
+    let made = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Lift", "position": [0, 2, 0]}),
+    );
+    let lift = made.split_whitespace().nth(1).unwrap().to_owned();
+    let animated = ok(host, "anim_edit", json!({"action": "animate", "id": lift}));
+    assert!(
+        animated.contains("undo \"AI (test): Animate Lift\""),
+        "{animated}"
+    );
+    let clip = "assets/animations/Lift/Lift.anim.json";
+    assert!(animated.contains(clip), "{animated}");
+    assert!(opened.folder.join(clip).is_file());
+    // With no value, a key holds what the target is now.
+    let first = ok(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "property": "Position", "time": 0}),
+    );
+    assert!(
+        first.starts_with("Key . Position at 0 s = [0, 2, 0]"),
+        "{first}"
+    );
+    let second = ok(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "property": "Position", "time": 3, "value": [0, 12, 0], "interp": "ease", "loop": true}),
+    );
+    assert!(second.contains("clip now 3 s long"), "{second}");
+    let info = ok(host, "anim_edit", json!({"action": "info", "clip": clip}));
+    assert!(
+        info.starts_with(&format!("{clip} · 3 s · loops · 1 track")),
+        "{info}"
+    );
+    assert!(
+        info.contains("\n. Position: 0 [0, 2, 0]; 3 [0, 12, 0] ease;"),
+        "{info}"
+    );
+    // Wrong widths, targets and properties say so.
+    let wide = call(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "property": "Transparency", "time": 1, "value": [1, 2, 3]}),
+    )
+    .unwrap_err();
+    assert_eq!(wide.code, Code::BadValue, "{wide}");
+    let nobody = call(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "target": "Ghost", "property": "Position", "time": 1}),
+    )
+    .unwrap_err();
+    assert_eq!(nobody.code, Code::NotFound, "{nobody}");
+    // Unkey, then undo puts the key back in the file.
+    ok(
+        host,
+        "anim_edit",
+        json!({"action": "unkey", "id": lift, "property": "Position", "time": 3}),
+    );
+    let read = || std::fs::read_to_string(opened.folder.join(clip)).unwrap();
+    assert!(!read().contains("12"), "{}", read());
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(read().contains("12"), "{}", read());
+    // Undoing everything takes the clip file and the Animator away.
+    ok(host, "history", json!({"action": "undo", "steps": 3}));
+    assert!(!opened.folder.join(clip).exists());
+    let gone = call(host, "anim_edit", json!({"action": "info", "id": lift})).unwrap_err();
+    assert_eq!(gone.code, Code::NotFound, "{gone}");
+}

@@ -27,6 +27,7 @@ use axcenity_mcp::{
 
 use super::EditorApp;
 
+mod anim_edit;
 mod batch;
 mod docs;
 mod env_set;
@@ -199,6 +200,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &terrain_edit::SPEC,
         call: terrain_edit::call,
+    },
+    Tool {
+        spec: &anim_edit::SPEC,
+        call: anim_edit::call,
     },
 ];
 

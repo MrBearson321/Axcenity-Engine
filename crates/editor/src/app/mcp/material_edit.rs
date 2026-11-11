@@ -318,7 +318,7 @@ fn build(
 }
 
 /// A project-relative path to a file in the project, or why not.
-fn check_path(folder: &std::path::Path, path: &str) -> Result<(), ToolError> {
+pub(super) fn check_path(folder: &std::path::Path, path: &str) -> Result<(), ToolError> {
     let relative = std::path::Path::new(path);
     let inside = relative.is_relative()
         && relative
