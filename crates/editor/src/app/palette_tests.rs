@@ -1,11 +1,13 @@
-//! The command palette and Quick Open (unified Phase 70).
+//! The command palette and Quick Open (unified Phase 70), now views of
+//! universal search (`search_tests.rs`).
 
 use std::collections::BTreeSet;
 
-use crate::command_palette::Mode;
+use crate::command_palette::Category;
 use crate::ribbon_tabs::{ActiveTab, BuiltInTab};
 
 use super::command_palette::Command;
+use super::search::SearchTarget;
 use super::tests::example;
 use super::*;
 
@@ -276,15 +278,17 @@ fn ctrl_shift_p_finds_a_command_by_a_few_letters_and_enter_runs_it() {
     let before = app.world.get(workspace).unwrap().children().len();
     let shift_command = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
     palette_frame(&mut app, &ctx, vec![key(egui::Key::P, shift_command)]);
-    assert_eq!(app.palette.open, Some(Mode::Commands));
+    assert!(app.palette.open);
+    assert!(app.palette.query.starts_with('>'), "commands only");
     palette_frame(&mut app, &ctx, vec![egui::Event::Text("ins blo".into())]);
+    assert_eq!(app.palette.query, "> ins blo");
     palette_frame(&mut app, &ctx, Vec::new());
     palette_frame(
         &mut app,
         &ctx,
         vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
     );
-    assert_eq!(app.palette.open, None);
+    assert!(!app.palette.open);
     assert_eq!(
         app.world.get(workspace).unwrap().children().len(),
         before + 1,
@@ -314,16 +318,16 @@ fn the_palette_shows_the_last_commands_run_first() {
     ] {
         let commands = app.palette_commands(&ctx);
         let entry = commands.iter().find(|c| c.command == command).unwrap();
-        app.palette.used(Mode::Commands, &entry.entry.key);
+        app.palette.used(&entry.entry.key);
         app.run_command(&ctx, command);
     }
     assert!(app.overlays.bounds);
     let commands = app.palette_commands(&ctx);
     let entries: Vec<_> = commands.iter().map(|c| c.entry.clone()).collect();
-    let ranked = app.palette.ranked(Mode::Commands, &entries);
-    assert_eq!(commands[ranked[0]].command, Command::ViewCube);
+    let ranked = app.palette.ranked(&[&entries], 0).to_vec();
+    assert_eq!(commands[ranked[0].1].command, Command::ViewCube);
     assert_eq!(
-        commands[ranked[1]].command,
+        commands[ranked[1].1].command,
         Command::Overlay(super::command_palette::Overlay::Bounds)
     );
 }
@@ -352,36 +356,43 @@ fn plugin_toolbar_buttons_are_commands_too() {
 fn quick_open_finds_scripts_assets_levels_and_instances_and_opens_them() {
     let mut app = EditorApp::new(Some(&example("hello-touched")));
     let ctx = theme::test_context();
-    let entries = app.quick_open_entries();
-    let find = |name: &str| {
-        entries
-            .iter()
-            .find(|(entry, _)| entry.title == name)
-            .map(|(_, target)| target.clone())
+    app.refresh_search(&ctx, true);
+    let rows = |app: &EditorApp, category: Category| -> Vec<(String, SearchTarget)> {
+        app.search
+            .rows(category)
+            .into_iter()
+            .map(|(entry, target)| (entry.title.clone(), target.clone()))
+            .collect()
+    };
+    let find = |category: Category, name: &str| {
+        rows(&app, category)
+            .into_iter()
+            .find(|(title, _)| title == name)
+            .map(|(_, target)| target)
             .unwrap_or_else(|| panic!("{name} is listed"))
     };
-    let pad = find("Pad");
-    app.open_target(&ctx, pad);
+    let pad = find(Category::Object, "Pad");
+    app.run_search_target(&ctx, pad);
     assert_eq!(
         app.selected
             .and_then(|id| app.world.get(id))
             .map(|i| i.name().to_owned()),
         Some("Pad".to_owned())
     );
-    let script = entries
-        .iter()
-        .find(|(_, target)| matches!(target, super::command_palette::OpenTarget::Script(_)))
-        .map(|(_, target)| target.clone())
-        .unwrap();
-    let super::command_palette::OpenTarget::Script(path) = script.clone() else {
-        unreachable!()
+    let (_, script) = rows(&app, Category::Script).into_iter().next().unwrap();
+    let SearchTarget::Open(super::command_palette::OpenTarget::Script(path)) = script.clone()
+    else {
+        panic!("a script row opens its script")
     };
-    app.open_target(&ctx, script);
+    app.run_search_target(&ctx, script);
     assert_eq!(app.tabs.active_path(), Some(path.as_str()));
     assert!(
-        entries
+        rows(&app, Category::Level)
             .iter()
-            .any(|(_, target)| matches!(target, super::command_palette::OpenTarget::Level(None)))
+            .any(|(_, target)| matches!(
+                target,
+                SearchTarget::Open(super::command_palette::OpenTarget::Level(None))
+            ))
     );
 }
 
@@ -391,8 +402,8 @@ fn quick_open_finds_scripts_assets_levels_and_instances_and_opens_them() {
 fn the_palette_and_find_windows_draw_on_screen() {
     let mut app = EditorApp::new(Some(&example("hello-touched")));
     let size = egui::vec2(1100.0, 700.0);
-    app.palette.toggle(Mode::Commands);
-    app.palette.query = "light".to_owned();
+    app.palette.toggle_commands();
+    app.palette.query = "> light cones".to_owned();
     app.find.show_and_focus();
     app.find.query = "Pad".to_owned();
     app.search_scripts();

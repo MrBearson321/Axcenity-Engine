@@ -309,15 +309,20 @@ impl EditorApp {
                     self.delete_selected();
                 }
                 ui.separator();
+                let search = egui::Button::new(theme::with_icon(icons::MAGNIFYING_GLASS, "Search Everything…"))
+                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::SEARCH_SHORTCUT));
+                if ui.add(search).clicked() {
+                    self.palette.toggle();
+                }
                 let palette = egui::Button::new(theme::with_icon(icons::COMMAND, "Command Palette"))
                     .shortcut_text(ui.ctx().format_shortcut(&command_palette::PALETTE_SHORTCUT));
                 if ui.add(palette).clicked() {
-                    self.palette.toggle(crate::command_palette::Mode::Commands);
+                    self.palette.toggle_commands();
                 }
                 let quick = egui::Button::new(theme::with_icon(icons::FILE_MAGNIFYING_GLASS, "Quick Open…"))
                     .shortcut_text(ui.ctx().format_shortcut(&command_palette::QUICK_OPEN_SHORTCUT));
                 if ui.add_enabled(self.project.is_some(), quick).clicked() {
-                    self.open_quick_open();
+                    self.palette.toggle();
                 }
                 let find = egui::Button::new(theme::with_icon(icons::MAGNIFYING_GLASS, "Find in Scripts…"))
                     .shortcut_text(ui.ctx().format_shortcut(&command_palette::FIND_SHORTCUT));

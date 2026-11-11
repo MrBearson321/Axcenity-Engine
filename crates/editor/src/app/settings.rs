@@ -43,7 +43,7 @@ impl SettingsPage {
         SettingsPage::Engine,
     ];
 
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             SettingsPage::Appearance => "Appearance",
             SettingsPage::Typography => "Text & density",
@@ -55,7 +55,7 @@ impl SettingsPage {
         }
     }
 
-    fn icon(self) -> &'static str {
+    pub(super) fn icon(self) -> &'static str {
         match self {
             SettingsPage::Appearance => icons::PALETTE,
             SettingsPage::Typography => icons::TEXT_AA,
@@ -155,7 +155,7 @@ impl EditorApp {
 
     fn layout_page(&mut self, ui: &mut egui::Ui) {
         page_title(ui, "Editor layout", "Which panels show, and where they go.");
-        widgets::section_label(ui, "Panels");
+        section(ui, "Panels");
         for pane in Pane::CLOSABLE {
             let mut open = self.layout.is_open(pane);
             if ui
@@ -180,79 +180,104 @@ impl EditorApp {
             self.layout.reset();
         }
         ui.add_space(space::L);
-        widgets::section_label(ui, "Viewport");
-        ui.checkbox(
-            &mut self.light_cones,
-            theme::with_icon(icons::FLASHLIGHT, "Show every light's cone"),
-        )
-        .on_hover_text("Off, only the selected light (or the part it's in) shows where it shines.");
-        ui.checkbox(
-            &mut self.grid,
-            theme::with_icon(icons::GRID_NINE, "Show the measuring grid"),
-        )
-        .on_hover_text("Lines and distances in studs on the baseplate, while editing.");
-        ui.add_enabled(
-            self.grid,
-            egui::Slider::new(
-                &mut self.grid_strength,
-                MIN_GRID_STRENGTH..=MAX_GRID_STRENGTH,
+        section(ui, "Viewport");
+        let row = ui
+            .checkbox(
+                &mut self.light_cones,
+                theme::with_icon(icons::FLASHLIGHT, "Show every light's cone"),
             )
-            .text("Grid strength")
-            .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
-        )
-        .on_hover_text("How solid the grid's lines are. Lower is easier on the eyes.");
-        ui.checkbox(
+            .on_hover_text(
+                "Off, only the selected light (or the part it's in) shows where it shines.",
+            );
+        found(ui, &row, "Show every light's cone");
+        let row = ui
+            .checkbox(
+                &mut self.grid,
+                theme::with_icon(icons::GRID_NINE, "Show the measuring grid"),
+            )
+            .on_hover_text("Lines and distances in studs on the baseplate, while editing.");
+        found(ui, &row, "Show the measuring grid");
+        let row = ui
+            .add_enabled(
+                self.grid,
+                egui::Slider::new(
+                    &mut self.grid_strength,
+                    MIN_GRID_STRENGTH..=MAX_GRID_STRENGTH,
+                )
+                .text("Grid strength")
+                .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+            )
+            .on_hover_text("How solid the grid's lines are. Lower is easier on the eyes.");
+        found(ui, &row, "Grid strength");
+        let row = ui.checkbox(
             &mut self.view_cube,
             theme::with_icon(icons::CUBE_FOCUS, "Show the view cube"),
         )
         .on_hover_text(
             "The cube in the viewport's corner that turns the camera to a face, edge or corner.",
         );
-        ui.checkbox(
-            &mut self.overlays.colliders,
-            theme::with_icon(icons::CUBE, "Show colliders"),
-        )
-        .on_hover_text("The shape each part collides with, including sensors and terrain.");
-        ui.checkbox(
-            &mut self.overlays.raycasts,
-            theme::with_icon(icons::LINE_SEGMENT, "Show raycasts"),
-        )
-        .on_hover_text("Recent workspace:Raycast calls during Play.");
-        ui.checkbox(
-            &mut self.overlays.bounds,
-            theme::with_icon(icons::SQUARE, "Show bounds"),
-        )
-        .on_hover_text("Each part's Size box.");
-        ui.checkbox(
-            &mut self.overlays.emitters,
-            theme::with_icon(icons::SPEAKER_HIGH, "Show audio emitters"),
-        )
-        .on_hover_text("Where each spatial Sound is heard from.");
-        ui.checkbox(
-            &mut self.overlays.nav_mesh,
-            theme::with_icon(icons::FOOTPRINTS, "Show navigation mesh"),
-        )
-        .on_hover_text("Where characters can walk, coloured by connected ground.");
-        ui.checkbox(
-            &mut self.overlays.agent_paths,
-            theme::with_icon(icons::PATH, "Show agent paths"),
-        )
-        .on_hover_text("The path each NavigationAgent is walking, during Play.");
-        ui.checkbox(
-            &mut self.overlays.constraints,
-            theme::with_icon(icons::LINK_SIMPLE, "Show constraints"),
-        )
-        .on_hover_text("Welds as lines between their parts, and every Attachment.");
-        ui.checkbox(
-            &mut self.overlays.culling,
-            theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
-        )
-        .on_hover_text(
-            "Holds what's drawn to the current view, and outlines what's drawn and culled. \
+        found(ui, &row, "Show the view cube");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.colliders,
+                theme::with_icon(icons::CUBE, "Show colliders"),
+            )
+            .on_hover_text("The shape each part collides with, including sensors and terrain.");
+        found(ui, &row, "Show colliders");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.raycasts,
+                theme::with_icon(icons::LINE_SEGMENT, "Show raycasts"),
+            )
+            .on_hover_text("Recent workspace:Raycast calls during Play.");
+        found(ui, &row, "Show raycasts");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.bounds,
+                theme::with_icon(icons::SQUARE, "Show bounds"),
+            )
+            .on_hover_text("Each part's Size box.");
+        found(ui, &row, "Show bounds");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.emitters,
+                theme::with_icon(icons::SPEAKER_HIGH, "Show audio emitters"),
+            )
+            .on_hover_text("Where each spatial Sound is heard from.");
+        found(ui, &row, "Show audio emitters");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.nav_mesh,
+                theme::with_icon(icons::FOOTPRINTS, "Show navigation mesh"),
+            )
+            .on_hover_text("Where characters can walk, coloured by connected ground.");
+        found(ui, &row, "Show navigation mesh");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.agent_paths,
+                theme::with_icon(icons::PATH, "Show agent paths"),
+            )
+            .on_hover_text("The path each NavigationAgent is walking, during Play.");
+        found(ui, &row, "Show agent paths");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.constraints,
+                theme::with_icon(icons::LINK_SIMPLE, "Show constraints"),
+            )
+            .on_hover_text("Welds as lines between their parts, and every Attachment.");
+        found(ui, &row, "Show constraints");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.culling,
+                theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
+            )
+            .on_hover_text(
+                "Holds what's drawn to the current view, and outlines what's drawn and culled. \
              Not saved between runs.",
-        );
+            );
+        found(ui, &row, "Show culling");
         ui.add_space(space::L);
-        widgets::section_label(ui, "Ribbon");
+        section(ui, "Ribbon");
         ui.label(
             egui::RichText::new(
                 "Make your own ribbon tab from any of the ribbon's groups. Right-click a tab \
@@ -277,15 +302,424 @@ impl EditorApp {
 /// A page's title and a line saying what's on it.
 pub(super) fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     let palette = theme::palette(ui.ctx());
-    ui.label(
+    let row = ui.label(
         egui::RichText::new(title)
             .family(theme::display_family())
             .size(type_scale::HEADING + 2.0)
             .extra_letter_spacing(theme::TITLE_TRACKING)
             .color(palette.text_strong),
     );
+    found(ui, &row, title);
     ui.label(egui::RichText::new(subtitle).color(palette.text_secondary));
     ui.add_space(14.0);
+}
+
+/// A row of the Settings window that universal search lists
+/// (`app/search.rs`): picking it opens its page, scrolls to the row and
+/// outlines it for a moment ([`find_setting`]).
+pub(super) struct SearchableSetting {
+    pub page: SettingsPage,
+    /// What the row says: the label, section or checkbox it's found by.
+    pub name: &'static str,
+    /// Other words for it.
+    pub aliases: &'static [&'static str],
+    pub description: &'static str,
+}
+
+const fn setting(
+    page: SettingsPage,
+    name: &'static str,
+    aliases: &'static [&'static str],
+    description: &'static str,
+) -> SearchableSetting {
+    SearchableSetting {
+        page,
+        name,
+        aliases,
+        description,
+    }
+}
+
+/// Every searchable row, by page. `every_searchable_setting_is_found_on_its_page`
+/// checks each name is drawn (and highlighted) on its page.
+pub(super) const SEARCHABLE: &[SearchableSetting] = {
+    use SettingsPage::*;
+    &[
+        setting(
+            Appearance,
+            "Theme",
+            &["Dark mode", "Light mode", "Match system", "Colors"],
+            "Dark, light, or match the computer's setting.",
+        ),
+        setting(
+            Appearance,
+            "Accent",
+            &["Accent colour", "Highlight colour", "Selection colour"],
+            "The colour of selections, focus rings and primary buttons.",
+        ),
+        setting(
+            Appearance,
+            "Interface scale",
+            &["Zoom", "UI size", "DPI", "Bigger text"],
+            "How big the whole editor is drawn, 90% to 150%.",
+        ),
+        setting(
+            Typography,
+            "Density",
+            &["Compact", "Comfortable", "Spacing", "Row height"],
+            "How much room rows and controls get.",
+        ),
+        setting(
+            Typography,
+            "Code and Output",
+            &[
+                "Code font size",
+                "Console font",
+                "Monospace",
+                "Script text size",
+            ],
+            "The size of code in scripts and the Console.",
+        ),
+        setting(
+            Typography,
+            "Interface font",
+            &["Font", "Typeface"],
+            "The fonts the editor uses.",
+        ),
+        setting(
+            Layout,
+            "Panels",
+            &["Show panel", "Hide panel", "Docking", "Windows"],
+            "Which panels show.",
+        ),
+        setting(
+            Layout,
+            "Show every light's cone",
+            &["Light cones", "Spotlight"],
+            "Off, only the selected light shows where it shines.",
+        ),
+        setting(
+            Layout,
+            "Show the measuring grid",
+            &["Grid", "Ruler", "Studs"],
+            "Lines and distances in studs on the baseplate, while editing.",
+        ),
+        setting(
+            Layout,
+            "Grid strength",
+            &["Grid opacity", "Grid lines"],
+            "How solid the grid's lines are.",
+        ),
+        setting(
+            Layout,
+            "Show the view cube",
+            &["View cube", "Navigation cube", "Gizmo"],
+            "The cube in the viewport's corner that turns the camera to a face.",
+        ),
+        setting(
+            Layout,
+            "Show colliders",
+            &["Collision shapes", "Physics", "Hitboxes"],
+            "The shape each part collides with.",
+        ),
+        setting(
+            Layout,
+            "Show raycasts",
+            &["Rays", "Physics debug"],
+            "Recent workspace:Raycast calls during Play.",
+        ),
+        setting(
+            Layout,
+            "Show bounds",
+            &["Bounding boxes", "Size box"],
+            "Each part's Size box.",
+        ),
+        setting(
+            Layout,
+            "Show audio emitters",
+            &["Sound", "Audio debug"],
+            "Where each spatial Sound is heard from.",
+        ),
+        setting(
+            Layout,
+            "Show navigation mesh",
+            &["Nav mesh", "Pathfinding", "Walkable"],
+            "Where characters can walk.",
+        ),
+        setting(
+            Layout,
+            "Show agent paths",
+            &["Pathfinding", "AI paths"],
+            "The path each NavigationAgent is walking, during Play.",
+        ),
+        setting(
+            Layout,
+            "Show constraints",
+            &["Welds", "Attachments", "Joints"],
+            "Welds as lines between their parts, and every Attachment.",
+        ),
+        setting(
+            Layout,
+            "Show culling",
+            &["Frustum", "Occlusion", "Culled objects"],
+            "What's drawn and what's culled for the current view.",
+        ),
+        setting(
+            Layout,
+            "Ribbon",
+            &["Custom ribbon tab", "Toolbar"],
+            "Make your own ribbon tab from any of the ribbon's groups.",
+        ),
+        setting(
+            Graphics,
+            "Quality",
+            &["Graphics preset", "Ultra", "High", "Medium", "Low"],
+            "This computer's quality preset for the viewport and Play.",
+        ),
+        setting(
+            Graphics,
+            "Shadow quality",
+            &["Shadow resolution", "Shadow map"],
+            "How sharp and far-reaching shadows are.",
+        ),
+        setting(
+            Graphics,
+            "Shadow distance",
+            &["Shadow range", "Cascades"],
+            "How far from the camera shadows are drawn.",
+        ),
+        setting(
+            Graphics,
+            "Post-processing",
+            &["Bloom", "Tone mapping", "Effects"],
+            "Bloom, colour correction and the other screen effects.",
+        ),
+        setting(
+            Graphics,
+            "Render scale",
+            &["Resolution", "Upscaling", "Supersampling"],
+            "How many pixels are drawn, before scaling to the window.",
+        ),
+        setting(
+            Graphics,
+            "Texture quality",
+            &["Texture resolution", "Mipmaps"],
+            "How detailed textures are.",
+        ),
+        setting(
+            Graphics,
+            "Texture memory",
+            &["VRAM", "Texture budget", "GPU memory"],
+            "How much graphics memory textures may use.",
+        ),
+        setting(
+            Graphics,
+            "Anti-aliasing",
+            &["AA", "MSAA", "TAA", "FXAA", "Jaggies"],
+            "Smoothing jagged edges.",
+        ),
+        setting(
+            Graphics,
+            "Ambient occlusion",
+            &["AO", "SSAO", "GTAO"],
+            "Soft shadows in corners and creases.",
+        ),
+        setting(
+            Graphics,
+            "Reflection quality",
+            &["Reflections", "SSR"],
+            "How reflections are drawn.",
+        ),
+        setting(
+            Graphics,
+            "Cloud quality",
+            &["Clouds", "Sky"],
+            "How detailed volumetric clouds are.",
+        ),
+        setting(
+            Graphics,
+            "Contact shadows",
+            &["Small shadows"],
+            "Short screen-space shadows where things touch.",
+        ),
+        setting(
+            Graphics,
+            "Real-time GI",
+            &["Global illumination", "Bounce light", "GI"],
+            "Light bouncing off surfaces, worked out as you go.",
+        ),
+        setting(
+            Graphics,
+            "Volumetric fog",
+            &["Fog", "God rays", "Light shafts"],
+            "Fog that lights and shadows shine through.",
+        ),
+        setting(
+            Graphics,
+            "Depth of field",
+            &["DOF", "Blur", "Focus"],
+            "Blurring what's out of focus.",
+        ),
+        setting(
+            Graphics,
+            "Motion blur",
+            &["Blur"],
+            "Blurring fast movement.",
+        ),
+        setting(
+            Graphics,
+            "Vignette",
+            &["Dark corners"],
+            "Darkening the screen's corners.",
+        ),
+        setting(
+            Graphics,
+            "Film grain",
+            &["Noise", "Grain"],
+            "A film-like noise over the picture.",
+        ),
+        setting(
+            Graphics,
+            "Chromatic aberration",
+            &["Colour fringing", "Lens effect"],
+            "Colour fringes towards the screen's edges.",
+        ),
+        setting(
+            Graphics,
+            "Sharpen",
+            &["Sharpness", "Sharpening"],
+            "Crisper edges after scaling.",
+        ),
+        setting(
+            Graphics,
+            "In use",
+            &["Effective settings", "GPU limits"],
+            "What's in use once the graphics card's limits are applied, and why.",
+        ),
+        setting(
+            Shortcuts,
+            "Shortcuts",
+            &["Keyboard shortcuts", "Hotkeys", "Keybindings", "Keys"],
+            "The keys the editor knows.",
+        ),
+        setting(
+            Accessibility,
+            "Reduce motion",
+            &["Animations", "Fades", "Motion sickness"],
+            "Turns off hover fades, popup fades and smooth scrolling.",
+        ),
+        setting(
+            Accessibility,
+            "Steady frame rate",
+            &[
+                "FPS cap",
+                "VSync",
+                "Refresh rate",
+                "OLED flicker",
+                "FreeSync",
+                "G-Sync",
+                "VRR",
+            ],
+            "Shows frames at a fixed rate so a variable-refresh display doesn't flicker.",
+        ),
+        setting(
+            Accessibility,
+            "Hold the refresh rate steady",
+            &["Flicker", "OLED", "Idle"],
+            "Keeps drawing while the editor has focus, for displays that flicker as the rate drops.",
+        ),
+        setting(
+            Accessibility,
+            "Readability",
+            &["Contrast", "Text size"],
+            "Contrast in both themes, and how to make text larger.",
+        ),
+        setting(
+            Accessibility,
+            "Keyboard",
+            &["Tab navigation", "Focus ring"],
+            "Moving between controls with Tab.",
+        ),
+    ]
+};
+
+/// What [`find_setting`] asked for: the row, when, and whether it was
+/// scrolled to yet.
+#[derive(Clone)]
+struct Finding {
+    name: &'static str,
+    since: f64,
+    scrolled: bool,
+}
+
+/// How long a found row stays outlined, in seconds.
+const FOUND_SECONDS: f64 = 2.0;
+
+fn finding_id() -> egui::Id {
+    egui::Id::new("settings find")
+}
+
+/// Scrolls the Settings window to the row called `name` the next time its
+/// page is drawn, and outlines it for a moment.
+pub(super) fn find_setting(ctx: &egui::Context, name: &'static str) {
+    let since = ctx.input(|input| input.time);
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            finding_id(),
+            Finding {
+                name,
+                since,
+                scrolled: false,
+            },
+        );
+    });
+}
+
+/// A section label that search can find.
+fn section(ui: &mut egui::Ui, name: &str) {
+    let palette = theme::palette(ui.ctx());
+    let row = ui.label(widgets::micro(name, palette.text_weak));
+    found(ui, &row, name);
+}
+
+/// A row's label that search can find.
+fn found_label(ui: &mut egui::Ui, name: &str) {
+    let row = ui.label(name);
+    found(ui, &row, name);
+}
+
+/// If search asked for the row `name` (drawn as `row`), scrolls to it once
+/// and outlines it in the accent, fading.
+fn found(ui: &egui::Ui, row: &egui::Response, name: &str) {
+    let Some(mut finding) = ui.data(|data| data.get_temp::<Finding>(finding_id())) else {
+        return;
+    };
+    if finding.name != name {
+        return;
+    }
+    let age = ui.input(|input| input.time) - finding.since;
+    if age > FOUND_SECONDS {
+        ui.data_mut(|data| data.remove::<Finding>(finding_id()));
+        return;
+    }
+    if !finding.scrolled {
+        row.scroll_to_me(Some(egui::Align::Center));
+        finding.scrolled = true;
+        ui.data_mut(|data| data.insert_temp(finding_id(), finding));
+        #[cfg(test)]
+        ui.data_mut(|data| data.insert_temp(egui::Id::new("settings found"), name.to_owned()));
+    }
+    let palette = theme::palette(ui.ctx());
+    let strength = (1.0 - age / FOUND_SECONDS).clamp(0.0, 1.0) as f32;
+    let rect = row.rect.expand2(egui::vec2(6.0, 3.0));
+    ui.painter().rect(
+        rect,
+        theme::radius::CONTROL,
+        palette.accent_soft.gamma_multiply(0.5 * strength),
+        egui::Stroke::new(1.5_f32, palette.accent.gamma_multiply(strength)),
+        egui::StrokeKind::Outside,
+    );
+    ui.ctx().request_repaint();
 }
 
 fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
@@ -294,7 +728,7 @@ fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         "Appearance",
         "The theme, the accent colour and how big everything is.",
     );
-    widgets::section_label(ui, "Theme");
+    section(ui, "Theme");
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
         for choice in ThemeChoice::ALL {
@@ -304,7 +738,7 @@ fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         }
     });
     ui.add_space(space::L);
-    widgets::section_label(ui, "Accent");
+    section(ui, "Accent");
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         for accent in Accent::ALL {
@@ -317,7 +751,7 @@ fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         ui.label(egui::RichText::new(appearance.accent.label()).color(palette.text_secondary));
     });
     ui.add_space(space::L);
-    widgets::section_label(ui, "Interface scale");
+    section(ui, "Interface scale");
     let options: Vec<(f32, Option<&str>, String)> = Appearance::UI_SCALES
         .iter()
         .map(|&scale| (scale, None, format!("{}%", (scale * 100.0).round())))
@@ -335,7 +769,7 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         "Text & density",
         "How much room controls get, and the size of code.",
     );
-    widgets::section_label(ui, "Density");
+    section(ui, "Density");
     widgets::segmented(
         ui,
         &mut appearance.density,
@@ -350,7 +784,7 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .color(palette.text_secondary),
     );
     ui.add_space(space::L);
-    widgets::section_label(ui, "Code and Output");
+    section(ui, "Code and Output");
     ui.add(
         egui::Slider::new(&mut appearance.code_font_size, Appearance::CODE_FONT_SIZES)
             .step_by(0.5)
@@ -376,7 +810,7 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
             );
         });
     ui.add_space(space::L);
-    widgets::section_label(ui, "Interface font");
+    section(ui, "Interface font");
     ui.label(
         egui::RichText::new("Inter for the interface and JetBrains Mono for code, both built in.")
             .color(palette.text_secondary),
@@ -397,6 +831,10 @@ fn shortcuts_page(ui: &mut egui::Ui) {
                 ("Settings".into(), format(&SETTINGS_SHORTCUT)),
                 ("Play".into(), format(&PLAY_SHORTCUT)),
                 ("Stop".into(), format(&STOP_SHORTCUT)),
+                (
+                    "Search everything".into(),
+                    format(&super::command_palette::SEARCH_SHORTCUT),
+                ),
                 (
                     "Command palette".into(),
                     format(&super::command_palette::PALETTE_SHORTCUT),
@@ -522,7 +960,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         "This computer's quality, for the viewport and Play. Not saved in projects.",
     );
     let palette = theme::palette(ui.ctx());
-    widgets::section_label(ui, "Quality");
+    section(ui, "Quality");
     widgets::segmented(
         ui,
         &mut settings.quality,
@@ -530,12 +968,12 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
     );
     let preset = GraphicsSettings::preset(settings.quality);
     ui.add_space(space::L);
-    widgets::section_label(ui, "Overrides");
+    section(ui, "Overrides");
     egui::Grid::new("graphics overrides")
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Shadow quality");
+            found_label(ui, "Shadow quality");
             let label = |quality: Option<ShadowQuality>| match quality {
                 Some(quality) => quality.label().to_owned(),
                 None => format!("Preset ({})", preset.shadow_quality().label()),
@@ -549,7 +987,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Shadow distance");
+            found_label(ui, "Shadow distance");
             ui.horizontal(|ui| {
                 let mut limited = settings.shadow_distance.is_some();
                 if ui
@@ -581,7 +1019,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             });
             ui.end_row();
 
-            ui.label("Post-processing");
+            found_label(ui, "Post-processing");
             let label = |on: Option<bool>| match on {
                 Some(true) => "On".to_owned(),
                 Some(false) => "Off".to_owned(),
@@ -603,7 +1041,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Render scale");
+            found_label(ui, "Render scale");
             ui.horizontal(|ui| {
                 let mut custom = settings.render_scale.is_some();
                 if ui
@@ -642,7 +1080,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             });
             ui.end_row();
 
-            ui.label("Texture quality");
+            found_label(ui, "Texture quality");
             let label = |quality: Option<TextureQuality>| match quality {
                 Some(quality) => quality.label().to_owned(),
                 None => format!("Preset ({})", preset.texture_quality().label()),
@@ -656,7 +1094,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Texture memory");
+            found_label(ui, "Texture memory");
             ui.horizontal(|ui| {
                 let mut custom = settings.texture_budget.is_some();
                 if ui
@@ -685,7 +1123,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             });
             ui.end_row();
 
-            ui.label("Anti-aliasing");
+            found_label(ui, "Anti-aliasing");
             let label = |mode: Option<AntiAliasing>| match mode {
                 Some(mode) => mode.label().to_owned(),
                 None => format!("Preset ({})", preset.anti_aliasing().label()),
@@ -699,7 +1137,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Ambient occlusion");
+            found_label(ui, "Ambient occlusion");
             let label = |mode: Option<AmbientOcclusion>| match mode {
                 Some(mode) => mode.label().to_owned(),
                 None => format!("Preset ({})", preset.ambient_occlusion().label()),
@@ -713,7 +1151,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Reflection quality");
+            found_label(ui, "Reflection quality");
             let label = |quality: Option<ReflectionQuality>| match quality {
                 Some(quality) => quality.label().to_owned(),
                 None => format!("Preset ({})", preset.reflection_quality().label()),
@@ -731,7 +1169,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Cloud quality");
+            found_label(ui, "Cloud quality");
             let label = |quality: Option<CloudQuality>| match quality {
                 Some(quality) => quality.label().to_owned(),
                 None => format!("Preset ({})", preset.cloud_quality().label()),
@@ -745,7 +1183,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Contact shadows");
+            found_label(ui, "Contact shadows");
             let on_off = |on: bool| if on { "On" } else { "Off" };
             let label = |on: Option<bool>| match on {
                 Some(on) => on_off(on).to_owned(),
@@ -760,7 +1198,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Real-time GI");
+            found_label(ui, "Real-time GI");
             let label = |on: Option<bool>| match on {
                 Some(on) => on_off(on).to_owned(),
                 None => format!("Preset ({})", on_off(preset.realtime_gi())),
@@ -774,7 +1212,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Volumetric fog");
+            found_label(ui, "Volumetric fog");
             let label = |on: Option<bool>| match on {
                 Some(on) => on_off(on).to_owned(),
                 None => format!("Preset ({})", on_off(preset.volumetric_fog())),
@@ -788,7 +1226,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Depth of field");
+            found_label(ui, "Depth of field");
             let label = |quality: Option<DepthOfFieldQuality>| match quality {
                 Some(quality) => quality.label().to_owned(),
                 None => format!("Preset ({})", preset.depth_of_field().label()),
@@ -802,7 +1240,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
-            ui.label("Motion blur");
+            found_label(ui, "Motion blur");
             let label = |quality: Option<MotionBlurQuality>| match quality {
                 Some(quality) => quality.label().to_owned(),
                 None => format!("Preset ({})", preset.motion_blur().label()),
@@ -827,7 +1265,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 ("Sharpen", preset.sharpen(), &mut settings.sharpen),
             ];
             for (name, preset_on, value) in switches {
-                ui.label(name);
+                found_label(ui, name);
                 let label = |on: Option<bool>| match on {
                     Some(on) => on_off(on).to_owned(),
                     None => format!("Preset ({})", on_off(preset_on)),
@@ -843,7 +1281,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             }
         });
     ui.add_space(space::L);
-    widgets::section_label(ui, "In use");
+    section(ui, "In use");
     let effective = settings.effective(capabilities);
     let shadows = match effective.shadow_quality.map() {
         Some(map) => format!(
@@ -965,8 +1403,9 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         "Motion, and other ways to make the editor easier to use.",
     );
     let palette = theme::palette(ui.ctx());
-    widgets::section_label(ui, "Motion");
-    ui.checkbox(&mut appearance.reduce_motion, "Reduce motion");
+    section(ui, "Motion");
+    let row = ui.checkbox(&mut appearance.reduce_motion, "Reduce motion");
+    found(ui, &row, "Reduce motion");
     ui.label(
         egui::RichText::new(
             "Turns off hover fades, popup and window fades, smooth scrolling and the theme \
@@ -975,9 +1414,9 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .color(palette.text_secondary),
     );
     ui.add_space(space::L);
-    widgets::section_label(ui, "Display");
+    section(ui, "Display");
     ui.horizontal(|ui| {
-        ui.label("Steady frame rate");
+        found_label(ui, "Steady frame rate");
         egui::ComboBox::from_id_salt("steady frame rate")
             .selected_text(Appearance::steady_rate_name(appearance.steady_hz))
             .show_ui(ui, |ui| {
@@ -1000,7 +1439,8 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .color(palette.text_secondary),
     );
     ui.add_space(space::S);
-    ui.checkbox(&mut appearance.hold_refresh, "Hold the refresh rate steady");
+    let row = ui.checkbox(&mut appearance.hold_refresh, "Hold the refresh rate steady");
+    found(ui, &row, "Hold the refresh rate steady");
     ui.label(
         egui::RichText::new(
             "Keeps drawing at the steady frame rate while the editor has focus instead of \
@@ -1010,7 +1450,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .color(palette.text_secondary),
     );
     ui.add_space(space::L);
-    widgets::section_label(ui, "Readability");
+    section(ui, "Readability");
     ui.label(
         egui::RichText::new(
             "Text and accent colours meet WCAG AA contrast in both themes. For larger text, \
@@ -1019,7 +1459,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .color(palette.text_secondary),
     );
     ui.add_space(space::L);
-    widgets::section_label(ui, "Keyboard");
+    section(ui, "Keyboard");
     ui.label(
         egui::RichText::new(
             "Tab moves between controls and shows a focus ring in the accent colour; Space or \

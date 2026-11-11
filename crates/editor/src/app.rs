@@ -53,6 +53,7 @@ mod nav_overlay;
 mod plugins;
 mod prefabs;
 mod probes;
+mod search;
 mod sequencer;
 mod session;
 mod settings;
@@ -210,10 +211,13 @@ pub struct EditorApp {
     window_icon: Option<std::sync::Arc<egui::IconData>>,
     /// The New Custom Material window's form, while it's open.
     custom_material: Option<custom_materials::CustomMaterialForm>,
-    /// The command palette and Quick Open (Phase 70), Quick Open's rows
-    /// while it's showing, Find in Scripts, and an asset's references.
+    /// Universal search's window (Ctrl+K, and the command palette and
+    /// Quick Open, Phase 70), its index of providers and rows
+    /// (`app/search.rs`), whether it was open last frame, Find in Scripts,
+    /// and an asset's references.
     palette: crate::command_palette::Palette,
-    quick_open: Vec<(crate::command_palette::Entry, command_palette::OpenTarget)>,
+    search: search::SearchIndex,
+    palette_was_open: bool,
     find: crate::find_in_scripts::FindWindow,
     references: Option<asset_refs::ReferencesWindow>,
     /// Every change made to `world` since it was opened, for undo and redo.
@@ -808,7 +812,8 @@ impl EditorApp {
             window_icon: None,
             custom_material: None,
             palette: Default::default(),
-            quick_open: Vec::new(),
+            search: search::SearchIndex::new(),
+            palette_was_open: false,
             find: Default::default(),
             references: None,
             history: History::new(),
@@ -1683,6 +1688,8 @@ mod posing_tests;
 mod prefab_tests;
 #[cfg(test)]
 mod scene_tools_tests;
+#[cfg(test)]
+mod search_tests;
 #[cfg(test)]
 mod spline_content_tests;
 #[cfg(test)]

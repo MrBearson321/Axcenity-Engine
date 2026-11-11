@@ -368,3 +368,41 @@ Plan and findings: [design-system.md](design-system.md). Approved by Paul with P
 **Left.** At 300 points wide a vector's third axis wraps under the first two and its first frame overlaps the next row (seen with one selected too; not new). Per-axis `—` for vectors.
 
 **Next.** Phase 5: one shortcut table (V16), layout presets (V17), Increase contrast (V18), and shared section, empty-state and chip pieces (V19).
+
+## Universal search and Recent Projects (Master Improvement Initiative §8–9)
+
+Paul's brief of 2026-11-11, section 8 (universal search and indexed discovery) and section 9 (UI stability). How it works: `docs/editor/shell.md`, Universal search.
+
+**Already there, reused.** The command palette and Quick Open (Phase 70), with every menu and ribbon command as a `Command`; the Explorer, Properties and Assets filters; the Assets panel's scan and the file watcher; stable `InstanceId`s and the world's `structure_version` and per-Instance revisions; the Settings window's pages. No second command registry and no second walk of the project's files: the search index reads these.
+
+| What | Change | Files |
+|---|---|---|
+| Recent Projects overflow (§9) | Cards ran off the start page's right edge: each card's fade-in `ui.scope` stopped egui's wrapping row from breaking. Laid out row by row (PR #75) | `start.rs`, `start/tests.rs` |
+| Ctrl+K (§8A) | One window over everything; Ctrl+P and Ctrl+Shift+P (with `>` typed) are views of it; Edit > Search Everything…; Up/Down, Enter, Escape, Tab | `command_palette.rs`, `app/search.rs`, `app/chrome/menus.rs` |
+| Categories (§8B) | Commands, Tools, Objects, Assets, Scripts, Levels, Settings, Properties, as chips with counts | `command_palette.rs`, `app/search.rs` |
+| Commands (§8C) | Descriptions for every command (the highlighted row's shows under the list), synonyms, shortcuts, why a disabled one can't run | `app/search.rs` |
+| Settings (§8B–C) | 47 rows of the Settings window searchable; picking one opens its page, scrolls to the row and outlines it | `app/settings.rs` |
+| Properties (§8C) | The selection's properties are rows; picking one opens Properties with its filter set to the name | `app/search.rs`, `properties.rs` |
+| Assets panel (§8C) | Its search matches every word against the asset's path and kind ("sound door", "texture") | `asset_browser.rs` |
+| Index (§8D–E) | Providers with stamps; listed again only when their data changes; ranking cached per query and index generation; a new system registers a `SearchProvider` | `app/search.rs`, `asset_browser.rs` (`generation`) |
+
+**Timings** (`search_cost_at_100_1000_and_10000_objects`, release, cloud container, 4 cores; a Folder of Parts named "Crate N" in hello-touched):
+
+| Objects | List everything | Check, nothing changed (each frame while open) | Rank "crate 99" (each keystroke) | Ranked again, same query |
+|---|---|---|---|---|
+| 100 | 0.60 ms | 0.001 ms | 0.28 ms | 0.0001 ms |
+| 1,000 | 1.03 ms | 0.005 ms | 0.93 ms | 0.0001 ms |
+| 10,000 | 6.07 ms | 0.110 ms | 6.13 ms | 0.0001 ms |
+
+Listing happens when the palette opens and after a change, not per keystroke; nothing is indexed while it's closed.
+
+**Differs from the brief, on purpose.**
+- *Asynchronous indexing* isn't used: listing 10,000 objects takes 6 ms once per change, and threads would need copies of the world. Revisit when a provider is slow (a docs or plugin provider reading files).
+- *Context-aware ranking* is recency (the last 20 picks lead and score more), the selection (only its properties are listed), Play (the session's world) and per-category weights, not which panel has focus: the editor doesn't track a focused pane.
+- *Asset tags and metadata*: assets have none beyond path and kind, so search matches those.
+- *Searchable documentation* and AI-assisted discovery are not built; both would be one more `SearchProvider` (the start screen's API Reference search, `reference::search_entries`, is the natural source).
+- *Explorer filter by type*: the Explorer's filter already matches the class ("PointLight") and opens the branches above matches; universal search's object rows show the class and full path. Unchanged, to stay clear of Design system Phase 4's Explorer work.
+
+**Tests.** New: `app/search_tests.rs` (Ctrl+K lists every category and Enter opens the pick; Tab narrows to one category and Shift+Tab goes back; typing ranks again but lists nothing again; creating, renaming, moving and deleting objects; Play's world and back; asset files coming and going; synonyms and a description for every command and tool; every searchable setting is found on its page; a property row selects and filters; snapshots `universal-search*.png`, `settings-found.png`), `command_palette.rs` unit tests (prefix and chips, counts, whole-name bonus, synonyms and descriptions, the ranking cache, Tab order, the ASCII fast path), `asset_browser/tests.rs` (the search's words), `start/tests.rs` (cards inside the page at 900–3,000 px). `palette_tests.rs` moved to the new API. `cargo test -p axcenity-editor`: 1,009 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** The palette reads shortcuts from `palette_commands` until Design system Phase 5's shortcut table (V16) lands; then it should read them from there. The rest of §9 (other menus and panels at narrow and wide sizes) wasn't audited beyond the start page: the design-system thread's tour shots cover the panels.
