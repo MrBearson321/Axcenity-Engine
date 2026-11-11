@@ -74,9 +74,7 @@ mod errors;
 mod events;
 mod gui_service;
 mod handler_threads;
-mod health;
 mod http;
-mod humanoid;
 mod input;
 mod instance;
 mod lent;
@@ -243,16 +241,12 @@ pub struct ScriptRuntime {
     particle_emits: Vec<(InstanceId, u32)>,
     /// Shatters waiting for the game host's physics.
     shatters: Vec<Shatter>,
-    /// Every Health's regeneration wait, and their events waiting to fire.
-    health: health::Healths,
     /// Game systems from other crates (roadmap L7), in the order added.
     systems: Vec<std::rc::Rc<dyn GameSystem>>,
     /// The ProximityPrompts showing and their holds (Phase 44).
     prompts: prompt::Prompts,
     /// What the mouse points at and presses, for ClickDetectors.
     clicks: click::Clicks,
-    /// Humanoids' walks and states (Phase 46).
-    humanoids: humanoid::Humanoids,
     /// Respawns, spawn ForceFields and the leaderboard's Tab (Phase 47).
     players: players::Players,
     /// Player events waiting to fire on both sides.
@@ -410,11 +404,9 @@ impl ScriptRuntime {
             sound_actions: Vec::new(),
             particle_emits: Vec::new(),
             shatters: Vec::new(),
-            health: health::Healths::default(),
             systems: Vec::new(),
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
-            humanoids: humanoid::Humanoids::default(),
             players: players::Players::default(),
             player_events: Vec::new(),
             reported_change_loop: false,
@@ -1058,7 +1050,7 @@ impl ScriptRuntime {
         }
     }
 
-    /// Frame step 1, after [`step_humanoids`](Self::step_humanoids)
+    /// Frame step 1, after the gameplay crate's `step_humanoids`
     /// (Phase 47). The first time, the player joins and gets a character:
     /// one already in the Workspace becomes theirs (and a copy of it, out
     /// of the game, is what they respawn as), or else, with
@@ -1457,26 +1449,6 @@ impl ScriptRuntime {
         }
     }
 
-    /// Frame step 1, after [`fire_seated`](Self::fire_seated): for each
-    /// character controller that landed this frame and how fast it was
-    /// falling, the Health in its Model takes fall damage (if its
-    /// `FallDamage` is on), then `Landed(fallSpeed)` fires, in Scripts and
-    /// then in LocalScripts (Phase 43).
-    pub fn fire_landed(&mut self, world: &mut World, landings: &[(InstanceId, f32)]) {
-        self.fire_changes(world);
-        for &(controller, speed) in landings {
-            let events = health::fall_damage(world, controller, f64::from(speed));
-            self.health.pending.extend(events);
-            self.fire_changes(world);
-            for side in [Side::Server, Side::Client] {
-                self.context(side)
-                    .fire_landed(world, controller, f64::from(speed));
-                self.collect(side);
-                self.fire_changes(world);
-            }
-        }
-    }
-
     /// Frame step 1, after [`input_events`](Self::input_events) (Phase
     /// 44): ProximityPrompts in reach of the player character show and
     /// follow their actions, and ClickDetectors follow the mouse, through
@@ -1537,12 +1509,10 @@ impl ScriptRuntime {
         self.client.prompt_input()
     }
 
-    /// For game systems: queues Health events (from
-    /// [`system::damage`], [`system::heal`] or [`system::set_health`]) to
-    /// fire on both sides with the engine's own, in
-    /// [`fire_changes`](Self::fire_changes).
-    pub fn queue_health_events(&mut self, events: Vec<system::HealthEvent>) {
-        self.health.pending.extend(events);
+    /// For game systems: the Humanoid `humanoid` died. If it was a
+    /// player's character, they respawn after their `RespawnTime`.
+    pub fn humanoid_died(&mut self, world: &World, humanoid: InstanceId) {
+        self.players.died(world, humanoid);
     }
 
     /// For game systems: the side that runs what the player starts without
@@ -1606,98 +1576,6 @@ impl ScriptRuntime {
     /// when it points at none.
     pub fn click_cursor(&self, world: &World) -> Option<String> {
         self.clicks.cursor(world)
-    }
-
-    /// Frame-order step 4, after [`fire_breaks`](Self::fire_breaks) and
-    /// before `Heartbeat` (Phase 43): DamageZones damage the Healths with
-    /// parts inside them, Healths regenerate, their events fire, and health
-    /// bars (ProgressBars bound to a Health) show where they are now.
-    pub fn step_health(&mut self, world: &mut World, seconds: f64) {
-        self.fire_changes(world);
-        let assets = self.server.assets();
-        let events = self.health.step(world, &assets, seconds);
-        self.health.pending.extend(events);
-        self.fire_changes(world);
-        // Then the game systems' (Abilities' cooldowns and Effects).
-        for system in self.systems.clone() {
-            system.step_server(self, world, seconds);
-            self.fire_changes(world);
-        }
-        health::bind_bars(world);
-        self.fire_changes(world);
-    }
-
-    /// Fires the Health events scripts and the health step queued, on both
-    /// sides, noting damage for regeneration. Handlers that cause more fire
-    /// those too, for up to [`MAX_CHANGE_ROUNDS`] rounds.
-    fn fire_health_events(&mut self, world: &mut World) {
-        for _ in 0..MAX_CHANGE_ROUNDS {
-            if self.health.pending.is_empty() {
-                return;
-            }
-            let events = std::mem::take(&mut self.health.pending);
-            self.health.note(&events);
-            for side in [Side::Server, Side::Client] {
-                self.context(side).fire_health_events(world, &events);
-                self.collect(side);
-                self.fire_change_rounds(world);
-            }
-            // Then the Humanoids of the Healths that died (Phase 46).
-            let died: Vec<InstanceId> = events.iter().filter_map(humanoid::died_health).collect();
-            for health in died {
-                let fired = self.humanoids.died(world, health);
-                self.fire_humanoid_events(world, &fired);
-            }
-        }
-    }
-
-    /// Frame step 1, after the character controllers and `Landed`
-    /// (Phase 46): every Humanoid in the Workspace makes the pieces it
-    /// lacks, walks its `MoveTo` on (by its controller's `MoveDirection`),
-    /// and fires `MoveToFinished`, `StateChanged` and `Died`, in Scripts
-    /// and then in LocalScripts; its Animator plays the matching state.
-    pub fn step_humanoids(
-        &mut self,
-        world: &mut World,
-        controllers: &axcenity_character::Controllers,
-        seconds: f64,
-    ) {
-        self.fire_changes(world);
-        let assets = self.server.assets();
-        let events = self.humanoids.step(world, &assets, controllers, seconds);
-        self.fire_humanoid_events(world, &events);
-        self.fire_changes(world);
-    }
-
-    /// Fires Humanoid events on both sides, after handing both the
-    /// Has Humanoids' `MoveTo` plan on `nav`, the game's one navigation
-    /// mesh, which its NavigationAgents walk on too
-    /// ([`axcenity_nav::Agents::nav_mesh`]), instead of building a second
-    /// one (roadmap item M13).
-    pub fn share_nav_mesh(&mut self, nav: axcenity_nav::SharedNavMesh) {
-        self.humanoids.share_nav_mesh(nav);
-    }
-
-    /// Humanoids' states for `GetState`.
-    fn fire_humanoid_events(&mut self, world: &mut World, events: &[humanoid::HumanoidEvent]) {
-        for side in [Side::Server, Side::Client] {
-            self.context(side)
-                .set_humanoid_states(&self.humanoids.states);
-        }
-        if events.is_empty() {
-            return;
-        }
-        // A player's character dying respawns them later (Phase 47).
-        for event in events {
-            if let humanoid::HumanoidEvent::Died { humanoid } = *event {
-                self.players.died(world, humanoid);
-            }
-        }
-        for side in [Side::Server, Side::Client] {
-            self.context(side).fire_humanoid_events(world, events);
-            self.collect(side);
-            self.fire_change_rounds(world);
-        }
     }
 
     fn fire_touch_event(
@@ -1854,9 +1732,9 @@ impl ScriptRuntime {
     /// that are now where scripts run start.
     pub fn fire_changes(&mut self, world: &mut World) {
         self.fire_change_rounds(world);
-        // Abilities' first, so Health events their Effects cause fire here.
+        // Abilities' and Health's first, so Health events Effects cause
+        // fire here, and before Players see a character die.
         self.fire_system_events(world, true);
-        self.fire_health_events(world);
         self.fire_player_events(world);
         self.fire_level_events(world);
         self.fire_system_events(world, false);
@@ -2093,8 +1971,6 @@ impl ScriptRuntime {
         self.sound_actions.extend(context.take_sound_actions());
         self.particle_emits.extend(context.take_particle_emits());
         self.shatters.extend(context.take_shatters());
-        self.health.pending.extend(context.take_health_events());
-        self.humanoids.note(context.take_humanoid_requests());
         self.player_events
             .extend(self.players.note(context.take_spawned()));
         for (copy, original) in context.take_cloned_scripts() {
@@ -2219,8 +2095,6 @@ mod tests;
 
 #[cfg(test)]
 mod client_server_tests;
-#[cfg(test)]
-mod humanoid_tests;
 
 #[cfg(test)]
 mod input_tests;
@@ -2297,8 +2171,6 @@ mod data_tests;
 mod decal_tests;
 #[cfg(test)]
 mod devices_tests;
-#[cfg(test)]
-mod health_tests;
 #[cfg(test)]
 mod instance_identity_tests;
 #[cfg(test)]

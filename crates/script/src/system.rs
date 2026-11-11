@@ -21,7 +21,7 @@ use axcenity_save::Saves;
 use mlua::{AnyUserData, Function, IntoLuaMulti, Lua, Table, Thread};
 
 pub use crate::cframe::{LuaCFrame, to_vec3};
-pub use crate::health::{HealthEvent, damage, heal, set_health};
+pub use crate::types::LuaVector3;
 
 use crate::input::PromptInput;
 use crate::{ScriptRuntime, Side};
@@ -110,9 +110,44 @@ pub trait GameSystem: Any {
         false
     }
 
-    /// Runs in `ScriptRuntime::step_health` (frame step 4, on the device
-    /// that runs the server) after Healths step, with the frame's length.
-    fn step_server(&self, _runtime: &mut ScriptRuntime, _world: &mut World, _seconds: f64) {}
+    /// Property names some class's Instances read or write through the
+    /// system instead of storing them (a Humanoid's `WalkSpeed` is its
+    /// controller's). The runtime checks these first, so only names listed
+    /// here reach [`GameSystem::get_field`] and [`GameSystem::set_field`].
+    fn field_names(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Reading `class.key` on `id` when the system keeps it; `None` reads
+    /// the stored property. The World is lent.
+    fn get_field(
+        &self,
+        _lua: &Lua,
+        _id: InstanceId,
+        _class: ClassName,
+        _key: &str,
+    ) -> Option<mlua::Result<mlua::Value>> {
+        None
+    }
+
+    /// Whether a script writing `class.key` goes to
+    /// [`GameSystem::set_field`] (`Health.Health` fires `HealthChanged`).
+    fn sets_field(&self, _class: ClassName, _key: &str) -> bool {
+        false
+    }
+
+    /// Writing `class.key` on `id`, when [`GameSystem::sets_field`] says
+    /// so. The World is lent.
+    fn set_field(
+        &self,
+        _lua: &Lua,
+        _id: InstanceId,
+        _class: ClassName,
+        _key: &str,
+        _value: mlua::Value,
+    ) -> mlua::Result<()> {
+        Ok(())
+    }
 
     /// A player asked to activate `target` (`MessageKind::Activate`, from
     /// this device or another), for the server to serve.
@@ -135,6 +170,14 @@ pub const DESCRIBED_SYSTEM_METHODS: &[(ClassName, &str)] = &[
     (ClassName::Ability, "Activate"),
     (ClassName::Ability, "Cancel"),
     (ClassName::Model, "ApplyEffect"),
+    (ClassName::Health, "TakeDamage"),
+    (ClassName::Health, "Heal"),
+    (ClassName::Humanoid, "MoveTo"),
+    (ClassName::Humanoid, "Move"),
+    (ClassName::Humanoid, "Jump"),
+    (ClassName::Humanoid, "TakeDamage"),
+    (ClassName::Humanoid, "GetState"),
+    (ClassName::Humanoid, "ChangeState"),
     (ClassName::Inventory, "GetItems"),
     (ClassName::Inventory, "Add"),
     (ClassName::Inventory, "Remove"),
@@ -145,18 +188,61 @@ pub const DESCRIBED_SYSTEM_METHODS: &[(ClassName, &str)] = &[
     (ClassName::Humanoid, "UnequipTools"),
 ];
 
+/// Instance properties the API definitions describe that game systems
+/// keep ([`GameSystem::get_field`]): a Humanoid's, read from its pieces.
+/// Skipped and checked as [`DESCRIBED_SYSTEM_SERVICES`] are.
+#[doc(hidden)]
+pub const DESCRIBED_SYSTEM_FIELDS: &[(ClassName, &str)] = &[
+    (ClassName::Humanoid, "WalkSpeed"),
+    (ClassName::Humanoid, "RunSpeed"),
+    (ClassName::Humanoid, "JumpHeight"),
+    (ClassName::Humanoid, "Sit"),
+    (ClassName::Humanoid, "PlatformStand"),
+    (ClassName::Humanoid, "AutoRotate"),
+    (ClassName::Humanoid, "MoveDirection"),
+    (ClassName::Humanoid, "Health"),
+    (ClassName::Humanoid, "MaxHealth"),
+    (ClassName::Humanoid, "DisplayName"),
+    (ClassName::Humanoid, "HealthDisplayDistance"),
+];
+
 /// The systems added to one interpreter, in the order they were added.
 #[derive(Default, Clone)]
 pub(crate) struct Systems(Vec<Rc<dyn GameSystem>>);
+
+/// The property names systems route ([`GameSystem::field_names`]), each
+/// with the systems that may keep it, so a property read checks one map.
+#[derive(Default)]
+struct Fields(rustc_hash::FxHashMap<&'static str, Vec<Rc<dyn GameSystem>>>);
 
 /// Adds `system` to the interpreter `lua`.
 pub(crate) fn add(lua: &Lua, system: Rc<dyn GameSystem>) {
     if lua.app_data_ref::<Systems>().is_none() {
         lua.set_app_data(Systems::default());
     }
+    if lua.app_data_ref::<Fields>().is_none() {
+        lua.set_app_data(Fields::default());
+    }
+    if let Some(mut fields) = lua.app_data_mut::<Fields>() {
+        for &name in system.field_names() {
+            fields.0.entry(name).or_default().push(Rc::clone(&system));
+        }
+    }
     if let Some(mut systems) = lua.app_data_mut::<Systems>() {
         systems.0.push(system);
     }
+}
+
+/// The systems that may route the property `key`, if any.
+pub(crate) fn routing(lua: &Lua, key: &str) -> Option<Vec<Rc<dyn GameSystem>>> {
+    lua.app_data_ref::<Fields>()?.0.get(key).cloned()
+}
+
+/// The system that keeps writes to `class.key`, if one does.
+pub(crate) fn field_setter(lua: &Lua, class: ClassName, key: &str) -> Option<Rc<dyn GameSystem>> {
+    routing(lua, key)?
+        .into_iter()
+        .find(|system| system.sets_field(class, key))
 }
 
 /// The systems added to `lua`, cloned out so none of the app data is
@@ -314,17 +400,6 @@ pub fn local_player(lua: &Lua) -> Option<InstanceId> {
         .map(|player| player.0)
 }
 
-/// The Inventory of the character whose Humanoid is `humanoid`, made (with
-/// the character's other pieces) if it has none. An error names `call`
-/// when the Humanoid is destroyed or isn't in a character's Model.
-pub fn humanoid_inventory(
-    lua: &Lua,
-    humanoid: InstanceId,
-    call: &str,
-) -> mlua::Result<Option<InstanceId>> {
-    crate::humanoid::inventory(lua, humanoid, call)
-}
-
 /// The Player whose `Character` is `character`, if any.
 pub fn player_of(world: &World, character: InstanceId) -> Option<InstanceId> {
     crate::players::player_of(world, character)
@@ -344,6 +419,55 @@ pub fn send_activation(lua: &Lua, target: InstanceId, player: InstanceId) {
         });
     }
 }
+
+/// Reads the property `key` of `id` as a script's `id.key` does (through
+/// a system that keeps it, too). The World must be lent.
+pub fn get_property(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
+    crate::instance::get(lua, id, key)
+}
+
+/// Writes the property `key` of `id` as a script's `id.key = value` does,
+/// with its checks and events. The World must be lent.
+pub fn set_property(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result<()> {
+    crate::instance::set(lua, id, key, value)
+}
+
+/// The camera's turn about Y on `lua`'s side, in radians, if it has a
+/// camera (a LocalScript's `workspace.CurrentCamera`).
+pub fn camera_yaw(lua: &Lua) -> Option<f32> {
+    let camera = lua.app_data_ref::<crate::camera::Camera>()?;
+    Some(camera.state.orientation.y.to_radians())
+}
+
+/// The `Enum.HumanoidStateType` item named `name` (one of
+/// [`HUMANOID_STATES`]).
+pub fn humanoid_state_item(name: &'static str) -> impl mlua::IntoLua {
+    crate::types::LuaEnumItem {
+        enum_type: crate::types::EnumType::HumanoidStateType,
+        name,
+    }
+}
+
+/// The name of the `Enum.HumanoidStateType` item `value` is, or of the
+/// state a string names; `None` for any other value. The name isn't
+/// checked against [`HUMANOID_STATES`].
+pub fn humanoid_state_name(lua: &Lua, value: &mlua::Value) -> Option<String> {
+    use mlua::FromLua;
+    match value {
+        mlua::Value::String(name) => Some(name.to_string_lossy()),
+        _ => match crate::types::LuaEnumItem::from_lua(value.clone(), lua) {
+            Ok(item) if item.enum_type == crate::types::EnumType::HumanoidStateType => {
+                Some(item.name.to_owned())
+            }
+            _ => None,
+        },
+    }
+}
+
+/// `Enum.HumanoidStateType`'s items, in order.
+pub const HUMANOID_STATES: [&str; 8] = [
+    "Running", "Jumping", "Freefall", "Landed", "Seated", "Swimming", "Ragdoll", "Dead",
+];
 
 /// Fires the event `event` of the Instance `id` (`ability.Activated`) on
 /// `lua`'s side with `args`. The World must be lent.

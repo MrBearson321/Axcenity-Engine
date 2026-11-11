@@ -2,7 +2,9 @@
 
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 
-use super::*;
+use axcenity_script::{OutputKind, ScriptRuntime};
+
+use crate::{script_runtime, step_health};
 
 fn start(world: &mut World, runtime: &mut ScriptRuntime, source: &str) {
     let script = world.create(ClassName::Script).unwrap();
@@ -72,7 +74,7 @@ health.Died:Connect(function() print("died") end)
 fn died_fires_once_at_zero_even_when_several_hits_land_in_one_frame() {
     let mut world = World::new();
     character(&mut world);
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     let source = format!(
         "{LISTEN}
 health:TakeDamage(60, workspace.Character.Body)
@@ -96,7 +98,7 @@ print('health', health.Health)"
         "{lines:?}"
     );
     // Later frames add nothing: it's dead.
-    runtime.step_health(&mut world, 1.0 / 60.0);
+    step_health(&mut runtime, &mut world, 1.0 / 60.0);
     runtime.heartbeat(&mut world, 1.0 / 60.0);
     assert!(output(&mut runtime).is_empty());
 }
@@ -105,7 +107,7 @@ print('health', health.Health)"
 fn heal_stops_at_max_health_and_does_nothing_once_dead_until_health_is_set() {
     let mut world = World::new();
     let (_, health) = character(&mut world);
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     let source = format!(
         "{LISTEN}
 health:TakeDamage(30)
@@ -134,7 +136,7 @@ health.Health = 250"
 fn an_invulnerable_health_takes_no_damage_and_bad_amounts_are_errors() {
     let mut world = World::new();
     let (_, health) = character(&mut world);
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     let source = format!(
         "{LISTEN}
 health.Invulnerable = true
@@ -162,7 +164,7 @@ fn regeneration_waits_regen_delay_after_damage_and_stops_at_max_health() {
             .set_property(health, name, Value::Number(value))
             .unwrap();
     }
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     start(
         &mut world,
         &mut runtime,
@@ -170,7 +172,7 @@ fn regeneration_waits_regen_delay_after_damage_and_stops_at_max_health() {
     );
     let step = |world: &mut World, runtime: &mut ScriptRuntime, seconds: f64| {
         for _ in 0..(seconds * 60.0).round() as usize {
-            runtime.step_health(world, 1.0 / 60.0);
+            step_health(runtime, world, 1.0 / 60.0);
         }
     };
     step(&mut world, &mut runtime, 0.9);
@@ -199,7 +201,7 @@ fn a_damage_zone_damages_each_health_inside_it_once_a_frame() {
         )
         .unwrap();
     assert!(world.get(zone).unwrap().class().is_a("Part"));
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     start(
         &mut world,
         &mut runtime,
@@ -207,7 +209,7 @@ fn a_damage_zone_damages_each_health_inside_it_once_a_frame() {
             print(string.format('%.3f', amount), source.ClassName)
         end)",
     );
-    runtime.step_health(&mut world, 0.5);
+    step_health(&mut runtime, &mut world, 0.5);
     assert_eq!(output(&mut runtime), ["5.000 DamageZone"]);
     assert_eq!(health_of(&world, health), 95.0);
 }

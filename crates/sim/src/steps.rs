@@ -174,7 +174,7 @@ fn characters_landed(ctx: &mut FrameCtx) {
     let sim = ctx.io.sim();
     let landings = sim.characters.take_landings();
     if !following && !landings.is_empty() {
-        sim.scripts.fire_landed(&mut sim.world, &landings);
+        axcenity_gameplay::fire_landed(&mut sim.scripts, &mut sim.world, &landings);
     }
 }
 
@@ -184,8 +184,12 @@ fn humanoids(ctx: &mut FrameCtx) {
         return;
     }
     let sim = ctx.io.sim();
-    sim.scripts
-        .step_humanoids(&mut sim.world, &sim.characters, ctx.seconds);
+    axcenity_gameplay::step_humanoids(
+        &mut sim.scripts,
+        &mut sim.world,
+        &sim.characters,
+        ctx.seconds,
+    );
 }
 
 /// Players: their first character, respawns and spawn ForceFields (Phase 47).
@@ -349,7 +353,7 @@ fn health(ctx: &mut FrameCtx) {
     }
     let sim = ctx.io.sim();
     if !sim.paused() {
-        sim.scripts.step_health(&mut sim.world, ctx.seconds);
+        axcenity_gameplay::step_health(&mut sim.scripts, &mut sim.world, ctx.seconds);
     }
 }
 

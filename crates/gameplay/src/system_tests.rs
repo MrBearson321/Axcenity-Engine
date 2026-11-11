@@ -29,11 +29,13 @@ fn described_system_methods_are_the_installed_ones_and_exist() {
 
     let lua = mlua::Lua::new();
     let abilities = crate::AbilitySystem::default();
+    let character = crate::CharacterSystem::default();
     let tools = crate::ToolSystem::default();
     let story = crate::Story::default();
     let installed: Vec<(ClassName, &str)> = [
         &crate::Debris as &dyn GameSystem,
         &abilities,
+        &character,
         &tools,
         &story,
     ]
@@ -81,11 +83,13 @@ fn described_system_services_are_the_installed_ones_and_their_members_exist() {
     use axcenity_script::{ApiKind, GameSystem, api_reference};
 
     let abilities = crate::AbilitySystem::default();
+    let character = crate::CharacterSystem::default();
     let tools = crate::ToolSystem::default();
     let story = crate::Story::default();
     let installed: Vec<&str> = [
         &crate::Debris as &dyn GameSystem,
         &abilities,
+        &character,
         &tools,
         &story,
     ]
@@ -114,6 +118,42 @@ fn described_system_services_are_the_installed_ones_and_their_members_exist() {
                 _ => format!("assert(game:GetService('{service}').{name} ~= nil, '{service}.{name}')"),
             });
         }
+    }
+    let source = format!("{}\nprint('checked')", checks.join("\n"));
+    assert_eq!(run_both_sides(&source), ["checked", "checked"]);
+}
+
+/// Every Instance property a system keeps that the definitions describe is
+/// one an installed system routes, and it reads on both sides.
+#[test]
+fn described_system_fields_are_kept_and_read() {
+    use axcenity_script::GameSystem;
+    use axcenity_script::system::DESCRIBED_SYSTEM_FIELDS;
+
+    let abilities = crate::AbilitySystem::default();
+    let character = crate::CharacterSystem::default();
+    let tools = crate::ToolSystem::default();
+    let story = crate::Story::default();
+    let systems = [
+        &crate::Debris as &dyn GameSystem,
+        &abilities,
+        &character,
+        &tools,
+        &story,
+    ];
+    let mut checks = vec![
+        "local humanoid = Instance.new('Humanoid')\nhumanoid.Parent = Instance.new('Model')"
+            .to_owned(),
+    ];
+    for &(class, name) in DESCRIBED_SYSTEM_FIELDS {
+        assert!(
+            systems.iter().any(
+                |system| system.field_names().contains(&name) && system.sets_field(class, name)
+            ),
+            "{class}.{name} is kept by a system"
+        );
+        assert_eq!(class, ClassName::Humanoid, "add a sample for {class}");
+        checks.push(format!("assert(humanoid.{name} ~= nil, '{class}.{name}')"));
     }
     let source = format!("{}\nprint('checked')", checks.join("\n"));
     assert_eq!(run_both_sides(&source), ["checked", "checked"]);

@@ -38,10 +38,6 @@ impl GameSystem for AbilitySystem {
         true
     }
 
-    fn step_server(&self, _runtime: &mut ScriptRuntime, world: &mut World, seconds: f64) {
-        self.abilities.0.borrow_mut().step(world, seconds);
-    }
-
     fn activation_requested(&self, target: InstanceId, player: InstanceId) {
         self.abilities.0.borrow_mut().requests.push(Request {
             ability: target,
@@ -59,7 +55,7 @@ impl GameSystem for AbilitySystem {
                 std::mem::take(&mut abilities.health),
             )
         };
-        runtime.queue_health_events(health);
+        crate::character_system::queue_health_events(runtime, health);
         if events.is_empty() {
             return false;
         }
@@ -68,6 +64,14 @@ impl GameSystem for AbilitySystem {
             runtime.fire_change_rounds(world);
         }
         true
+    }
+}
+
+/// The server's step (from `step_health`): cooldowns, active abilities
+/// and Effects count down.
+pub(crate) fn step_server(runtime: &ScriptRuntime, world: &mut World, seconds: f64) {
+    if let Some(system) = runtime.system::<AbilitySystem>() {
+        system.abilities.0.borrow_mut().step(world, seconds);
     }
 }
 

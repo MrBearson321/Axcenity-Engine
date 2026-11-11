@@ -4,20 +4,22 @@
 //! per-frame step ([`Healths::step`]) that applies DamageZones and
 //! regeneration and keeps health bars bound to their Health.
 //!
-//! A side's scripts queue events in its app data ([`HealthEvents`]); the
-//! runtime collects them and fires them on both sides, as it does change
-//! events. `Died` fires when Health goes from above 0 to 0, so it fires once
+//! Scripts on both sides queue events in one [`SharedHealthEvents`]; the
+//! character system ([`crate::CharacterSystem`]) fires them on both sides
+//! from `fire_changes`, as the runtime does change events. `Died` fires when Health goes from above 0 to 0, so it fires once
 //! however many hits land: at 0 damage does nothing.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_physics::QueryParams;
 use mlua::{FromLua, Function, Lua};
 
-use crate::instance::{LuaInstance, destroyed, world_mut};
-use crate::types::type_name;
+use axcenity_script::system::{destroyed, type_name};
+use axcenity_script::{LuaInstance, lent_world_mut as world_mut};
 
 /// The name of the ObjectValue inside a ProgressBar that binds it to a
 /// Health: the bar shows that Health out of its MaxHealth.
@@ -42,9 +44,10 @@ pub enum HealthEvent {
     Died { health: InstanceId },
 }
 
-/// The events one side's scripts caused, until the runtime collects them.
-#[derive(Default)]
-pub struct HealthEvents(pub Vec<HealthEvent>);
+/// The events scripts on either side caused, until the character system
+/// fires them.
+#[derive(Clone, Default)]
+pub struct SharedHealthEvents(pub Rc<RefCell<Vec<HealthEvent>>>);
 
 fn number(world: &World, id: InstanceId, name: &str) -> f64 {
     world
@@ -174,8 +177,8 @@ pub fn health_of(world: &World, id: InstanceId) -> Option<InstanceId> {
 }
 
 pub(crate) fn push(lua: &Lua, events: Vec<HealthEvent>) {
-    if let Some(mut queue) = lua.app_data_mut::<HealthEvents>() {
-        queue.0.extend(events);
+    if let Some(queue) = lua.app_data_ref::<SharedHealthEvents>() {
+        queue.0.borrow_mut().extend(events);
     }
 }
 
@@ -261,8 +264,6 @@ pub struct Healths {
     /// Seconds since each Health last took damage. One never damaged
     /// regenerates at once.
     since_damage: HashMap<InstanceId, f64>,
-    /// Events waiting to be fired on both sides.
-    pub pending: Vec<HealthEvent>,
 }
 
 impl Healths {

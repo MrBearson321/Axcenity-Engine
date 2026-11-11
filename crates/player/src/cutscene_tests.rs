@@ -56,9 +56,12 @@ impl App {
         self.sim
             .characters
             .step(&mut self.sim.world, &self.sim.assets, motion, FRAME);
-        self.sim
-            .scripts
-            .step_humanoids(&mut self.sim.world, &self.sim.characters, seconds);
+        axcenity_gameplay::step_humanoids(
+            &mut self.sim.scripts,
+            &mut self.sim.world,
+            &self.sim.characters,
+            seconds,
+        );
         self.sim.scripts.step_players(&mut self.sim.world, seconds);
         let events = self.input.take_events(self.pointer);
         self.sim.scripts.input_events(&mut self.sim.world, &events);

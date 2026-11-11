@@ -22,7 +22,7 @@ use axcenity_core::{ClassName, InstanceId, KeyCode, Parameter, Value, World};
 use glam::{Quat, Vec3};
 use mlua::{FromLua, Function, Lua};
 
-use axcenity_script::system::{self, LuaCFrame, destroyed, to_vec3, type_name};
+use axcenity_script::system::{LuaCFrame, destroyed, to_vec3, type_name};
 use axcenity_script::{LuaInstance, PromptInput, lent_world as world, lent_world_mut as world_mut};
 
 /// The Animator parameter a character's Tool in hand sets.
@@ -747,7 +747,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
     let humanoid_equip = lua.create_function(|lua, (this, tool): (LuaInstance, mlua::Value)| {
         let call = "EquipTool(tool)";
         let tool = tool_arg(lua, tool, call)?;
-        let Some(inventory) = system::humanoid_inventory(lua, this.0, call)? else {
+        let Some(inventory) = crate::humanoid::inventory(lua, this.0, call)? else {
             return Ok(());
         };
         let assets = assets_of(lua);
@@ -760,7 +760,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         .map_err(mlua::Error::runtime)
     })?;
     let humanoid_unequip = lua.create_function(|lua, this: LuaInstance| {
-        if let Some(inventory) = system::humanoid_inventory(lua, this.0, "UnequipTools()")? {
+        if let Some(inventory) = crate::humanoid::inventory(lua, this.0, "UnequipTools()")? {
             with_changes(lua, inventory, |world, changes| {
                 unequip_all(world, inventory, changes)
             })?;

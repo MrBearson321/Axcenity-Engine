@@ -118,13 +118,17 @@ impl Game {
         self.characters
             .step(&mut self.world, &self.assets, MoveInput::default(), FRAME);
         let landings = self.characters.take_landings();
-        self.scripts.fire_landed(&mut self.world, &landings);
-        self.scripts
-            .step_humanoids(&mut self.world, &self.characters, seconds);
+        axcenity_gameplay::fire_landed(&mut self.scripts, &mut self.world, &landings);
+        axcenity_gameplay::step_humanoids(
+            &mut self.scripts,
+            &mut self.world,
+            &self.characters,
+            seconds,
+        );
         self.scripts.step(&mut self.world, seconds);
         self.characters.keep_kinematic(&mut self.world);
         self.physics.step(&mut self.world, seconds);
-        self.scripts.step_health(&mut self.world, seconds);
+        axcenity_gameplay::step_health(&mut self.scripts, &mut self.world, seconds);
         self.animators
             .update(&mut self.world, &self.assets, seconds);
         self.take_printed();

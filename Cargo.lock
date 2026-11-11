@@ -701,6 +701,8 @@ dependencies = [
  "axcenity-assets",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-nav",
+ "axcenity-physics",
  "axcenity-save",
  "axcenity-script",
  "axcenity-workspace-hack",

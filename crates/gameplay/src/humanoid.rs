@@ -9,7 +9,9 @@
 //! by the controller's `MoveDirection`), and each Humanoid's state, which
 //! it works out from the pieces every frame and fires `StateChanged` for.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use axcenity_anim::read_state_machine;
@@ -19,9 +21,11 @@ use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
 use axcenity_nav::{NavMesh, SharedNavMesh};
 use mlua::{FromLua, Function, Lua};
 
+use axcenity_script::LuaInstance;
+use axcenity_script::system::{self, LuaVector3, destroyed, type_name};
+use axcenity_script::{lent_world as world, lent_world_mut as world_mut};
+
 use crate::health::{self, HealthEvent};
-use crate::instance::{LuaInstance, destroyed, world, world_mut};
-use crate::types::{EnumType, LuaEnumItem, LuaVector3, type_name};
 
 /// Humanoid properties that are its controller's.
 pub const CONTROLLER_FIELDS: [&str; 7] = [
@@ -97,11 +101,8 @@ impl State {
         }
     }
 
-    fn item(self) -> LuaEnumItem {
-        LuaEnumItem {
-            enum_type: EnumType::HumanoidStateType,
-            name: self.name(),
-        }
+    fn item(self) -> impl mlua::IntoLua {
+        system::humanoid_state_item(self.name())
     }
 
     fn from_name(name: &str) -> Option<Self> {
@@ -148,14 +149,14 @@ pub enum Request {
     Stop { humanoid: InstanceId },
 }
 
-/// One side's scripts' requests, until the runtime collects them.
-#[derive(Default)]
-pub struct Requests(pub Vec<Request>);
-
-/// Each Humanoid's state as the runtime last worked it out, for
-/// `GetState`. The runtime copies it into both sides.
+/// Scripts' requests on both sides, until the next step takes them.
 #[derive(Clone, Default)]
-pub struct States(pub HashMap<InstanceId, State>);
+pub struct Requests(pub Rc<RefCell<Vec<Request>>>);
+
+/// Each Humanoid's state as the step last worked it out, which both
+/// sides' `GetState` read.
+#[derive(Clone, Default)]
+pub struct States(pub Rc<RefCell<HashMap<InstanceId, State>>>);
 
 /// The parent a Humanoid fronts: a Model, or a part.
 fn holder(world: &World, humanoid: InstanceId) -> Option<InstanceId> {
@@ -271,29 +272,29 @@ pub fn is_field(key: &str) -> bool {
 /// Reading `humanoid.<key>`: the piece's property.
 pub fn get(lua: &Lua, humanoid: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     let (piece, name) = field(lua, humanoid, key)?;
-    crate::instance::get(lua, piece, name)
+    system::get_property(lua, piece, name)
 }
 
 /// Writing `humanoid.<key>`: the piece's property, as setting it there
 /// would (a Health's `Health` fires `HealthChanged`).
 pub fn set(lua: &Lua, humanoid: InstanceId, key: &str, value: mlua::Value) -> mlua::Result<()> {
     let (piece, name) = field(lua, humanoid, key)?;
-    crate::instance::set(lua, piece, name, value)
+    system::set_property(lua, piece, name, value)
 }
 
-fn requests_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Requests>> {
-    lua.app_data_mut::<Requests>()
-        .ok_or_else(|| mlua::Error::runtime("Humanoids aren't set up on this side"))
+fn push_request(lua: &Lua, request: Request) -> mlua::Result<()> {
+    let requests = lua
+        .app_data_ref::<Requests>()
+        .map(|requests| requests.clone())
+        .ok_or_else(|| mlua::Error::runtime("Humanoids aren't set up on this side"))?;
+    requests.0.borrow_mut().push(request);
+    Ok(())
 }
 
 /// The pieces of a Humanoid a method is called on.
 /// The Inventory of the Humanoid's character, made if it has none (for
 /// the Tools system's `EquipTool`).
-pub(crate) fn inventory(
-    lua: &Lua,
-    humanoid: InstanceId,
-    call: &str,
-) -> mlua::Result<Option<InstanceId>> {
+pub fn inventory(lua: &Lua, humanoid: InstanceId, call: &str) -> mlua::Result<Option<InstanceId>> {
     Ok(pieces_for(lua, humanoid, call)?.inventory)
 }
 
@@ -328,12 +329,6 @@ fn set_direction(world: &mut World, controller: InstanceId, x: f32, z: f32) {
 
 fn position(world: &World, id: InstanceId) -> Option<Vector3> {
     world.get(id)?.property("Position")?.as_vector3()
-}
-
-/// The camera's turn about Y on this side, in radians, if it has one.
-fn camera_yaw(lua: &Lua) -> Option<f32> {
-    let camera = lua.app_data_ref::<crate::camera::Camera>()?;
-    Some(camera.state.orientation.y.to_radians())
 }
 
 /// Turns every Ragdoll in `holder` on or off.
@@ -379,17 +374,11 @@ fn number(world: &World, id: InstanceId, name: &str) -> f64 {
 }
 
 fn state_arg(lua: &Lua, value: mlua::Value) -> mlua::Result<State> {
-    let name = match &value {
-        mlua::Value::String(name) => name.to_string_lossy(),
-        _ => match LuaEnumItem::from_lua(value.clone(), lua) {
-            Ok(item) if item.enum_type == EnumType::HumanoidStateType => item.name.to_owned(),
-            _ => {
-                return Err(mlua::Error::runtime(format!(
-                    "ChangeState(state) needs an Enum.HumanoidStateType item, not {}",
-                    type_name(lua, &value)
-                )));
-            }
-        },
+    let Some(name) = system::humanoid_state_name(lua, &value) else {
+        return Err(mlua::Error::runtime(format!(
+            "ChangeState(state) needs an Enum.HumanoidStateType item, not {}",
+            type_name(lua, &value)
+        )));
     };
     State::from_name(&name).ok_or_else(|| {
         mlua::Error::runtime(format!(
@@ -423,11 +412,14 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
                     ))
                 }
             };
-            requests_mut(lua)?.0.push(Request::MoveTo {
-                humanoid: this.0,
-                target,
-                part,
-            });
+            push_request(
+                lua,
+                Request::MoveTo {
+                    humanoid: this.0,
+                    target,
+                    part,
+                },
+            )?;
             Ok(())
         },
     )?;
@@ -438,7 +430,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
             let pieces = pieces_for(lua, this.0, call)?;
             let (mut x, mut z) = (direction.x, direction.z);
             if relative == Some(true)
-                && let Some(yaw) = camera_yaw(lua)
+                && let Some(yaw) = system::camera_yaw(lua)
             {
                 let (sin, cos) = yaw.sin_cos();
                 (x, z) = (x * cos + z * sin, -x * sin + z * cos);
@@ -446,9 +438,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
             if let Some(controller) = pieces.controller {
                 set_direction(&mut *world_mut(lua)?, controller, x, z);
             }
-            requests_mut(lua)?
-                .0
-                .push(Request::Stop { humanoid: this.0 });
+            push_request(lua, Request::Stop { humanoid: this.0 })?;
             Ok(())
         },
     )?;
@@ -476,7 +466,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         world(lua)?.get(this.0).ok_or_else(destroyed)?;
         let state = lua
             .app_data_ref::<States>()
-            .and_then(|states| states.0.get(&this.0).copied())
+            .and_then(|states| states.0.borrow().get(&this.0).copied())
             .unwrap_or(State::Running);
         Ok(state.item())
     })?;
@@ -557,6 +547,8 @@ impl Walk {
 #[derive(Default)]
 pub struct Humanoids {
     walks: HashMap<InstanceId, Walk>,
+    /// Scripts' `MoveTo` and `Move` calls on both sides, not yet taken.
+    pub requests: Requests,
     pub states: States,
     /// The Animator state each last asked for (or `None` while seated,
     /// dead or ragdolled), and its feet last frame, to tell walking from
@@ -580,7 +572,8 @@ fn feet_of(world: &World, holder: InstanceId) -> Option<Vector3> {
 
 impl Humanoids {
     /// Takes scripts' `MoveTo` and `Move` calls.
-    pub fn note(&mut self, requests: Vec<Request>) {
+    fn note(&mut self) {
+        let requests = std::mem::take(&mut *self.requests.0.borrow_mut());
         for request in requests {
             match request {
                 Request::MoveTo {
@@ -634,13 +627,17 @@ impl Humanoids {
         } else {
             0.0
         };
+        self.note();
         if !self.nav_shared {
             self.nav.advance(dt);
         }
         let humanoids: Vec<InstanceId> =
             world.all_below(world.workspace(), |class| class == ClassName::Humanoid);
         self.walks.retain(|id, _| humanoids.contains(id));
-        self.states.0.retain(|id, _| humanoids.contains(id));
+        self.states
+            .0
+            .borrow_mut()
+            .retain(|id, _| humanoids.contains(id));
         self.playing.retain(|id, _| humanoids.contains(id));
         self.feet.retain(|id, _| humanoids.contains(id));
         let mut events = Vec::new();
@@ -657,7 +654,7 @@ impl Humanoids {
                 controllers,
                 holder,
                 pieces,
-                self.states.0.get(&humanoid),
+                self.states.0.borrow().get(&humanoid),
             );
             events.extend(self.enter(world, humanoid, state));
             self.animate(world, assets, humanoid, holder, pieces, dt);
@@ -674,7 +671,7 @@ impl Humanoids {
         humanoid: InstanceId,
         state: State,
     ) -> Vec<HumanoidEvent> {
-        let old = self.states.0.insert(humanoid, state);
+        let old = self.states.0.borrow_mut().insert(humanoid, state);
         let mut events = Vec::new();
         if old == Some(state) {
             return events;
@@ -704,6 +701,7 @@ impl Humanoids {
     /// The Health `health` died: its Humanoid, if its Model has one, dies
     /// now, without waiting for the next step.
     pub fn died(&mut self, world: &mut World, health: InstanceId) -> Vec<HumanoidEvent> {
+        self.note();
         let Some(humanoid) = world
             .get(health)
             .and_then(|instance| instance.parent())
@@ -807,7 +805,7 @@ impl Humanoids {
             (Some(now), Some(last)) if dt > 0.0 => across(last, now) / dt,
             _ => 0.0,
         };
-        let state = self.states.0.get(&humanoid).copied();
+        let state = self.states.0.borrow().get(&humanoid).copied();
         let wanted = match state {
             Some(State::Running | State::Landed) => {
                 let controller = pieces.controller.unwrap_or(humanoid);
@@ -956,7 +954,7 @@ fn in_ragdoll(world: &World, id: InstanceId) -> bool {
 }
 
 /// The event's arguments for the Humanoid's `StateChanged`.
-pub fn state_items(old: State, new: State) -> (LuaEnumItem, LuaEnumItem) {
+pub fn state_items(old: State, new: State) -> (impl mlua::IntoLua, impl mlua::IntoLua) {
     (old.item(), new.item())
 }
 
