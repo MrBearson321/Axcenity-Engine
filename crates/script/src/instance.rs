@@ -167,13 +167,17 @@ impl LuaInstance {
 }
 
 pub(crate) fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
-    // A Humanoid's fields are its pieces' (Phase 46).
-    if crate::humanoid::is_field(key)
-        && world(lua)?
-            .get(id)
-            .is_some_and(|instance| instance.class() == ClassName::Humanoid)
-    {
-        return crate::humanoid::get(lua, id, key);
+    // Properties a game system keeps: a Humanoid's are its pieces'
+    // (Phase 46).
+    if let Some(systems) = crate::system::routing(lua, key) {
+        let class = world(lua)?.get(id).map(|instance| instance.class());
+        if let Some(class) = class
+            && let Some(result) = systems
+                .iter()
+                .find_map(|system| system.get_field(lua, id, class, key))
+        {
+            return result;
+        }
     }
     let world = world(lua)?;
     // Both work on something that's not on this device (Phase 80), so
@@ -371,7 +375,16 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
                 crate::system::read_only(lua, class, key).expect("checked above"),
             ))
         }
-        "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
+        // Properties a game system keeps: `Health.Health` fires
+        // `HealthChanged`, a Humanoid's are its pieces' (Phase 43, 46).
+        key if class
+            .is_some_and(|class| crate::system::field_setter(lua, class, key).is_some()) =>
+        {
+            let class = class.expect("checked above");
+            crate::system::field_setter(lua, class, key)
+                .expect("checked above")
+                .set_field(lua, id, class, key, value)
+        }
         key if class == Some(ClassName::Sequence) && crate::sequence::is_field(key) => {
             crate::sequence::set(lua, id, key, value)
         }
@@ -379,9 +392,6 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
         "UserId" | "DisplayName" if class == Some(ClassName::Player) => Err(mlua::Error::runtime(
             format!("Player.{key} is read-only: it's who joined, as they joined"),
         )),
-        key if class == Some(ClassName::Humanoid) && crate::humanoid::is_field(key) => {
-            crate::humanoid::set(lua, id, key, value)
-        }
         "Occupant" if class.is_some_and(ClassName::is_seat) => {
             Err(mlua::Error::runtime(crate::seat::OCCUPANT_READ_ONLY))
         }

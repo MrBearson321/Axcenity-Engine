@@ -406,6 +406,10 @@ fn described_fields_and_methods_exist() {
         {
             continue;
         }
+        // A Humanoid's fields, which the character system keeps.
+        if crate::system::DESCRIBED_SYSTEM_FIELDS.contains(&(*class, field.name)) {
+            continue;
+        }
         // `LocalPlayer` is nil only before the player joins.
         check(
             side_of(*class, field.name),

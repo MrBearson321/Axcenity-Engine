@@ -89,8 +89,12 @@ impl Game {
         let seconds = f64::from(FRAME);
         self.characters
             .step(&mut self.world, &self.assets, MoveInput::default(), FRAME);
-        self.scripts
-            .step_humanoids(&mut self.world, &self.characters, seconds);
+        axcenity_gameplay::step_humanoids(
+            &mut self.scripts,
+            &mut self.world,
+            &self.characters,
+            seconds,
+        );
         self.scripts.step(&mut self.world, seconds);
         self.characters.keep_kinematic(&mut self.world);
         self.physics.step(&mut self.world, seconds);

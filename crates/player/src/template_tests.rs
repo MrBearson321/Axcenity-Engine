@@ -143,7 +143,8 @@ impl App {
                 &mut self.sim.world,
                 &mut self.sim.characters,
             );
-            self.sim.scripts.step_humanoids(
+            axcenity_gameplay::step_humanoids(
+                &mut self.sim.scripts,
                 &mut self.sim.world,
                 &self.sim.characters,
                 f64::from(seconds),
@@ -202,9 +203,11 @@ impl App {
             self.sim
                 .scripts
                 .fire_breaks(&mut self.sim.world, &mut self.sim.physics);
-            self.sim
-                .scripts
-                .step_health(&mut self.sim.world, f64::from(seconds));
+            axcenity_gameplay::step_health(
+                &mut self.sim.scripts,
+                &mut self.sim.world,
+                f64::from(seconds),
+            );
         }
         self.sim
             .scripts

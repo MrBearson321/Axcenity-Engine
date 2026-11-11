@@ -50,10 +50,10 @@ pub struct Sim {
 
 impl Sim {
     /// A simulation of `world` with nothing moving yet.
-    pub fn new(world: World, mut scripts: ScriptRuntime, assets: Assets) -> Self {
+    pub fn new(world: World, scripts: ScriptRuntime, assets: Assets) -> Self {
         // Agents and Humanoids walk on one navigation mesh (roadmap M13).
         let agents = Agents::default();
-        scripts.share_nav_mesh(agents.nav_mesh());
+        axcenity_gameplay::share_nav_mesh(&scripts, agents.nav_mesh());
         Self {
             world,
             scripts,

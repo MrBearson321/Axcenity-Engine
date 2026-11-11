@@ -514,7 +514,7 @@ fn tool_in_hand(world: &World) -> bool {
 fn fire_landed(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
     let landings = characters.take_landings();
     if !landings.is_empty() {
-        scripts.fire_landed(world, &landings);
+        axcenity_gameplay::fire_landed(scripts, world, &landings);
     }
 }
 

@@ -44,7 +44,7 @@ impl Device {
         axcenity_gameplay::step_abilities(&mut self.scripts, &mut self.world, SECONDS);
         self.scripts.step(&mut self.world, SECONDS);
         if !self.network.is_following() {
-            self.scripts.step_health(&mut self.world, SECONDS);
+            axcenity_gameplay::step_health(&mut self.scripts, &mut self.world, SECONDS);
         }
         self.network.send(&self.world, &mut self.scripts);
         for line in self.scripts.take_output() {

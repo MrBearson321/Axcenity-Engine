@@ -35,8 +35,10 @@ use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use mlua::{FromLua, Function, Lua};
 
-use axcenity_script::system::{self, HealthEvent, destroyed, type_name};
+use axcenity_script::system::{self, destroyed, type_name};
 use axcenity_script::{LuaInstance, Side, lent_world as world, lent_world_mut as world_mut};
+
+use crate::health::HealthEvent;
 
 /// Something an Ability did, waiting to fire on both sides.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -347,13 +349,13 @@ fn is_health_value(world: &World, place: &Place) -> Option<InstanceId> {
 }
 
 /// Sets `place` to `to`, as setting it from a script would: a Health's
-/// `Health` through [`system::set_health`].
+/// `Health` through [`crate::health::set_health`].
 fn write(world: &mut World, place: &Place, to: f64) -> Vec<HealthEvent> {
     if !to.is_finite() {
         return Vec::new();
     }
     if let Some(health) = is_health_value(world, place) {
-        return system::set_health(world, health, to);
+        return crate::health::set_health(world, health, to);
     }
     match place {
         Place::Property(id, name) => {
@@ -386,9 +388,9 @@ fn change(
             let by = amount * stacks;
             if let Some(health) = is_health_value(world, place) {
                 let events = if by < 0.0 {
-                    system::damage(world, health, -by, Some(source))
+                    crate::health::damage(world, health, -by, Some(source))
                 } else {
-                    system::heal(world, health, by)
+                    crate::health::heal(world, health, by)
                 };
                 let after = read(world, place).unwrap_or(now);
                 return (after - now, events);

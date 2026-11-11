@@ -117,7 +117,7 @@ impl Game {
         self.runtime.input_events(world, events);
         step_abilities(&mut self.runtime, world, FRAME);
         self.runtime.step(world, FRAME);
-        self.runtime.step_health(world, FRAME);
+        crate::step_health(&mut self.runtime, world, FRAME);
     }
 
     fn seconds(&mut self, seconds: f64) {

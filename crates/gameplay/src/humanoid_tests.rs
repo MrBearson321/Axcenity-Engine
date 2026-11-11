@@ -56,11 +56,11 @@ fn floor_and_character() -> (World, InstanceId) {
 }
 
 fn walk_east(humanoids: &mut Humanoids, world: &mut World, humanoid: InstanceId) {
-    humanoids.note(vec![Request::MoveTo {
+    humanoids.requests.0.borrow_mut().push(Request::MoveTo {
         humanoid,
         target: Vector3::new(10.0, 0.0, 0.0),
         part: None,
-    }]);
+    });
     humanoids.step(
         world,
         &Assets::default(),

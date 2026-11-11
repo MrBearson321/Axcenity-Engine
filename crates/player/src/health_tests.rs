@@ -41,11 +41,11 @@ impl Game {
         let landings = self.characters.take_landings();
         self.landings
             .extend(landings.iter().map(|&(_, speed)| speed));
-        self.scripts.fire_landed(&mut self.world, &landings);
+        axcenity_gameplay::fire_landed(&mut self.scripts, &mut self.world, &landings);
         self.scripts.step(&mut self.world, f64::from(FRAME));
         self.characters.keep_kinematic(&mut self.world);
         self.physics.step(&mut self.world, f64::from(FRAME));
-        self.scripts.step_health(&mut self.world, f64::from(FRAME));
+        axcenity_gameplay::step_health(&mut self.scripts, &mut self.world, f64::from(FRAME));
         self.scripts.heartbeat(&mut self.world, f64::from(FRAME));
         self.printed
             .extend(self.scripts.take_output().into_iter().map(|line| line.text));

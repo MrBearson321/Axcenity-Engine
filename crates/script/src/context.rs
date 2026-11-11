@@ -14,7 +14,6 @@ use mlua::{Lua, LuaOptions, StdLib, Thread};
 use crate::camera::{Camera, CameraState, GameCamera};
 use crate::client::{LoadingScreenRemoved, LocalPlayer};
 use crate::errors::error_message;
-use crate::health::HealthEvent;
 use crate::input::{self, Inputs};
 use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
@@ -60,9 +59,6 @@ impl Context {
         lua.set_app_data(crate::SoundActions::default());
         lua.set_app_data(crate::ParticleEmits::default());
         lua.set_app_data(crate::Shatters::default());
-        lua.set_app_data(crate::health::HealthEvents::default());
-        lua.set_app_data(crate::humanoid::Requests::default());
-        lua.set_app_data(crate::humanoid::States::default());
         lua.set_app_data(crate::players::Spawned::default());
         lua.set_app_data(crate::players::Spawning::default());
         lua.set_app_data(crate::players::Kicks::default());
@@ -152,14 +148,6 @@ impl Context {
         methods.extend(
             crate::ownership::methods(&lua)
                 .expect("creating the network ownership methods only fails when out of memory"),
-        );
-        methods.extend(
-            crate::health::methods(&lua)
-                .expect("creating Health methods only fails when out of memory"),
-        );
-        methods.extend(
-            crate::humanoid::methods(&lua)
-                .expect("creating Humanoid methods only fails when out of memory"),
         );
         methods.extend(
             crate::players::methods(&lua)
@@ -580,46 +568,6 @@ impl Context {
             .unwrap_or_default()
     }
 
-    /// Fires `Landed(speed)` on a character controller that's still there.
-    pub fn fire_landed(&self, world: &mut World, controller: InstanceId, speed: f64) {
-        with_world(&self.lua, world, || {
-            if instance::world(&self.lua).is_ok_and(|world| world.contains(controller)) {
-                let owner = events::Owner::Instance(controller);
-                events::fire(&self.lua, owner, "Landed", speed);
-            }
-        });
-    }
-
-    /// Fires each Health event on its Health, skipping Healths that are
-    /// gone. A source that's gone is nil.
-    pub fn fire_health_events(&self, world: &mut World, health_events: &[HealthEvent]) {
-        with_world(&self.lua, world, || {
-            let exists =
-                |id: InstanceId| instance::world(&self.lua).is_ok_and(|world| world.contains(id));
-            for event in health_events {
-                match *event {
-                    HealthEvent::Changed { health, new, old } if exists(health) => {
-                        let owner = events::Owner::Instance(health);
-                        events::fire(&self.lua, owner, "HealthChanged", (new, old));
-                    }
-                    HealthEvent::Damaged {
-                        health,
-                        amount,
-                        source,
-                    } if exists(health) => {
-                        let source = source.filter(|&id| exists(id)).map(instance::LuaInstance);
-                        let owner = events::Owner::Instance(health);
-                        events::fire(&self.lua, owner, "Damaged", (amount, source));
-                    }
-                    HealthEvent::Died { health } if exists(health) => {
-                        events::fire(&self.lua, events::Owner::Instance(health), "Died", ());
-                    }
-                    _ => {}
-                }
-            }
-        });
-    }
-
     /// Fires `Changed`, property signals, `ChildAdded` and `ChildRemoved`
     /// for `changes`.
     pub fn fire_changes(&self, world: &mut World, changes: &[RecordedChange]) {
@@ -900,57 +848,6 @@ impl Context {
             Some(mut emits) => std::mem::take(&mut emits.0),
             None => Vec::new(),
         }
-    }
-
-    pub fn take_health_events(&self) -> Vec<HealthEvent> {
-        match self.lua.app_data_mut::<crate::health::HealthEvents>() {
-            Some(mut queue) => std::mem::take(&mut queue.0),
-            None => Vec::new(),
-        }
-    }
-
-    /// What this side's scripts asked Humanoids' walks since the last call.
-    pub fn take_humanoid_requests(&self) -> Vec<crate::humanoid::Request> {
-        match self.lua.app_data_mut::<crate::humanoid::Requests>() {
-            Some(mut requests) => std::mem::take(&mut requests.0),
-            None => Vec::new(),
-        }
-    }
-
-    /// Each Humanoid's state, for `GetState`.
-    pub fn set_humanoid_states(&self, states: &crate::humanoid::States) {
-        self.lua.set_app_data(states.clone());
-    }
-
-    /// Fires each Humanoid event on its Humanoid, skipping Humanoids that
-    /// are gone.
-    pub fn fire_humanoid_events(
-        &self,
-        world: &mut World,
-        humanoid_events: &[crate::humanoid::HumanoidEvent],
-    ) {
-        use crate::humanoid::HumanoidEvent;
-        with_world(&self.lua, world, || {
-            for &event in humanoid_events {
-                let humanoid = event.humanoid();
-                if !instance::world(&self.lua).is_ok_and(|world| world.contains(humanoid)) {
-                    continue;
-                }
-                let owner = events::Owner::Instance(humanoid);
-                match event {
-                    HumanoidEvent::MoveToFinished { reached, .. } => {
-                        events::fire(&self.lua, owner, "MoveToFinished", reached);
-                    }
-                    HumanoidEvent::StateChanged { old, new, .. } => {
-                        let args = crate::humanoid::state_items(old, new);
-                        events::fire(&self.lua, owner, "StateChanged", args);
-                    }
-                    HumanoidEvent::Died { .. } => {
-                        events::fire(&self.lua, owner, "Died", ());
-                    }
-                }
-            }
-        });
     }
 
     /// The models and tables this side's queries use.

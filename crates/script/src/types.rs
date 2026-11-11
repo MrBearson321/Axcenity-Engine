@@ -698,10 +698,7 @@ impl EnumType {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
             }
             // What a Humanoid's character is doing (Phase 46).
-            EnumType::HumanoidStateType => crate::humanoid::State::ALL
-                .iter()
-                .map(|state| state.name())
-                .collect(),
+            EnumType::HumanoidStateType => crate::system::HUMANOID_STATES.to_vec(),
         }
     }
 
