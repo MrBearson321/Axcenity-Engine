@@ -144,3 +144,99 @@ fn flat_colors_come_through_upscaling_unchanged() {
         assert!(a.abs_diff(b) <= 2, "{a} vs {b}");
     }
 }
+
+/// GPU time of upscaling at 0.67 and 0.5 scale, for `docs/rendering/post.md`:
+/// `cargo test -p axcenity-render --release --lib -- --ignored
+/// bench_upscaling --nocapture` on a device with timestamps.
+///
+/// For each output size it draws a field of blocks at full size, then at
+/// each scale twice: upscaled to the output, and at the smaller size
+/// itself. The upscaled frame less the small one is what EASU and RCAS
+/// cost; the full-size frame less the upscaled one is what the scale saves.
+#[test]
+#[ignore]
+fn bench_upscaling() {
+    let instance = crate::adapters::instance();
+    let Ok(adapter) = pollster::block_on(crate::adapters::adapter(&instance, None)) else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+        eprintln!("skipped: the adapter has no timestamps");
+        return;
+    }
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_features: wgpu::Features::TIMESTAMP_QUERY,
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut items = vec![big_block()];
+    for x in -12..12 {
+        for z in 0..24 {
+            items.push(item(
+                Shape::Block,
+                Vec3::new(
+                    x as f32 * 1.5,
+                    -2.0 + (x * z % 3) as f32 * 0.5,
+                    -4.0 - z as f32 * 1.5,
+                ),
+                1.0,
+            ));
+        }
+    }
+    let mut list = list_of(items);
+    list.shadows.enabled = true;
+    list.post.enabled = true;
+    list.ambient.intensity = 0.3;
+    // Median GPU frame and post-processing (which includes the upscale).
+    let measure = |size: (u32, u32), scale: f32| {
+        let mut renderer = TextureRenderer::new(&device, &queue, size.0, size.1);
+        renderer.set_graphics(&scaled(scale, crate::AntiAliasing::Fxaa));
+        let (mut frames, mut posts) = (Vec::new(), Vec::new());
+        for frame in 0..230 {
+            renderer.render(&list).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let stats = renderer.stats();
+            if frame >= 30
+                && let (Some(gpu), Some(post)) =
+                    (stats.gpu_time, stats.pass_time(FramePass::PostProcessing))
+            {
+                frames.push(gpu.as_secs_f64() * 1000.0);
+                posts.push(post.as_secs_f64() * 1000.0);
+            }
+        }
+        let median = |values: &mut Vec<f64>| {
+            values.sort_by(f64::total_cmp);
+            values[values.len() / 2]
+        };
+        (median(&mut frames), median(&mut posts))
+    };
+    println!("{}", adapter.get_info().name);
+    println!(
+        "output     scale  frame ms  post ms  | same size native: frame  post | upscale cost  saved vs 1.0"
+    );
+    for size in [(1920, 1080), (2560, 1440), (3840, 2160)] {
+        let (full, full_post) = measure(size, 1.0);
+        println!(
+            "{:>4}x{:<4}  1.00  {full:>8.3}  {full_post:>7.3}  |",
+            size.0, size.1
+        );
+        for scale in [0.67_f32, 0.5] {
+            let (frame, post) = measure(size, scale);
+            let small = (
+                (size.0 as f32 * scale).round() as u32,
+                (size.1 as f32 * scale).round() as u32,
+            );
+            let (native, native_post) = measure(small, 1.0);
+            println!(
+                "{:>4}x{:<4}  {scale:.2}  {frame:>8.3}  {post:>7.3}  | {:>4}x{:<4} {native:>6.3} {native_post:>6.3} | {:>11.3}  {:>11.3}",
+                size.0,
+                size.1,
+                small.0,
+                small.1,
+                frame - native,
+                full - frame,
+            );
+        }
+    }
+}
