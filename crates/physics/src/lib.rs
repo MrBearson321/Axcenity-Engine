@@ -679,7 +679,7 @@ impl Physics {
         let mut step = || rapier.step_with_events(&material::Weighted, &());
         #[cfg(feature = "parallel")]
         if let Some(pool) = &self.pool {
-            pool.install(step);
+            pool.run(step);
             return;
         }
         step();

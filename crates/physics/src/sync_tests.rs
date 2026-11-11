@@ -569,6 +569,39 @@ fn a_pile_lands_the_same_way_on_any_number_of_threads() {
     assert_eq!(one, pile(Some(8)));
 }
 
+/// Worlds stepping at the same time on the same threads, more of them than
+/// there are threads, as tests do. rapier's step waits on a task it hands
+/// the pool, so if a step took every thread, each would wait forever.
+#[cfg(feature = "parallel")]
+#[test]
+fn more_worlds_than_threads_can_step_at_once() {
+    let pool = threads::make(2);
+    let worlds = 6;
+    let (done, finished) = std::sync::mpsc::channel();
+    for _ in 0..worlds {
+        let (pool, done) = (pool.clone(), done.clone());
+        std::thread::spawn(move || {
+            let mut world = World::new();
+            block_on_a_floor(&mut world, 0.0);
+            for i in 0..40 {
+                let (x, z) = ((i % 5) as f32 * 0.9 - 2.0, (i / 5) as f32 * 0.7 - 2.5);
+                part(&mut world, Vector3::new(x, 2.0 + (i / 10) as f32, z), false);
+            }
+            let mut physics = Physics::new();
+            physics.pool = pool;
+            for _ in 0..120 {
+                physics.step(&mut world, STEP_SECONDS);
+            }
+            done.send(()).unwrap();
+        });
+    }
+    for _ in 0..worlds {
+        finished
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("every world finishes its steps");
+    }
+}
+
 /// Where 150 parts dropped on a block on a floor are after 90 steps, with
 /// rapier's step on `threads` threads of a pool of its own, or the shared
 /// pool.

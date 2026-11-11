@@ -9,14 +9,36 @@
 //! keeps the global one.
 //! `AXCENITY_PHYSICS_THREADS` sets the number instead. Results are the same
 //! with any number of threads (`a_pile_lands_the_same_way_on_any_number_of_threads`).
+//!
+//! A pool runs one step at a time. rapier's step hands the pool a task (the
+//! broad phase's tree optimization) and later blocks its thread until that
+//! task is done, without helping with the pool's other work. With as many
+//! steps at once as the pool has threads, as when tests run side by side,
+//! every thread would wait on a task none is free to run.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// The most threads physics uses unless `AXCENITY_PHYSICS_THREADS` says.
 pub const MAX_THREADS: usize = 12;
 
 /// A pool for rapier's step.
-pub(crate) type Pool = Arc<rayon::ThreadPool>;
+pub(crate) type Pool = Arc<Threads>;
+
+pub(crate) struct Threads {
+    pool: rayon::ThreadPool,
+    /// Held while a step runs, so steps take turns.
+    stepping: Mutex<()>,
+}
+
+impl Threads {
+    /// Runs `step` on the pool once no other step is running on it.
+    pub(crate) fn run(&self, step: impl FnOnce() + Send) {
+        // A step that panicked leaves nothing behind to protect, so the
+        // next one goes ahead.
+        let _turn = self.stepping.lock().unwrap_or_else(PoisonError::into_inner);
+        self.pool.install(step);
+    }
+}
 
 /// The pool every [`Physics`](crate::Physics) shares, made the first time
 /// one asks. `None` if its threads couldn't be started: rapier then runs
@@ -33,7 +55,12 @@ pub(crate) fn make(threads: usize) -> Option<Pool> {
         .thread_name(|index| format!("physics {index}"))
         .build()
         .ok()
-        .map(Arc::new)
+        .map(|pool| {
+            Arc::new(Threads {
+                pool,
+                stepping: Mutex::new(()),
+            })
+        })
 }
 
 /// `AXCENITY_PHYSICS_THREADS` if it's a number of at least 1, otherwise
