@@ -70,13 +70,6 @@ pub(super) fn report(options: &Options, exe: &Path) -> (String, bool) {
             tools.len()
         ),
     );
-    if options.profile == Profile::Lite {
-        note(
-            "warn",
-            "lite has no project_save: object edits are lost when the client closes the server"
-                .to_owned(),
-        );
-    }
     for import in &options.import_folders {
         if import.is_dir() {
             note(
