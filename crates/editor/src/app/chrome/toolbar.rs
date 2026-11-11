@@ -199,7 +199,7 @@ impl EditorApp {
                     .add_enabled((!playing || paused) && can_play, play_button)
                     .on_hover_text(format!(
                         "{hover} ({})",
-                        ui.ctx().format_shortcut(&PLAY_SHORTCUT)
+                        crate::shortcuts::Action::Play.menu_text(ui.ctx())
                     ))
                     .on_disabled_hover_text(if playing {
                         "The game is playing."
@@ -214,7 +214,7 @@ impl EditorApp {
                     .add_enabled(playing, stop_button)
                     .on_hover_text(format!(
                         "Stop the game and go back to editing ({})",
-                        ui.ctx().format_shortcut(&STOP_SHORTCUT)
+                        crate::shortcuts::Action::Stop.menu_text(ui.ctx())
                     ))
                     .clicked();
             }),

@@ -157,24 +157,13 @@ impl Tool {
     const _TOOLS_SPLIT: () = assert!(Self::TRANSFORM.len() + Self::BUILD.len() == Self::ALL.len());
 
     /// The single key that picks the tool, pressed on its own while
-    /// editing (not typing, not during Play): 1 to 5 for the tools with
-    /// handles, as in Studio, and F3X's letters for the building tools.
+    /// editing (not typing, not during Play), from the shortcut table.
     /// Escape goes back to Select too (see `EditorApp::shortcuts`).
     pub fn key(self) -> Option<egui::Key> {
-        Some(match self {
-            Tool::Select => egui::Key::Num1,
-            Tool::Move => egui::Key::Num2,
-            Tool::Scale => egui::Key::Num3,
-            Tool::Rotate => egui::Key::Num4,
-            Tool::Transform => egui::Key::Num5,
-            Tool::Paint => egui::Key::V,
-            Tool::Material => egui::Key::N,
-            Tool::Anchor => egui::Key::M,
-            Tool::Lighting => egui::Key::U,
-            Tool::Emission => egui::Key::P,
-            // Not an F3X tool; R is free in F3X and in the camera keys.
-            Tool::Angular => egui::Key::R,
-        })
+        crate::shortcuts::Action::Tool(self)
+            .keys()
+            .first()
+            .map(|chord| chord.logical_key)
     }
 
     /// True for the tools with handles to drag.

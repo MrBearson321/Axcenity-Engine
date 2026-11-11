@@ -56,7 +56,7 @@ fn delete_on_the_right_click_menu_deletes_as_one_undo_step() {
         &format!(
             "{} {}",
             theme::with_icon(icons::TRASH, "Delete"),
-            crate::app::DELETE_KEY_TEXT
+            crate::shortcuts::Action::Delete.menu_text(&ctx)
         ),
     );
     assert!(

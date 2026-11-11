@@ -1114,9 +1114,8 @@ impl UiDesigner {
         else {
             return;
         };
-        for (key, toggle) in rich_text::SHORTCUTS {
-            let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
-            if ctx.input_mut(|input| input.consume_shortcut(&shortcut)) {
+        for (action, toggle) in rich_text::SHORTCUTS {
+            if ctx.input_mut(|input| crate::shortcuts::consume(input, action)) {
                 let (property, value) = toggle.flipped(&style);
                 actions.push(state_style_action(id, state, property, value, false));
             }

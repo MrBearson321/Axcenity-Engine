@@ -225,20 +225,13 @@ impl EditorApp {
     /// The palette's keys and window, Quick Open and Find in Scripts, run
     /// before the other shortcuts so their keys reach them first.
     pub(super) fn palette_frame(&mut self, ctx: &egui::Context) {
-        use super::command_palette::{
-            FIND_SHORTCUT, PALETTE_SHORTCUT, QUICK_OPEN_SHORTCUT, SEARCH_SHORTCUT,
-        };
+        use crate::shortcuts::{Action, consume};
         // Shift first: egui counts Ctrl+Shift+P as Ctrl+P too.
         let (commands, find, quick, search) = ctx.input_mut(|input| {
-            let commands = input.consume_shortcut(&PALETTE_SHORTCUT);
-            let find = input.consume_shortcut(&FIND_SHORTCUT);
-            let quick = input.consume_shortcut(&QUICK_OPEN_SHORTCUT);
-            (
-                commands,
-                find,
-                quick,
-                input.consume_shortcut(&SEARCH_SHORTCUT),
-            )
+            let commands = consume(input, Action::Palette);
+            let find = consume(input, Action::FindInScripts);
+            let quick = consume(input, Action::QuickOpen);
+            (commands, find, quick, consume(input, Action::Search))
         });
         if commands {
             self.palette.toggle_commands();
@@ -467,6 +460,9 @@ fn command_description(command: &Command) -> String {
         Command::TogglePane(pane) => return format!("Show or hide the {} panel.", pane.label()),
         Command::ShowScene => "Bring the Scene View to the front.",
         Command::ResetLayout => "Put every panel back where it starts.",
+        Command::LayoutPreset(preset) => return preset.about().to_owned(),
+        Command::SavedLayout(name) => return format!("Switch to the layout you saved as {name}."),
+        Command::SaveLayout => "Keep where the panels are now, by name, to switch back to later.",
         Command::LightCones => "Show every light's cone, not only the selected one's.",
         Command::ViewCube => "The cube in the viewport's corner that turns the camera to a face.",
         Command::Grid => "Lines and distances in studs on the baseplate, while editing.",

@@ -44,6 +44,7 @@ mod find_in_scripts;
 mod floating;
 mod game_tests;
 mod input_settings;
+mod layouts;
 mod levels;
 mod material_files;
 mod material_tab;
@@ -113,6 +114,7 @@ use crate::relaunch::Handoff;
 use crate::ribbon::{self, RibbonButton};
 use crate::ribbon_tabs::{RibbonGroup, RibbonTabs};
 use crate::scripts::{self, ScriptTabs};
+use crate::shortcuts;
 use crate::side_warnings::{self, WarningCache};
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
 use crate::style_panel::{self, StyleEdit};
@@ -138,11 +140,6 @@ const IMPORT_HOVER: &str = "Import models (.gltf, .glb or .fbx), images, sounds 
     sounds are copied into the project's assets and reported in the Console. You can also \
     drop files onto the editor.";
 
-/// F5 plays and Shift+F5 stops, as in Roblox Studio.
-const PLAY_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F5);
-const STOP_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::F5);
 /// During Play, after a long pause (such as dragging the window), don't jump
 /// the game ahead by the whole pause; treat the frame as at most this long.
 /// The same cap as the player's.
@@ -155,31 +152,6 @@ const STEADY_FRAME_SECONDS: f64 = 1.0;
 /// A frame this long after the last one, when none was asked for, means
 /// something woke an idle editor (see [`EditorApp::keep_frames_steady`]).
 const WAKE_GAP_SECONDS: f64 = 0.2;
-/// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
-const SAVE_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
-const UNDO_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
-/// Ctrl+Y, as on Windows, and Ctrl+Shift+Z (Cmd+Shift+Z on macOS) both redo.
-const REDO_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
-const REDO_SHIFT_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::Z,
-);
-/// Ctrl+D (Cmd+D on macOS) duplicates the selection, as in Studio.
-pub const DUPLICATE_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
-/// F2 renames the selection in the Explorer, as in Studio and most file managers.
-pub const RENAME_KEY: egui::Key = egui::Key::F2;
-/// The Delete key deletes the selection. On macOS, the key labelled
-/// "delete" is Backspace, so that works there too.
-pub const DELETE_KEY_TEXT: &str = if cfg!(target_os = "macos") {
-    "⌫"
-} else {
-    "Del"
-};
-
 pub struct EditorApp {
     /// The open project's Instances, or an empty world when none is open.
     world: World,
@@ -397,6 +369,12 @@ pub struct EditorApp {
     terrain: TerrainStudio,
     /// Where the dockable panels are. Saved between runs.
     layout: Layout,
+    /// Layouts saved by name (View › Layout).
+    saved_layouts: crate::layout::SavedLayouts,
+    /// Save Current Layout…, while it's open.
+    layout_name: Option<layouts::LayoutName>,
+    /// A saved layout picked in the menu, switched to after the menu is drawn.
+    pending_layout: Option<String>,
     /// The ribbon's tabs, including the ones people made. Saved between runs.
     ribbon_tabs: RibbonTabs,
     /// View > Light Cones: show every light's reach in the viewport, not
@@ -896,6 +874,9 @@ impl EditorApp {
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
+            saved_layouts: Default::default(),
+            layout_name: None,
+            pending_layout: None,
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
             view_cube: true,
@@ -950,6 +931,7 @@ impl EditorApp {
             if let Some(text) = storage.get_string(LAYOUT_KEY) {
                 self.layout = Layout::from_text(&text);
             }
+            self.saved_layouts = layouts::load_saved_layouts(storage);
             if let Some(text) = storage.get_string(RIBBON_TABS_KEY) {
                 self.ribbon_tabs = RibbonTabs::from_text(&text);
             }
@@ -1054,6 +1036,7 @@ impl eframe::App for EditorApp {
             .map(|link| link.folder.display().to_string())
             .collect();
         storage.set_string(LAYOUT_KEY, self.layout.to_text());
+        storage.set_string(layouts::SAVED_LAYOUTS_KEY, self.saved_layouts.to_text());
         storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
@@ -1255,10 +1238,10 @@ impl EditorApp {
         self.finish_thumbnail(ctx);
         // Taken from the input before the viewport sees it, so the S doesn't
         // also fly the camera backward.
-        if ctx.input_mut(|input| input.consume_shortcut(&SAVE_SHORTCUT)) {
+        if ctx.input_mut(|input| shortcuts::consume(input, shortcuts::Action::Save)) {
             self.save();
         }
-        if ctx.input_mut(|input| input.consume_shortcut(&settings::SETTINGS_SHORTCUT)) {
+        if ctx.input_mut(|input| shortcuts::consume(input, shortcuts::Action::Settings)) {
             self.settings.open = !self.settings.open;
         }
         self.terrain_frame(ctx);
@@ -1479,7 +1462,8 @@ impl EditorApp {
             self.plugin_mouse(mouse);
         }
         if self.constraint_tool.is_some()
-            && (self.playing() || ctx.input(|input| input.key_pressed(egui::Key::Escape)))
+            && (self.playing()
+                || ctx.input(|input| shortcuts::pressed(input, shortcuts::Action::PutToolDown)))
         {
             self.pick_constraint_tool(None);
         }
@@ -1576,6 +1560,7 @@ impl EditorApp {
         self.input_window(ctx);
         self.collision_groups_window(ctx);
         self.custom_material_window(ctx);
+        self.save_layout_dialog(ctx);
         self.references_window(ctx);
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);

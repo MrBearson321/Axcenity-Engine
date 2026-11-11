@@ -427,7 +427,7 @@ impl Palette {
             } else {
                 "All".to_owned()
             };
-            if crate::asset_browser::chip(ui, &all, self.scope.is_none())
+            if crate::widgets::chip(ui, &all, self.scope.is_none())
                 .on_hover_text("Search every category (Tab and Shift+Tab step through these)")
                 .clicked()
             {
@@ -441,7 +441,7 @@ impl Palette {
                 }
                 let picked = self.scope == Some(category);
                 let label = format!("{} {count}", category.label());
-                if crate::asset_browser::chip(ui, &label, picked).clicked() {
+                if crate::widgets::chip(ui, &label, picked).clicked() {
                     self.scope = if picked { None } else { Some(category) };
                     self.selected = 0;
                     self.focus = true;

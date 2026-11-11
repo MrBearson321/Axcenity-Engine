@@ -714,7 +714,6 @@ impl AssetBrowser {
         let mut action = None;
         self.thumbnails.poll(ui.ctx());
         self.global_thumbnails.poll(ui.ctx());
-        let palette = theme::palette(ui.ctx());
         let width = ui.available_width();
         if width >= ONE_ROW_FROM {
             // Everything on one row: the chips, then the rest at the right.
@@ -828,32 +827,28 @@ impl AssetBrowser {
             .auto_shrink(false)
             .show(ui, |ui| {
                 if shown.is_empty() {
-                    ui.add_space(16.0);
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new(if search.is_empty() {
-                                icons::FOLDER_DASHED
-                            } else {
-                                icons::MAGNIFYING_GLASS
-                            })
-                            .size(20.0)
-                            .color(palette.text_muted),
-                        );
-                        ui.label(
-                            egui::RichText::new(if in_folder {
-                                "Nothing of this kind in this folder."
-                            } else if search.is_empty() && self.category == Category::Global {
-                                "No global assets yet. Right-click an asset and tick Global \
-                                 asset to use it in every project."
-                            } else if search.is_empty() {
-                                "Nothing here yet. Import files, or copy them into the project's \
-                                 assets folder."
-                            } else {
-                                "No asset's path has that in it."
-                            })
-                            .color(palette.text_weak),
-                        );
-                    });
+                    let (title, sentence) = if in_folder {
+                        ("Empty folder", "Nothing of this kind in this folder.")
+                    } else if search.is_empty() && self.category == Category::Global {
+                        (
+                            "No global assets",
+                            "Right-click an asset and tick Global asset to use it in every \
+                             project.",
+                        )
+                    } else if search.is_empty() {
+                        (
+                            "No assets yet",
+                            "Import files, or copy them into the project's assets folder.",
+                        )
+                    } else {
+                        ("No matches", "No asset's path has that in it.")
+                    };
+                    let icon = if search.is_empty() {
+                        icons::FOLDER_DASHED
+                    } else {
+                        icons::MAGNIFYING_GLASS
+                    };
+                    widgets::empty_state(ui, icon, title, sentence, None);
                     return;
                 }
                 // A readable list in a narrow column, tiles where there's room.
@@ -1022,11 +1017,11 @@ impl AssetBrowser {
     /// The category chips, which pick what's shown.
     fn chips(&mut self, ui: &mut egui::Ui) {
         for category in Category::ALL {
-            if chip(ui, category.label(), self.category == category).clicked() {
+            if widgets::chip(ui, category.label(), self.category == category).clicked() {
                 self.category = category;
             }
         }
-        if chip(ui, "Unused", self.unused_only)
+        if widgets::chip(ui, "Unused", self.unused_only)
             .on_hover_text(
                 "Only the assets nothing uses: no Instance, script (by its path), material, \
                  prefab, level or data table names them.",
@@ -1811,33 +1806,6 @@ pub fn prefab_file_stem(name: &str) -> String {
 fn search_matches(entry: &AssetEntry, search: &str) -> bool {
     let text = format!("{} {}", entry.kind.label(), entry.path).to_lowercase();
     search.split_whitespace().all(|word| text.contains(word))
-}
-
-/// A category to filter by: quiet text, filled while it's picked.
-pub(crate) fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
-    let palette = theme::palette(ui.ctx());
-    let galley = ui.painter().layout_no_wrap(
-        label.to_owned(),
-        egui::FontId::new(theme::type_scale::SMALL + 0.5, theme::medium_family()),
-        egui::Color32::PLACEHOLDER,
-    );
-    let size = egui::vec2(galley.size().x + 16.0, 24.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
-    });
-    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
-    if selected {
-        ui.painter().rect_filled(rect, 12.0, palette.control_active);
-    }
-    let color = if selected || response.hovered() {
-        palette.text_strong
-    } else {
-        palette.text_weak
-    };
-    ui.painter()
-        .galley(rect.center() - galley.size() / 2.0, galley, color);
-    response
 }
 
 #[cfg(test)]

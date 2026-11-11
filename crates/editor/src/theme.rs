@@ -264,6 +264,9 @@ pub struct Appearance {
     pub density: Density,
     /// Turns transitions off: hover fades, panel and popup fades, smooth scrolling.
     pub reduce_motion: bool,
+    /// Stronger outlines, borders, muted text and focus ring, and block
+    /// colours dark enough for their white labels (design system V18).
+    pub increase_contrast: bool,
     /// The size of code and Output text, in points.
     pub code_font_size: f32,
     /// How big the whole interface is drawn (egui's zoom factor).
@@ -284,6 +287,7 @@ impl Default for Appearance {
             accent: Accent::Blue,
             density: Density::Comfortable,
             reduce_motion: false,
+            increase_contrast: false,
             code_font_size: 13.0,
             ui_scale: 1.0,
             hold_refresh: false,
@@ -331,6 +335,9 @@ impl Appearance {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub dark: bool,
+    /// Settings › Accessibility › Increase contrast is on
+    /// ([`Palette::with_contrast`]).
+    pub high_contrast: bool,
     /// Behind everything: the header, toolbars and tab bars.
     pub app_bg: Color32,
     /// Panel bodies: the Explorer, Properties, Output and pages.
@@ -377,6 +384,7 @@ impl Palette {
             let panel = hex(0x1E1E1E);
             Self {
                 dark,
+                high_contrast: false,
                 app_bg: hex(0x171717),
                 panel,
                 surface: hex(0x242424),
@@ -405,6 +413,7 @@ impl Palette {
             let panel = Color32::WHITE;
             Self {
                 dark,
+                high_contrast: false,
                 app_bg: hex(0xF4F4F5),
                 panel,
                 surface: hex(0xF7F7F8),
@@ -430,6 +439,61 @@ impl Palette {
                 error: hex(0xC42B2B),
             }
         }
+    }
+}
+
+impl Palette {
+    /// This palette with Increase contrast on (`high`): borders one step
+    /// stronger, outlines of controls and fields at 3:1 or more against the
+    /// panel, muted text raised to AA (4.5:1) and a 2-point focus ring.
+    pub fn with_contrast(mut self, high: bool) -> Self {
+        if !high {
+            return self;
+        }
+        let hex = |rgb: u32| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+        self.high_contrast = true;
+        self.border = self.border_strong;
+        if self.dark {
+            self.border_strong = hex(0x76767E);
+            self.text_muted = hex(0x8E8E96);
+        } else {
+            self.border_strong = hex(0x86868E);
+            self.text_muted = hex(0x6B6B73);
+        }
+        self
+    }
+
+    /// The outline of a control or field: the border, or with Increase
+    /// contrast the strong border, so it reaches 3:1.
+    pub fn control_outline(&self) -> Color32 {
+        if self.high_contrast {
+            self.border_strong
+        } else {
+            self.border
+        }
+    }
+
+    /// The accent ring around what has the keyboard: 2 points with
+    /// Increase contrast.
+    pub fn focus_stroke(&self) -> Stroke {
+        let width = if self.high_contrast { 2.0_f32 } else { 1.0 };
+        Stroke::new(width, self.accent)
+    }
+
+    /// A saturated colour (a block category's) with white text on it: as
+    /// it is, or with Increase contrast darkened until the white reaches
+    /// 4.5:1.
+    pub fn under_white_text(&self, fill: Color32) -> Color32 {
+        if !self.high_contrast {
+            return fill;
+        }
+        let mut t = 0.0;
+        let mut darker = fill;
+        while contrast(Color32::WHITE, darker) < 4.5 && t < 1.0 {
+            t += 0.04;
+            darker = mix(fill, Color32::BLACK, t);
+        }
+        darker
     }
 }
 
@@ -581,6 +645,10 @@ fn density_id() -> egui::Id {
     egui::Id::new("axcenity density")
 }
 
+fn contrast_id() -> egui::Id {
+    egui::Id::new("axcenity increase contrast")
+}
+
 /// The density picked in Settings, for widgets that change shape with it
 /// (such as the ribbon, which drops its captions when compact).
 pub fn density(ctx: &egui::Context) -> Density {
@@ -593,7 +661,10 @@ pub fn palette(ctx: &egui::Context) -> Palette {
     let accent = ctx
         .data(|data| data.get_temp::<Accent>(accent_id()))
         .unwrap_or_default();
-    Palette::new(ctx.style().visuals.dark_mode, accent)
+    let high = ctx
+        .data(|data| data.get_temp::<bool>(contrast_id()))
+        .unwrap_or(false);
+    Palette::new(ctx.style().visuals.dark_mode, accent).with_contrast(high)
 }
 
 /// The font family of headings, panel titles and emphasis (Inter SemiBold).
@@ -631,9 +702,11 @@ pub fn apply(ctx: &egui::Context, appearance: &Appearance) {
     ctx.data_mut(|data| {
         data.insert_temp(accent_id(), appearance.accent);
         data.insert_temp(density_id(), appearance.density);
+        data.insert_temp(contrast_id(), appearance.increase_contrast);
     });
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
-        let palette = Palette::new(theme == egui::Theme::Dark, appearance.accent);
+        let palette = Palette::new(theme == egui::Theme::Dark, appearance.accent)
+            .with_contrast(appearance.increase_contrast);
         ctx.set_visuals_of(theme, visuals(&palette));
         ctx.style_mut_of(theme, |style| set_sizes(style, appearance));
     }
@@ -853,7 +926,7 @@ fn visuals(p: &Palette) -> egui::Visuals {
     // Selected rows and items. The stroke is also the focus ring of text
     // fields and the text on a selected item.
     v.selection.bg_fill = p.accent_soft;
-    v.selection.stroke = Stroke::new(1.0_f32, p.accent_text);
+    v.selection.stroke = Stroke::new(p.focus_stroke().width, p.accent_text);
     v.text_cursor.stroke = Stroke::new(2.0_f32, p.accent);
     let shadow = |y: i8, blur: u8, alpha: u8| Shadow {
         offset: [0, y],
@@ -888,7 +961,7 @@ fn visuals(p: &Palette) -> egui::Visuals {
     w.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
     w.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text);
     for (state, fill, outline, text) in [
-        (&mut w.inactive, p.control, p.border, p.text),
+        (&mut w.inactive, p.control, p.control_outline(), p.text),
         (
             &mut w.hovered,
             p.control_hover,
@@ -897,7 +970,7 @@ fn visuals(p: &Palette) -> egui::Visuals {
         ),
         // Pressed, and focused from the keyboard: the accent ring shows focus.
         (&mut w.active, p.control_active, p.accent, p.text_strong),
-        (&mut w.open, p.control_hover, p.border, p.text),
+        (&mut w.open, p.control_hover, p.control_outline(), p.text),
     ] {
         state.bg_fill = fill;
         state.weak_bg_fill = fill;
@@ -907,6 +980,8 @@ fn visuals(p: &Palette) -> egui::Visuals {
         // No growing on hover: it shifts edges by a pixel and looks jittery.
         state.expansion = 0.0;
     }
+    // Pressed or focused: the ring is thicker with Increase contrast.
+    w.active.bg_stroke.width = p.focus_stroke().width;
     w.noninteractive.corner_radius = corner;
     v
 }
@@ -1384,10 +1459,10 @@ mod tests {
 
     #[test]
     fn text_and_every_accent_meet_wcag_aa_in_both_themes() {
-        for dark in [true, false] {
+        for (dark, high) in [(true, false), (false, false), (true, true), (false, true)] {
             for accent in Accent::ALL {
-                let p = Palette::new(dark, accent);
-                let label = format!("{accent:?}, dark {dark}");
+                let p = Palette::new(dark, accent).with_contrast(high);
+                let label = format!("{accent:?}, dark {dark}, increased contrast {high}");
                 for background in [p.app_bg, p.panel, p.surface, p.elevated] {
                     for text in [p.text, p.text_strong, p.text_secondary] {
                         assert!(contrast(text, background) >= 4.5, "{label}");
@@ -1402,6 +1477,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Increase contrast (design system V18): outlines of controls and
+    /// fields reach 3:1 against every surface they sit on, muted text
+    /// reaches AA, the focus ring is 2 points, and the default look is
+    /// left alone when it's off.
+    #[test]
+    fn increase_contrast_reaches_3_to_1_outlines_and_aa_muted_text() {
+        for dark in [true, false] {
+            let quiet = Palette::new(dark, Accent::Blue);
+            assert_eq!(quiet.with_contrast(false), quiet);
+            let p = quiet.with_contrast(true);
+            for background in [p.app_bg, p.panel, p.surface, p.elevated, p.inset] {
+                assert!(
+                    contrast(p.control_outline(), background) >= 3.0,
+                    "dark {dark}: {:.2}",
+                    contrast(p.control_outline(), background)
+                );
+            }
+            assert!(contrast(p.text_muted, p.panel) >= 4.5, "dark {dark}");
+            assert!(contrast(p.border, p.panel) > contrast(quiet.border, quiet.panel));
+            assert_eq!(p.focus_stroke().width, 2.0);
+            assert_eq!(quiet.focus_stroke().width, 1.0);
+            let visuals = visuals(&p);
+            assert_eq!(visuals.widgets.inactive.bg_stroke.color, p.border_strong);
+        }
+    }
+
+    #[test]
+    fn appearance_saved_before_increase_contrast_loads_with_it_off() {
+        let old = Appearance::from_text(r#"{"theme":"Light","reduce_motion":true}"#);
+        assert!(old.reduce_motion);
+        assert!(!old.increase_contrast);
     }
 
     /// The arguments of each call to `function(` in `source`, split at
@@ -1594,6 +1702,7 @@ mod tests {
             accent: Accent::Violet,
             density: Density::Compact,
             reduce_motion: true,
+            increase_contrast: true,
             code_font_size: 15.0,
             ui_scale: 1.25,
             hold_refresh: true,

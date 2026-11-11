@@ -70,21 +70,14 @@ impl Mixer {
     pub fn show(&mut self, ui: &mut egui::Ui, groups: &[Group], playing: bool) {
         let palette = theme::palette(ui.ctx());
         if groups.is_empty() {
-            ui.add_space(16.0);
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(icons::FADERS)
-                        .size(22.0)
-                        .color(palette.text_muted),
-                );
-                ui.label(
-                    RichText::new(
-                        "No SoundGroups yet. Insert ▸ SoundGroup puts one in SoundService; set a \
-                         Sound's SoundGroup to play it through one.",
-                    )
-                    .color(palette.text_weak),
-                );
-            });
+            crate::widgets::empty_state(
+                ui,
+                icons::FADERS,
+                "No SoundGroups",
+                "Insert ▸ SoundGroup puts one in SoundService; set a Sound's SoundGroup to play \
+                 it through one.",
+                None,
+            );
             return;
         }
         if !playing {

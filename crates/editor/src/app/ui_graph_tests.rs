@@ -433,3 +433,41 @@ fn hovering_in_live_preview_runs_parallel_branches_and_a_hidden_screen_gui_hides
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Delete and Ctrl+D over a graph are the graph's (design system V16's
+/// shortcut table: Graphs win over the scene), so the Instance selected in
+/// the Explorer stays where it is.
+#[test]
+fn delete_over_the_event_graph_leaves_the_selected_instance_alone() {
+    let (folder, mut app, menu, _, settings) = hello_ui_graph("ui-graph-delete-key");
+    let ctx = theme::test_context();
+    app.designer_actions(vec![DesignerAction::Select(Some(settings))]);
+    app.ui_designer.set_tab(DesignerTab::EventGraph);
+    draw_designer(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(egui::pos2(300.0, 400.0))],
+    );
+    draw_designer(&mut app, &ctx, Vec::new());
+    assert!(app.ui_designer.graph_has_pointer());
+    for (key, modifiers) in [
+        (egui::Key::Delete, egui::Modifiers::NONE),
+        (egui::Key::D, egui::Modifiers::COMMAND),
+    ] {
+        let input = egui::RawInput {
+            modifiers,
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        };
+        let _ = egui::Context::default().run(input, |ctx| app.shortcuts(ctx));
+    }
+    assert!(app.world.is_descendant_of(settings, menu), "not deleted");
+    assert_eq!(app.selected, Some(settings), "not duplicated");
+    let _ = std::fs::remove_dir_all(&folder);
+}

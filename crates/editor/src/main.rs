@@ -62,6 +62,7 @@ mod ribbon_tabs;
 mod screen;
 mod scripts;
 mod sequencer;
+mod shortcuts;
 mod side_warnings;
 mod snapping;
 #[cfg(test)]

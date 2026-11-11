@@ -345,16 +345,22 @@ impl Console {
             let one_line = !self.input.contains('\n');
             // Taken before the text field sees them: Enter runs (Shift+Enter
             // is a new line), Tab completes, Up and Down walk the history.
-            // `consume_key` ignores Shift, so it's checked first.
+            // Taking a key ignores Shift, so it's checked first.
             let (enter, tab, up, down) = ui.input_mut(|input| {
-                let plain = !input.modifiers.shift;
-                let mut take = |key| plain && input.consume_key(egui::Modifiers::NONE, key);
-                (
-                    take(egui::Key::Enter),
-                    take(egui::Key::Tab),
-                    one_line && take(egui::Key::ArrowUp),
-                    one_line && take(egui::Key::ArrowDown),
-                )
+                use crate::shortcuts::{Action, consume, consume_each};
+                if input.modifiers.shift {
+                    return (false, false, false, false);
+                }
+                let enter = consume(input, Action::ConsoleRun);
+                let tab = consume(input, Action::ConsoleComplete);
+                // History's first key goes back (Up), its second on (Down).
+                let walk = if one_line {
+                    consume_each(input, Action::ConsoleHistory)
+                } else {
+                    Vec::new()
+                };
+                let walked = |index: usize| walk.get(index) == Some(&true);
+                (enter, tab, walked(0), walked(1))
             });
             if enter && !self.input.trim().is_empty() {
                 let command = std::mem::take(&mut self.input);

@@ -26,6 +26,7 @@ use eframe::egui;
 use super::view::{self, Event, Extras};
 use super::{Falloff, Mode, ModelStudio, Pivot};
 use crate::screen::Screen;
+use crate::shortcuts::{self, Action};
 use crate::theme::{self, icons};
 use crate::widgets;
 
@@ -249,16 +250,11 @@ impl ModelStudio {
     /// The operations' keys, outside of a move or a tool. True if one was
     /// pressed.
     pub(super) fn op_keys(&mut self, ui: &mut egui::Ui, pointer: egui::Pos2) -> bool {
-        let none = egui::Modifiers::NONE;
-        let command = egui::Modifiers::COMMAND;
-        let shift = egui::Modifiers::SHIFT;
-        let alt = egui::Modifiers::ALT;
         let edit = self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Edit);
-        // More modifiers first: a plain key's shortcut takes Shift too.
         let (proportional, cursor_home) = ui.input_mut(|input| {
             (
-                input.consume_key(none, egui::Key::O),
-                input.consume_key(shift, egui::Key::C),
+                shortcuts::consume(input, Action::Proportional),
+                shortcuts::consume(input, Action::CursorHome),
             )
         });
         if proportional {
@@ -286,26 +282,28 @@ impl ModelStudio {
             Delete,
             Fill,
         }
+        // Keys with more modifiers are taken first: a plain key's pattern
+        // takes Shift too.
         let key = ui.input_mut(|input| {
-            let both = command | shift;
-            [
-                (both, egui::Key::B, Key::BevelVertices),
-                (command, egui::Key::B, Key::Bevel),
-                (command, egui::Key::R, Key::LoopCut),
-                (both, egui::Key::N, Key::Inside),
-                (alt, egui::Key::N, Key::Flip),
-                (shift, egui::Key::N, Key::Outside),
-                (none, egui::Key::E, Key::Extrude),
-                (none, egui::Key::I, Key::Inset),
-                (none, egui::Key::K, Key::Knife),
-                (none, egui::Key::M, Key::Merge),
-                (none, egui::Key::X, Key::Delete),
-                (none, egui::Key::Delete, Key::Delete),
-                (none, egui::Key::F, Key::Fill),
-            ]
-            .into_iter()
-            .find_map(|(modifiers, key, name)| input.consume_key(modifiers, key).then_some(name))
-            .unwrap_or(Key::None)
+            let ops = [
+                (Action::BevelVertices, Key::BevelVertices),
+                (Action::Bevel, Key::Bevel),
+                (Action::LoopCut, Key::LoopCut),
+                (Action::NormalsInside, Key::Inside),
+                (Action::FlipNormals, Key::Flip),
+                (Action::NormalsOutside, Key::Outside),
+                (Action::Extrude, Key::Extrude),
+                (Action::Inset, Key::Inset),
+                (Action::Knife, Key::Knife),
+                (Action::Merge, Key::Merge),
+                (Action::DeleteMesh, Key::Delete),
+                (Action::Fill, Key::Fill),
+            ];
+            let actions: Vec<Action> = ops.iter().map(|(action, _)| *action).collect();
+            let pressed = shortcuts::consume_first(input, &actions);
+            ops.into_iter()
+                .find(|(action, _)| Some(*action) == pressed)
+                .map_or(Key::None, |(_, key)| key)
         });
         match key {
             Key::None => return proportional || cursor_home,
@@ -363,7 +361,6 @@ impl ModelStudio {
         if !self.tools.busy() && self.tools.menu.is_none() {
             return false;
         }
-        let none = egui::Modifiers::NONE;
         let (typed, back, enter, escape, wheel) = ui.input_mut(|input| {
             let typed: Vec<char> = input
                 .events
@@ -379,10 +376,9 @@ impl ModelStudio {
             input.smooth_scroll_delta = egui::Vec2::ZERO;
             (
                 typed,
-                input.consume_key(none, egui::Key::Backspace),
-                input.consume_key(none, egui::Key::Enter)
-                    || input.consume_key(none, egui::Key::Space),
-                input.consume_key(none, egui::Key::Escape),
+                shortcuts::consume(input, Action::EraseAmountDigit),
+                shortcuts::consume(input, Action::ApplyAmount),
+                shortcuts::consume(input, Action::CancelAmount),
                 wheel,
             )
         });

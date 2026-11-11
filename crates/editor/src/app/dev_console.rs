@@ -73,11 +73,22 @@ impl EditorApp {
         for event in events {
             match event {
                 egui::Event::Key {
-                    key: egui::Key::F9,
+                    key,
                     pressed: true,
                     repeat: false,
+                    modifiers,
                     ..
-                } if !editing || self.dev.console.open => self.dev.console.toggle(),
+                } if (!editing || self.dev.console.open)
+                    && crate::shortcuts::Action::DevConsole
+                        .keys()
+                        .iter()
+                        .any(|chord| {
+                            chord.logical_key == *key
+                                && modifiers.matches_logically(chord.modifiers)
+                        }) =>
+                {
+                    self.dev.console.toggle()
+                }
                 _ if !self.dev.console.open => {}
                 egui::Event::Text(text) => self.dev.console.type_text(text),
                 egui::Event::Key {

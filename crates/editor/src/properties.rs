@@ -651,21 +651,13 @@ pub fn show(
         .auto_shrink(false)
         .show(ui, |ui| {
             let Some((id, instance)) = selected.and_then(|id| Some((id, world.get(id)?))) else {
-                ui.add_space(theme::space::XL);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(icons::CURSOR_CLICK)
-                            .size(22.0)
-                            .color(palette.text_muted),
-                    );
-                    ui.label(
-                        egui::RichText::new(
-                            "Select something in the Explorer or the viewport to see its \
-                             properties.",
-                        )
-                        .color(palette.text_weak),
-                    );
-                });
+                crate::widgets::empty_state(
+                    ui,
+                    icons::CURSOR_CLICK,
+                    "Nothing selected",
+                    "Select something in the Explorer or the viewport to see its properties.",
+                    None,
+                );
                 return;
             };
             // What's selected, so it's clear what the fields below change.
@@ -1218,23 +1210,14 @@ fn section_titled(
         ADVANCED => icons::SLIDERS_HORIZONTAL,
         _ => icons::DOTS_THREE_OUTLINE,
     };
-    let palette = theme::palette(ui.ctx());
-    ui.add_space(4.0);
-    crate::widgets::divider(ui);
-    let header = egui::RichText::new(theme::with_icon(icon, header))
-        .family(theme::medium_family())
-        .color(palette.text_secondary);
     // Every section's names take the same width (from the panel's), so the
     // fields line up from one section to the next. In a narrow panel the
     // values go under their names instead.
-    egui::CollapsingHeader::new(header)
+    crate::widgets::section(icon, header)
         .id_salt(title)
         .default_open(default_open)
-        .open(open)
-        .icon(crate::widgets::chevron)
-        .show_unindented(ui, |ui| {
-            crate::responsive::form(ui, title, rows);
-        });
+        .forced(open)
+        .show(ui, |ui| crate::responsive::form(ui, title, rows));
 }
 
 /// A property's name in the left column, after its Keep pin when it was

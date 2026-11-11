@@ -1154,9 +1154,8 @@ impl UiDesigner {
 
         // Taken before the box sees them: it has its own Ctrl+U.
         let mut format = None;
-        for (key, toggle) in rich_text::SHORTCUTS {
-            let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
-            if ui.input_mut(|input| input.consume_shortcut(&shortcut)) {
+        for (action, toggle) in rich_text::SHORTCUTS {
+            if ui.input_mut(|input| crate::shortcuts::consume(input, action)) {
                 format = Some(Format::Toggle(toggle));
             }
         }

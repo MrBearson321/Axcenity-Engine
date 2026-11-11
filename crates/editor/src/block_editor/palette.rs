@@ -924,8 +924,11 @@ pub(super) fn show_palette(
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     let (dot, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    ui.painter()
-                        .circle_filled(dot.center(), 6.0, category.fill());
+                    ui.painter().circle_filled(
+                        dot.center(),
+                        6.0,
+                        category.fill(&theme::palette(ui.ctx())),
+                    );
                     let heading = ui.label(
                         egui::RichText::new(category.name())
                             .strong()

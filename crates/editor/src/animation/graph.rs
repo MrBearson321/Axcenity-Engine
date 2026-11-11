@@ -676,9 +676,14 @@ impl GraphView {
             }
         }
 
-        // The Delete key removes the selection while the mouse is over the graph.
+        // Delete removes the selection while the mouse is over the graph.
         let typing = ui.ctx().memory(|memory| memory.focused().is_some());
-        if canvas.hovered() && !typing && ui.input(|input| input.key_pressed(egui::Key::Delete)) {
+        if canvas.hovered()
+            && !typing
+            && ui.input(|input| {
+                crate::shortcuts::pressed(input, crate::shortcuts::Action::DeleteNodes)
+            })
+        {
             events.push(GraphEvent::Delete(selected));
         }
         if clip.is_some() {
