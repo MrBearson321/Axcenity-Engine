@@ -8,6 +8,10 @@ The map is [docs/README.md](docs/README.md). Open that only to find the file for
 
 When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 10 lines: what the crate is, which topic file to open, and local constraints.
 
+## Engineering wiki
+
+[wiki/](wiki/Home.md) is the engineering wiki (an Obsidian vault): architecture, traced workflows, decisions (ADRs), performance history and limitations. [AGENTS.md](AGENTS.md) says how to use it. In short: before a non-trivial change, read the system's wiki page and the ADRs it links (start at `wiki/Architecture/System-Inventory.md`); don't silently override an accepted ADR; after a change that alters architecture, a decision, performance or a limitation, update the wiki in the same change and run `python scripts/check-wiki.py`.
+
 ## Invariants
 
 - `player` must not depend on `editor`, `egui` or `blocks`; it translates block scripts and graphs through `blocks-runtime`.

@@ -17,8 +17,9 @@ Two passes, in order: **docs** first, then **code**. Behavior must not change in
    - Every crate under `crates/` has a `CLAUDE.md`; every topic file is listed in the `docs/README.md` table. Add or remove rows as files appear or go away.
    - Root `CLAUDE.md`: keep invariants and commands accurate (check commands against `Cargo.toml` and `README.md`). Keep it short.
    - Check `README.md` run instructions and the `.claude/skills/*` references still name files that exist.
+   - **Wiki** (`wiki/`): run `python scripts/check-wiki.py`. For each page it reports as "may be stale", compare the page with the code that changed, fix what no longer matches, and bump its `verified` and `verified_commit`. Record wiki edits in `wiki/Changelog/Documentation-History.md`. Don't copy topic-file detail into the wiki; link to it.
 4. **Memory.** If the session revealed a durable preference or project fact that is not derivable from the repo, save it to the memory directory per the memory rules. Drop memories that are now wrong.
-5. **Verify links.** Grep the edited docs for relative links and confirm each target exists.
+5. **Verify links.** Grep the edited docs for relative links and confirm each target exists; `scripts/check-wiki.py` does this for the wiki.
 
 ## Pass 2: Code cleanup
 
