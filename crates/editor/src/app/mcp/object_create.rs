@@ -115,7 +115,34 @@ pub(super) fn offered() -> Vec<String> {
         .collect()
 }
 
+/// The class an object_create kind makes (`Block` → Part), for errors
+/// that take a kind for a class.
+pub(super) fn class_of_kind(name: &str) -> Option<axcenity_core::ClassName> {
+    kinds()
+        .into_iter()
+        .find(|kind| kind_name(*kind).eq_ignore_ascii_case(name))
+        .map(|kind| kind.class())
+}
+
+/// Scripts are files the scene points at, made with `script_write`: small
+/// models try object_create first, so the error says where to go.
+pub(super) fn is_script_class(name: &str) -> bool {
+    ["Script", "LocalScript", "ModuleScript"]
+        .iter()
+        .any(|class| class.eq_ignore_ascii_case(name))
+}
+
+/// What to do instead of creating a script object.
+pub(super) const SCRIPT_FIX: &str = "scripts are files: use script_write with name, side (server, client or module) and text; in the code, workspace.Block reaches a part";
+
 fn find_kind(name: &str) -> Result<Insertable, ToolError> {
+    if is_script_class(name) {
+        return Err(ToolError::new(
+            Code::Unsupported,
+            format!("{name} isn't an object_create kind"),
+        )
+        .with_fix(SCRIPT_FIX));
+    }
     let all = kinds();
     let found = all.iter().copied().find(|kind| {
         kind_name(*kind).eq_ignore_ascii_case(name)

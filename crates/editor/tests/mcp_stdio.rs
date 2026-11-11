@@ -337,3 +337,26 @@ fn without_the_editor_the_server_refuses_writes_while_an_editor_listens() {
     assert!(!folder.join(".axcenity/mcp-headless.lock").exists());
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Windows gives a program's first thread a 1 MB stack, less than a debug
+/// build needs to open a project; the server runs on a thread of its own.
+/// Here the same limit is set with `ulimit -s` (the Windows build gets it
+/// from the executable itself).
+#[cfg(unix)]
+#[test]
+fn the_server_starts_with_a_one_megabyte_main_thread_stack() {
+    let folder = copy_of_example_for("hello-part", "small-stack");
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg("ulimit -s 1024 && exec \"$0\" --mcp --check \"$1\"")
+        .arg(env!("CARGO_BIN_EXE_axcenity-editor"))
+        .arg(&folder)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("Axcenity MCP check"), "{stdout}");
+    assert!(!stderr.contains("overflowed"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&folder);
+}
