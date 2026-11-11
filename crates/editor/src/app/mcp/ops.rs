@@ -2,8 +2,9 @@
 //! [`confirm`] asks first for a destructive one.
 //!
 //! A write works like a Lua plugin's call (`app/plugins.rs`): the world is
-//! copied, the change runs with the world's change log on, and the objects
-//! the log names become one undo step (`History::record_edits`). If the
+//! copied, the change runs with the world's change log on (the host keeps
+//! it on, for `history changes`), and the objects the log names become one
+//! undo step (`History::record_edits`). If the
 //! change fails part way, the copy is put back, so a failed call changes
 //! nothing. The session's first write keeps a version of the project files
 //! first (`Before AI session (<client>)` in Version History).
@@ -12,6 +13,7 @@ use axcenity_core::World;
 use axcenity_mcp::{Allowed, Args, Class, Code, ToolError, ToolSpec, call_key};
 
 use super::Host;
+use super::changes::By;
 use crate::history::changed_ids;
 
 /// What a write did: its result line, and the undo step's label (`None`
@@ -52,25 +54,23 @@ pub(super) fn write<T>(
     }
     checkpoint(host, &folder);
     let app = &mut host.app;
-    let was_recording = app.world.is_recording_changes();
-    app.world.record_changes();
-    // Changes from before the call aren't this one's.
-    drop(app.world.take_changes());
+    let log = &mut host.session.changes;
+    // Changes from before this write go to the log, not into its step.
+    log.take(&mut app.world, By::Client);
     let before = app.world.clone();
     let result = change(&mut app.world);
     let changes = app.world.take_changes();
-    if !was_recording {
-        app.world.stop_recording_changes();
-    }
     let value = match result {
         Ok(value) => value,
         Err(error) => {
+            // Its changes are undone with it, so they never happened.
             app.world = before;
             return Err(error);
         }
     };
     let label = format!("AI ({}): {label}", host.session.client);
     let ids = changed_ids(&changes);
+    log.add(By::Client, changes);
     let recorded =
         app.history
             .record_edits(&mut app.world, label.clone(), (&before, None), &ids, None);
