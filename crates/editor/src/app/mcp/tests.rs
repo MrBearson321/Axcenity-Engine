@@ -878,3 +878,196 @@ fn project_check_lists_script_problems_worst_first() {
         "{report}"
     );
 }
+
+#[test]
+fn object_duplicate_copies_in_place_or_as_a_row() {
+    let mut opened = open("hello-part", "mcp-duplicate");
+    let host = &mut opened.app;
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Model", "name": "Post"}),
+    );
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Pole", "parent": "Workspace/Post", "position": [0, 2, 0]}),
+    );
+    // Something placed on its part doesn't move by itself.
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Attachment", "parent": "Workspace/Post/Pole", "props": {"Position": [0, 1, 0]}}),
+    );
+    let before = objects(host);
+    let text = ok(
+        host,
+        "object_duplicate",
+        json!({"id": "Workspace/Post", "count": 3, "offset": [0, 0, 6]}),
+    );
+    assert!(
+        text.starts_with("made ")
+            && text.contains("Model \"Post2\"")
+            && text.contains("Model \"Post4\"")
+            && text.ends_with("· undo \"AI (test): Duplicate Post\""),
+        "{text}"
+    );
+    assert_eq!(objects(host), before + 9, "three copies of three objects");
+    for (name, z) in [("Post2", 6), ("Post3", 12), ("Post4", 18)] {
+        let pole = ok(
+            host,
+            "object_get",
+            json!({"id": format!("Workspace/{name}/Pole"), "props": ["Position"]}),
+        );
+        assert!(pole.contains(&format!("Position [0,2,{z}]")), "{pole}");
+        let attachment = ok(
+            host,
+            "object_get",
+            json!({"id": format!("Workspace/{name}/Pole/Attachment"), "props": ["Position"]}),
+        );
+        assert!(attachment.contains("Position [0,1,0]"), "{attachment}");
+    }
+    // Copies go right after the original, in order.
+    let world = &host.app.world;
+    let names: Vec<String> = world
+        .get(world.workspace())
+        .unwrap()
+        .children()
+        .iter()
+        .map(|&id| world.get(id).unwrap().name().to_owned())
+        .filter(|name| name.starts_with("Post"))
+        .collect();
+    assert_eq!(names, ["Post", "Post2", "Post3", "Post4"]);
+
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before);
+
+    // Scripts and services can't be copied, as in the editor.
+    let error = call(host, "object_duplicate", json!({"id": "Workspace"})).unwrap_err();
+    assert_eq!(error.code, Code::NotAllowed, "{error}");
+    let error = call(
+        host,
+        "object_duplicate",
+        json!({"id": "Workspace/Post", "count": 500}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::BadValue, "{error}");
+}
+
+#[test]
+fn batch_runs_steps_as_one_undo_step_with_names_for_results() {
+    let mut opened = open("hello-part", "mcp-batch");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let text = ok(
+        host,
+        "batch",
+        json!({"label": "Build a hut", "ops": [
+            {"op": "create", "kind": "Model", "name": "Hut", "as": "hut"},
+            {"op": "create", "kind": "Block", "name": "Floor", "parent": "$hut", "size": [10, 1, 10], "as": "floor"},
+            {"op": "create", "kind": "Block", "name": "Wall", "parent": "$hut", "position": [0, 3, -5], "size": [10, 5, 1], "as": "wall"},
+            {"op": "duplicate", "id": "$wall", "offset": [0, 0, 10]},
+            {"op": "set", "ids": ["$floor", "$wall"], "props": {"Anchored": true}},
+            {"op": "create", "kind": "ObjectValue", "name": "Door", "parent": "$hut", "props": {"Value": "$wall"}},
+            {"op": "delete", "id": "Workspace/Block"}
+        ]}),
+    );
+    assert!(
+        text.starts_with("ran 7 steps · undo \"AI (test): Build a hut\"\n1. created "),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n4. made ") && text.contains("Part \"Wall2\""),
+        "{text}"
+    );
+    assert!(text.contains("\n7. deleted 1 object"), "{text}");
+    // Hut, Floor, Wall, Wall2, Door; the Block went.
+    assert_eq!(objects(host), before + 5 - 1);
+    let wall2 = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Hut/Wall2", "props": ["Position"]}),
+    );
+    assert!(wall2.contains("Position [0,3,5]"), "{wall2}");
+    let door = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Hut/Door", "props": ["Value"]}),
+    );
+    assert!(door.contains("Wall"), "{door}");
+
+    // The whole batch is one step.
+    let undone = ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(undone, "undid \"AI (test): Build a hut\"");
+    assert_eq!(objects(host), before);
+}
+
+#[test]
+fn a_failing_batch_step_changes_nothing_and_says_which() {
+    let mut opened = open("hello-part", "mcp-batch-fail");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let revision = host.app.history.revision();
+    let error = call(
+        host,
+        "batch",
+        json!({"ops": [
+            {"op": "create", "kind": "Block", "name": "A"},
+            {"op": "set", "id": "Workspace/A", "props": {"Colour": [1, 0, 0]}}
+        ]}),
+    )
+    .unwrap_err();
+    assert!(
+        error.message.starts_with("step 2 (set): ")
+            && error.message.ends_with("nothing was changed"),
+        "{error}"
+    );
+    assert_eq!(objects(host), before);
+    assert_eq!(host.app.history.revision(), revision);
+
+    // Bad steps are caught before anything runs.
+    for (ops, says) in [
+        (json!([{"kind": "Block"}]), "step 1 needs op"),
+        (
+            json!([{"op": "create", "kind": "Block", "sise": [1, 1, 1]}]),
+            "step 1 (create): object_create has no parameter \"sise\"",
+        ),
+        (
+            json!([{"op": "create", "kind": "Block", "parent": "$nope"}]),
+            "no earlier step is \"as\":\"nope\"",
+        ),
+        (
+            json!([{"op": "delete", "id": "Workspace/Block", "confirm": "abcdef"}]),
+            "confirm goes on the batch",
+        ),
+    ] {
+        let error = call(host, "batch", json!({"ops": ops})).unwrap_err();
+        assert!(error.message.contains(says), "{error}");
+    }
+    let too_many: Vec<Value> = (0..101)
+        .map(|_| json!({"op": "create", "kind": "Block"}))
+        .collect();
+    let error = call(host, "batch", json!({"ops": too_many})).unwrap_err();
+    assert_eq!(error.code, Code::TooLarge);
+    assert_eq!(objects(host), before);
+}
+
+#[test]
+fn a_batch_with_a_big_delete_asks_first() {
+    let mut opened = open("hello-part", "mcp-batch-ask");
+    let host = &mut opened.app;
+    let ops = json!([
+        {"op": "create", "kind": "Model", "name": "Pile", "as": "pile"},
+        {"op": "create", "kind": "Block", "parent": "$pile", "as": "brick"},
+        {"op": "duplicate", "id": "$brick", "count": 6},
+        {"op": "delete", "id": "$pile"}
+    ]);
+    let before = objects(host);
+    let error = call(host, "batch", json!({"ops": ops})).unwrap_err();
+    assert!(error.message.contains("step 4 deletes "), "{error}");
+    assert_eq!(objects(host), before, "asking changed nothing");
+    let token = token(&error);
+    let text = ok(host, "batch", json!({"ops": ops, "confirm": token}));
+    assert!(text.contains("\n4. deleted 8 objects"), "{text}");
+    assert_eq!(objects(host), before);
+}

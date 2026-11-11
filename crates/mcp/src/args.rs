@@ -146,6 +146,9 @@ fn fits(kind: Kind, value: &Value) -> bool {
                     && item.get(second).is_some_and(Value::is_string)
             })
         }),
+        Kind::Objects => value
+            .as_array()
+            .is_some_and(|items| items.iter().all(Value::is_object)),
     }
 }
 
@@ -162,6 +165,7 @@ fn describe(kind: Kind) -> String {
         Kind::Pairs(first, second) => {
             format!("a list like [{{\"{first}\":\"…\",\"{second}\":\"…\"}}]")
         }
+        Kind::Objects => "a list of objects, like [{\"op\":\"create\"}]".into(),
     }
 }
 

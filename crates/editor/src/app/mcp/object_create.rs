@@ -146,13 +146,41 @@ fn find_kind(name: &str) -> Result<Insertable, ToolError> {
 }
 
 pub fn call(host: &mut Host, args: &Args) -> Outcome {
-    let kind = find_kind(args.str("kind").unwrap_or_default())?;
+    let what = what(args)?;
+    let written = write(host, &format!("Create {what}"), |world| step(world, args))?;
+    let id = written.value;
     let world = &host.app.world;
+    Ok(format!(
+        "created {} in {}{}",
+        label(world, id),
+        parent_path(world, id),
+        written.undo_note()
+    ))
+}
+
+/// The name the new object is asked to have: `name`, else its class.
+pub(super) fn what(args: &Args) -> Result<String, ToolError> {
+    let kind = find_kind(args.str("kind").unwrap_or_default())?;
+    Ok(args.str("name").unwrap_or(kind.class().as_str()).to_owned())
+}
+
+/// The path of what `id` is in, for result lines.
+pub(super) fn parent_path(world: &World, id: InstanceId) -> String {
+    world
+        .get(id)
+        .and_then(|instance| instance.parent())
+        .map_or_else(String::new, |parent| path(world, parent))
+}
+
+/// Makes the object `args` describe in `world` (`write` and `batch` call
+/// this inside their undo step).
+pub(super) fn step(world: &mut World, args: &Args) -> Result<InstanceId, ToolError> {
+    let kind = find_kind(args.str("kind").unwrap_or_default())?;
     let parent = match args.str("parent") {
         Some(text) => resolve(world, text)?,
         None => tree::insert_parent(world, None, kind),
     };
-    let wanted = args.str("name").unwrap_or(kind.class().as_str()).to_owned();
+    let wanted = args.str("name").unwrap_or(kind.class().as_str());
     let mut props = Map::new();
     for (param, property) in [
         ("size", "Size"),
@@ -168,22 +196,14 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             props.insert(name.clone(), value.clone());
         }
     }
-    let position = args.vector3("position");
-    let name_for_label = wanted.clone();
-    let written = write(host, &format!("Create {name_for_label}"), |world| {
-        create(world, kind, parent, &wanted, position, &props)
-    })?;
-    let id = written.value;
-    let world = &host.app.world;
-    let parent_path = world
-        .get(id)
-        .and_then(|instance| instance.parent())
-        .map_or_else(String::new, |parent| path(world, parent));
-    Ok(format!(
-        "created {} in {parent_path}{}",
-        label(world, id),
-        written.undo_note()
-    ))
+    create(
+        world,
+        kind,
+        parent,
+        wanted,
+        args.vector3("position"),
+        &props,
+    )
 }
 
 fn create(

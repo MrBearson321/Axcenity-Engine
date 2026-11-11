@@ -27,10 +27,12 @@ use axcenity_mcp::{
 
 use super::EditorApp;
 
+mod batch;
 mod docs;
 mod history;
 mod object_create;
 mod object_delete;
+mod object_duplicate;
 mod object_get;
 mod object_set;
 mod ops;
@@ -146,6 +148,14 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &object_delete::SPEC,
         call: object_delete::call,
+    },
+    Tool {
+        spec: &object_duplicate::SPEC,
+        call: object_duplicate::call,
+    },
+    Tool {
+        spec: &batch::SPEC,
+        call: batch::call,
     },
     Tool {
         spec: &script_read::SPEC,
