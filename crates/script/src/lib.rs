@@ -293,8 +293,10 @@ pub struct ScriptRuntime {
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
-    /// Scripts copied by `Clone`, with their original's code, waiting to
-    /// be somewhere scripts run (see [`Self::start_clones`]).
+    /// Scripts waiting to be somewhere scripts run, with their code (see
+    /// [`Self::start_clones`]): copies made by `Clone`, with their
+    /// original's, and scripts inside objects started somewhere else, such
+    /// as a template in ServerStorage, so its clones have code too (G2).
     clones: Vec<Started>,
     /// True while [`Self::start_clones`] runs, so starting a clone doesn't
     /// start more inside it.
@@ -601,6 +603,11 @@ impl ScriptRuntime {
     /// A ModuleScript doesn't run here: its code is kept for `require`, on
     /// both sides. So pass the ModuleScripts first, before any script that
     /// might require them.
+    ///
+    /// A script inside an object (one with a `SourceFile`, G2) only runs
+    /// where a clone would ([`Self::start_clones`]): elsewhere, such as a
+    /// template in ServerStorage, its code is kept, and it starts once it's
+    /// moved there, as does a `Clone` of it.
     pub fn start_script(
         &mut self,
         world: &mut World,
@@ -608,13 +615,28 @@ impl ScriptRuntime {
         path: &str,
         source: &str,
     ) {
-        self.remember(script, path, source);
         let class = world.get(script).map(|instance| instance.class());
         if class == Some(ClassName::ModuleScript) {
+            self.remember(script, path, source);
             self.server.add_module(script, path, source);
             self.client.add_module(script, path, source);
             return;
         }
+        let waits = world.get(script).is_some_and(|instance| {
+            instance.source_file().is_some() && !world.runs_scripts_at(script)
+        });
+        if waits {
+            // New code (a reload) replaces what it waited with.
+            self.started.retain(|started| started.script != script);
+            self.clones.retain(|clone| clone.script != script);
+            self.clones.push(Started {
+                script,
+                path: path.to_owned(),
+                source: source.to_owned(),
+            });
+            return;
+        }
+        self.remember(script, path, source);
         let side = class.and_then(Side::of_class).unwrap_or(Side::Server);
         if side == Side::Server && self.client_only {
             // The server runs it.
@@ -1789,33 +1811,20 @@ impl ScriptRuntime {
         });
     }
 
-    /// Starts each cloned script that's now where scripts of its kind run:
-    /// a Script in the Workspace or ServerScriptService, a LocalScript in
-    /// the Workspace, StarterPlayerScripts or Players. A cloned ModuleScript
-    /// can be required wherever it is. The rest wait for the next call;
-    /// clones destroyed before they ran are forgotten.
+    /// Starts each waiting script (a clone, or a template inside an object)
+    /// that's now where scripts of its kind run (`World::runs_scripts_at`). The
+    /// rest wait for the next call; those destroyed before they ran are
+    /// forgotten.
     fn start_clones(&mut self, world: &mut World) {
         if self.starting_clones || self.clones.is_empty() {
             return;
         }
         self.starting_clones = true;
         for clone in std::mem::take(&mut self.clones) {
-            let Some(class) = world.get(clone.script).map(|instance| instance.class()) else {
+            if !world.contains(clone.script) {
                 continue;
-            };
-            let under = |place| world.is_descendant_of(clone.script, place);
-            let runs = match class {
-                ClassName::Script => {
-                    under(world.workspace()) || under(world.server_script_service())
-                }
-                ClassName::LocalScript => {
-                    under(world.workspace())
-                        || under(world.starter_player_scripts())
-                        || under(world.players())
-                }
-                _ => true,
-            };
-            if runs {
+            }
+            if world.runs_scripts_at(clone.script) {
                 self.start_script(world, clone.script, &clone.path, &clone.source);
             } else {
                 self.clones.push(clone);

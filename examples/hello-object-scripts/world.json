@@ -1,0 +1,59 @@
+{
+  "format_version": 2,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Baseplate",
+        "properties": {
+          "Anchored": true,
+          "Size": [40, 1, 40],
+          "Position": [0, -0.5, 0],
+          "Color": [0.4, 0.45, 0.4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "FrontDoor",
+        "prefab": "assets/prefabs/Door.prefab.json",
+        "overrides": ["Position"],
+        "properties": {
+          "Position": [-5, 4, 4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "BackDoor",
+        "prefab": "assets/prefabs/Door.prefab.json",
+        "overrides": ["Position"],
+        "properties": {
+          "Position": [5, 4, 4]
+        }
+      }
+    ]
+  },
+  "server_storage": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Coin",
+        "properties": {
+          "Anchored": true,
+          "Shape": "Cylinder",
+          "Size": [0.4, 2, 2],
+          "Color": [1, 0.8, 0.1],
+          "Material": "Metal"
+        },
+        "children": [
+          {
+            "class": "Script",
+            "name": "Spin",
+            "properties": {
+              "SourceFile": "objects/Coin/Spin.server.lua"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

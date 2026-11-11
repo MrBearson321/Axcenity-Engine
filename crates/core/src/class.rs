@@ -1020,15 +1020,19 @@ impl ClassName {
             | ClassName::Teams
             | ClassName::SoundService
             | ClassName::ForceField
-            | ClassName::Script
-            | ClassName::LocalScript
-            | ClassName::ModuleScript
             | ClassName::RemoteEvent
             | ClassName::RemoteFunction
             | ClassName::BindableEvent
             | ClassName::BindableFunction
             | ClassName::Folder
             | ClassName::AnimationTrack => Vec::new(),
+            // The project file holding its code, such as
+            // "objects/Door/Open.server.lua", for a script inside an object
+            // (G2, `docs/project/world.md`). Empty for the scripts made from
+            // `scripts/`, which world files never hold.
+            ClassName::Script | ClassName::LocalScript | ClassName::ModuleScript => {
+                vec![("SourceFile", Value::String(String::new()))]
+            }
             // How it streams (Phase 80): Default, Atomic or Persistent.
             ClassName::Model => vec![(
                 "ModelStreamingMode",
