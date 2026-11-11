@@ -340,6 +340,8 @@ impl EditorApp {
         self.materials = Default::default();
         self.asset_check.clear();
         self.replace_world(project.world);
+        // A session hosted from here that stopped without ending (TC6).
+        self.recover_team_session();
     }
     /// Puts `world` in place of the world being edited, with nothing
     /// selected and a new undo history (its steps belong to the old world).
