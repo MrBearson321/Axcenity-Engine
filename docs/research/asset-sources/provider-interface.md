@@ -106,15 +106,18 @@ crates/toolbox/
   src/cache.rs        on-disk JSON cache with time-to-live and offline fallback
   src/guard.rs        untrusted-data rules: https only, refused types, zip and glTF checks
   src/download.rs     verified downloads (.part, size, MD5), zip extraction, progress, cancel
-  src/library.rs      the shared library: layout, registry.json, per-asset JSON, lock
+  src/directory.rs    the central Axcenity asset directory: where it is, its layout
+  src/db.rs           the metadata database (metadata.db): schema, migrations, queries
+  src/migrate.rs      the conditional import of an existing Blender asset_library
   src/variants.rs     describing variants and choosing one (resolution, format, maps)
   src/license.rs      normalising licences, policy verdicts, credit lines and files
   src/ambientcg.rs    ambientCG, v3 API
   src/polyhaven.rs    Poly Haven
   src/bin/axcenity-toolbox.rs   the CLI
+python/axcenity_toolbox/        the Python package the Blender pipeline imports
 ```
 
-Dependencies: `ureq`, `zip`, `serde`, `serde_json` (all already in the workspace), and one new one, **`md-5`** (RustCrypto, MIT OR Apache-2.0) to check Poly Haven's published MD5s, pinned in the workspace with `cargo hakari generate` afterwards. No async runtime: calls block, and the editor runs them on its own threads as it does today.
+Dependencies: `ureq`, `zip`, `serde`, `serde_json` (all already in the workspace), and two new ones, pinned in the workspace with `cargo hakari generate` afterwards: **`md-5`** (RustCrypto, MIT OR Apache-2.0) to check Poly Haven's published MD5s, and **`rusqlite`** with its `bundled` feature (MIT; the bundled SQLite is public domain) for the metadata database, built with `cc` on every desktop OS as `zstd` already is. No async runtime: calls block, and the editor runs them on its own threads as it does today.
 
 ### The trait
 
@@ -179,12 +182,15 @@ Every request sends `User-Agent: AxcenityEngine/<version> (asset sources)`; the 
 | Kenney, Sketchfab, local folders, catalogues | Ported from the Blender pipeline when the CLI replaces its Python providers (step 7) | | Sketchfab is `opt_in`, needs `SKETCHFAB_API_TOKEN` from the environment for downloads, never stores or logs it, and drops the header on a redirect to another host |
 | Sounds | Not chosen yet: Openverse (no key, 200 requests a day per client) or Freesound's API (a user's own key) | | The Blender pipeline's page-reading script is not ported |
 
-## 3. The shared library on disk
+## 3. The central Axcenity asset directory and its metadata database
 
-The Blender pipeline's layout (`tools/blender/providers/asset_registry.py`), with `audio/` added:
+Decisions 4 and 5. One directory per user holds every downloaded original and the database that describes them, shared by the editor, the CLI and the Blender integration.
+
+**Where it is.** `AXCENITY_ASSET_DIR` if set, else the editor setting **Asset directory**, else the platform default: `%LOCALAPPDATA%\Axcenity\Assets` (Windows), `$XDG_DATA_HOME/axcenity/assets` or `~/.local/share/axcenity/assets` (Linux), `~/Library/Application Support/Axcenity/Assets` (macOS). Local, not roaming, data on Windows, since it holds gigabytes. `directory::locate()` is the one function that answers, and `axcenity-toolbox where` prints it for Python.
 
 ```
-<library>/
+<asset directory>/
+  metadata.db                              the metadata database (below)
   textures/<provider>/<id>/<resolution>/   maps as downloaded
   hdri/<provider>/<id>/<resolution>/
   models/<provider>/<id>/<resolution>/     glTF and what it includes
@@ -192,17 +198,27 @@ The Blender pipeline's layout (`tools/blender/providers/asset_registry.py`), wit
   sprites/<provider>/<id>/<version>/
   previews/<provider>/<id>.png
   cache/<provider>/                        API responses (JSON), time-stamped
-  metadata/registry.json                   {"version": 1, "assets": {"provider:id": entry}}
-  metadata/<provider>/<id>.json            the same entry, per asset
 ```
 
-An entry is `{record, downloads: {"2k": {resolution, folder, files, maps, bytes, source_urls, fetched}}, analysis, added, updated}`, paths relative to the library. Downloaded files are never changed. The Blender pipeline's materials folders stay its own.
+The folders are the Blender pipeline's layout (`asset_registry.py`) with `audio/` added. Downloaded files are never changed. Paths in the database are relative to the directory, so it can move.
 
-- **Location.** An editor setting, **Asset library folder**, defaulting to the editor's data folder (`eframe::storage_dir("Axcenity Editor")/Asset Library`, beside Global Assets). The CLI takes `--library` or `AXCENITY_ASSET_LIBRARY`; the Blender pipeline points `PIPELINE_ASSET_LIBRARY` at the same folder. One library per machine, shared.
-- **Two writers.** The editor and a Blender job can write at once, so every registry write takes `metadata/.lock` (created exclusively; one older than a minute is treated as left behind) and writes through a temporary file and a rename, as the Blender pipeline already does.
-- **Compatibility test.** A small registry written by the Blender pipeline (a fixture with a few entries, not the real library) must read, and the crate's writes must read back in Python unchanged.
+**The metadata database, `metadata.db`.** SQLite, in WAL mode so the editor and a Blender job can read and write at once (no lock file). Rust reaches it through `rusqlite`, Python through its built-in `sqlite3`. A `schema_version` table drives forward-only migrations in `db.rs`; Python refuses a newer version than it knows.
 
-## 4. From the library into a project
+| Table | One row per | Holds |
+|---|---|---|
+| `assets` | asset (`key` = `provider:id`) | The source and licence record: provider, id, kind, name, source page, authors, licence code, version and URL, attribution, and the full `asset-source` record as JSON; `first_seen`, `updated`. **Never deleted** when files are removed, so a project's credits can always be answered |
+| `downloads` | asset and resolution | Folder, files (with size and MD5), maps, bytes, source URLs, `fetched` |
+| `installs` | file copied into a project | The file's `ax://` ID, the project's path and name, its path in the project, the asset key and resolution, `installed_at` |
+| `favourites`, `collections`, `collection_items`, `recents` | | The Toolbox panel's library views ([toolbox-experience.md](toolbox-experience.md)) |
+| `analysis` | asset and name | The Blender pipeline's analysis results (preview colour and the like), kept as JSON |
+
+**Each project's snapshot.** A project must not depend on one machine's database, so after every install (and on Build Game) the editor writes `.axcenity/asset-sources.json`: for each file in the project that came from the Toolbox, its `ax://` ID and the asset's source and licence record, generated from the database. Opening the project on another machine adds any records its database lacks. The database stays the source of truth; the snapshot is how credits travel with the project.
+
+**Conditional migration from the Blender pipeline (decision 3).** `migrate::import_blender_library(path)`, offered once by the editor and the CLI (`axcenity-toolbox migrate <asset_library>`) when an old library is found: for each `registry.json` entry, the record goes into `assets`; each download is copied into the central directory **only if every file still matches its recorded size (and MD5, when known)**, otherwise it is reported and skipped. Nothing in the old folder is changed or deleted; it is a copy, rerunnable, and reports what it took and what it left.
+
+**Tests.** A small `registry.json` fixture written by the Blender pipeline imports correctly; a database written by Rust reads in Python (a test in the Python package); two writers at once don't corrupt it; a damaged file is skipped by the migration.
+
+## 4. From the directory into a project
 
 The editor installs by copying, as Global Assets do, so projects stay self-contained and the player never reads the library.
 
@@ -213,15 +229,7 @@ The editor installs by copying, as Global Assets do, so projects stay self-conta
 | model | `assets/models/<id>/` with the glTF's files at their relative paths | Through the Import dialog's checks (`docs/editor/import.md`) |
 | sound | `assets/audio/<id>.<ext>` | |
 
-Each installed file's `*.import.json` sidecar gets an optional `source` block (decision 5):
-
-```json
-{"format_version": 1, "uid": "ax://…",
- "source": {"provider": "polyhaven", "id": "red_brick_03", "license": "CC0", "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
-            "authors": ["Rob Tuytel"], "url": "https://polyhaven.com/a/red_brick_03", "attribution": ""}}
-```
-
-Old readers ignore it, so `format_version` stays 1. From it the Assets panel's tooltip can name the source and licence, and Build Game writes `CREDITS.txt` (required credits first, optional thanks for CC0) using `license.rs`.
+Each installed file gets its `ax://` ID first (`give_asset_id`), and the install is recorded in the database's `installs` table and the project's `.axcenity/asset-sources.json` snapshot (section 3). Sidecars are not changed. From those the Assets panel's tooltip names the source and licence, and Build Game writes `CREDITS.txt` (required credits first, optional thanks for CC0) using `license.rs`. A file renamed or moved keeps its ID, so its record follows it.
 
 ## 5. The CLI: `axcenity-toolbox`
 
@@ -234,10 +242,14 @@ axcenity-toolbox fetch polyhaven:red_brick_03 --res 2k [--format jpg] --json
 axcenity-toolbox list [--kind texture] [--query brick] [--downloaded] --json
 axcenity-toolbox credits [--keys a:b,c:d] [--out CREDITS.md]
 axcenity-toolbox stats --json
-  common: --library <dir>  --offline
+axcenity-toolbox where
+axcenity-toolbox migrate <old asset_library> [--dry-run]
+  common: --dir <asset directory>  --offline
 ```
 
-`--json` prints records and download entries in exactly the library's shapes. Exit codes: 0 done, 2 a `SourceError` (its safe message on stderr), 3 a source unavailable. In the Blender pipeline, one small Python class per source registers with the existing `register_provider` and runs the CLI, so `providers.search`, `providers.fetch` and the acquisition code don't change; `asset_registry.AssetLibrary` keeps reading `registry.json` directly. The binary is found from `AXCENITY_ASSETS` or `PATH`.
+`--json` prints records and download entries in the database's shapes. Exit codes: 0 done, 2 a `SourceError` (its safe message on stderr), 3 a source unavailable.
+
+**The Python Blender integration (decision 2)** is a small package, `axcenity_toolbox`, kept in the engine repository at `crates/toolbox/python/` so it versions with the Rust core, and installed into the Blender pipeline. It does two things only: runs the CLI for anything that touches the network or writes (search, info, fetch, migrate), and reads `metadata.db` directly with `sqlite3` for fast local queries (records, downloads, maps, licences). In the Blender pipeline, one class per source registers with the existing `register_provider` and calls it, so `providers.search`, `providers.fetch` and the acquisition code don't change; `asset_registry.AssetLibrary` is rewritten over the package. The binary is found from `AXCENITY_TOOLBOX` or `PATH`. It has no Rust extension module, so it works with Blender's bundled Python without compiling anything.
 
 ## 6. Importing a Toolbox pack
 
@@ -247,7 +259,7 @@ axcenity-toolbox stats --json
 - List the items, their licences, the use checks that fail (for example a CC-BY-NC sound blocks commercial use), the total size, and where each lands, and download only on **Import**.
 - ambientCG and Poly Haven items are fetched by `provider:id` through their source (verified, into the library), using the manifest's chosen variant label when it still exists, else `variants::choose`. Other items are downloaded from their listed URLs through the same guard (https, refused types, size limit), since no source exists for them yet.
 - `import_path` is read under `assets/`, through `safe_path`; the Toolbox's blank-path defaults map to the engine's folders (`textures/` → `assets/textures/`, `hdris/` → `assets/sky/`, `models/` → `assets/models/`, `sounds/` → `assets/audio/`).
-- The manifest's `credits` and each item's licence go into the sidecars, as in section 4.
+- Each item's source and licence go into the database and the project's snapshot, as in section 4.
 
 Optional Toolbox follow-up, its own decision later: a manifest version 2 that adds each file's `md5` and `map` and the normalised licence code.
 
@@ -255,7 +267,7 @@ Optional Toolbox follow-up, its own decision later: a manifest version 2 that ad
 
 | Where | Change |
 |---|---|
-| `Cargo.toml` (workspace) | Add `crates/toolbox` to members; pin `md-5`; run `cargo hakari generate` |
+| `Cargo.toml` (workspace) | Add `crates/toolbox` to members; pin `md-5` and `rusqlite`; run `cargo hakari generate` |
 | `crates/toolbox/` | New, as section 2 |
 | `crates/editor/src/ambient_cg.rs` | Steps 1 to 3: the dialog only, calling the crate (HTTP, parsing, extraction and `replace_dir` move out). Step 4: replaced by `toolbox_panel.rs` and a `toolbox_panel/` folder (cards, drawer, library views) with its actions in `app/toolbox.rs` |
 | `crates/editor/src/asset_browser.rs` | The Get texture button and state (`use crate::ambient_cg::GetTexture`, the `get_texture` field, the button, the finished-download refresh) become a button that shows the Toolbox tab |
@@ -267,13 +279,13 @@ Optional Toolbox follow-up, its own decision later: a manifest version 2 that ad
 | `crates/editor/Cargo.toml` | Depends on `toolbox`; drops `ureq` (only Get texture uses it) |
 | `crates/assets/src/model/maps.rs` | Add `nordx` (DirectX normal) and `norgl` to `WORDS`, with a test, before Poly Haven textures arrive (see the assessment, section 3) |
 | `crates/assets/src/texture_set.rs` | Unchanged format; `source` and `link` filled from the record |
-| `crates/assets/src/asset_id.rs` | Read and write the optional `source` block in sidecars |
+| `crates/assets/src/asset_id.rs` | No format change; installs use `give_asset_id` so every installed file has an ID before it is recorded |
 | `crates/editor/src/global_assets.rs` | The copy-into-project pattern to reuse for installs |
 | `crates/editor/src/app/sky.rs`, `app/files/import.rs` | Install paths for skies and models |
-| `crates/editor/src/build_game.rs` | `CREDITS.txt` from sidecar `source` blocks |
-| `crates/editor/src/app/settings.rs` | **Asset library folder** setting |
+| `crates/editor/src/build_game.rs` | `CREDITS.txt` from the project's records (database, else the snapshot) |
+| `crates/editor/src/app/settings.rs` | **Asset directory** setting |
 | Player, server, `sim` | No change, and no dependency on `toolbox`; a check in `scripts/check-platform.*` that `cargo tree -p axcenity-player` doesn't contain it |
-| Docs | `docs/architecture/crates.md` (new row), `docs/editor/assets.md` (the Toolbox panel, the library, pack import), `docs/project/licensing.md` (third-party asset credits, `md-5`), `docs/README.md` (a row once built) |
+| Docs | `docs/architecture/crates.md` (new row), `docs/editor/assets.md` (the Toolbox panel, the library, pack import), `docs/project/licensing.md` (third-party asset credits, `md-5`, `rusqlite` and SQLite), `docs/README.md` (a row once built) |
 
 ## 8. Migration plan
 
@@ -284,12 +296,12 @@ Each step is one pull request, leaves the editor working, adds its own tests, an
 | 0 | Paul signs off the decisions in the [README](README.md) | Answers recorded in this folder |
 | 1 | **Crate and helpers, no behaviour change.** Create `toolbox` with `Http`, `SourceError`, `guard`, zip extraction and the limited copy, moved out of `ambient_cg.rs`; the dialog calls them | Get texture behaves as before; its two tests move to the crate and pass; new guard tests (refused types, entry limit) |
 | 2 | **Record and ambientCG v3.** `AssetRecord`, the trait, `ambientcg.rs` on v3, `variants::choose`. The dialog searches and downloads through the trait and offers the nearest package with a note instead of refusing | Fixture tests for search, an unknown id, a malformed response, and the choice notes; the v2 parser is gone |
-| 3 | **Library, cache, verified downloads.** The shared library and its lock, the on-disk cache with offline fallback, `.part` downloads with size checks, the Asset library folder setting. Get texture fetches into the library, then copies into the project | A second project gets the same material without a request; offline search shows cached results; the Blender registry fixture reads and round-trips |
+| 3 | **Asset directory, database, cache, verified downloads.** The central directory, `metadata.db` (`rusqlite`, schema version 1), the on-disk cache with offline fallback, `.part` downloads with size checks, the Asset directory setting. Get texture fetches into the directory, records the asset and the install, then copies into the project | A second project gets the same material without a request; offline search shows cached results; the asset's record survives deleting its files; two writers at once leave the database whole |
 | 4 | **Poly Haven, and the Toolbox panel.** `maps.rs` fix first, then `polyhaven.rs` with MD5 checks (`md-5`). The Toolbox tab replaces the Get texture dialog: search across sources, Textures and Skies tabs, source and category chips, sort, licence filter, cached previews, the details drawer, drag or double-click to apply, **Make material**, and Terrain Studio's **From Toolbox…** ([toolbox-experience.md](toolbox-experience.md)) | Fixture tests for catalogue search, `/files` to variants, `nor_dx` handling and an MD5 mismatch; drawing tests for the panel narrow and wide (`AXCENITY_SNAPSHOTS`); a sky lands in `assets/sky` and asks to be used; a texture dropped on a part fills it as one undo step |
-| 5 | **Provenance, licences and the library views.** Sidecar `source` blocks, `license.rs` (codes, policy, credit lines), the Assets panel tooltip, Build Game's `CREDITS.txt`; favourites, collections, recents, history and This project in the panel | A built game with a CC-BY asset has its credit line; a CC0-only project's credits list optional thanks; favourites and collections survive a restart and a second project |
+| 5 | **Provenance, licences and the library views.** The project's `.axcenity/asset-sources.json` snapshot, `license.rs` (codes, policy, credit lines), the Assets panel tooltip, Build Game's `CREDITS.txt`; favourites, collections, recents, history and This project in the panel | A built game with a CC-BY asset has its credit line; a CC0-only project's credits list optional thanks; favourites and collections survive a restart and a second project |
 | 6 | **Poly Haven models.** `bundle` variants into `assets/models/<id>/`, the glTF reference check, through the Import dialog | A Poly Haven model places in the viewport with its textures; a glTF pointing outside its folder is refused |
 | 7 | **Sounds.** The first sound source (decision 6; Openverse recommended), the Sounds tab, preview playback, install to `assets/audio`, drop to make a Sound | Fixture tests for search, licence filtering and the anonymous page limit; a dropped sound plays in Play |
-| 8 | **CLI and the Blender pipeline.** `axcenity-toolbox`; in the 3D Models repository (its own pull request), CLI-backed `ambientcg` and `polyhaven` providers pass that repository's existing provider tests, then the Python versions are removed. Kenney, Sketchfab, local folders and catalogues port next, in the same way | The pipeline's `tools/library.py search/fetch` give the same records and files through the CLI |
+| 8 | **CLI, Python integration and the conditional migration.** `axcenity-toolbox` and the `axcenity_toolbox` Python package; `migrate` imports the Blender `asset_library` where its files verify. In the 3D Models repository (its own pull request), package-backed `ambientcg` and `polyhaven` providers must pass that repository's existing provider tests before the Python versions are removed. Kenney, Sketchfab, local folders and catalogues are ported to Rust next, each under the same condition | The pipeline's `tools/library.py search/fetch` give the same records and files through the package; the migration report lists what it skipped and why |
 | 9 | **Toolbox packs.** Import a Django Toolbox pack (section 6) and export a collection as one | The Django Toolbox's golden manifest imports, with its licence warnings shown; an exported collection imports back unchanged |
 | Later | A live link to the Django Toolbox if it's ever hosted, manifest version 2, more sources each on its own merits | Each on its own decision |
 

@@ -7,10 +7,12 @@
 //! download runs on its own thread and writes the zip to disk before
 //! extracting it, so a large package is not held in memory. Cancelling, or
 //! closing the dialog, leaves the project as it was.
+//!
+//! Requests, the download's size limit, unpacking and swapping the folder
+//! into the project go through the Toolbox crate (`axcenity_toolbox`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -20,6 +22,8 @@ use std::time::Duration;
 use axcenity_assets::{
     TEXTURE_EXTENSIONS, TEXTURE_SET_SUFFIX, texture_set_from_files, write_texture_set,
 };
+use axcenity_toolbox::http::{self, Http};
+use axcenity_toolbox::{files, guard};
 use eframe::egui;
 
 use crate::dialog;
@@ -28,7 +32,6 @@ use crate::theme::icons;
 const PAGE: usize = 24;
 const RESOLUTIONS: [&str; 4] = ["1K", "2K", "4K", "8K"];
 const FORMATS: [&str; 2] = ["JPG", "PNG"];
-const USER_AGENT: &str = "AxcenityEngine/0.1 (texture catalog)";
 /// A zip larger than this is refused, so a bad response can't fill the disk.
 const ZIP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
@@ -498,9 +501,10 @@ impl GetTexture {
 fn search(query: &str, offset: usize) -> Result<(usize, Vec<Listing>), String> {
     let url = format!(
         "https://ambientcg.com/api/v2/full_json?type=Material&sort=Popular&limit={PAGE}&offset={offset}&include=downloadData,previewData,displayData&q={}",
-        encode(query)
+        http::encode_query(query)
     );
-    let text = get_text(&url, Duration::from_secs(30))?;
+    let client = http::Client::new(Duration::from_secs(30));
+    let text = http::get_text(&client, &url, JSON_LIMIT).map_err(|err| err.to_string())?;
     parse_catalog(&text)
 }
 
@@ -511,14 +515,12 @@ fn fetch_previews(ctx: &egui::Context, wanted: VecDeque<(String, String)>, tx: &
     if wanted.is_empty() {
         return;
     }
-    let Ok(agent) = http_agent(Duration::from_secs(20)) else {
-        return;
-    };
+    let client = http::Client::new(Duration::from_secs(20));
     let fetchers = PREVIEW_FETCHERS.min(wanted.len());
     let queue = Arc::new(Mutex::new(wanted));
     for _ in 0..fetchers {
         let queue = Arc::clone(&queue);
-        let agent = agent.clone();
+        let client = client.clone();
         let tx = tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -527,7 +529,7 @@ fn fetch_previews(ctx: &egui::Context, wanted: VecDeque<(String, String)>, tx: &
                 let Some((id, url)) = next else {
                     return;
                 };
-                let image = preview_image(&agent, &url);
+                let image = preview_image(&client, &url);
                 if tx.send((id, image)).is_err() {
                     return;
                 }
@@ -537,8 +539,8 @@ fn fetch_previews(ctx: &egui::Context, wanted: VecDeque<(String, String)>, tx: &
     }
 }
 
-fn preview_image(agent: &ureq::Agent, url: &str) -> Option<egui::ColorImage> {
-    let bytes = get_bytes(agent, url, PREVIEW_LIMIT).ok()?;
+fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
+    let bytes = http::get_bytes(client, url, PREVIEW_LIMIT).ok()?;
     let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
     Some(egui::ColorImage::from_rgba_unmultiplied(
         [image.width() as usize, image.height() as usize],
@@ -557,7 +559,7 @@ fn download(
     url: &str,
     cancel: &AtomicBool,
 ) -> Result<DownloadResult, String> {
-    if !safe_asset_id(id) {
+    if !guard::safe_asset_id(id) {
         return Err("the asset id is not a file name".to_owned());
     }
     if !url.starts_with("https://ambientcg.com/") {
@@ -585,11 +587,16 @@ fn download_into(
     fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
     let zip_path = root.join("package.zip");
     let mut zip = fs::File::create(&zip_path).map_err(|err| err.to_string())?;
-    write_download(url, &mut zip)?;
+    let client = http::Client::new(Duration::from_secs(15 * 60));
+    client
+        .fetch(url, ZIP_LIMIT, &mut zip)
+        .map_err(|err| err.to_string())?;
+    drop(zip);
     if cancel.load(Ordering::Relaxed) {
         return Ok(DownloadResult::Cancelled);
     }
-    let names = extract_images(&zip_path, &staging)?;
+    let names = guard::extract_files(&zip_path, &staging, &TEXTURE_EXTENSIONS)
+        .map_err(|err| err.to_string())?;
     let pairs: Vec<(String, String)> = names
         .iter()
         .map(|file| (file.clone(), format!("assets/textures/{id}/{file}")))
@@ -608,156 +615,12 @@ fn download_into(
         return Ok(DownloadResult::Cancelled);
     }
     let dest = project.join("assets").join("textures").join(id);
-    let replaced = replace_dir(&staging, &dest, &root.join("previous"))?;
+    let replaced = files::replace_dir(&staging, &dest, &root.join("previous"))
+        .map_err(|err| err.to_string())?;
     let verb = if replaced { "Replaced" } else { "Saved" };
     Ok(DownloadResult::Saved(format!(
         "{verb} {name} (CC0) in assets/textures/{id}."
     )))
-}
-
-fn write_download(url: &str, file: &mut fs::File) -> Result<(), String> {
-    let agent = http_agent(Duration::from_secs(15 * 60))?;
-    let mut response = agent
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|err| err.to_string())?;
-    let mut reader = response.body_mut().as_reader();
-    copy_limited(&mut reader, file, ZIP_LIMIT)
-}
-
-fn extract_images(zip_path: &Path, dest: &Path) -> Result<Vec<String>, String> {
-    let file = fs::File::open(zip_path).map_err(|err| err.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|err| err.to_string())?;
-    let mut names = Vec::new();
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|err| err.to_string())?;
-        if entry.is_dir() {
-            continue;
-        }
-        let Some(enclosed) = entry.enclosed_name() else {
-            continue;
-        };
-        let Some(file_name) = enclosed.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if file_name.is_empty()
-            || file_name.starts_with('.')
-            || file_name == ".."
-            || file_name.contains("..")
-        {
-            continue;
-        }
-        let extension = file_name
-            .rsplit_once('.')
-            .map(|(_, extension)| extension.to_ascii_lowercase())
-            .unwrap_or_default();
-        if !TEXTURE_EXTENSIONS.contains(&extension.as_str()) {
-            continue;
-        }
-        if names.iter().any(|known| known == file_name) {
-            continue;
-        }
-        let mut output = fs::File::create(dest.join(file_name)).map_err(|err| err.to_string())?;
-        io::copy(&mut entry, &mut output).map_err(|err| err.to_string())?;
-        names.push(file_name.to_owned());
-    }
-    if names.is_empty() {
-        return Err("the package has no images".to_owned());
-    }
-    Ok(names)
-}
-
-/// Moves `staging` to `dest`, replacing `dest` when it is already there.
-/// `backup` holds the old folder until the new one is in place.
-fn replace_dir(staging: &Path, dest: &Path, backup: &Path) -> Result<bool, String> {
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    let replaced = dest.exists();
-    if replaced {
-        let _ = fs::remove_dir_all(backup);
-        fs::rename(dest, backup).map_err(|err| err.to_string())?;
-    }
-    if fs::rename(staging, dest).is_err()
-        && let Err(err) = copy_dir(staging, dest)
-    {
-        if replaced {
-            let _ = fs::rename(backup, dest);
-        }
-        return Err(err);
-    }
-    if replaced {
-        let _ = fs::remove_dir_all(backup);
-    }
-    Ok(replaced)
-}
-
-fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
-    fs::create_dir_all(to).map_err(|err| err.to_string())?;
-    for entry in fs::read_dir(from).map_err(|err| err.to_string())? {
-        let entry = entry.map_err(|err| err.to_string())?;
-        let dest = to.join(entry.file_name());
-        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            copy_dir(&entry.path(), &dest)?;
-        } else {
-            fs::copy(entry.path(), &dest).map_err(|err| err.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn get_text(url: &str, timeout: Duration) -> Result<String, String> {
-    let bytes = get_bytes(&http_agent(timeout)?, url, JSON_LIMIT)?;
-    String::from_utf8(bytes).map_err(|_| "the catalog was not text".to_owned())
-}
-
-/// `agent` can be shared, so requests to the same host reuse a connection.
-fn get_bytes(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Vec<u8>, String> {
-    if !url.starts_with("https://") {
-        return Err("the address is not https".to_owned());
-    }
-    let mut response = agent
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|err| err.to_string())?;
-    let mut reader = response.body_mut().as_reader();
-    let mut bytes = Vec::new();
-    copy_limited(&mut reader, &mut bytes, limit)?;
-    Ok(bytes)
-}
-
-fn http_agent(timeout: Duration) -> Result<ureq::Agent, String> {
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .build();
-    Ok(config.into())
-}
-
-fn copy_limited(reader: &mut impl Read, writer: &mut impl Write, limit: u64) -> Result<(), String> {
-    let copied = io::copy(&mut reader.take(limit + 1), writer).map_err(|err| err.to_string())?;
-    if copied > limit {
-        Err("the download is too large".to_owned())
-    } else {
-        Ok(())
-    }
-}
-
-fn encode(text: &str) -> String {
-    let mut out = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
-fn safe_asset_id(id: &str) -> bool {
-    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn parse_catalog(text: &str) -> Result<(usize, Vec<Listing>), String> {
@@ -778,7 +641,7 @@ fn parse_catalog(text: &str) -> Result<(usize, Vec<Listing>), String> {
         let Some(id) = asset.get("assetId").and_then(serde_json::Value::as_str) else {
             continue;
         };
-        if !safe_asset_id(id) {
+        if !guard::safe_asset_id(id) {
             continue;
         }
         let mut packages = Vec::new();
@@ -882,35 +745,5 @@ mod tests {
         assert_eq!(listings[0].packages.len(), 1);
         assert_eq!(listings[0].packages[0].0, "2K-JPG");
         assert!(listings[0].preview.is_some());
-    }
-
-    #[test]
-    fn extraction_keeps_images_and_drops_paths_that_escape() {
-        let root = std::env::temp_dir().join(format!("axcenity-zip-slip-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        let zip_path = root.join("package.zip");
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        {
-            let mut writer = zip::ZipWriter::new(&mut cursor);
-            let options = zip::write::SimpleFileOptions::default();
-            writer
-                .start_file("maps/Fabric086_Color.jpg", options)
-                .unwrap();
-            writer.write_all(b"color").unwrap();
-            writer.start_file("../evil.png", options).unwrap();
-            writer.write_all(b"no").unwrap();
-            writer.start_file("readme.txt", options).unwrap();
-            writer.write_all(b"skip").unwrap();
-            writer.finish().unwrap();
-        }
-        fs::write(&zip_path, cursor.into_inner()).unwrap();
-        let dest = root.join("out");
-        fs::create_dir_all(&dest).unwrap();
-        let names = extract_images(&zip_path, &dest).unwrap();
-        assert_eq!(names, vec!["Fabric086_Color.jpg".to_owned()]);
-        assert!(dest.join("Fabric086_Color.jpg").is_file());
-        assert!(!root.join("evil.png").exists());
-        let _ = fs::remove_dir_all(&root);
     }
 }

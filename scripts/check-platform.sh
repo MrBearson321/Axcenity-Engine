@@ -32,7 +32,7 @@ step() {
 
 no_editor_code() {
     ! cargo tree -p axcenity-player -e normal --prefix none --locked |
-        grep -E '^(axcenity-editor|axcenity-blocks|axcenity-plugins|axcenity-cook|intel_tex_2|eframe|egui|subsecond) '
+        grep -E '^(axcenity-editor|axcenity-blocks|axcenity-plugins|axcenity-cook|axcenity-toolbox|intel_tex_2|eframe|egui|subsecond) '
 }
 
 all_tests() {

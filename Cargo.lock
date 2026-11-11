@@ -669,6 +669,7 @@ dependencies = [
  "axcenity-sim",
  "axcenity-terrain",
  "axcenity-testing",
+ "axcenity-toolbox",
  "axcenity-ui",
  "axcenity-workspace-hack",
  "dioxus-cli-config",
@@ -689,7 +690,6 @@ dependencies = [
  "serde",
  "serde_json",
  "subsecond",
- "ureq",
  "zip",
 ]
 
@@ -984,6 +984,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-toolbox"
+version = "0.1.0"
+dependencies = [
+ "axcenity-workspace-hack",
+ "log",
+ "thiserror 2.0.21",
+ "ureq",
+ "zip",
+]
+
+[[package]]
 name = "axcenity-ui"
 version = "0.1.0"
 dependencies = [
@@ -1010,10 +1021,12 @@ dependencies = [
  "cc",
  "core-foundation",
  "core-graphics-types",
+ "crc32fast",
  "crossbeam-utils",
  "crypto-common",
  "dispatch2",
  "either",
+ "flate2",
  "getrandom 0.3.4",
  "glam 0.34.3",
  "half",
@@ -1043,6 +1056,7 @@ dependencies = [
  "serde",
  "serde_core",
  "serde_json",
+ "simd-adler32",
  "slotmap",
  "smallvec",
  "smol_str",
