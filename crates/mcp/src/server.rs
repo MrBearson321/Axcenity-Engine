@@ -65,7 +65,8 @@ pub struct Setup {
 /// The tool as `rmcp` sends it, with annotations from its class: clients
 /// skip confirmation for read-only tools and always ask for destructive ones.
 pub fn rmcp_tool(spec: &ToolSpec) -> Tool {
-    let annotations = ToolAnnotations::with_title(spec.title)
+    // The title is the tool's own; not repeated in the annotations.
+    let annotations = ToolAnnotations::new()
         .read_only(spec.class == Class::Read)
         .destructive(spec.class == Class::Destructive)
         .idempotent(spec.idempotent)

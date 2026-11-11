@@ -20,11 +20,7 @@ pub const SPEC: ToolSpec = ToolSpec {
             Kind::Enum(&["list", "undo", "redo"]),
             "default list",
         ),
-        Param::optional(
-            "steps",
-            Kind::Integer,
-            "how many to undo or redo, default 1",
-        ),
+        Param::optional("steps", Kind::Integer, "default 1"),
     ],
 };
 
@@ -100,6 +96,8 @@ fn step(host: &mut Host, count: usize, undo: bool) -> Outcome {
         } else {
             host.app.redo();
         }
+        // A script's step puts its file back: the project takes it in.
+        super::script_write::resync_scripts(host);
         done.push(quoted(&label));
     }
     if done.is_empty() {

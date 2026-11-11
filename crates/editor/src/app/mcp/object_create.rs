@@ -20,7 +20,7 @@ use crate::tree::{self, Insertable};
 pub const SPEC: ToolSpec = ToolSpec {
     name: "object_create",
     title: "Create object",
-    summary: "Create one object as the editor's Insert does, e.g. {\"kind\":\"Block\",\"name\":\"Wall\",\"size\":[20,10,1]}.",
+    summary: "Create one object as Insert does, e.g. {\"kind\":\"Block\",\"size\":[20,10,1]}.",
     profile: Profile::Lite,
     class: Class::Add,
     idempotent: false,
@@ -28,23 +28,19 @@ pub const SPEC: ToolSpec = ToolSpec {
         Param::required(
             "kind",
             Kind::String,
-            "Insert name or class: Block, Sphere, Model, PointLight... (docs lists them)",
+            "Block, Sphere, Model, PointLight... (docs lists all)",
         ),
         Param::optional("name", Kind::String, "default: the kind"),
-        Param::optional(
-            "parent",
-            Kind::String,
-            "ID or path; default where Insert puts it",
-        ),
+        Param::optional("parent", Kind::String, "default: where Insert puts it"),
         Param::optional(
             "position",
             Kind::Vector3,
-            "[x,y,z]; default a part rests on the ground at the origin",
+            "centre; default: on the ground at 0,0",
         ),
-        Param::optional("size", Kind::Vector3, "[x,y,z] studs"),
+        Param::optional("size", Kind::Vector3, "studs"),
         Param::optional("color", Kind::Vector3, "[r,g,b] 0-1"),
-        Param::optional("material", Kind::String, "such as Brick, Wood, Neon"),
-        Param::optional("props", Kind::Object, "other properties, world.json values"),
+        Param::optional("material", Kind::String, "e.g. Brick"),
+        Param::optional("props", Kind::Object, "other properties"),
     ],
 };
 

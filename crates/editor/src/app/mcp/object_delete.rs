@@ -16,7 +16,7 @@ use crate::tree;
 pub const SPEC: ToolSpec = ToolSpec {
     name: "object_delete",
     title: "Delete objects",
-    summary: "Delete objects and what's inside them (undoable); many objects or scripts return a preview and confirm token first.",
+    summary: "Delete objects and their contents (undoable); big or script deletes preview first.",
     profile: Profile::Lite,
     class: Class::Destructive,
     idempotent: false,

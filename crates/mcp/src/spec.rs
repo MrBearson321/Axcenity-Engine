@@ -88,6 +88,9 @@ pub enum Kind {
     Vector3,
     /// A flat object, such as `props`.
     Object,
+    /// A list of objects with these two string fields, such as
+    /// `[{"find":…,"replace":…}]`.
+    Pairs(&'static str, &'static str),
 }
 
 /// One parameter. Tools share the common ones as constants (`ID`, `DETAIL`,
@@ -135,6 +138,14 @@ impl Param {
                 "maxItems": 3
             }),
             Kind::Object => json!({ "type": "object" }),
+            Kind::Pairs(first, second) => json!({
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": { first: { "type": "string" }, second: { "type": "string" } },
+                    "required": [first, second]
+                }
+            }),
         };
         if !self.about.is_empty() {
             schema["description"] = Value::String(self.about.to_owned());

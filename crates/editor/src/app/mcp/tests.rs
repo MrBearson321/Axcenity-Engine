@@ -285,6 +285,12 @@ fn docs_describe_classes_properties_and_search_the_api() {
         "{material}"
     );
 
+    // Services and types only scripts see come from the API reference.
+    let run_service = ok(app, "docs", json!({"class": "RunService"}));
+    assert!(
+        run_service.starts_with("RunService") && run_service.contains("Heartbeat"),
+        "{run_service}"
+    );
     let search = ok(app, "docs", json!({"query": "tween"}));
     assert!(search.contains("TweenService"), "{search}");
 
@@ -690,4 +696,185 @@ fn project_save_asks_first_then_writes_the_files() {
     assert_eq!(lines[0]["undo"], "AI (test): Create Saved");
     assert_eq!(lines[0]["client"], "test");
     assert_eq!(lines[1]["result"], "needs_confirm");
+}
+
+#[test]
+fn script_read_lists_scripts_and_shows_numbered_lines() {
+    let mut opened = open("hello-touched", "mcp-script-read");
+    let host = &mut opened.app;
+    let list = ok(host, "script_read", json!({}));
+    assert!(
+        list.starts_with("1 scripts\nscripts/pad.server.lua · "),
+        "{list}"
+    );
+    assert!(list.contains(" Script · "), "{list}");
+    let part = ok(
+        host,
+        "script_read",
+        json!({"path": "scripts/pad.server.lua", "from": 5, "to": 6}),
+    );
+    let mut lines = part.lines();
+    assert!(
+        lines
+            .next()
+            .unwrap()
+            .starts_with("scripts/pad.server.lua · "),
+        "{part}"
+    );
+    assert_eq!(lines.next(), Some("5| local pad = workspace.Pad"));
+    assert_eq!(lines.next(), Some("6| local colors = {"));
+    assert_eq!(lines.next(), None);
+    // Its object names it too.
+    let by_object = ok(
+        host,
+        "script_read",
+        json!({"path": "ServerScriptService/pad", "to": 1}),
+    );
+    assert!(
+        by_object.contains("\n1| -- The Milestone 1 demo"),
+        "{by_object}"
+    );
+    let error = call(
+        host,
+        "script_read",
+        json!({"path": "scripts/pads.server.lua"}),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.fix.as_deref(),
+        Some("did you mean \"scripts/pad.server.lua\"?")
+    );
+}
+
+#[test]
+fn script_write_makes_and_edits_scripts_as_undoable_file_changes() {
+    let mut opened = open("hello-touched", "mcp-script-write");
+    let host = &mut opened.app;
+    let file = opened.folder.join("scripts/Spinner.server.lua");
+    let text = ok(
+        host,
+        "script_write",
+        json!({"name": "Spinner", "side": "server", "text": "local speed = 2\nprint(speed)\n"}),
+    );
+    assert_eq!(
+        text,
+        "created scripts/Spinner.server.lua (2 lines) · syntax ok · undo \"AI (test): Create Spinner.server.lua\""
+    );
+    assert!(file.is_file());
+    let service = ok(
+        host,
+        "scene_inspect",
+        json!({"root": "ServerScriptService"}),
+    );
+    assert!(service.contains("Script \"Spinner\""), "{service}");
+
+    let text = ok(
+        host,
+        "script_write",
+        json!({"path": "scripts/Spinner.server.lua", "edits": [{"find": "speed = 2", "replace": "speed = 5"}]}),
+    );
+    assert!(
+        text.starts_with("wrote scripts/Spinner.server.lua (2 lines) · syntax ok"),
+        "{text}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "local speed = 5\nprint(speed)\n"
+    );
+
+    // An edit that doesn't match once changes nothing.
+    let error = call(host, "script_write", json!({"path": "scripts/Spinner.server.lua", "edits": [{"find": "speed", "replace": "rate"}]})).unwrap_err();
+    assert_eq!(error.message, "edit 1: find matches 2 times, not once");
+    // Code that doesn't compile is still written, and the check says where.
+    let text = ok(
+        host,
+        "script_write",
+        json!({"path": "scripts/Spinner.server.lua", "text": "local x = \nprint(\n"}),
+    );
+    assert!(
+        text.contains("· syntax error scripts/Spinner.server.lua:"),
+        "{text}"
+    );
+    // A Script using an API only clients have is warned about.
+    let text = ok(
+        host,
+        "script_write",
+        json!({"path": "scripts/Spinner.server.lua", "text": "local uis = game:GetService(\"UserInputService\")\n"}),
+    );
+    assert!(
+        text.contains("\nwarning scripts/Spinner.server.lua:1: "),
+        "{text}"
+    );
+
+    // Undo puts the files back, the last one first; undoing the creation
+    // takes the script away.
+    ok(host, "history", json!({"action": "undo", "steps": 3}));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "local speed = 2\nprint(speed)\n"
+    );
+    let read = ok(
+        host,
+        "script_read",
+        json!({"path": "scripts/Spinner.server.lua"}),
+    );
+    assert!(read.contains("1| local speed = 2"), "{read}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!file.exists());
+    assert!(
+        call(
+            host,
+            "script_read",
+            json!({"path": "scripts/Spinner.server.lua"})
+        )
+        .is_err()
+    );
+    ok(host, "history", json!({"action": "redo"}));
+    assert!(
+        ok(
+            host,
+            "scene_inspect",
+            json!({"root": "ServerScriptService"})
+        )
+        .contains("\"Spinner\"")
+    );
+
+    let error = call(
+        host,
+        "script_write",
+        json!({"name": "Spinner", "side": "server", "text": ""}),
+    )
+    .unwrap_err();
+    assert!(error.message.contains("is already there"), "{error}");
+}
+
+#[test]
+fn project_check_lists_script_problems_worst_first() {
+    let mut opened = open("hello-touched", "mcp-check");
+    let host = &mut opened.app;
+    assert_eq!(
+        ok(host, "project_check", json!({"scope": "scripts"})),
+        "no problems found (scripts)"
+    );
+    ok(
+        host,
+        "script_write",
+        json!({"name": "Broken", "side": "server", "text": "local x = \n"}),
+    );
+    ok(
+        host,
+        "script_write",
+        json!({"name": "Input", "side": "server", "text": "local uis = game:GetService(\"UserInputService\")\n"}),
+    );
+    let report = ok(host, "project_check", json!({"scope": "scripts"}));
+    let lines: Vec<&str> = report.lines().collect();
+    assert_eq!(lines[0], "2 problems (1 error, 1 warning)", "{report}");
+    assert!(
+        lines[1].starts_with("syntax error scripts/Broken.server.lua:"),
+        "{report}"
+    );
+    assert!(
+        lines[2].starts_with("warning scripts/Input.server.lua:1: "),
+        "{report}"
+    );
 }
