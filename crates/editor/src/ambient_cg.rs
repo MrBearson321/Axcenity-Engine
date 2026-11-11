@@ -8,8 +8,11 @@
 //! extracting it, so a large package is not held in memory. Cancelling, or
 //! closing the dialog, leaves the project as it was.
 //!
-//! Requests, the download's size limit, unpacking and swapping the folder
-//! into the project go through the Toolbox crate (`axcenity_toolbox`).
+//! Searching and the packages on offer come from the Toolbox's ambientCG
+//! source (its v3 API); when the chosen resolution and format aren't
+//! there, Get takes the nearest package and says so. Requests, the
+//! download's size limit, unpacking and swapping the folder into the
+//! project go through the Toolbox crate (`axcenity_toolbox`) too.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -22,8 +25,10 @@ use std::time::Duration;
 use axcenity_assets::{
     TEXTURE_EXTENSIONS, TEXTURE_SET_SUFFIX, texture_set_from_files, write_texture_set,
 };
+use axcenity_toolbox::ambientcg::AMBIENTCG;
 use axcenity_toolbox::http::{self, Http};
-use axcenity_toolbox::{files, guard};
+use axcenity_toolbox::variants::{self, Choice};
+use axcenity_toolbox::{AssetRecord, AssetSource, Kind, Package, Query, Variant, files, guard};
 use eframe::egui;
 
 use crate::dialog;
@@ -35,7 +40,6 @@ const FORMATS: [&str; 2] = ["JPG", "PNG"];
 /// A zip larger than this is refused, so a bad response can't fill the disk.
 const ZIP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
-const JSON_LIMIT: u64 = 8 * 1024 * 1024;
 /// How many previews are fetched at once.
 const PREVIEW_FETCHERS: usize = 6;
 /// A result card's width and height, and its picture's side.
@@ -58,8 +62,43 @@ struct Listing {
     link: String,
     maps: Vec<String>,
     preview: Option<String>,
-    /// `(attribute, https url)`, such as `("2K-JPG", "https://ambientcg.com/get?…")`.
-    packages: Vec<(String, String)>,
+    /// Its zip downloads, such as "2K JPG", each one file from ambientCG.
+    packages: Vec<Variant>,
+}
+
+impl Listing {
+    /// A search result from the Toolbox's ambientCG source.
+    fn from_record(record: AssetRecord) -> Self {
+        Self {
+            category: record.categories.first().cloned().unwrap_or_default(),
+            maps: record
+                .maps
+                .iter()
+                .map(|map| map_label(map).to_owned())
+                .collect(),
+            preview: Some(record.thumbnail_url).filter(|url| url.starts_with("https://")),
+            packages: record
+                .variants
+                .into_iter()
+                .filter(|variant| variant.package == Package::Archive && variant.files.len() == 1)
+                .collect(),
+            id: record.id,
+            name: record.name,
+            link: record.url,
+        }
+    }
+}
+
+/// How a map's name reads on a card.
+fn map_label(map: &str) -> &str {
+    match map {
+        "base_color" => "color",
+        "normal" | "normal_dx" => "normal",
+        "ao" => "occlusion",
+        "height" => "displacement",
+        "metallic" => "metalness",
+        other => other,
+    }
 }
 
 struct Page {
@@ -91,7 +130,8 @@ struct Card {
     id: String,
     name: String,
     detail: String,
-    available: bool,
+    /// What Get would fetch ("Gets 2K JPG."), or `None` with no download.
+    plan: Option<String>,
 }
 
 /// The Get texture dialog.
@@ -221,7 +261,6 @@ impl GetTexture {
     }
 
     fn results(&mut self, ui: &mut egui::Ui, project: &Path, height: f32) {
-        let attribute = format!("{}-{}", self.resolution, self.format);
         let Some(page) = self.page.as_ref() else {
             if self.search.is_some() {
                 ui.label("Searching…");
@@ -250,10 +289,7 @@ impl GetTexture {
                     id: listing.id.clone(),
                     name: listing.name.clone(),
                     detail,
-                    available: listing
-                        .packages
-                        .iter()
-                        .any(|(known, _)| known == &attribute),
+                    plan: self.package(listing).map(|choice| choice.describe()),
                 }
             })
             .collect();
@@ -319,28 +355,25 @@ impl GetTexture {
         }
         ui.add(egui::Label::new(&card.name).truncate());
         ui.add(egui::Label::new(egui::RichText::new(&card.detail).weak().small()).truncate());
-        let mut button = ui.add_enabled(
-            card.available && self.download.is_none(),
+        let button = ui.add_enabled(
+            card.plan.is_some() && self.download.is_none(),
             egui::Button::new("Get"),
         );
-        if !card.available {
-            button = button.on_disabled_hover_text(format!(
-                "{} has no {} {} package.",
-                card.name, self.resolution, self.format
-            ));
-        }
+        let button = match &card.plan {
+            Some(plan) => button.on_hover_text(plan),
+            None => button.on_disabled_hover_text(format!("{} has no download.", card.name)),
+        };
         if button.clicked() {
             self.start_download(ui.ctx(), project, &card.id);
         }
     }
 
-    fn package<'a>(&self, listing: &'a Listing) -> Option<&'a str> {
-        let attribute = format!("{}-{}", self.resolution, self.format);
-        listing
-            .packages
-            .iter()
-            .find(|(known, _)| known == &attribute)
-            .map(|(_, url)| url.as_str())
+    /// The package Get fetches for `listing`: the chosen resolution and
+    /// format, else the nearest there is (`variants::choose`).
+    fn package<'a>(&self, listing: &'a Listing) -> Option<Choice<'a>> {
+        let resolution = self.resolution.to_ascii_lowercase();
+        let format = self.format.to_ascii_lowercase();
+        variants::choose(&listing.packages, &resolution, &format, &["jpg", "png"])
     }
 
     fn start_search(&mut self, ctx: &egui::Context, offset: usize) {
@@ -375,19 +408,23 @@ impl GetTexture {
         else {
             return;
         };
-        let Some(url) = self.package(listing).map(str::to_owned) else {
-            self.error = Some(format!(
-                "{} has no {} {} package.",
-                listing.name, self.resolution, self.format
-            ));
+        let Some(choice) = self.package(listing) else {
+            self.error = Some(format!("{} has no download.", listing.name));
             return;
         };
+        let url = choice.variant.files[0].url.clone();
+        let label = choice.variant.label.clone();
+        let notes = choice.notes.join(" ");
         let name = listing.name.clone();
         let asset_id = listing.id.clone();
         let link = listing.link.clone();
         let project = project.to_owned();
         self.error = None;
-        self.status = Some(format!("Downloading {name}…"));
+        self.status = Some(
+            format!("Downloading {name} ({label})… {notes}")
+                .trim_end()
+                .to_owned(),
+        );
         self.cancel = Arc::new(AtomicBool::new(false));
         let cancel = Arc::clone(&self.cancel);
         let (tx, rx) = mpsc::channel();
@@ -395,6 +432,9 @@ impl GetTexture {
         std::thread::spawn(move || {
             let result = match download(&project, &asset_id, &name, &link, &url, &cancel) {
                 Ok(DownloadResult::Cancelled) => Ok(DownloadResult::Cancelled),
+                Ok(DownloadResult::Saved(text)) if !notes.is_empty() => {
+                    Ok(DownloadResult::Saved(format!("{text} {notes}")))
+                }
                 Ok(saved) => Ok(saved),
                 Err(err) => Err(format!("Could not get {name}: {err}")),
             };
@@ -498,14 +538,22 @@ impl GetTexture {
     }
 }
 
+/// One page of popular materials matching `query`, through the Toolbox's
+/// ambientCG source.
 fn search(query: &str, offset: usize) -> Result<(usize, Vec<Listing>), String> {
-    let url = format!(
-        "https://ambientcg.com/api/v2/full_json?type=Material&sort=Popular&limit={PAGE}&offset={offset}&include=downloadData,previewData,displayData&q={}",
-        http::encode_query(query)
-    );
     let client = http::Client::new(Duration::from_secs(30));
-    let text = http::get_text(&client, &url, JSON_LIMIT).map_err(|err| err.to_string())?;
-    parse_catalog(&text)
+    let mut wanted = Query::new(query, Kind::Texture);
+    wanted.per_page = PAGE as u32;
+    wanted.page = (offset / PAGE) as u32 + 1;
+    let page = AMBIENTCG
+        .search(&client, &wanted)
+        .map_err(|err| err.to_string())?;
+    let shown = offset + page.records.len();
+    let total = page
+        .total
+        .map_or(shown + usize::from(page.more), |total| total as usize);
+    let listings = page.records.into_iter().map(Listing::from_record).collect();
+    Ok((total, listings))
 }
 
 /// Fetches each `(id, url)` in `wanted` on a few threads that share one
@@ -562,7 +610,7 @@ fn download(
     if !guard::safe_asset_id(id) {
         return Err("the asset id is not a file name".to_owned());
     }
-    if !url.starts_with("https://ambientcg.com/") {
+    if !AMBIENTCG.info().allows_download_from(url) {
         return Err("the download is not from ambientCG".to_owned());
     }
     let stamp = std::time::SystemTime::now()
@@ -623,127 +671,113 @@ fn download_into(
     )))
 }
 
-fn parse_catalog(text: &str) -> Result<(usize, Vec<Listing>), String> {
-    let json: serde_json::Value =
-        serde_json::from_str(text).map_err(|_| "the catalog was not understood".to_owned())?;
-    let total = json
-        .get("numberOfResults")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let Some(assets) = json
-        .get("foundAssets")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Ok((total, Vec::new()));
-    };
-    let mut listings = Vec::new();
-    for asset in assets {
-        let Some(id) = asset.get("assetId").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        if !guard::safe_asset_id(id) {
-            continue;
-        }
-        let mut packages = Vec::new();
-        if let Some(downloads) = asset
-            .pointer("/downloadFolders/default/downloadFiletypeCategories/zip/downloads")
-            .and_then(serde_json::Value::as_array)
-        {
-            for item in downloads {
-                let Some(attribute) = item.get("attribute").and_then(serde_json::Value::as_str)
-                else {
-                    continue;
-                };
-                let Some(link) = item
-                    .get("downloadLink")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|link| link.starts_with("https://ambientcg.com/"))
-                else {
-                    continue;
-                };
-                packages.push((attribute.to_owned(), link.to_owned()));
-            }
-        }
-        // The larger preview when there is one, for the hover view.
-        let preview = [
-            "256-JPG-242424",
-            "256-PNG",
-            "256-JPG-FFFFFF",
-            "128-JPG-242424",
-            "128-PNG",
-            "128-JPG-FFFFFF",
-        ]
-        .into_iter()
-        .find_map(|key| {
-            asset
-                .pointer(&format!("/previewImage/{key}"))
-                .and_then(serde_json::Value::as_str)
-                .filter(|url| url.starts_with("https://"))
-        })
-        .map(str::to_owned);
-        let maps = asset
-            .get("maps")
-            .and_then(serde_json::Value::as_array)
-            .map(|maps| {
-                maps.iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
-        listings.push(Listing {
-            id: id.to_owned(),
-            name: asset
-                .get("displayName")
-                .and_then(serde_json::Value::as_str)
-                .filter(|name| !name.is_empty())
-                .unwrap_or(id)
-                .to_owned(),
-            category: asset
-                .get("displayCategory")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            link: asset
-                .get("shortLink")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            maps,
-            preview,
-            packages,
-        });
-    }
-    Ok((total, listings))
-}
-
 #[cfg(test)]
 mod tests {
+    use axcenity_toolbox::RemoteFile;
+
     use super::*;
 
+    fn zip(label: &str, resolution: &str, format: &str) -> Variant {
+        Variant {
+            label: label.to_owned(),
+            resolution: Some(resolution.to_owned()),
+            format: format.to_owned(),
+            package: Package::Archive,
+            files: vec![RemoteFile {
+                url: format!("https://ambientcg.com/get?file=Fabric086_{resolution}-{format}.zip"),
+                path: format!("Fabric086_{resolution}-{format}.zip"),
+                ..RemoteFile::default()
+            }],
+        }
+    }
+
+    /// The whole Get path against the real ambientCG: search, choose the
+    /// nearest to 1K JPG, download, unpack and save the texture set.
+    /// Reaches the network, so run it by hand:
+    /// `cargo nextest run -p axcenity-editor --run-ignored only -E 'test(ambient_cg)'`
     #[test]
-    fn catalog_json_reads_a_material_and_its_package() {
-        let text = r#"{
-            "numberOfResults": 3,
-            "foundAssets": [{
-                "assetId": "Fabric086",
-                "displayName": "Fabric 086",
-                "displayCategory": "Fabric",
-                "shortLink": "https://ambientcg.com/a/Fabric086",
-                "maps": ["color", "normal"],
-                "previewImage": { "128-JPG-242424": "https://example.com/Fabric086.jpg" },
-                "downloadFolders": { "default": { "downloadFiletypeCategories": { "zip": { "downloads": [
-                    { "attribute": "2K-JPG", "downloadLink": "https://ambientcg.com/get?file=Fabric086_2K-JPG.zip" },
-                    { "attribute": "1K-PNG", "downloadLink": "https://evil.example/get" }
-                ]}}}}
-            }, { "assetId": "../nope" }]
-        }"#;
-        let (total, listings) = parse_catalog(text).unwrap();
-        assert_eq!(total, 3);
-        assert_eq!(listings.len(), 1);
-        assert_eq!(listings[0].id, "Fabric086");
-        assert_eq!(listings[0].packages.len(), 1);
-        assert_eq!(listings[0].packages[0].0, "2K-JPG");
-        assert!(listings[0].preview.is_some());
+    #[ignore = "reaches ambientCG"]
+    fn get_downloads_a_real_material_into_a_project() {
+        let (_, listings) = search("ground", 0).unwrap();
+        let listing = listings
+            .into_iter()
+            .find(|l| !l.packages.is_empty())
+            .unwrap();
+        let choice = variants::choose(&listing.packages, "1k", "jpg", &["png"]).unwrap();
+        let project =
+            std::env::temp_dir().join(format!("axcenity-get-texture-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&project);
+        let cancel = AtomicBool::new(false);
+        let url = &choice.variant.files[0].url;
+        let saved = download(
+            &project,
+            &listing.id,
+            &listing.name,
+            &listing.link,
+            url,
+            &cancel,
+        );
+        assert!(
+            matches!(saved, Ok(DownloadResult::Saved(_))),
+            "{:?}",
+            saved.err()
+        );
+        let folder = project.join("assets").join("textures").join(&listing.id);
+        assert!(
+            folder
+                .join(format!("{}{TEXTURE_SET_SUFFIX}", listing.id))
+                .is_file()
+        );
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn a_listing_keeps_only_single_zip_downloads_and_names_its_maps() {
+        let mut single = zip("8K EXR", "8k", "exr");
+        single.package = Package::Single;
+        let record = AssetRecord {
+            provider: "ambientcg".into(),
+            id: "Fabric086".into(),
+            name: "Fabric 086".into(),
+            url: "https://ambientcg.com/a/Fabric086".into(),
+            thumbnail_url: "https://example.com/Fabric086.png".into(),
+            maps: vec!["base_color".into(), "normal".into(), "ao".into()],
+            variants: vec![zip("2K JPG", "2k", "jpg"), single],
+            ..AssetRecord::default()
+        };
+        let listing = Listing::from_record(record);
+        assert_eq!(listing.id, "Fabric086");
+        assert_eq!(listing.link, "https://ambientcg.com/a/Fabric086");
+        assert_eq!(listing.maps, ["color", "normal", "occlusion"]);
+        assert_eq!(listing.packages.len(), 1);
+        assert!(listing.preview.is_some());
+    }
+
+    #[test]
+    fn get_offers_the_nearest_package_when_the_chosen_one_is_missing() {
+        let ctx = egui::Context::default();
+        let mut dialog = GetTexture::open(&ctx);
+        dialog.search = None;
+        let listing = Listing {
+            id: "Fabric086".into(),
+            name: "Fabric 086".into(),
+            category: String::new(),
+            link: String::new(),
+            maps: Vec::new(),
+            preview: None,
+            packages: vec![zip("1K JPG", "1k", "jpg"), zip("4K PNG", "4k", "png")],
+        };
+        dialog.resolution = "2K".into();
+        dialog.format = "JPG".into();
+        let choice = dialog.package(&listing).unwrap();
+        assert_eq!(choice.variant.label, "1K JPG");
+        assert_eq!(choice.notes, ["No 2K here, so 1K, the nearest."]);
+        dialog.format = "PNG".into();
+        assert_eq!(dialog.package(&listing).unwrap().variant.label, "4K PNG");
+        let empty = Listing {
+            packages: Vec::new(),
+            ..listing
+        };
+        assert!(dialog.package(&empty).is_none());
     }
 }

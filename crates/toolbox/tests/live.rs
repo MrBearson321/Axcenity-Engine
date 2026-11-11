@@ -61,6 +61,22 @@ fn ambientcg_textures_and_hdris() {
 }
 
 #[test]
+#[ignore = "reaches ambientCG"]
+fn ambientcg_search_results_carry_their_downloads() {
+    let source = source("ambientcg").unwrap();
+    let http = Client::new(Duration::from_secs(60));
+    let page = source
+        .search(&http, &Query::new("wood", Kind::Texture))
+        .unwrap();
+    assert!(
+        page.records
+            .iter()
+            .all(|record| !record.variants.is_empty())
+    );
+    assert!(page.records.iter().any(|record| !record.maps.is_empty()));
+}
+
+#[test]
 #[ignore = "reaches Poly Haven"]
 fn polyhaven_textures_hdris_and_models() {
     search_then_record("polyhaven", Kind::Texture, "brick");

@@ -2,9 +2,10 @@
 //! models, through its v3 API (<https://docs.ambientcg.com/api/v3/>).
 //!
 //! Ported from the Django Toolbox's `providers/ambientcg.py`. Search is
-//! `GET /api/v3/assets` with `offset` paging; a full record asks for the
-//! same asset by `id` with its downloads, each one zip (or file) per
-//! resolution and format ("2K-JPG"). ambientCG answers an unknown id with
+//! `GET /api/v3/assets` with `offset` paging, and asks for each result's
+//! downloads too, so its records already carry their variants; a full
+//! record asks for one asset by `id`. Each download is one zip (or file)
+//! per resolution and format ("2K-JPG"). ambientCG answers an unknown id with
 //! an empty list, not 404. It's run by one person, so callers should cache.
 
 use serde_json::Value;
@@ -17,8 +18,9 @@ use crate::source::{AssetSource, Licenses, Query, SearchPage, SourceInfo};
 use crate::{SourceError, guard};
 
 const API: &str = "https://ambientcg.com/api/v3/assets";
-const SEARCH_FIELDS: &str = "title,url,tags,type,thumbnails";
-const RECORD_FIELDS: &str = "title,url,tags,type,thumbnails,downloads,maps";
+/// Search asks for the downloads too, so a result already says which
+/// packages it has (a page of 24 is still small).
+const FIELDS: &str = "title,url,tags,type,thumbnails,downloads,maps";
 /// Preview sizes in order of preference: big enough for a card, small to load.
 const THUMBNAILS: [&str; 6] = [
     "256-PNG", "256-JPG", "512-PNG", "512-JPG", "128-PNG", "128-JPG",
@@ -59,7 +61,7 @@ fn kind_of(type_name: &str) -> Option<Kind> {
 /// The search address for `query` (public for tests and the CLI's dry runs).
 pub fn search_url(query: &Query, type_name: &str) -> String {
     let mut url = format!(
-        "{API}?q={}&type={type_name}&sort=popular&limit={}&include={SEARCH_FIELDS}",
+        "{API}?q={}&type={type_name}&sort=popular&limit={}&include={FIELDS}",
         http::encode_query(query.text.trim()),
         query.per_page.max(1),
     );
@@ -71,7 +73,7 @@ pub fn search_url(query: &Query, type_name: &str) -> String {
 
 /// The full-record address for one id.
 pub fn record_url(id: &str) -> String {
-    format!("{API}?id={id}&include={RECORD_FIELDS}")
+    format!("{API}?id={id}&include={FIELDS}")
 }
 
 impl AssetSource for AmbientCg {
@@ -93,7 +95,7 @@ impl AssetSource for AmbientCg {
         )?)?;
         let records: Vec<AssetRecord> = assets(&answer)?
             .iter()
-            .filter_map(|asset| summary(asset, query.kind))
+            .filter_map(|asset| full(asset, query.kind))
             .collect();
         let total = json::count(answer.get("totalResults"));
         let shown = query.offset() + records.len() as u64;
@@ -116,12 +118,18 @@ impl AssetSource for AmbientCg {
         let kind = kind_of(&json::text(asset.get("type"))).ok_or(SourceError::BadResponse(
             "ambientCG sent an asset of a kind the Toolbox doesn't hold",
         ))?;
-        let mut record = summary(asset, kind).ok_or(SourceError::NotFound)?;
-        record.variants = variants(asset, &record.id);
-        record.resolutions = resolutions(&record.variants);
-        record.maps = maps(asset.get("maps"));
-        Ok(record)
+        full(asset, kind).ok_or(SourceError::NotFound)
     }
+}
+
+/// A record with its downloads, resolutions and maps; `None` for an entry
+/// with no usable id.
+fn full(asset: &Value, kind: Kind) -> Option<AssetRecord> {
+    let mut record = summary(asset, kind)?;
+    record.variants = variants(asset, &record.id);
+    record.resolutions = resolutions(&record.variants);
+    record.maps = maps(asset.get("maps"));
+    Some(record)
 }
 
 fn assets(answer: &Value) -> Result<&Vec<Value>, SourceError> {
@@ -329,7 +337,7 @@ mod tests {
         let mut query = Query::new("red brick", Kind::Hdri);
         assert_eq!(
             search_url(&query, "hdri"),
-            "https://ambientcg.com/api/v3/assets?q=red%20brick&type=hdri&sort=popular&limit=24&include=title,url,tags,type,thumbnails"
+            "https://ambientcg.com/api/v3/assets?q=red%20brick&type=hdri&sort=popular&limit=24&include=title,url,tags,type,thumbnails,downloads,maps"
         );
         query.page = 3;
         assert!(search_url(&query, "hdri").ends_with("&offset=48"));

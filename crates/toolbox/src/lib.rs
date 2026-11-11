@@ -24,6 +24,7 @@ pub mod openverse;
 pub mod polyhaven;
 pub mod record;
 mod source;
+pub mod variants;
 
 pub use error::SourceError;
 pub use record::{AssetRecord, Kind, Package, RemoteFile, Variant};
