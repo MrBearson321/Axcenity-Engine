@@ -29,7 +29,9 @@ Axcenity's frame, by stage (run 1, medians in ms): physics 2.43, draw list 1.38,
 - **Godot** 4.7.2 (Steam), release export (`export_presets.cfg`), Forward+ on Vulkan, Jolt physics.
 - **Unity** 6000.6.3f1, Windows player, URP on Direct3D 12, **Mono** scripting backend (the IL2CPP module isn't installed), PhysX.
 - **s&box** 26.11.10 (1.0.1), game client `sbox.exe -sw -w 1920 -h 1080 +game`, Vulkan, physics tick 60 Hz.
-- Not in this batch: **Unreal** 5.8.4 (being packaged) and **Roblox** (run by hand in Studio).
+- Not timed: **Unreal** 5.8.4 and **Roblox** Studio 0.747, at Paul's call (2026-11-11), since four engines give enough comparison for now.
+  - Unreal: the C++ game target compiles, but the editor build needs the .NET Framework SDK, which wasn't installed. Its project and both run profiles are in `unreal/`.
+  - Roblox: one smoke Play of `roblox/XB10k.rbxlx` built the scene correctly (`XB10K_CHECK count=10000 sum=98894.50`, no script errors) but ran at Studio's 60 fps cap (median 16.96 ms), so it says nothing about Roblox's cost. Raising Studio's Framerate Manager cap to 240 is the step to retry.
 
 ## Read these numbers with
 
