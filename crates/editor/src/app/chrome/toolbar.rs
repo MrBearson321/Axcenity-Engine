@@ -846,46 +846,59 @@ impl EditorApp {
                 .on_disabled_hover_text("Stop the game to change how many clients play.");
                 self.play_settings.clients = clients;
             });
-            ui.menu_button(theme::with_icon(icons::WIFI_HIGH, "Network"), |ui| {
-                let mut conditions = self.play_settings.conditions;
-                let mut latency = conditions.latency.as_secs_f64() * 1000.0;
-                let mut jitter = conditions.jitter.as_secs_f64() * 1000.0;
-                let mut loss = conditions.loss * 100.0;
-                crate::responsive::form(ui, "play network", |ui| {
-                    ui.label("Latency");
-                    ui.add(
-                        egui::DragValue::new(&mut latency)
-                            .range(0.0..=1000.0)
-                            .suffix(" ms"),
-                    )
-                    .on_hover_text("Added to every packet each way between the clients.");
-                    ui.end_row();
-                    ui.label("Jitter");
-                    ui.add(
-                        egui::DragValue::new(&mut jitter)
-                            .range(0.0..=500.0)
-                            .suffix(" ms"),
-                    )
-                    .on_hover_text("Each packet is up to this much earlier or later.");
-                    ui.end_row();
-                    ui.label("Packet loss");
-                    ui.add(
-                        egui::DragValue::new(&mut loss)
-                            .range(0.0..=50.0)
-                            .suffix(" %"),
-                    )
-                    .on_hover_text("This share of packets never arrives.");
-                    ui.end_row();
-                });
-                ui.weak("Between Play's clients, with 2 or more.");
-                conditions.latency = std::time::Duration::from_secs_f64(latency / 1000.0);
-                conditions.jitter = std::time::Duration::from_secs_f64(jitter / 1000.0);
-                conditions.loss = loss / 100.0;
-                if conditions != self.play_settings.conditions {
-                    self.play_settings.conditions = conditions;
-                    if let Some(play) = &mut self.play {
-                        play.emulate(conditions);
+            ui.horizontal(|ui| {
+                ui.menu_button(theme::with_icon(icons::WIFI_HIGH, "Network"), |ui| {
+                    let mut conditions = self.play_settings.conditions;
+                    let mut latency = conditions.latency.as_secs_f64() * 1000.0;
+                    let mut jitter = conditions.jitter.as_secs_f64() * 1000.0;
+                    let mut loss = conditions.loss * 100.0;
+                    crate::responsive::form(ui, "play network", |ui| {
+                        ui.label("Latency");
+                        ui.add(
+                            egui::DragValue::new(&mut latency)
+                                .range(0.0..=1000.0)
+                                .suffix(" ms"),
+                        )
+                        .on_hover_text("Added to every packet each way between the clients.");
+                        ui.end_row();
+                        ui.label("Jitter");
+                        ui.add(
+                            egui::DragValue::new(&mut jitter)
+                                .range(0.0..=500.0)
+                                .suffix(" ms"),
+                        )
+                        .on_hover_text("Each packet is up to this much earlier or later.");
+                        ui.end_row();
+                        ui.label("Packet loss");
+                        ui.add(
+                            egui::DragValue::new(&mut loss)
+                                .range(0.0..=50.0)
+                                .suffix(" %"),
+                        )
+                        .on_hover_text("This share of packets never arrives.");
+                        ui.end_row();
+                    });
+                    ui.weak("Between Play's clients, with 2 or more.");
+                    conditions.latency = std::time::Duration::from_secs_f64(latency / 1000.0);
+                    conditions.jitter = std::time::Duration::from_secs_f64(jitter / 1000.0);
+                    conditions.loss = loss / 100.0;
+                    if conditions != self.play_settings.conditions {
+                        self.play_settings.conditions = conditions;
+                        if let Some(play) = &mut self.play {
+                            play.emulate(conditions);
+                        }
                     }
+                });
+                let mut pause_on_error = self.play_settings.pause_on_error;
+                if ui
+                    .checkbox(&mut pause_on_error, "Pause on errors")
+                    .on_hover_text(
+                        "A script error pauses Play where it happened, with that script's \
+                         variables, instead of only being shown in Output.",
+                    )
+                    .changed()
+                {
+                    self.set_pause_on_error(pause_on_error);
                 }
             });
             if let Some(play) = &mut self.play

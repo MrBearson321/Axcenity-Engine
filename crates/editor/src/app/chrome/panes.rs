@@ -1108,9 +1108,11 @@ impl EditorApp {
                 return;
             }
         }
-        // Paused at a breakpoint in this script: where, the locals, Continue.
+        // Paused in this script: where, the locals, watches, Continue and
+        // the steps.
         if let Some(pause) = self.tabs.paused.clone().filter(|pause| pause.path == path) {
-            let continued = egui::Panel::bottom(egui::Id::new(("paused", id)))
+            let watches = &mut self.watches;
+            let resume = egui::Panel::bottom(egui::Id::new(("paused", id)))
                 .resizable(true)
                 .default_size(180.0)
                 .min_size(80.0)
@@ -1119,10 +1121,13 @@ impl EditorApp {
                         .fill(palette.panel)
                         .inner_margin(egui::Margin::symmetric(10, 6)),
                 )
-                .show(ui, |ui| paused_panel(ui, &pause))
+                .show(ui, |ui| paused_panel(ui, &pause, watches))
                 .inner;
-            if continued {
-                self.continue_play();
+            if self.watches.is_stale() {
+                self.evaluate_watches();
+            }
+            if let Some(how) = resume {
+                self.resume_play(how);
             }
         }
 

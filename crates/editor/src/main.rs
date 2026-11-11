@@ -86,6 +86,7 @@ mod ui_handles;
 mod version_explorer;
 mod viewport;
 mod watcher;
+mod watches;
 mod wheel;
 mod widgets;
 mod window_frame;
