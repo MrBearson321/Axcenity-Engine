@@ -175,6 +175,35 @@ impl EditorApp {
                     }
 
                     ui.separator();
+                    widgets::section_label(ui, "Team Create");
+                    if ui
+                        .add_enabled(
+                            editing && self.team.is_none(),
+                            egui::Button::new(theme::with_icon(
+                                icons::SHARE_NETWORK,
+                                "Share with Team Create…",
+                            )),
+                        )
+                        .on_hover_text("Host a session others can join with an invite link.")
+                        .clicked()
+                    {
+                        self.share_with_team_create();
+                    }
+                    if ui
+                        .add_enabled(
+                            editing && self.team.is_none(),
+                            egui::Button::new(theme::with_icon(
+                                icons::SIGN_IN,
+                                "Join Team Create…",
+                            )),
+                        )
+                        .on_hover_text("Join someone's session with their invite link.")
+                        .clicked()
+                    {
+                        self.join_team_create();
+                    }
+
+                    ui.separator();
                     widgets::section_label(ui, "Publish");
                     self.build_game_menu(ui, editing);
 
@@ -475,6 +504,7 @@ impl EditorApp {
                         self.settings.open = !self.settings.open;
                     }
                     self.update_chip(ui);
+                    self.team_chip(ui);
                     if self.playing() {
                         playing_badge(ui, self.paused());
                     }
