@@ -2405,7 +2405,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         Function {
             name: "MoveTo",
             doc: "Walks the character to `position` along a path on the navigation mesh, by its controller's MoveDirection, and fires MoveToFinished(true) when it's there (within half a stud across the ground), or MoveToFinished(false) if there's no path, 8 seconds pass or it dies. With `part`, it walks to the place `position` was relative to the part, as the part moves. A new MoveTo, or Move, replaces it.",
-            params: &[("position", "Vector3"), ("part", "BasePart?")],
+            params: &[("position", "Vector3"), ("part", "(Part | MeshPart)?")],
             returns: "()",
         },
     ),

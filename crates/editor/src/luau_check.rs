@@ -1,0 +1,364 @@
+//! Type errors and lint warnings for code tabs (roadmap G4, stage 2), from
+//! luau-lsp run as a child process: `luau-lsp analyze` on the tab's text,
+//! with the engine's definitions, on a background thread.
+//!
+//! luau-lsp isn't shipped with the engine. [`find`] looks for it where a
+//! developer would have it: `AXCENITY_LUAU_LSP`, `luau-lsp` on the PATH, or
+//! the server bundled with VS Code's Luau extension (File > Set Up VS Code
+//! Autocomplete suggests that extension). Without it, tabs simply show no
+//! squiggles.
+//!
+//! Each run writes the text to `script.lua` in a folder of its own under
+//! the system's temp folder, beside the definitions
+//! (`axcenity_script::lua_definitions`) and settings that match
+//! `autocomplete.rs`'s (the standard platform, and no globals the sandbox
+//! leaves out), and reads the `--formatter=gnu` lines it prints.
+
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
+
+/// The environment variable that names the luau-lsp program, first.
+pub const PROGRAM_VARIABLE: &str = "AXCENITY_LUAU_LSP";
+/// A run that takes longer is stopped.
+const TIME_LIMIT: Duration = Duration::from_secs(10);
+
+/// luau-lsp's settings for a run: as `autocomplete.rs` writes for VS Code.
+const SETTINGS: &str = r#"{
+  "luau-lsp.platform.type": "standard",
+  "luau-lsp.sourcemap.enabled": false,
+  "luau-lsp.types.disabledGlobals": [
+    "debug", "gcinfo", "getfenv", "loadstring", "newproxy", "setfenv", "unpack", "vector"
+  ]
+}"#;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    /// A type or syntax error.
+    Error,
+    /// A lint, such as an unused local.
+    Warning,
+}
+
+/// One problem luau-lsp found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+    /// Counting from 1.
+    pub line: usize,
+    /// The first byte of the line it covers, counting from 1.
+    pub column: usize,
+    pub end_line: usize,
+    /// The last byte it covers, counting from 1.
+    pub end_column: usize,
+    pub severity: Severity,
+    /// Its kind, such as `TypeError` or `LocalUnused`.
+    pub code: String,
+    pub message: String,
+}
+
+/// A hash of a script's text, to match a result to the text it was for.
+pub fn text_hash(text: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Reads `luau-lsp analyze --formatter=gnu` output:
+/// `file:line.column-line.column: Kind: message`, a message's later lines
+/// following on lines of their own.
+pub fn parse(output: &str) -> Vec<Diagnostic> {
+    let mut found: Vec<Diagnostic> = Vec::new();
+    for line in output.lines() {
+        match parse_line(line) {
+            Some(diagnostic) => found.push(diagnostic),
+            None => {
+                if let Some(last) = found.last_mut()
+                    && !line.trim().is_empty()
+                {
+                    last.message.push('\n');
+                    last.message.push_str(line.trim_end());
+                }
+            }
+        }
+    }
+    found
+}
+
+fn parse_line(line: &str) -> Option<Diagnostic> {
+    // The file name may hold `:` (a Windows drive), so read from the
+    // `: Kind: ` after the position.
+    let (head, message) = split_kind(line)?;
+    let (head, code) = head;
+    let (_, range) = head.rsplit_once(':')?;
+    let (start, end) = range.split_once('-')?;
+    let (line_number, column) = start.split_once('.')?;
+    let (end_line, end_column) = end.split_once('.')?;
+    let severity = if code.ends_with("Error") {
+        Severity::Error
+    } else {
+        Severity::Warning
+    };
+    Some(Diagnostic {
+        line: line_number.parse().ok()?,
+        column: column.parse().ok()?,
+        end_line: end_line.parse().ok()?,
+        end_column: end_column.parse().ok()?,
+        severity,
+        code: code.to_owned(),
+        message: message.to_owned(),
+    })
+}
+
+/// `(("file:range", "Kind"), "message")`.
+fn split_kind(line: &str) -> Option<((&str, &str), &str)> {
+    // The first `: Word: ` whose word has no spaces, after a range.
+    let mut from = 0;
+    while let Some(at) = line[from..].find(": ") {
+        let at = from + at;
+        let rest = &line[at + 2..];
+        if let Some((code, message)) = rest.split_once(": ")
+            && !code.is_empty()
+            && code.chars().all(|c| c.is_ascii_alphanumeric())
+            && line[..at].rsplit(':').next().is_some_and(|range| {
+                range.contains('-')
+                    && range
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c == '.' || c == '-')
+            })
+        {
+            return Some(((&line[..at], code), message));
+        }
+        from = at + 2;
+    }
+    None
+}
+
+/// Where luau-lsp is: `AXCENITY_LUAU_LSP`, else `luau-lsp` on the PATH,
+/// else the newest server inside VS Code's Luau extension.
+pub fn find() -> Option<PathBuf> {
+    if let Some(program) = std::env::var_os(PROGRAM_VARIABLE) {
+        let program = PathBuf::from(program);
+        return program.is_file().then_some(program);
+    }
+    let name = if cfg!(windows) {
+        "luau-lsp.exe"
+    } else {
+        "luau-lsp"
+    };
+    if let Some(paths) = std::env::var_os("PATH") {
+        for folder in std::env::split_paths(&paths) {
+            let program = folder.join(name);
+            if program.is_file() {
+                return Some(program);
+            }
+        }
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+    vs_code_server(&PathBuf::from(home).join(".vscode").join("extensions"))
+}
+
+/// The server in the newest `johnnymorganz.luau-lsp-<version>` folder in
+/// `extensions`.
+fn vs_code_server(extensions: &Path) -> Option<PathBuf> {
+    let server = if cfg!(windows) {
+        "server.exe"
+    } else {
+        "server"
+    };
+    let mut found: Vec<(Vec<u32>, PathBuf)> = std::fs::read_dir(extensions)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let version = name.strip_prefix("johnnymorganz.luau-lsp-")?;
+            let version: Vec<u32> = version
+                .split(['.', '-'])
+                .map_while(|part| part.parse().ok())
+                .collect();
+            let program = entry.path().join("bin").join(server);
+            program.is_file().then_some((version, program))
+        })
+        .collect();
+    found.sort();
+    found.pop().map(|(_, program)| program)
+}
+
+/// A script's text to check.
+struct Job {
+    path: String,
+    text: String,
+}
+
+/// What a check found, for the script at `path` with text of `hash`.
+#[derive(Debug)]
+pub struct Checked {
+    pub path: String,
+    pub hash: u64,
+    /// The problems, or why luau-lsp couldn't run.
+    pub result: Result<Vec<Diagnostic>, String>,
+}
+
+/// Checks scripts on a background thread, one at a time, the latest text
+/// of each.
+pub struct Checker {
+    jobs: Sender<Job>,
+    done: Receiver<Checked>,
+    program: PathBuf,
+}
+
+impl Checker {
+    /// Starts the thread, with luau-lsp at `program`, in a folder of its
+    /// own under the temp folder.
+    pub fn start(program: PathBuf) -> io::Result<Checker> {
+        // A folder for each checker, so two never share `script.lua`.
+        static CHECKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let number = CHECKERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-luau-{}-{number}", std::process::id()));
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(
+            folder.join("axcenity.d.luau"),
+            axcenity_script::lua_definitions(),
+        )?;
+        std::fs::write(folder.join("settings.json"), SETTINGS)?;
+        let (jobs, inbox) = mpsc::channel::<Job>();
+        let (outbox, done) = mpsc::channel();
+        let runner = program.clone();
+        std::thread::Builder::new()
+            .name("luau-lsp".to_owned())
+            .spawn(move || {
+                while let Ok(first) = inbox.recv() {
+                    // Only each script's latest text is worth checking.
+                    let mut latest: Vec<Job> = vec![first];
+                    while let Ok(job) = inbox.try_recv() {
+                        latest.retain(|old| old.path != job.path);
+                        latest.push(job);
+                    }
+                    for job in latest {
+                        let result = run(&runner, &folder, &job.text);
+                        let checked = Checked {
+                            hash: text_hash(&job.text),
+                            path: job.path,
+                            result,
+                        };
+                        if outbox.send(checked).is_err() {
+                            return;
+                        }
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&folder);
+            })?;
+        Ok(Checker {
+            jobs,
+            done,
+            program,
+        })
+    }
+
+    pub fn program(&self) -> &Path {
+        &self.program
+    }
+
+    /// Asks for the script at `path` to be checked with `text`.
+    pub fn check(&self, path: &str, text: &str) {
+        let _ = self.jobs.send(Job {
+            path: path.to_owned(),
+            text: text.to_owned(),
+        });
+    }
+
+    /// The checks finished since the last call.
+    pub fn finished(&self) -> Vec<Checked> {
+        self.done.try_iter().collect()
+    }
+
+    /// Waits up to `limit` for the next check to finish (tests).
+    #[cfg(test)]
+    pub fn wait(&self, limit: Duration) -> Option<Checked> {
+        self.done.recv_timeout(limit).ok()
+    }
+}
+
+/// Runs luau-lsp on `text` in `folder`.
+fn run(program: &Path, folder: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
+    std::fs::write(folder.join("script.lua"), text).map_err(|err| err.to_string())?;
+    let mut command = Command::new(program);
+    command
+        .current_dir(folder)
+        .args([
+            "analyze",
+            "--platform",
+            "standard",
+            "--definitions=axcenity.d.luau",
+            "--settings",
+            "settings.json",
+            "--formatter=gnu",
+            "script.lua",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        // No console window flashing up for each check.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn().map_err(|err| err.to_string())?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() > TIME_LIMIT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "luau-lsp took over {} seconds",
+                    TIME_LIMIT.as_secs()
+                ));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+    let output = child.wait_with_output().map_err(|err| err.to_string())?;
+    let mut printed = String::from_utf8_lossy(&output.stdout).into_owned();
+    printed.push_str(&String::from_utf8_lossy(&output.stderr));
+    let found = parse(&printed);
+    // Exit code 1 with nothing read means luau-lsp itself failed (a bad
+    // definitions file, an unknown option).
+    if found.is_empty() && !output.status.success() {
+        let reason = printed.lines().next().unwrap_or("no output").to_owned();
+        return Err(format!("luau-lsp failed: {reason}"));
+    }
+    Ok(found)
+}
+
+/// Each script's last check, keyed by the hash of the text it was for.
+#[derive(Default)]
+pub struct Results {
+    by_path: HashMap<String, (u64, Vec<Diagnostic>)>,
+}
+
+impl Results {
+    pub fn set(&mut self, path: &str, hash: u64, found: Vec<Diagnostic>) {
+        self.by_path.insert(path.to_owned(), (hash, found));
+    }
+
+    /// The problems in the script at `path`, if they were found for text of
+    /// `hash`.
+    pub fn get(&self, path: &str, hash: u64) -> Option<&[Diagnostic]> {
+        self.by_path
+            .get(path)
+            .filter(|(checked, _)| *checked == hash)
+            .map(|(_, found)| found.as_slice())
+    }
+}
+
+#[cfg(test)]
+mod tests;

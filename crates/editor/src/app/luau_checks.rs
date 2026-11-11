@@ -1,0 +1,247 @@
+//! Checks the open code tabs with luau-lsp (G4 stage 2; `luau_check.rs`)
+//! and gives each tab what was found, for its squiggles. A tab is checked
+//! once its code has stayed the same for [`QUIET`], and a saved tab's
+//! errors are also listed in Output, as `path:line:` links.
+
+use super::*;
+use crate::luau_check::{self, Checker, Diagnostic, Results, Severity};
+
+/// How long code must stay unchanged before it's checked, in seconds.
+const QUIET: f64 = 0.4;
+
+pub(crate) struct LuauChecks {
+    /// Off in tests unless a test turns it on, so test runs never start
+    /// luau-lsp on their own.
+    pub(crate) enabled: bool,
+    checker: Option<Checker>,
+    /// luau-lsp was looked for (it's looked for once).
+    looked: bool,
+    results: Results,
+    /// The text (by hash) each script was last sent with.
+    asked: HashMap<String, u64>,
+    /// Each tab's text (by hash) and when it was first seen like that.
+    seen: HashMap<String, (u64, f64)>,
+    /// The errors (by hash) last listed in Output for each script.
+    reported: HashMap<String, u64>,
+    /// A failed run was reported in Output (once).
+    failed: bool,
+}
+
+impl Default for LuauChecks {
+    fn default() -> Self {
+        LuauChecks {
+            enabled: !cfg!(test),
+            checker: None,
+            looked: false,
+            results: Results::default(),
+            asked: HashMap::new(),
+            seen: HashMap::new(),
+            reported: HashMap::new(),
+            failed: false,
+        }
+    }
+}
+
+impl LuauChecks {
+    /// Uses luau-lsp at `program` (tests).
+    #[cfg(test)]
+    pub(crate) fn start_with(&mut self, program: std::path::PathBuf) {
+        self.enabled = true;
+        self.looked = true;
+        self.checker = Checker::start(program).ok();
+    }
+}
+
+impl EditorApp {
+    /// Sends code tabs that have changed and gone quiet to luau-lsp, and
+    /// takes in what it found. True while a check is waiting or running,
+    /// so the caller draws again soon.
+    pub(super) fn check_scripts(&mut self, now: f64) -> bool {
+        let checks = &mut self.luau;
+        if !checks.enabled {
+            return false;
+        }
+        if !checks.looked {
+            checks.looked = true;
+            checks.checker = luau_check::find().and_then(|program| Checker::start(program).ok());
+        }
+        let Some(checker) = &checks.checker else {
+            return false;
+        };
+
+        let mut waiting = false;
+        for done in checker.finished() {
+            let found = match done.result {
+                Ok(found) => found,
+                Err(reason) => {
+                    if !checks.failed {
+                        checks.failed = true;
+                        self.output.warning(format!(
+                            "Couldn't check scripts with luau-lsp ({}): {reason}",
+                            checker.program().display()
+                        ));
+                    }
+                    Vec::new()
+                }
+            };
+            checks.results.set(&done.path, done.hash, found.clone());
+            // Only the latest text asked about counts; an older answer is
+            // dropped.
+            if checks.asked.get(&done.path) != Some(&done.hash) {
+                continue;
+            }
+            if let Some(tab) = self.tabs.get_mut(&done.path) {
+                let saved = !tab.unsaved();
+                tab.problems = found.clone();
+                if saved {
+                    report(&mut self.output, &mut checks.reported, &done.path, &found);
+                }
+            }
+        }
+
+        for tab in self.tabs.iter_mut() {
+            if tab.is_stylesheet() || !tab.path.ends_with(".lua") {
+                continue;
+            }
+            let hash = luau_check::text_hash(&tab.text);
+            if checks.asked.get(&tab.path) == Some(&hash) {
+                if checks.results.get(&tab.path, hash).is_none() {
+                    waiting = true;
+                }
+                continue;
+            }
+            match checks.seen.get(&tab.path) {
+                Some(&(seen, since)) if seen == hash => {
+                    if now - since >= QUIET {
+                        checker.check(&tab.path, &tab.text);
+                        checks.asked.insert(tab.path.clone(), hash);
+                    }
+                }
+                _ => {
+                    checks.seen.insert(tab.path.clone(), (hash, now));
+                }
+            }
+            waiting = true;
+        }
+        waiting
+    }
+}
+
+/// Lists a saved script's errors in Output, when they're not the ones
+/// listed last time.
+fn report(
+    output: &mut Output,
+    reported: &mut HashMap<String, u64>,
+    path: &str,
+    found: &[Diagnostic],
+) {
+    let errors: Vec<&Diagnostic> = found
+        .iter()
+        .filter(|found| found.severity == Severity::Error)
+        .collect();
+    let summary: String = errors
+        .iter()
+        .map(|error| format!("{}:{}\n", error.line, error.message))
+        .collect();
+    let hash = luau_check::text_hash(&summary);
+    if reported.insert(path.to_owned(), hash) == Some(hash) || errors.is_empty() {
+        return;
+    }
+    for error in errors {
+        let message = error.message.lines().next().unwrap_or("");
+        output.error(format!("{path}:{}: {message}", error.line));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::tests::copy_of_example;
+    use crate::output::OutputKind;
+
+    /// Runs checks as frames 0.1 s apart until `done` or 30 s pass.
+    fn check_until(app: &mut EditorApp, now: &mut f64, done: impl Fn(&EditorApp) -> bool) {
+        let started = std::time::Instant::now();
+        while !done(app) {
+            assert!(
+                started.elapsed().as_secs() < 30,
+                "luau-lsp didn't answer: {:?}",
+                app.output
+                    .lines()
+                    .iter()
+                    .map(|line| &line.text)
+                    .collect::<Vec<_>>()
+            );
+            app.check_scripts(*now);
+            *now += 0.1;
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_tab_is_checked_once_its_code_goes_quiet_and_saved_errors_go_to_output() {
+        let Some(program) = luau_check::find() else {
+            eprintln!("skipped: no luau-lsp");
+            return;
+        };
+        let folder = copy_of_example("hello-touched", "luau-checks");
+        let mut app = EditorApp::new(Some(&folder));
+        app.luau.start_with(program);
+        let path = "scripts/pad.server.lua";
+        app.open_script(path, None);
+        let mut now = 0.0;
+
+        // Typed, unsaved: underlined, but not in Output.
+        app.tabs.get_mut(path).unwrap().text = "print(nope)\n".to_owned();
+        check_until(&mut app, &mut now, |app| {
+            !app.tabs.get(path).unwrap().problems.is_empty()
+        });
+        let problem = &app.tabs.get(path).unwrap().problems[0];
+        assert_eq!((problem.line, problem.severity), (1, Severity::Error));
+        assert!(problem.message.contains("nope"), "{problem:?}");
+        let errors = |app: &EditorApp| {
+            app.output
+                .lines()
+                .iter()
+                .filter(|line| line.kind == OutputKind::Error && line.text.contains("nope"))
+                .count()
+        };
+        assert_eq!(errors(&app), 0);
+
+        // Saved (with a change, so it's checked again): the error is
+        // listed once, as a link to its line.
+        let saved = "print(nope)\n\n";
+        app.tabs.get_mut(path).unwrap().text = saved.to_owned();
+        assert!(app.save());
+        check_until(&mut app, &mut now, |app| errors(app) == 1);
+        let line = app
+            .output
+            .lines()
+            .iter()
+            .rev()
+            .find(|line| line.text.contains("nope"))
+            .unwrap();
+        assert!(
+            line.text.starts_with("scripts/pad.server.lua:1:"),
+            "{}",
+            line.text
+        );
+        assert!(line.location.is_some());
+
+        // Fixed: the squiggle goes, and nothing more is listed.
+        app.tabs.get_mut(path).unwrap().text = "print('fine')\n".to_owned();
+        check_until(&mut app, &mut now, |app| {
+            app.tabs.get(path).unwrap().problems.is_empty()
+        });
+        assert_eq!(errors(&app), 1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn without_luau_lsp_tabs_are_left_alone() {
+        let mut app = EditorApp::new(None);
+        app.luau.enabled = true;
+        app.luau.looked = true;
+        assert!(!app.check_scripts(0.0));
+    }
+}

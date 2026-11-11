@@ -4684,7 +4684,7 @@ declare extern type Humanoid extends Instance with
 	Died: Signal
 	[string]: any
 	--- Walks the character to `position` along a path on the navigation mesh, by its controller's MoveDirection, and fires MoveToFinished(true) when it's there (within half a stud across the ground), or MoveToFinished(false) if there's no path, 8 seconds pass or it dies. With `part`, it walks to the place `position` was relative to the part, as the part moves. A new MoveTo, or Move, replaces it.
-	function MoveTo(self, position: Vector3, part: BasePart?): ()
+	function MoveTo(self, position: Vector3, part: (Part | MeshPart)?): ()
 	--- Sets the controller's MoveDirection to `direction` across the ground (relative to where the camera looks if `relativeToCamera`, on the client), and stops any MoveTo. A zero vector stops.
 	function Move(self, direction: Vector3, relativeToCamera: boolean?): ()
 	--- Jumps once from the ground (the controller's Jump).
