@@ -278,6 +278,7 @@ impl EditorApp {
                 let _ = self.assets.reload(&blob.path);
             }
         }
+        self.move_object_files(&blobs[..written]);
         // A script Replace All (or its undo) rewrote: its tab and blocks take it.
         for blob in blobs.iter().take(written) {
             if crate::app::find_in_scripts::is_script_file(&blob.path)
@@ -289,6 +290,41 @@ impl EditorApp {
         }
         self.hand_over_tables();
         written
+    }
+}
+
+impl EditorApp {
+    /// The code of scripts inside objects that `blobs` (just written)
+    /// moved, made or deleted (G2): a Rename or Move…, its undo, a package
+    /// or a fix. The editor's copy follows, and an open tab follows its
+    /// file to where it went: the new file with the bytes a deleted one had.
+    fn move_object_files(&mut self, blobs: &[BlobChange]) {
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        let objects = format!("{}/", project::OBJECTS_FOLDER);
+        let mut moves = Vec::new();
+        for blob in blobs {
+            if !blob.path.starts_with(&objects) && !project.object_files.contains_key(&blob.path) {
+                continue;
+            }
+            if blob.after.is_some() {
+                if let Ok(source) = project::read_object_file(&project.folder, &blob.path) {
+                    project.object_files.insert(blob.path.clone(), source);
+                }
+                continue;
+            }
+            project.object_files.remove(&blob.path);
+            let went = blobs.iter().find(|other| {
+                other.path != blob.path && other.before.is_none() && other.after == blob.before
+            });
+            if let Some(went) = went {
+                moves.push((blob.path.clone(), went.path.clone()));
+            }
+        }
+        for (from, to) in moves {
+            self.tabs.rename(&from, &to);
+        }
     }
 }
 

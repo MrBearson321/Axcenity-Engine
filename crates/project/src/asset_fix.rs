@@ -399,6 +399,9 @@ impl Planner<'_> {
             AssetKind::Material => MATERIALS_FOLDER,
             AssetKind::Prefab => PREFABS_FOLDER,
             AssetKind::Folder => return Err("pick a folder inside the project".to_owned()),
+            AssetKind::ServerScript | AssetKind::ClientScript | AssetKind::ModuleScript => {
+                crate::OBJECTS_FOLDER
+            }
             AssetKind::Texture => match finding.site {
                 Site::Instance { property, .. }
                 | Site::Prefab { property, .. }

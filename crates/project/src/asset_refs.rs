@@ -197,8 +197,22 @@ pub fn plan_rename(
     if !folder.join(&from_disk).is_file() {
         return Err(format!("`{from}` isn't there"));
     }
-    if !to.starts_with("assets/") {
+    let objects = format!("{}/", crate::OBJECTS_FOLDER);
+    if from.starts_with(&objects) {
+        if !to.starts_with(&objects) {
+            return Err(format!(
+                "the code of scripts inside objects stays in the {} folder",
+                crate::OBJECTS_FOLDER
+            ));
+        }
+    } else if !to.starts_with("assets/") {
         return Err("assets stay in the assets folder".to_owned());
+    }
+    // A script's file says what kind of script it is.
+    if let Some(ending) = script_ending(from)
+        && !to.ends_with(ending)
+    {
+        return Err(format!("keep the `{ending}` ending"));
     }
     let same_file = from.eq_ignore_ascii_case(to);
     if folder.join(&to_disk).exists() && !same_file {
@@ -297,6 +311,20 @@ pub fn plan_rename(
         });
     }
     Ok(plan)
+}
+
+/// The ending that makes `path` a script file of one kind, such as
+/// `.server.lua`.
+fn script_ending(path: &str) -> Option<&'static str> {
+    [
+        crate::SERVER_BLOCK_SCRIPT_SUFFIX,
+        crate::CLIENT_BLOCK_SCRIPT_SUFFIX,
+        crate::SERVER_SCRIPT_SUFFIX,
+        crate::CLIENT_SCRIPT_SUFFIX,
+        crate::MODULE_SCRIPT_SUFFIX,
+    ]
+    .into_iter()
+    .find(|ending| path.ends_with(ending))
 }
 
 /// Calls `found` with every reference to any file in the project, one by
@@ -637,8 +665,16 @@ fn script_refs(folder: &Path, found: &mut dyn FnMut(Reference)) {
     }
 }
 
+/// The scripts in `scripts/`, then the code of scripts inside objects in
+/// `objects/` (G2).
 fn script_files(folder: &Path) -> Vec<String> {
-    crate::find_scripts(folder, &mut Vec::new())
+    let mut files = crate::find_scripts(folder, &mut Vec::new());
+    files.extend(
+        files_under(folder, crate::OBJECTS_FOLDER)
+            .into_iter()
+            .filter(|file| script_ending(file).is_some()),
+    );
+    files
 }
 
 /// What [`strings`] calls with each string: its key, the text, and the

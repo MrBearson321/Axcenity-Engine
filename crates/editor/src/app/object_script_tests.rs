@@ -129,3 +129,69 @@ fn saving_a_shared_file_during_play_reloads_every_copy() {
     assert_eq!(app.project.as_ref().unwrap().scripts.len(), 1);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn rename_or_move_a_shared_file_points_every_copy_at_it_as_one_undo_step() {
+    let folder = copy_of_example("hello-object-scripts", "object-script-move");
+    let mut app = EditorApp::new(Some(&folder));
+    let back = script_in(&app, "BackDoor", "Open");
+    let front = script_in(&app, "FrontDoor", "Open");
+    app.open_script_instance(back);
+    let swing = "objects/Door/Swing.server.lua";
+    app.rename_asset(DOOR, swing);
+
+    for copy in [back, front] {
+        assert_eq!(source_file(&app, copy).as_deref(), Some(swing));
+    }
+    assert!(folder.join(swing).exists() && !folder.join(DOOR).exists());
+    let prefab = std::fs::read_to_string(folder.join("assets/prefabs/Door.prefab.json")).unwrap();
+    assert!(prefab.contains(swing), "{prefab}");
+    let files = &app.project.as_ref().unwrap().object_files;
+    assert!(files.contains_key(swing) && !files.contains_key(DOOR));
+    assert_eq!(app.tabs.active().unwrap().path, swing, "its tab follows it");
+
+    app.undo();
+    assert_eq!(source_file(&app, back).as_deref(), Some(DOOR));
+    assert!(folder.join(DOOR).exists() && !folder.join(swing).exists());
+    let files = &app.project.as_ref().unwrap().object_files;
+    assert!(files.contains_key(DOOR) && !files.contains_key(swing));
+    assert_eq!(app.tabs.active().unwrap().path, DOOR);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn find_in_scripts_and_quick_open_include_the_code_of_scripts_inside_objects() {
+    use super::search::SearchTarget;
+    use crate::command_palette::Category;
+
+    let folder = copy_of_example("hello-object-scripts", "object-script-find");
+    let mut app = EditorApp::new(Some(&folder));
+    app.find.query = "slides up".to_owned();
+    app.search_scripts();
+    let hits = app.find.results.clone().unwrap();
+    let paths: Vec<&str> = hits.iter().map(|hit| hit.path.as_str()).collect();
+    assert_eq!(paths, [DOOR], "one hit for the file, however many copies");
+
+    app.find.replacement = "rises".to_owned();
+    app.replace_all_in_scripts();
+    let written = std::fs::read_to_string(folder.join(DOOR)).unwrap();
+    assert!(written.contains("the door rises"), "{written}");
+    assert!(app.project.as_ref().unwrap().object_files[DOOR].contains("rises"));
+
+    let ctx = theme::test_context();
+    app.refresh_search(&ctx, true);
+    let target = app
+        .search
+        .rows(Category::Script)
+        .into_iter()
+        .find(|(entry, _)| entry.title == "Open")
+        .map(|(_, target)| target.clone())
+        .expect("the door's code is listed");
+    assert!(matches!(
+        &target,
+        SearchTarget::Open(super::command_palette::OpenTarget::Script(path)) if path == DOOR
+    ));
+    app.run_search_target(&ctx, target);
+    assert_eq!(app.tabs.active_path(), Some(DOOR));
+    let _ = std::fs::remove_dir_all(&folder);
+}

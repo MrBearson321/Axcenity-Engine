@@ -121,6 +121,14 @@ impl EditorApp {
                 self.open_script_instance(id);
                 return;
             }
+            Edit::MoveSourceFile => {
+                if let Some(path) = self.world.get(id).and_then(|i| i.source_file()) {
+                    let path = path.to_owned();
+                    self.layout.open(Pane::Assets);
+                    self.asset_browser.start_move(path);
+                }
+                return;
+            }
             Edit::OpenBehaviorTree => {
                 if let Some(path) = self
                     .world
@@ -1446,6 +1454,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::PickBehaviorTree
         | Edit::PickSourceFile
         | Edit::OpenSourceFile
+        | Edit::MoveSourceFile
         | Edit::OpenBehaviorTree
         | Edit::PickSkyImage
         | Edit::AskSkyImage(_)
