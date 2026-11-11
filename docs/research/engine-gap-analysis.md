@@ -21,7 +21,7 @@ Priority 2 is a short list of real capability gaps: debugger stepping, a memory 
 
 **No system needs complete replacement** (category E) except the ambientCG HTTP client itself, which the brief asks to move behind the Toolbox; its dialog's features are kept.
 
-**Decisions needed from Paul** (section 7): how scripts inside objects are stored (G2), whether interpolation is on by default (G3), how diagnostics are computed (G4), and the Toolbox architecture (G1, from the Toolbox thread).
+**Decisions** (section 7): Paul approved the defaults for G2, G3 and G4 on 11 Nov 2026 (file references, interpolation on, luau-lsp). The five asset-source decisions for G1 are open.
 
 ## 2. How the engine is built (Phase 2)
 
@@ -234,9 +234,11 @@ Each entry gives the brief's Phase 4 fields and the Phase 2 questions (where it 
 - **Now**: `editor/src/ambient_cg.rs` (916 lines) calls ambientCG's API with `ureq`, downloads zips, extracts them into `assets/textures/<id>/` and writes a `.texture.json` with `provider` and source URL (`assets/src/texture_set.rs`). Previews, paging and resolution choice are in the same file. Poly Haven has no engine code. Two more client sets exist outside the engine: the Toolbox's (Django: ambientCG, Poly Haven, Openverse) and the "3D Models" Blender pipeline's (Python: ambientCG, Poly Haven, Kenney, plus Freesound downloads and a shared asset record).
 - **Inspiration**: Roblox Toolbox (search, insert, attribution in one panel); Unity Asset Store window; Fab in Unreal.
 - **Limitation**: each provider would be another editor file with its own HTTP, cache and metadata; nothing is shared with the Toolbox or the asset pipeline.
-- **Proposal**: the Toolbox thread's architecture decides where providers run (section 5). The engine side, whatever that decision: an editor-only crate (like `cook`) that owns the provider interface the editor calls (search, metadata, preview, download), moves `ureq` and `zip` out of `editor`, and lands every download through the existing import paths (texture sets, the Import dialog for models, `assets/sky` for HDRIs, `assets/audio`), with the provider, license and attribution kept in the asset's sidecar. The ambientCG dialog's behavior (exact package or none, zip-slip checks, preview pool, staging then replace) is kept and becomes the first provider's tests.
+- **Proposal** (from the Toolbox thread, [asset-sources/README.md](asset-sources/README.md), PR #90): one provider layer in Rust. A new editor-only crate, `asset-sources`, holds the providers, HTTP, cache, verified downloads (md5), licences and a shared library on disk, behind a blocking `AssetSource` trait (`info`, `search`, `record`, `resolve`) that takes a `Context` with an `Http` trait, so tests run on fixtures with no network. One record, `asset-source` v1, merges the Blender pipeline's AssetRecord with the Toolbox's licence, attribution and file fields. A CLI, `axcenity-assets`, lets the Blender pipeline call the same code. The Toolbox stays an optional web companion whose `axcenity-pack` v1 manifest the editor imports from a file; a companion service, a hosted backend and a live link were evaluated and rejected or deferred. Downloads land through the existing import paths (texture sets, the Import dialog, `assets/sky`, `assets/audio`) and the ambientCG dialog's behavior (exact package or none, zip-slip checks, preview pool, staging then replace) is kept, becoming `get_asset.rs`.
+- **Engine touch points** (from PR #90): workspace and hakari; `editor/src/ambient_cg.rs` → `get_asset.rs`, `asset_browser.rs`, `ureq` out of `editor`; `assets` `model/maps.rs` learns `nordx`/`norgl` (fixes Poly Haven DirectX normal maps being read as OpenGL); `asset_id.rs` gains a source block in `*.import.json`; `global_assets.rs`, `sky.rs`, import, `build_game.rs` (a CREDITS.txt), `settings.rs` (library folder); the check-platform scripts.
+- **Plan**: 8 PRs. Step 1 only moves code into the crate with no behavior change, so it can start before the open decisions are settled.
 - **Category**: E for the HTTP client, D for the dialog, F for the Toolbox panel.
-- **Depends on**: the Toolbox thread's proposal and Paul's sign-off on it; G2 for models that carry scripts.
+- **Depends on**: Paul's answers to the five asset-source decisions (section 7); G2 for models that carry scripts. New dependency: `md-5`.
 - **Who depends on it**: Assets panel (`asset_browser.rs`), texture sets (materials in `app/material_files.rs`, terrain layers in `app/terrain/layers.rs`), Import dialog, sky picker, Sound.
 - **Fits the architecture**: yes; the cook crate is the precedent for an editor-only crate the player never links (`check-platform.sh` gains the new crate).
 - **Compatibility**: existing `.texture.json` files keep loading; the sidecar gains optional fields.
@@ -328,7 +330,7 @@ The vegetation thread's open LOD items (per-category thresholds, leaf-card LOD) 
 
 ## 5. Toolbox integration (Phase 3, engine side)
 
-The Toolbox assessment, the architecture choice (embedded, companion service, remote, hybrid) and the provider design come from the thread "Assess Toolbox and plan engine integration". This section is what the engine needs from that design, so the two documents meet; the recommendation will be linked here when it lands.
+The Toolbox assessment, the architecture evaluation (embedded, companion service, remote, hybrid) and the provider design are in [asset-sources/](asset-sources/README.md) (PR #90, thread "Assess Toolbox and plan engine integration"); G1 summarizes the recommendation. This section lists what the engine needs from any design; the proposal meets each point (embedded Rust crate, editor-only, downloads through the existing import paths, provenance kept with the asset).
 
 **Engine-side requirements**
 
@@ -354,15 +356,15 @@ Most of what the brief asks to examine is category A. In particular, keep: the I
 
 ## 7. Decisions for Paul
 
-1. **G2 storage**: scripts inside objects as references to files (recommended: keeps git, the code editor and blocks working) or as source inside `world.json`.
-2. **G3 default**: interpolation on by default with a Workspace switch (recommended) or off by default.
-3. **G4 stage 2**: diagnostics from luau-lsp run as a child process (recommended: already the project's language server, nothing to compile) or from Luau's analysis library compiled in.
-4. **G1**: the Toolbox architecture from the Toolbox thread.
+1. **G2 storage**: references to files. *Approved 11 Nov 2026.*
+2. **G3 default**: on, with a Workspace switch. *Approved.*
+3. **G4 stage 2**: luau-lsp as a child process. *Approved.*
+4. **G1**, from the asset-sources proposal (PR #90): (a) embedded Rust crate plus manifest files, or a companion, remote or live hybrid; (b) Rust as the one implementation with the Blender pipeline moving onto the CLI, or two implementations; (c) whether the Toolbox and 3D Models code, which carry no licence, may be ported into the Apache-2.0 engine; (d) where the shared library lives; (e) provenance in `*.import.json` sidecars or in `.axcenity/sources.json`. The proposal recommends the first of (a), (b) and (e).
 
 ## 8. Proposed order
 
 1. Now, independent of other threads: G3 (interpolation), G2 design note and then implementation, G7, G8.
-2. After the Toolbox decision: G1, then G5.
+2. G1 step 1 (move code, no behavior change) now; the rest after Paul answers the asset-source decisions; then G5.
 3. After M12 merges: G4, G9, G11.
 4. When the PC is free: G13.
 
