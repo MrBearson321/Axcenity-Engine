@@ -27,6 +27,7 @@ use axcenity_mcp::{
 
 use super::EditorApp;
 
+mod asset_find;
 mod batch;
 mod docs;
 mod env_set;
@@ -142,6 +143,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &docs::SPEC,
         call: docs::call,
+    },
+    Tool {
+        spec: &asset_find::SPEC,
+        call: asset_find::call,
     },
     Tool {
         spec: &object_create::SPEC,

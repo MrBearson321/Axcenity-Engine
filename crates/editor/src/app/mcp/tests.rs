@@ -1289,3 +1289,34 @@ fn game_run_runs_the_game_tests() {
         "lists the spec files"
     );
 }
+
+#[test]
+fn asset_find_lists_assets_by_kind_name_and_use() {
+    let mut opened = open("hello-material-graph", "mcp-assets");
+    let host = &mut opened.app;
+    let text = ok(host, "asset_find", json!({}));
+    assert!(text.starts_with("4 assets\n"), "{text}");
+    assert!(
+        text.contains("\nassets/materials/MossyStone.material.json · material · ")
+            && text.contains("\nassets/textures/moss.png · texture · "),
+        "{text}"
+    );
+    let materials = ok(host, "asset_find", json!({"kind": "material", "name": "moss"}));
+    assert!(materials.starts_with("1 asset\n"), "{materials}");
+    // Full detail says what uses each one.
+    let full = ok(
+        host,
+        "asset_find",
+        json!({"name": "moss.png", "detail": "full"}),
+    );
+    assert!(full.contains("\n  used by "), "{full}");
+    // A new material nothing uses shows as unused.
+    ok(
+        host,
+        "material_edit",
+        json!({"action": "create", "name": "Spare", "values": {"roughness": 0.5}}),
+    );
+    let unused = ok(host, "asset_find", json!({"unused": true}));
+    assert!(unused.contains("Spare.material.json"), "{unused}");
+    assert!(!unused.contains("moss.png"), "{unused}");
+}
