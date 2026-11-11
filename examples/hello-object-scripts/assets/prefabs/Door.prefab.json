@@ -1,0 +1,23 @@
+{
+  "format_version": 2,
+  "instances": [
+    {
+      "class": "Part",
+      "name": "Door",
+      "properties": {
+        "Anchored": true,
+        "Size": [6, 8, 1],
+        "Color": [0.55, 0.35, 0.2]
+      },
+      "children": [
+        {
+          "class": "Script",
+          "name": "Open",
+          "properties": {
+            "SourceFile": "objects/Door/Open.server.lua"
+          }
+        }
+      ]
+    }
+  ]
+}

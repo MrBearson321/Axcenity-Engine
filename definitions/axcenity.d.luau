@@ -2457,16 +2457,22 @@ end
 
 --- Lua code that runs on the server, from a `.server.lua` file.
 declare extern type Script extends Instance with
+	--- For a script inside an object: the project file its code is in, such as `objects/Door/Open.server.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.
+	SourceFile: string
 	[string]: any
 end
 
 --- Lua code that runs on the player's side (input, camera), from a `.client.lua` file.
 declare extern type LocalScript extends Instance with
+	--- For a script inside an object: the project file its code is in, such as `objects/Door/Open.client.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.
+	SourceFile: string
 	[string]: any
 end
 
 --- Lua code that scripts load with `require`, from a `.module.lua` file. It runs once per side and returns one value.
 declare extern type ModuleScript extends Instance with
+	--- For a script inside an object: the project file its code is in, such as `objects/Door/Open.module.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.
+	SourceFile: string
 	[string]: any
 end
 
