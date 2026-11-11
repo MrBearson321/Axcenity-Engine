@@ -1,0 +1,20 @@
+XB10K_CHECK count=10000 sum=98894.50
+player: xb10k (600 frames)
+  stage                       mean ms  median ms     p95 ms     max ms
+  Network                       0.004      0.004      0.006      0.006
+  Characters                    0.009      0.008      0.011      0.029
+  Agents                        0.001      0.001      0.001      0.002
+  Input                         0.015      0.015      0.017      0.021
+  Scripts                       0.040      0.012      0.186      0.455
+  Physics                       2.554      2.510      3.024      3.561
+  Heartbeat                     0.753      0.738      0.851      1.010
+  Animation                     0.004      0.004      0.004      0.016
+  Draw list                     1.559      1.522      1.793      2.650
+  UI                            0.009      0.009      0.011      0.048
+  Render                        1.921      1.915      2.149      2.462
+  frame                         6.869      6.797      7.603      8.944
+  first frame                  74.027
+  worst warm-up frame          74.027
+  launch to first frame      3738.409
+  launch to assets loaded    3738.411
+{"host":"player","scene":"xb10k","frames":600,"stages":[{"name":"Network","mean_ms":0.0045,"median_ms":0.0044,"p95_ms":0.0056,"max_ms":0.0064},{"name":"Characters","mean_ms":0.0087,"median_ms":0.0084,"p95_ms":0.0106,"max_ms":0.0293},{"name":"Agents","mean_ms":0.0007,"median_ms":0.0007,"p95_ms":0.0010,"max_ms":0.0015},{"name":"Input","mean_ms":0.0150,"median_ms":0.0147,"p95_ms":0.0173,"max_ms":0.0208},{"name":"Scripts","mean_ms":0.0399,"median_ms":0.0122,"p95_ms":0.1865,"max_ms":0.4551},{"name":"Physics","mean_ms":2.5538,"median_ms":2.5095,"p95_ms":3.0237,"max_ms":3.5613},{"name":"Heartbeat","mean_ms":0.7530,"median_ms":0.7384,"p95_ms":0.8514,"max_ms":1.0095},{"name":"Animation","mean_ms":0.0038,"median_ms":0.0037,"p95_ms":0.0043,"max_ms":0.0162},{"name":"Draw list","mean_ms":1.5590,"median_ms":1.5216,"p95_ms":1.7929,"max_ms":2.6501},{"name":"UI","mean_ms":0.0092,"median_ms":0.0093,"p95_ms":0.0107,"max_ms":0.0482},{"name":"Render","mean_ms":1.9211,"median_ms":1.9154,"p95_ms":2.1491,"max_ms":2.4623},{"name":"frame","mean_ms":6.8685,"median_ms":6.7971,"p95_ms":7.6025,"max_ms":8.9437}],"startup":{"first frame":74.0274,"worst warm-up frame":74.0274,"launch to first frame":3738.4091,"launch to assets loaded":3738.4109}}
