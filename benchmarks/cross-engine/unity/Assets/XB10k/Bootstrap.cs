@@ -168,7 +168,9 @@ public class Bootstrap : MonoBehaviour
 
     void Build()
     {
-        shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+        // BuildXB10k saves this material so the player keeps URP's Lit shader.
+        var lit = Resources.Load<Material>("XB10kLit");
+        shader = lit != null ? lit.shader : Shader.Find("Universal Render Pipeline/Lit");
         meshes["Cube"] = Primitive(PrimitiveType.Cube);
         meshes["Sphere"] = Primitive(PrimitiveType.Sphere);
         meshes["Cylinder"] = Primitive(PrimitiveType.Cylinder);

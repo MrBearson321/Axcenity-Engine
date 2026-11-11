@@ -17,6 +17,7 @@ public static class BuildXB10k
     public static void Build()
     {
         EnsurePipeline();
+        EnsureLitMaterial();
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var cam = new GameObject("Main Camera").AddComponent<Camera>();
         cam.tag = "MainCamera";
@@ -41,6 +42,18 @@ public static class BuildXB10k
         Debug.Log("XB10K_BUILD " + report.summary.result);
         if (Application.isBatchMode)
             EditorApplication.Exit(report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded ? 0 : 1);
+    }
+
+    // Nothing in the empty scene uses URP's Lit shader, so a player build
+    // strips it and Shader.Find returns null. A material in Resources keeps
+    // it in the build; Bootstrap takes its shader from there.
+    static void EnsureLitMaterial()
+    {
+        const string path = "Assets/XB10k/Resources/XB10kLit.mat";
+        if (AssetDatabase.LoadAssetAtPath<Material>(path) != null) return;
+        Directory.CreateDirectory("Assets/XB10k/Resources");
+        AssetDatabase.CreateAsset(new Material(Shader.Find("Universal Render Pipeline/Lit")), path);
+        AssetDatabase.SaveAssets();
     }
 
     // A new Unity 6 project from the Universal 3D template uses URP; this

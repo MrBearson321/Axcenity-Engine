@@ -156,7 +156,7 @@ public sealed class XB10kSystem : GameObjectSystem
 			verts.Add( verts[i] with { Normal = n } ); verts.Add( verts[i + 2] with { Normal = n } ); verts.Add( verts[i + 1] with { Normal = n } );
 		}
 		var mesh = new Mesh( Lit );
-		mesh.CreateVertexBuffer( verts.Count, Vertex.Layout, verts );
+		mesh.CreateVertexBuffer( verts.Count, verts );
 		mesh.Bounds = BBox.FromPoints( verts.Select( v => v.Position ) );
 		var model = builder.AddMesh( mesh ).Create();
 		models[key] = model;

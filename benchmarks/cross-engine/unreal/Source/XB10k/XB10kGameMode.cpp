@@ -188,7 +188,7 @@ void AXB10kGameMode::Build()
 	ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>();
 	Sun->GetRootComponent()->SetMobility(EComponentMobility::Movable);
 	Sun->SetActorRotation((-ToUnreal(FVector(0.5f, 1.f, 0.25f))).Rotation());
-	Sun->GetComponent()->SetCastShadows(true);
+	Sun->GetLightComponent()->SetCastShadows(true);
 	AActor* Sky = World->SpawnActor<AActor>();
 	USkyAtmosphereComponent* Atmosphere = NewObject<USkyAtmosphereComponent>(Sky);
 	Sky->SetRootComponent(Atmosphere);
