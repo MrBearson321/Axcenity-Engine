@@ -30,13 +30,28 @@ public sealed class XB10kSystem : GameObjectSystem
 	// Spec axes are Y up; s&box's are Z up (right-handed).
 	public static Vector3 ToSbox( Vector3 v ) => new( v.x, -v.z, v.y );
 
+	/// <summary>
+	/// Builds the scene again and times a new run. run-all.ps1 calls this
+	/// (through sbox-cli) after turning vsync and the frame cap off, which
+	/// s&box doesn't keep between launches.
+	/// </summary>
+	public void Restart()
+	{
+		built = false;
+		samples.Clear();
+		models.Clear();
+		frame = 0;
+		checkCount = 0;
+		checkSum = 0;
+	}
+
 	void OnFrame()
 	{
 		if ( Scene.IsEditor ) return;
 		if ( !built )
 		{
 			built = true;
-			clock.Start();
+			clock.Restart();
 			Build();
 			buildMs = clock.Elapsed.TotalMilliseconds;
 			Log.Info( $"XB10K_CHECK count={checkCount} sum={checkSum:F2}" );
