@@ -206,7 +206,7 @@ mod tests {
         assert!(!folder.join(".axcenity").exists());
 
         // The box draws, and nothing is written while it's up.
-        let mut draw = |ctx: &egui::Context| app.upgrade_prompt(ctx);
+        let mut draw = |ui: &mut egui::Ui| app.upgrade_prompt(ui.ctx());
         match std::env::var_os("AXCENITY_SNAPSHOTS") {
             Some(out) => crate::snapshot::snapshot(
                 &PathBuf::from(out).join("upgrade-project.png"),
@@ -216,7 +216,7 @@ mod tests {
             ),
             None => {
                 for _ in 0..3 {
-                    let _ = ctx.run(Default::default(), &mut draw);
+                    let _ = theme::run(&ctx, Default::default(), &mut draw);
                 }
             }
         }
