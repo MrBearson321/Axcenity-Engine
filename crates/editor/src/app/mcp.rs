@@ -56,6 +56,7 @@ mod project_save;
 mod project_settings;
 mod prompts;
 mod refs;
+mod render_stats;
 mod scene_inspect;
 mod script_read;
 mod script_write;
@@ -68,6 +69,7 @@ mod values;
 mod tests;
 
 pub(crate) use live::AiConnections;
+pub(crate) use render_stats::LastDrawn;
 
 /// The command-line flag that starts the server.
 pub(crate) const FLAG: &str = "--mcp";
@@ -288,6 +290,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &asset_manage::SPEC,
         call: asset_manage::call,
+    },
+    Tool {
+        spec: &render_stats::SPEC,
+        call: render_stats::call,
     },
 ];
 

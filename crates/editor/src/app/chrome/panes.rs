@@ -1052,6 +1052,12 @@ impl EditorApp {
         self.swap_play_effects();
         if let Some(render) = output.render {
             self.profiler.record_render(render);
+            self.last_drawn = Some(super::mcp::LastDrawn {
+                cost: render,
+                at: std::time::Instant::now(),
+                size: self.viewport.pixel_size(),
+                playing: self.play.is_some(),
+            });
         }
         self.profiler.record_shader_errors(&output.shader_errors);
         for error in output.shader_errors.drain(..) {

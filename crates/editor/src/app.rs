@@ -279,6 +279,9 @@ pub struct EditorApp {
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
     profiler: Profiler,
+    /// The viewport's last frame, edit or Play, for the AI's
+    /// `render_stats`.
+    last_drawn: Option<mcp::LastDrawn>,
     /// The Mixer panel's meters, mute and solo.
     mixer: crate::mixer::Mixer,
     /// The Tests panel's tree and the run going now (Phase 53).
@@ -866,6 +869,7 @@ impl EditorApp {
             ui_warnings: Vec::new(),
             last_frame: None,
             profiler: Profiler::default(),
+            last_drawn: None,
             mixer: crate::mixer::Mixer::default(),
             game_tests: crate::game_tests::GameTests::default(),
             plugins: crate::plugins::Plugins::default(),
