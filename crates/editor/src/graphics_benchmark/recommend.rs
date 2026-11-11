@@ -123,11 +123,45 @@ fn render_scale_for(measurement: &Measurement) -> Option<f32> {
 
 /// The texture memory budget for a card with `video_memory` bytes: a
 /// quarter of it in MiB, rounded down to a power of two, between 256 MiB
-/// and 8 GiB.
+/// and 8 GiB. The memory is first rounded to whole GiB, as a "16 GB" card
+/// reports a little less (15.9 GiB on an RX 9070 XT).
 pub fn texture_budget_for(video_memory: u64) -> u32 {
-    let quarter = (video_memory / 4 / (1024 * 1024)).max(1);
+    let quarter = (whole_gib(video_memory) * 1024 / 4).max(1);
     let power = 1u64 << (63 - quarter.leading_zeros());
     power.clamp(256, 8192) as u32
+}
+
+/// The card's memory as its box says it: rounded to whole GiB, at least 1.
+fn whole_gib(video_memory: u64) -> u64 {
+    const GIB: f64 = (1u64 << 30) as f64;
+    (video_memory as f64 / GIB).round().max(1.0) as u64
+}
+
+/// What Apply sets on top of `current`: the recommendation, keeping the
+/// person's own overrides for what the benchmark doesn't weigh. That's
+/// real-time GI (off at every preset, and the test worlds have no light
+/// probe volumes), the lens effects (depth of field, vignette, film grain,
+/// chromatic aberration, sharpen, motion blur: a world's effects, which
+/// the test worlds don't have), and a texture memory budget that fits the
+/// card (at most half its memory, or any when its memory isn't known).
+pub fn apply_to(current: &GraphicsSettings, report: &Report) -> GraphicsSettings {
+    let mut settings = report.recommendation.settings.clone();
+    settings.realtime_gi = current.realtime_gi;
+    settings.depth_of_field = current.depth_of_field;
+    settings.vignette = current.vignette;
+    settings.film_grain = current.film_grain;
+    settings.chromatic_aberration = current.chromatic_aberration;
+    settings.sharpen = current.sharpen;
+    settings.motion_blur = current.motion_blur;
+    if let Some(budget) = current.texture_budget {
+        let fits = report
+            .video_memory
+            .is_none_or(|memory| u64::from(budget) <= whole_gib(memory) * 1024 / 2);
+        if fits {
+            settings.texture_budget = Some(budget);
+        }
+    }
+    settings
 }
 
 fn ms(value: f32) -> String {
@@ -532,6 +566,8 @@ mod tests {
     #[test]
     fn the_texture_budget_follows_the_cards_memory() {
         assert_eq!(texture_budget_for(16 << 30), 4096);
+        // An RX 9070 XT's 16 GB, as Windows reports it.
+        assert_eq!(texture_budget_for(17_095_983_104), 4096);
         assert_eq!(texture_budget_for(12 << 30), 2048);
         assert_eq!(texture_budget_for(2 << 30), 512);
         assert_eq!(texture_budget_for(512 << 20), 256);
@@ -558,6 +594,46 @@ mod tests {
         // Unknown memory leaves the preset's.
         small.video_memory = None;
         assert_eq!(recommend(&small).settings.texture_budget, None);
+    }
+
+    #[test]
+    fn apply_keeps_what_the_benchmark_doesnt_weigh() {
+        let presets: Vec<_> = Tier::ALL
+            .into_iter()
+            .map(|tier| measured(tier, 3.0, &[]))
+            .collect();
+        let mut report = report(presets);
+        report.video_memory = Some(17_095_983_104);
+        report.recommendation = recommend(&report);
+        assert_eq!(report.recommendation.settings.texture_budget, Some(4096));
+
+        // The owner's settings on the PC: Ultra, 8 GB of textures and
+        // real-time GI. Both are kept; nothing else differs.
+        let mut current = GraphicsSettings::preset(Quality::Ultra);
+        current.texture_budget = Some(8192);
+        current.realtime_gi = Some(true);
+        current.vignette = Some(false);
+        let applied = apply_to(&current, &report);
+        assert_eq!(applied, current);
+
+        // A budget the card can't hold is replaced, and one set by
+        // nobody takes the recommendation's.
+        current.texture_budget = Some(16384);
+        assert_eq!(apply_to(&current, &report).texture_budget, Some(4096));
+        current.texture_budget = None;
+        assert_eq!(apply_to(&current, &report).texture_budget, Some(4096));
+        // With the card's memory unknown, the owner's budget stands.
+        report.video_memory = None;
+        current.texture_budget = Some(16384);
+        assert_eq!(apply_to(&current, &report).texture_budget, Some(16384));
+
+        // What the benchmark does weigh follows the recommendation.
+        current.shadow_quality = Some(ShadowQuality::Off);
+        current.anti_aliasing = Some(axcenity_render::AntiAliasing::Off);
+        let applied = apply_to(&current, &report);
+        assert_eq!(applied.shadow_quality, None);
+        assert_eq!(applied.anti_aliasing, None);
+        assert_eq!(applied.realtime_gi, Some(true));
     }
 
     #[test]

@@ -39,15 +39,12 @@ fn a_run_leaves_the_project_and_settings_alone_until_apply() {
     assert!(!app.unsaved());
     assert_eq!(app.graphics, before);
 
-    // Apply uses the recommendation; Undo puts the old settings back.
-    let recommended = app
-        .benchmark
-        .report
-        .as_ref()
-        .unwrap()
-        .recommendation
-        .settings
-        .clone();
+    // Apply uses the recommendation (keeping what the benchmark doesn't
+    // weigh); Undo puts the old settings back.
+    let recommended = app.benchmark.applied(&before).unwrap();
+    let report = app.benchmark.report.as_ref().unwrap();
+    assert_eq!(recommended.quality, report.recommendation.settings.quality);
+    assert_eq!(recommended.realtime_gi, before.realtime_gi);
     app.apply_graphics_benchmark();
     assert_eq!(app.graphics, recommended);
     assert_eq!(app.benchmark.previous, Some(before.clone()));
