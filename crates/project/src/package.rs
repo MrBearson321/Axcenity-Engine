@@ -5,7 +5,8 @@
 //! Exporting brings everything the chosen assets need
 //! ([`package_contents`]): a state machine brings its clips, a linked clip
 //! the model its take is in, a model in a folder of its own every file in
-//! that folder (its textures), and a prefab every asset its Instances name.
+//! that folder (its textures), and a prefab every asset its Instances name,
+//! the files in `objects/` its scripts take their code from included.
 //!
 //! Importing ([`plan_import`]) leaves files the project already has, byte
 //! for byte, alone. A file whose path holds a different file is a clash,
@@ -36,7 +37,8 @@ pub const PACKAGE_EXTENSION: &str = "axpkg";
 const MANIFEST_FILE: &str = "axpkg.json";
 /// The newest package format this reads, and the one it writes.
 const PACKAGE_FORMAT: u32 = 1;
-/// Every file in a package is under this folder.
+/// Every file in a package is under this folder, but the code of scripts
+/// inside objects, in `objects/`.
 const ASSETS_ROOT: &str = "assets/";
 
 /// What a package says it holds.
@@ -282,12 +284,16 @@ fn own_model_folder(path: &str) -> Option<String> {
     Some(format!("{MODELS_FOLDER}/{name}"))
 }
 
-/// A path a package may hold: inside `assets`, with no way out of it.
+/// A path a package may hold: inside `assets`, or `objects` for the code
+/// of scripts inside objects (G2), with no way out of it.
 fn check_path(path: &str) -> Result<(), PackageError> {
     let unsafe_path = || PackageError::UnsafePath(path.to_owned());
     let normal = safe_path(path).ok_or_else(unsafe_path)?;
     let normal = normal.to_string_lossy().replace('\\', "/");
-    if normal != path || !path.starts_with(ASSETS_ROOT) {
+    let objects = path
+        .strip_prefix(crate::OBJECTS_FOLDER)
+        .is_some_and(|rest| rest.starts_with('/'));
+    if normal != path || !(path.starts_with(ASSETS_ROOT) || objects) {
         return Err(unsafe_path());
     }
     Ok(())

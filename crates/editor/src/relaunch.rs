@@ -205,7 +205,7 @@ fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
             .copied()
             .filter(|&child| {
                 world.get(child).is_some_and(|child| {
-                    !child.class().is_script() && child.class() != ClassName::Player
+                    !crate::tree::is_file_script(child) && child.class() != ClassName::Player
                 })
             })
             .collect()
