@@ -580,6 +580,118 @@ fn the_start_screen_joins_a_session_and_opens_its_files() {
 }
 
 #[test]
+fn document_tabs_lock_while_edited_and_reload_what_a_teammate_saves() {
+    let project = copy_of_example("hello-touched", "team-docs-host");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = over_loopback(
+        a.host_network_session(Some(&team_folder("docs-host")), 0)
+            .expect("hosting"),
+    );
+    let mut b = EditorApp::new(None);
+    b.join_network_session(&invite, Some(&team_folder("docs-joiner")))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |_, b| b.project.is_some());
+
+    // The joiner makes a behavior tree and saves it: it reaches the host's
+    // folder, where the host's editor opens it.
+    let tree = "assets/Guard.behaviortree.json";
+    b.behavior.create(tree);
+    assert!(b.save());
+    settle_net(&mut a, &mut b, |_, _| project.join(tree).exists());
+    a.behavior.open(&project, tree).expect("the tree opens");
+    let saved = a.behavior.document(tree).unwrap().graph.clone();
+
+    // The joiner edits it: the host's tab is read-only, by the joiner.
+    b.behavior.document_mut(tree).unwrap().graph.nodes[0].position[0] += 120.0;
+    settle_net(&mut a, &mut b, |a, _| {
+        a.team
+            .as_ref()
+            .is_some_and(|team| team.editing_elsewhere(tree).is_some())
+    });
+    assert_eq!(a.behavior.document(tree).unwrap().graph, saved);
+
+    // Saving frees it, and the host's editor shows the new version.
+    assert!(b.save());
+    settle_net(&mut a, &mut b, |a, b| {
+        a.behavior.document(tree).map(|doc| &doc.graph)
+            == b.behavior.document(tree).map(|doc| &doc.graph)
+            && a.team
+                .as_ref()
+                .is_some_and(|team| team.editing_elsewhere(tree).is_none())
+    });
+    assert!(!a.behavior.unsaved());
+
+    // The string table and the input map are read again too.
+    let mut strings = (**b.world.strings()).clone();
+    strings.set("Greeting", "en", "Hello, team");
+    std::fs::write(
+        b.project
+            .as_ref()
+            .unwrap()
+            .folder
+            .join(axcenity_project::STRINGS_FILE),
+        axcenity_project::write_strings(&strings),
+    )
+    .unwrap();
+    settle_net(&mut a, &mut b, |a, _| {
+        a.world.strings().get("Greeting", "en") == Some("Hello, team")
+    });
+}
+
+#[test]
+fn a_ui_graph_a_teammate_saves_runs_its_new_version_here() {
+    let project = copy_of_example("hello-ui-graph", "team-graph-host");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = over_loopback(
+        a.host_network_session(Some(&team_folder("graph-host")), 0)
+            .expect("hosting"),
+    );
+    let mut b = EditorApp::new(None);
+    b.join_network_session(&invite, Some(&team_folder("graph-joiner")))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |_, b| b.project.is_some());
+    let path = "ui/Menu.uigraph.json";
+    let graph = |app: &EditorApp| {
+        app.project
+            .as_ref()
+            .unwrap()
+            .ui_graphs
+            .iter()
+            .find(|doc| doc.saved_path.as_deref() == Some(path))
+            .map(|doc| doc.graph.clone())
+            .expect("the Menu graph")
+    };
+    assert_eq!(graph(&a), graph(&b));
+
+    // The joiner moves a node: the host's Event Graph is locked meanwhile.
+    {
+        let doc = b
+            .project
+            .as_mut()
+            .unwrap()
+            .ui_graphs
+            .iter_mut()
+            .find(|doc| doc.saved_path.as_deref() == Some(path))
+            .unwrap();
+        doc.graph.nodes[0].position[1] += 80.0;
+    }
+    settle_net(&mut a, &mut b, |a, _| {
+        a.team
+            .as_ref()
+            .is_some_and(|team| team.editing_elsewhere(path).is_some())
+    });
+    assert!(b.save());
+    settle_net(&mut a, &mut b, |a, b| graph(a) == graph(b));
+    // Still one EventGraph script, with the same code on both.
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq)
+    });
+    assert_eq!(scripts(&a), scripts(&b));
+    assert_eq!(dump(&a.world), dump(&b.world));
+}
+
+#[test]
 fn a_joining_editor_gets_the_files_and_its_saves_reach_the_host() {
     let project = copy_of_example("hello-touched", "team-files-host");
     let mut a = EditorApp::new(Some(&project));

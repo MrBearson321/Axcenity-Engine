@@ -86,6 +86,72 @@ impl EditorApp {
             .is_some_and(|project| project.ui_graphs.iter().any(UiGraphDocument::unsaved))
     }
 
+    /// The paths the graphs with changes will be saved at (their
+    /// ScreenGui's name), for Team Create's locks.
+    pub(super) fn unsaved_ui_graphs(&self) -> Vec<String> {
+        let Some(project) = &self.project else {
+            return Vec::new();
+        };
+        project
+            .ui_graphs
+            .iter()
+            .filter(|doc| doc.unsaved())
+            .filter_map(|doc| self.world.get(doc.gui))
+            .map(|gui| ui_graph_path(gui.name()))
+            .collect()
+    }
+
+    /// The graph file `path` changed on disk (a teammate saved it, or
+    /// another program did): a graph without unsaved changes reads it
+    /// again, and its LocalScript runs the new one. The LocalScript a
+    /// teammate's editor made for a new graph is used, not a second one.
+    pub(in crate::app) fn ui_graph_file_changed(&mut self, path: &str) {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        let Some(gui) = project::screen_gui_named(&self.world, ui_graph_gui_name(path)) else {
+            return;
+        };
+        // A deleted graph's file stays gone; its document keeps what it had.
+        let Ok(graph) = project::read_ui_graph(&folder, path) else {
+            return;
+        };
+        let Some(index) = self.graph_document(gui) else {
+            return;
+        };
+        let world = &self.world;
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        let doc = &mut project.ui_graphs[index];
+        if doc.unsaved() || (doc.graph == graph && doc.saved_path.as_deref() == Some(path)) {
+            return;
+        }
+        doc.saved = graph.clone();
+        doc.graph = graph;
+        doc.saved_path = Some(path.to_owned());
+        doc.undo.clear();
+        doc.redo.clear();
+        if !project.scripts.iter().any(|script| script.path == path)
+            && let Some(instance) = world.get(gui).and_then(|gui| {
+                gui.children().iter().copied().find(|&id| {
+                    world.get(id).is_some_and(|script| {
+                        script.class() == ClassName::LocalScript
+                            && script.name() == axcenity_blocks::ui_graph::UI_GRAPH_SCRIPT_NAME
+                    }) && !project.scripts.iter().any(|s| s.instance == id)
+                })
+            })
+        {
+            project.scripts.push(ScriptFile {
+                instance,
+                path: path.to_owned(),
+                source: String::new(),
+            });
+        }
+        self.make_graph_script(index, None, path);
+        self.output.info(format!("Reloaded `{path}`."));
+    }
+
     /// An edit of the shown ScreenGui's graph finished: `before` is how it was.
     pub(super) fn graph_step(&mut self, before: NodeGraph) {
         let Some(gui) = self.ui_designer.current_gui() else {

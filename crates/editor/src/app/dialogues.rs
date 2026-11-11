@@ -84,10 +84,11 @@ impl EditorApp {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
         self.dialogues.follow(folder.as_deref(), prompt.as_ref());
         let files = folder.as_deref().map(dialogue_files).unwrap_or_default();
+        let locked = self.locked_banner(ui, self.dialogues.current());
         let scene = DialogueScene {
             files: &files,
             prompt: prompt.as_ref(),
-            editable: folder.is_some() && !self.playing(),
+            editable: folder.is_some() && !self.playing() && !locked,
         };
         let actions = self.dialogues.show(ui, &scene);
         for action in actions {

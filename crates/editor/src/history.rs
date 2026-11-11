@@ -930,11 +930,11 @@ impl History {
     /// (it shares Instances), such as "terrain".
     pub fn top_unshared(&self) -> Option<&'static str> {
         // Files a step writes (stylesheets, clips, imports) are shared by
-        // the session's folder sync (TC5).
+        // the session's folder sync (TC5), and so is the string table once
+        // it's saved (`strings.json`).
         match &self.undo.last()?.kind {
             StepKind::World { texts, .. } if !texts.is_empty() => Some("project files"),
             StepKind::Terrain { .. } => Some("terrain"),
-            StepKind::Strings { .. } => Some("the string table"),
             _ => None,
         }
     }

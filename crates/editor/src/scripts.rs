@@ -87,6 +87,24 @@ pub struct ScriptTab {
     pub editing_elsewhere: Option<String>,
 }
 
+/// Team Create: `who` is editing the document shown, so it's read-only
+/// here. Every document tab says it the same way.
+pub fn locked_banner(ui: &mut egui::Ui, who: &str) {
+    let warning = ui.visuals().warn_fg_color;
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(theme::with_icon(
+                icons::LOCK,
+                &format!(
+                    "{who} is editing this file. It's read-only here until they save or close it."
+                ),
+            ))
+            .color(warning),
+        )
+        .wrap(),
+    );
+}
+
 impl ScriptTab {
     /// The Script's name, from its file name, or a stylesheet's file name.
     pub fn name(&self) -> &str {
@@ -353,16 +371,7 @@ impl ScriptTabs {
         };
         let warning = ui.visuals().warn_fg_color;
         if let Some(who) = &tab.editing_elsewhere {
-            ui.colored_label(
-                warning,
-                theme::with_icon(
-                    icons::LOCK,
-                    &format!(
-                        "{who} is editing this file. It's read-only here until they save or \
-                         close it."
-                    ),
-                ),
-            );
+            locked_banner(ui, who);
         }
         match tab.disk {
             Disk::Same => {}

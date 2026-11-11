@@ -50,6 +50,10 @@ impl EditorApp {
         for path in paths {
             if path == project::WORLD_FILE {
                 self.world_file_changed();
+            } else if path == project::STRINGS_FILE || path == project::INPUT_FILE {
+                self.settings_file_changed(path);
+            } else if axcenity_blocks::ui_graph::is_ui_graph(path) {
+                self.ui_graph_file_changed(path);
             } else if project::is_stylesheet(path) {
                 self.stylesheet_file_changed(path);
             } else if project::is_asset_path(path) {
@@ -102,6 +106,59 @@ impl EditorApp {
         {
             self.materials.file_changed(&folder, path);
             self.hand_over_materials();
+        }
+        if let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) {
+            if axcenity_blocks::behavior_tree::is_behavior_tree(path) {
+                self.behavior.file_changed(&folder, path);
+            }
+            if axcenity_blocks::dialogue::is_dialogue(path) {
+                self.dialogues.file_changed(&folder, path);
+            }
+        }
+    }
+
+    /// `strings.json` or `input.json` changed on disk (a teammate saved
+    /// it, or another program did): the string table or the input map is
+    /// read again. A damaged file keeps what the editor had, and says so.
+    pub(in crate::app) fn settings_file_changed(&mut self, path: &str) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let text = match std::fs::read_to_string(folder.join(path)) {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                self.output
+                    .error(format!("Couldn't read `{path}` again: {error}"));
+                return;
+            }
+        };
+        if path == project::STRINGS_FILE {
+            let table = match text.as_deref().map(project::parse_strings) {
+                None => Default::default(),
+                Some(Ok(table)) => table,
+                Some(Err(error)) => {
+                    self.output.error(format!("`{path}`: {error}"));
+                    return;
+                }
+            };
+            if **self.world.strings() != table {
+                self.world.set_strings(std::sync::Arc::new(table));
+                self.output.info(format!("Reloaded `{path}`."));
+            }
+        } else if let Some(project) = &mut self.project {
+            let map = match text.as_deref().map(project::parse_input_map) {
+                None => Default::default(),
+                Some(Ok(map)) => map,
+                Some(Err(error)) => {
+                    self.output.error(format!("`{path}`: {error}"));
+                    return;
+                }
+            };
+            if project.input_map != map {
+                project.input_map = map;
+                self.output.info(format!("Reloaded `{path}`."));
+            }
         }
     }
 

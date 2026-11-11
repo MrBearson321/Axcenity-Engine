@@ -10,8 +10,7 @@
 //! Undo in a session only changes what's still as the step left it
 //! (`History::set_shared`), and its result syncs like any edit. Steps that
 //! swap the whole World (Console commands, prefab Apply) can't be undone in
-//! a session yet, and terrain and the string table aren't shared yet: the
-//! Output says so.
+//! a session yet, and terrain isn't shared yet: the Output says so.
 //!
 //! Files (TC5): every editor in a session keeps a folder of the session's
 //! files in step with `collab::Mirror`, every half second and right after
@@ -20,9 +19,14 @@
 //! folder of its own (under the Team Create data folder, one per session)
 //! and opens it as the project once they're in, keeping the session's
 //! World and pointing the project's scripts at the session's Instances
-//! ([`EditorApp::open_team_mirror`]). A script tab with unsaved changes
-//! asks to be the one editing that file; the others' tabs for it are
-//! read-only until it's saved or closed.
+//! ([`EditorApp::open_team_mirror`]); the start screen's Join… does this
+//! with no project open ([`EditorApp::join_from_start`]). A document with
+//! unsaved changes (a script or stylesheet tab, a block script, a UI Event
+//! Graph, a behavior tree, dialogue, data table or material) asks to be
+//! the one editing that file; the others' tabs for it are read-only until
+//! it's saved or closed. What a teammate saves is read again like a file
+//! another program changed (`disk_changed`), the string table and the
+//! input map included.
 //!
 //! What SplineMeshes and SplineScatters make isn't shared: each copy makes
 //! its own ([`World::unrecorded`] in `generate_frame`).
@@ -141,8 +145,16 @@ fn access_path(folder: &Path, project: &Path) -> PathBuf {
 }
 
 /// True for a file the editor takes in when it changes on disk (what its
-/// watcher reports): scripts, stylesheets and assets.
+/// watcher reports): scripts, stylesheets, assets (data tables, materials,
+/// behavior trees and dialogues among them), UI Event Graphs, the string
+/// table and the input map.
 fn editor_reads(path: &str) -> bool {
+    if axcenity_blocks::ui_graph::is_ui_graph(path)
+        || path == project::STRINGS_FILE
+        || path == project::INPUT_FILE
+    {
+        return true;
+    }
     let script = (path.starts_with("scripts/") || path.starts_with("objects/"))
         && [
             project::SERVER_SCRIPT_SUFFIX,
@@ -986,21 +998,24 @@ impl EditorApp {
             })
     }
 
-    /// Asks to be the one editing each script with unsaved changes, lets
-    /// go of the rest, and marks tabs someone else is editing read-only.
+    /// Asks to be the one editing each document with unsaved changes, lets
+    /// go of the rest, and marks script tabs someone else is editing
+    /// read-only (the other tabs ask as they're drawn: `locked_banner`).
     fn team_locks(&mut self) {
+        if self.team.is_none() {
+            return;
+        }
+        let wanted: std::collections::BTreeSet<String> = self
+            .unsaved_documents()
+            .into_iter()
+            .filter(|path| axcenity_collab::files::is_synced(path))
+            .collect();
         let Some(team) = self.team.as_mut() else {
             return;
         };
         let Some(client) = team.client.as_mut().filter(|c| c.is_joined()) else {
             return;
         };
-        let wanted: std::collections::BTreeSet<String> = self
-            .tabs
-            .unsaved_paths()
-            .into_iter()
-            .filter(|path| axcenity_collab::files::is_synced(path))
-            .collect();
         let held = client.my_locks().clone();
         for path in held.difference(&wanted) {
             client.unlock(path);
@@ -1011,6 +1026,47 @@ impl EditorApp {
         let team = self.team.as_ref().expect("checked above");
         for tab in self.tabs.iter_mut() {
             tab.editing_elsewhere = team.editing_elsewhere(&tab.path);
+        }
+    }
+
+    /// Every document with changes to save, by the path it's saved at:
+    /// script and stylesheet tabs, block scripts, UI Event Graphs, and the
+    /// behavior tree, dialogue, data table and material tabs. Each is
+    /// locked for this editor while it has changes (design §7.7).
+    fn unsaved_documents(&self) -> Vec<String> {
+        let mut paths = self.tabs.unsaved_paths();
+        if let Some(project) = &self.project {
+            paths.extend(
+                project
+                    .block_scripts
+                    .iter()
+                    .filter(|doc| doc.script != doc.saved)
+                    .map(|doc| doc.path.clone()),
+            );
+        }
+        paths.extend(self.unsaved_ui_graphs());
+        paths.extend(self.behavior.unsaved_paths());
+        paths.extend(self.dialogues.unsaved_paths());
+        paths.extend(self.data_tables.unsaved_paths());
+        paths.extend(self.materials.unsaved_paths());
+        paths
+    }
+
+    /// For a document tab: when someone else is editing the document at
+    /// `path`, says so at the top of the tab and returns true (the tab is
+    /// then read-only).
+    pub(super) fn locked_banner(&self, ui: &mut egui::Ui, path: Option<&str>) -> bool {
+        let who = self
+            .team
+            .as_ref()
+            .zip(path)
+            .and_then(|(team, path)| team.editing_elsewhere(path));
+        match who {
+            Some(who) => {
+                crate::scripts::locked_banner(ui, &who);
+                true
+            }
+            None => false,
         }
     }
 

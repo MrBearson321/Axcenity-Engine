@@ -220,11 +220,16 @@ impl EditorApp {
             .iter()
             .map(|(path, text)| crate::ui_designer::links::ScriptText { path, text })
             .collect();
+        let locked_by = self
+            .team
+            .as_ref()
+            .and_then(|team| team.editing_elsewhere(&path));
         let (stylesheets, graph) = match self.project.as_mut() {
             Some(project) => {
                 let graph = document.map(|index| GraphPane {
                     graph: &mut project.ui_graphs[index].graph,
                     path: &path,
+                    locked_by: locked_by.as_deref(),
                 });
                 (&project.stylesheets[..], graph)
             }
@@ -1184,6 +1189,11 @@ impl EditorApp {
             if ui.rect_contains_pointer(ui.max_rect()) {
                 self.block_tab_pointer = Some(path.clone());
             }
+            // Team Create: someone else is editing it, so it's shown as is.
+            let locked_by = self
+                .team
+                .as_ref()
+                .and_then(|team| team.editing_elsewhere(&path));
             // An edit is over once nothing is held or typed (`BlockUndo`).
             let busy =
                 ctx.egui_wants_keyboard_input() || ctx.input(|input| input.pointer.any_down());
@@ -1196,6 +1206,9 @@ impl EditorApp {
                             .iter_mut()
                             .find(|document| document.path == path)
                     }) {
+                        if let Some(who) = &locked_by {
+                            crate::scripts::locked_banner(ui, who);
+                        }
                         let before = document.script.clone();
                         let context = block_editor::BlockContext {
                             key: &path,
@@ -1208,6 +1221,10 @@ impl EditorApp {
                         } else {
                             block_editor::show(ui, &mut document.script, context)
                         };
+                        if changed && locked_by.is_some() {
+                            document.script = before.clone();
+                            changed = false;
+                        }
                         if changed {
                             document.highlighted = None;
                         }

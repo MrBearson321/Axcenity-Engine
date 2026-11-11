@@ -233,9 +233,17 @@ impl DataTableStudio {
         self.hovered
     }
 
-    #[cfg(test)]
     pub fn current(&self) -> Option<&str> {
         self.current.as_deref()
+    }
+
+    /// The paths of the tables with changes to save.
+    pub fn unsaved_paths(&self) -> Vec<String> {
+        self.documents
+            .iter()
+            .filter(|doc| doc.unsaved())
+            .map(|doc| doc.path.clone())
+            .collect()
     }
 
     pub fn document(&self, path: &str) -> Option<&TableDocument> {

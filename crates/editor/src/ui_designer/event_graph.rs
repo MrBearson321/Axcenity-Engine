@@ -41,6 +41,8 @@ pub struct GraphPane<'a> {
     pub graph: &'a mut NodeGraph,
     /// Its file's project path, which the Lua's errors name.
     pub path: &'a str,
+    /// Team Create: who else is editing it (it's read-only here).
+    pub locked_by: Option<&'a str>,
 }
 
 /// The graph's Lua running on a copy of the world.
@@ -363,6 +365,10 @@ impl UiDesigner {
             ui.weak("Open a project to give this ScreenGui an Event Graph.");
             return;
         };
+        if let Some(who) = pane.locked_by {
+            crate::scripts::locked_banner(ui, who);
+        }
+        let editable = scene.editing && pane.locked_by.is_none();
         let objects = axcenity_project::graph_objects(scene.world, gui);
         let compiled = compile_ui_graph(pane.graph, &objects);
         let errors = compiled.as_ref().err().cloned().unwrap_or_default();
@@ -393,13 +399,13 @@ impl UiDesigner {
                 objects: &objects,
                 images: &[],
                 errors: &by_node,
-                editable: scene.editing,
+                editable,
                 key: &key,
             },
         );
         self.graph_hovered = response.hovered;
         let mut side_panel = |ui: &mut egui::Ui, graph: &mut NodeGraph| {
-            self.graph_side(ui, graph, &errors, compiled.as_ref().ok(), scene.editing);
+            self.graph_side(ui, graph, &errors, compiled.as_ref().ok(), editable);
         };
         if side == 0.0 {
             egui::ScrollArea::vertical()
