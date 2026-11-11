@@ -20,7 +20,7 @@ use crate::tree::{self, Insertable};
 pub const SPEC: ToolSpec = ToolSpec {
     name: "object_create",
     title: "Create object",
-    summary: "Create one object as the editor's Insert does, e.g. {\"kind\":\"Block\",\"name\":\"Wall\",\"size\":[20,10,1]}.",
+    summary: "Create one object as Insert does, e.g. {\"kind\":\"Block\",\"size\":[20,10,1]}.",
     profile: Profile::Lite,
     class: Class::Add,
     idempotent: false,
@@ -28,23 +28,19 @@ pub const SPEC: ToolSpec = ToolSpec {
         Param::required(
             "kind",
             Kind::String,
-            "Insert name or class: Block, Sphere, Model, PointLight... (docs lists them)",
+            "Block, Sphere, Model, PointLight... (docs lists all)",
         ),
         Param::optional("name", Kind::String, "default: the kind"),
-        Param::optional(
-            "parent",
-            Kind::String,
-            "ID or path; default where Insert puts it",
-        ),
+        Param::optional("parent", Kind::String, "default: where Insert puts it"),
         Param::optional(
             "position",
             Kind::Vector3,
-            "[x,y,z]; default a part rests on the ground at the origin",
+            "centre; default: on the ground at 0,0",
         ),
-        Param::optional("size", Kind::Vector3, "[x,y,z] studs"),
+        Param::optional("size", Kind::Vector3, "studs"),
         Param::optional("color", Kind::Vector3, "[r,g,b] 0-1"),
-        Param::optional("material", Kind::String, "such as Brick, Wood, Neon"),
-        Param::optional("props", Kind::Object, "other properties, world.json values"),
+        Param::optional("material", Kind::String, "e.g. Brick"),
+        Param::optional("props", Kind::Object, "other properties"),
     ],
 };
 
@@ -150,13 +146,41 @@ fn find_kind(name: &str) -> Result<Insertable, ToolError> {
 }
 
 pub fn call(host: &mut Host, args: &Args) -> Outcome {
-    let kind = find_kind(args.str("kind").unwrap_or_default())?;
+    let what = what(args)?;
+    let written = write(host, &format!("Create {what}"), |world| step(world, args))?;
+    let id = written.value;
     let world = &host.app.world;
+    Ok(format!(
+        "created {} in {}{}",
+        label(world, id),
+        parent_path(world, id),
+        written.undo_note()
+    ))
+}
+
+/// The name the new object is asked to have: `name`, else its class.
+pub(super) fn what(args: &Args) -> Result<String, ToolError> {
+    let kind = find_kind(args.str("kind").unwrap_or_default())?;
+    Ok(args.str("name").unwrap_or(kind.class().as_str()).to_owned())
+}
+
+/// The path of what `id` is in, for result lines.
+pub(super) fn parent_path(world: &World, id: InstanceId) -> String {
+    world
+        .get(id)
+        .and_then(|instance| instance.parent())
+        .map_or_else(String::new, |parent| path(world, parent))
+}
+
+/// Makes the object `args` describe in `world` (`write` and `batch` call
+/// this inside their undo step).
+pub(super) fn step(world: &mut World, args: &Args) -> Result<InstanceId, ToolError> {
+    let kind = find_kind(args.str("kind").unwrap_or_default())?;
     let parent = match args.str("parent") {
         Some(text) => resolve(world, text)?,
         None => tree::insert_parent(world, None, kind),
     };
-    let wanted = args.str("name").unwrap_or(kind.class().as_str()).to_owned();
+    let wanted = args.str("name").unwrap_or(kind.class().as_str());
     let mut props = Map::new();
     for (param, property) in [
         ("size", "Size"),
@@ -172,22 +196,14 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             props.insert(name.clone(), value.clone());
         }
     }
-    let position = args.vector3("position");
-    let name_for_label = wanted.clone();
-    let written = write(host, &format!("Create {name_for_label}"), |world| {
-        create(world, kind, parent, &wanted, position, &props)
-    })?;
-    let id = written.value;
-    let world = &host.app.world;
-    let parent_path = world
-        .get(id)
-        .and_then(|instance| instance.parent())
-        .map_or_else(String::new, |parent| path(world, parent));
-    Ok(format!(
-        "created {} in {parent_path}{}",
-        label(world, id),
-        written.undo_note()
-    ))
+    create(
+        world,
+        kind,
+        parent,
+        wanted,
+        args.vector3("position"),
+        &props,
+    )
 }
 
 fn create(

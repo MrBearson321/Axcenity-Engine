@@ -27,17 +27,25 @@ use axcenity_mcp::{
 
 use super::EditorApp;
 
+mod batch;
 mod docs;
+mod env_set;
+mod game_run;
 mod history;
+mod material_edit;
 mod object_create;
 mod object_delete;
+mod object_duplicate;
 mod object_get;
 mod object_set;
 mod ops;
+mod project_check;
 mod project_info;
 mod project_save;
 mod refs;
 mod scene_inspect;
+mod script_read;
+mod script_write;
 mod values;
 
 #[cfg(test)]
@@ -51,14 +59,13 @@ pub(crate) const FLAG: &str = "--mcp";
 pub(crate) const TOOLKIT_VERSION: &str = "0.1.0";
 
 /// Sent to clients when they connect. Short: some put it in every prompt.
-const INSTRUCTIONS: &str = "Axcenity Engine project tools. Objects are named by \
-ID (\"17\", from any result) or path (\"Workspace/House/Door\"). Values use \
-world.json form: [x,y,z] vectors (Y up; a part's Position is its centre), \
-[r,g,b] colors 0-1, enum names as strings. \
-Use scene_inspect to find objects, object_get for their properties, docs for \
-classes and properties. Every edit is one undo step (history undoes it); \
-deletes and saves return a preview first and run when called again with its \
-confirm token. Nothing is on disk until project_save.";
+const INSTRUCTIONS: &str = "Axcenity Engine project tools. Name objects by ID \
+(\"17\", from results) or path (\"Workspace/House/Door\"). Values: [x,y,z] \
+(Y up; a part's Position is its centre), [r,g,b] 0-1, enum names as strings. \
+Find with scene_inspect, read with object_get, look up classes with docs. \
+Each edit is one undo step (see history). Deletes and saves preview first; \
+call again with the confirm token. Object edits stay in memory until \
+project_save; script_write saves its file at once.";
 
 /// The editor and this session: what every tool gets.
 pub(super) struct Host {
@@ -79,6 +86,8 @@ pub(super) struct Session {
     pub last_undo: Option<String>,
     /// Tells this run's lines in the log apart.
     pub id: String,
+    /// Asset files this session wrote, read again after an undo or redo.
+    pub files: Vec<String>,
 }
 
 impl Session {
@@ -92,6 +101,7 @@ impl Session {
             confirms: Confirms::default(),
             checkpointed: false,
             last_undo: None,
+            files: Vec::new(),
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -146,6 +156,38 @@ pub(super) const TOOLS: &[Tool] = &[
         call: object_delete::call,
     },
     Tool {
+        spec: &object_duplicate::SPEC,
+        call: object_duplicate::call,
+    },
+    Tool {
+        spec: &batch::SPEC,
+        call: batch::call,
+    },
+    Tool {
+        spec: &material_edit::SPEC,
+        call: material_edit::call,
+    },
+    Tool {
+        spec: &env_set::SPEC,
+        call: env_set::call,
+    },
+    Tool {
+        spec: &script_read::SPEC,
+        call: script_read::call,
+    },
+    Tool {
+        spec: &script_write::SPEC,
+        call: script_write::call,
+    },
+    Tool {
+        spec: &project_check::SPEC,
+        call: project_check::call,
+    },
+    Tool {
+        spec: &game_run::SPEC,
+        call: game_run::call,
+    },
+    Tool {
         spec: &history::SPEC,
         call: history::call,
     },
@@ -156,26 +198,13 @@ pub(super) const TOOLS: &[Tool] = &[
 ];
 
 // Parameters shared by several tools.
-pub(super) const ID: Param = Param::optional(
-    "id",
-    Kind::String,
-    "object ID (\"17\") or path (\"Workspace/Door\")",
-);
-pub(super) const IDS: Param =
-    Param::optional("ids", Kind::Strings, "several objects, same forms as id");
+pub(super) const ID: Param = Param::optional("id", Kind::String, "ID or path");
+pub(super) const IDS: Param = Param::optional("ids", Kind::Strings, "several IDs or paths");
 pub(super) const DETAIL: Param =
     Param::optional("detail", Kind::Enum(Detail::NAMES), "how much to return");
-pub(super) const LIMIT: Param = Param::optional("limit", Kind::Integer, "most rows to return");
-pub(super) const CONFIRM: Param = Param::optional(
-    "confirm",
-    Kind::String,
-    "the token a preview gave, to go ahead",
-);
-pub(super) const CURSOR: Param = Param::optional(
-    "cursor",
-    Kind::String,
-    "from a result that was cut, to get the next part",
-);
+pub(super) const LIMIT: Param = Param::optional("limit", Kind::Integer, "max rows");
+pub(super) const CONFIRM: Param = Param::optional("confirm", Kind::String, "token from a preview");
+pub(super) const CURSOR: Param = Param::optional("cursor", Kind::String, "from a cut result");
 
 /// The tools a server with `profile` lists.
 pub(super) fn tools_for(profile: Profile) -> Vec<&'static ToolSpec> {

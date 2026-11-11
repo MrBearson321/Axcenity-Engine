@@ -16,7 +16,7 @@ use crate::tree;
 pub const SPEC: ToolSpec = ToolSpec {
     name: "object_delete",
     title: "Delete objects",
-    summary: "Delete objects and what's inside them (undoable); many objects or scripts return a preview and confirm token first.",
+    summary: "Delete objects and their contents (undoable); big or script deletes preview first.",
     profile: Profile::Lite,
     class: Class::Destructive,
     idempotent: false,
@@ -28,18 +28,37 @@ pub const SPEC: ToolSpec = ToolSpec {
 const ASK_OVER: usize = 5;
 
 /// What a delete takes away.
-struct Doomed {
+pub(super) struct Doomed {
     /// The objects named, without any inside another named one.
     roots: Vec<InstanceId>,
     /// Every object that goes, the roots included.
-    all: Vec<InstanceId>,
+    pub all: Vec<InstanceId>,
     scripts: Vec<InstanceId>,
     /// Properties outside that point in: (holder, property).
     references: Vec<(InstanceId, &'static str)>,
 }
 
 pub fn call(host: &mut Host, args: &Args) -> Outcome {
-    let world = &host.app.world;
+    let doomed = prepare(&host.app.world, args)?;
+    let what = match doomed.roots.as_slice() {
+        [one] => host
+            .app
+            .world
+            .get(*one)
+            .map_or_else(String::new, |i| i.name().to_owned()),
+        many => format!("{} objects", many.len()),
+    };
+    if let Some(preview) = ask(&host.app.world, &doomed) {
+        confirm(host, &SPEC, args, &preview)?;
+    }
+    let written = write(host, &format!("Delete {what}"), |world| {
+        apply(world, &doomed)
+    })?;
+    Ok(format!("{}{}", written.value, written.undo_note()))
+}
+
+/// Checks the objects `args` names may go, and finds all that goes.
+pub(super) fn prepare(world: &World, args: &Args) -> Result<Doomed, ToolError> {
     let ids = targets(world, args)?;
     for &id in &ids {
         tree::check_delete(world, id).map_err(|reason| {
@@ -49,28 +68,23 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             )
         })?;
     }
-    let doomed = doomed(world, &ids);
-    let what = match doomed.roots.as_slice() {
-        [one] => world
-            .get(*one)
-            .map_or_else(String::new, |i| i.name().to_owned()),
-        many => format!("{} objects", many.len()),
-    };
-    if doomed.all.len() > ASK_OVER || !doomed.scripts.is_empty() {
-        let preview = preview(world, &doomed);
-        confirm(host, &SPEC, args, &preview)?;
+    Ok(doomed(world, &ids))
+}
+
+/// The preview when a delete is big or takes scripts.
+pub(super) fn ask(world: &World, doomed: &Doomed) -> Option<String> {
+    (doomed.all.len() > ASK_OVER || !doomed.scripts.is_empty()).then(|| preview(world, doomed))
+}
+
+/// Takes the objects out of the tree; returns the result line.
+pub(super) fn apply(world: &mut World, doomed: &Doomed) -> Result<String, ToolError> {
+    for &id in &doomed.roots {
+        world
+            .set_parent(id, None)
+            .map_err(|error| ToolError::new(Code::NotAllowed, error.to_string()))?;
     }
     let count = doomed.all.len();
     let scripts = doomed.scripts.len();
-    let roots = doomed.roots.clone();
-    let written = write(host, &format!("Delete {what}"), |world| {
-        for &id in &roots {
-            world
-                .set_parent(id, None)
-                .map_err(|error| ToolError::new(Code::NotAllowed, error.to_string()))?;
-        }
-        Ok(())
-    })?;
     let mut text = format!(
         "deleted {count} object{}",
         if count == 1 { "" } else { "s" }
@@ -81,7 +95,6 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             if scripts == 1 { "" } else { "s" }
         ));
     }
-    text.push_str(&written.undo_note());
     Ok(text)
 }
 

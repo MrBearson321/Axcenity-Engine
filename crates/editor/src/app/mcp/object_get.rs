@@ -16,7 +16,7 @@ use super::{DETAIL, ID, IDS};
 pub const SPEC: ToolSpec = ToolSpec {
     name: "object_get",
     title: "Get objects",
-    summary: "An object's class, place and properties (by default only those that differ from the class defaults).",
+    summary: "Objects' class, place and properties (by default only the non-default ones).",
     profile: Profile::Lite,
     class: Class::Read,
     idempotent: true,

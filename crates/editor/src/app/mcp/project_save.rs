@@ -12,8 +12,8 @@ use super::{CONFIRM, Host};
 pub const SPEC: ToolSpec = ToolSpec {
     name: "project_save",
     title: "Save project",
-    summary: "Save the project's files (a version is kept in Version History); asks first with a preview and confirm token.",
-    profile: Profile::Lite,
+    summary: "Save the project's files (Version History keeps a version); previews first.",
+    profile: Profile::Standard,
     class: Class::Destructive,
     idempotent: true,
     params: &[CONFIRM],

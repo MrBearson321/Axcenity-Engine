@@ -50,14 +50,7 @@ pub(super) fn write<T>(
         return Err(ToolError::new(Code::Busy, "the game is playing")
             .with_fix("stop Play in the editor, then try again"));
     }
-    if !host.session.checkpointed {
-        let message = format!("Before AI session ({})", host.session.client);
-        // Kept even if it fails: the edits are still undoable one by one.
-        if let Err(error) = axcenity_project::record_checkpoint(&folder, &message) {
-            eprintln!("axcenity-editor --mcp: could not keep a version first: {error}");
-        }
-        host.session.checkpointed = true;
-    }
+    checkpoint(host, &folder);
     let app = &mut host.app;
     let was_recording = app.world.is_recording_changes();
     app.world.record_changes();
@@ -86,6 +79,20 @@ pub(super) fn write<T>(
     let undo = recorded.map(|_| label);
     host.session.last_undo.clone_from(&undo);
     Ok(Written { value, undo })
+}
+
+/// Before the session's first write, keeps the project's files in `folder`
+/// as a pinned version, `Before AI session (<client>)`.
+pub(super) fn checkpoint(host: &mut Host, folder: &std::path::Path) {
+    if host.session.checkpointed {
+        return;
+    }
+    let message = format!("Before AI session ({})", host.session.client);
+    // Kept even if it fails: the edits are still undoable one by one.
+    if let Err(error) = axcenity_project::record_checkpoint(folder, &message) {
+        eprintln!("axcenity-editor --mcp: could not keep a version first: {error}");
+    }
+    host.session.checkpointed = true;
 }
 
 /// Lets a destructive call go ahead: always in `full` mode; in `edit`
