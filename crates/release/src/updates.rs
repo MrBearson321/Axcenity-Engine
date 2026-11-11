@@ -283,6 +283,11 @@ pub fn checks_disabled(build: &BuildInfo) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    // Fixtures signed with a throwaway test key pair (never used for
+    // anything else): `minisign -Sm manifest.json -t "axcenity-engine
+    // v0.2.0-alpha.2"`; `wrong-comment.minisig` names v0.2.0-alpha.1 and
+    // `other-key.minisig` is signed by a second throwaway key. Remake them
+    // with new keys if the manifest changes.
     const KEY: &str = include_str!("testdata/release-key.pub");
     const MANIFEST: &[u8] = include_bytes!("testdata/manifest.json");
     const SIGNATURE: &str = include_str!("testdata/manifest.json.minisig");
