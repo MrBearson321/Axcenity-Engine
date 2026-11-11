@@ -1,0 +1,5 @@
+# Per-user Obsidian state
+.obsidian/workspace*.json
+.obsidian/appearance.json
+.obsidian/plugins/
+.trash/
