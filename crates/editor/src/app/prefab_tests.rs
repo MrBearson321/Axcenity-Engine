@@ -216,3 +216,91 @@ fn renaming_a_prefab_keeps_its_copies_linked() {
     assert_eq!(link, path);
     assert!(file(&app, &path).is_some());
 }
+
+/// Drops the prefab at `path` from the Assets panel, over `ui` if given.
+fn drop_prefab_at(app: &mut EditorApp, path: &str, ui: Option<InstanceId>) {
+    let entry = crate::asset_browser::AssetEntry {
+        kind: crate::asset_browser::AssetKind::Prefab,
+        path: path.to_owned(),
+        name: crate::asset_browser::display_name(path),
+    };
+    let target = crate::viewport::DropTarget {
+        point: axcenity_render::glam::Vec3::ZERO,
+        normal: axcenity_render::glam::Vec3::Y,
+        part: None,
+        ui,
+        released: true,
+    };
+    app.drop_asset(&entry, Some(target));
+}
+
+#[test]
+fn a_screengui_with_its_script_saves_as_a_prefab_and_places_as_a_linked_copy() {
+    let mut app = opened("prefab-ui-gui");
+    let workspace = app.world.workspace();
+    let gui = new_in(&mut app, ClassName::ScreenGui, "Hud", workspace);
+    let panel = new_in(&mut app, ClassName::Frame, "Panel", gui);
+    let script = new_in(&mut app, ClassName::LocalScript, "Menu", gui);
+    let source = Value::String("objects/Hud/Menu.client.lua".to_owned());
+    app.world
+        .set_property(script, "SourceFile", source)
+        .unwrap();
+    assert!(tree::can_be_prefab(&app.world, gui));
+    assert!(tree::can_be_prefab(&app.world, panel));
+
+    let path = save_as_prefab(&mut app, gui);
+    assert_eq!(path, "assets/prefabs/Hud.prefab.json");
+    let text = file(&app, &path).unwrap();
+    assert!(text.contains("objects/Hud/Menu.client.lua"), "{text}");
+
+    drop_prefab_at(&mut app, &path, None);
+    let copy = app.selected.expect("the copy is selected");
+    assert_ne!(copy, gui);
+    let placed = app.world.get(copy).unwrap();
+    assert_eq!(placed.class(), ClassName::ScreenGui);
+    assert_eq!(placed.parent(), Some(workspace), "a layer of its own");
+    assert_eq!(placed.prefab().unwrap().path, path);
+    let menu = app.world.find_first_child(copy, "Menu").unwrap();
+    assert_eq!(
+        app.world.get(menu).unwrap().source_file(),
+        Some("objects/Hud/Menu.client.lua"),
+        "shares the script's file"
+    );
+    assert!(prefab::overrides(&app.world, copy).is_empty());
+}
+
+#[test]
+fn a_dropped_ui_element_prefab_goes_into_the_ui_or_a_new_screengui() {
+    let mut app = opened("prefab-ui-element");
+    let workspace = app.world.workspace();
+    let gui = new_in(&mut app, ClassName::ScreenGui, "Hud", workspace);
+    let button = new_in(&mut app, ClassName::TextButton, "Play", gui);
+    let path = save_as_prefab(&mut app, button);
+    // The original goes, so the Workspace has no ScreenGui.
+    app.world.set_parent(gui, None).unwrap();
+    let before = app.world.get(workspace).unwrap().children().len();
+
+    drop_prefab_at(&mut app, &path, None);
+    let copy = app.selected.expect("the copy is selected");
+    let new_gui = app.world.get(copy).unwrap().parent().unwrap();
+    assert_eq!(
+        app.world.get(new_gui).unwrap().class(),
+        ClassName::ScreenGui
+    );
+    assert_eq!(app.world.get(new_gui).unwrap().parent(), Some(workspace));
+    assert_eq!(app.history.undo_label(), Some("Place Play"));
+    app.undo();
+    assert_eq!(
+        app.world.get(workspace).unwrap().children().len(),
+        before,
+        "the copy and its ScreenGui go in one step"
+    );
+
+    // Dropped over a Frame in a ScreenGui, it goes into that Frame.
+    let menu = new_in(&mut app, ClassName::ScreenGui, "Menu", workspace);
+    let frame = new_in(&mut app, ClassName::Frame, "Buttons", menu);
+    drop_prefab_at(&mut app, &path, Some(frame));
+    let copy = app.selected.unwrap();
+    assert_eq!(app.world.get(copy).unwrap().parent(), Some(frame));
+    assert_eq!(app.world.get(copy).unwrap().prefab().unwrap().path, path);
+}
