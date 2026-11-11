@@ -617,8 +617,8 @@ mod tests {
             // Open every collapsible section, so their bodies draw too.
             explorer.search.clear();
             for _ in 0..2 {
-                let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         ui.set_width(260.0);
                         explorer.show(ui, &build);
                     });

@@ -187,7 +187,7 @@ impl TerrainPass {
             address_mode_v: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             // Ground is mostly seen at a glancing angle, where this keeps
             // the textures sharp.
             anisotropy_clamp: 8,
@@ -198,7 +198,7 @@ impl TerrainPass {
             label: Some("terrain weights"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let pipeline = terrain_pipeline(device, frame_layout, &layout, samples);

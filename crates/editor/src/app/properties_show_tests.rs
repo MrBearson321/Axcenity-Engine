@@ -51,8 +51,8 @@ fn showing_the_properties_of_anything_in_the_examples_changes_nothing() {
                     )),
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| app.properties_pane(ui));
+                let _ = crate::theme::run(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| app.properties_pane(ui));
                 });
             }
             if let Some(label) = app.history.undo_label() {
@@ -86,8 +86,8 @@ fn showing_the_properties_of_anything_in_the_examples_changes_nothing() {
                     )),
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| app.properties_pane(ui));
+                let _ = crate::theme::run(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| app.properties_pane(ui));
                 });
             }
             if let Some(label) = app.history.undo_label() {

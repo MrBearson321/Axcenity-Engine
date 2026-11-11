@@ -109,15 +109,19 @@ impl DecalPass {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             anisotropy_clamp: 4,
             ..Default::default()
         });
         let white_group = texture_group(device, &texture_layout, white, &sampler);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("decals"),
-            bind_group_layouts: &[frame_layout, &normals_layout, &texture_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[
+                Some(frame_layout),
+                Some(&normals_layout),
+                Some(&texture_layout),
+            ],
+            immediate_size: 0,
         });
         let pipeline = decal_pipeline(device, &layout, samples);
         let capacity = 64;
@@ -308,7 +312,7 @@ fn decal_pipeline(
             module: &shader,
             entry_point: Some("vs_decal"),
             compilation_options: Default::default(),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: size_of::<DecalRaw>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &wgpu::vertex_attr_array![
@@ -316,7 +320,7 @@ fn decal_pipeline(
                     4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
                     8 => Float32x4, 9 => Float32x4
                 ],
-            }],
+            })],
         },
         primitive: wgpu::PrimitiveState {
             cull_mode: Some(wgpu::Face::Front),
@@ -324,8 +328,8 @@ fn decal_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Always,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -355,7 +359,7 @@ fn decal_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

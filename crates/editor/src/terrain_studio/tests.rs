@@ -39,8 +39,8 @@ fn the_panel_draws_with_and_without_a_terrain() {
     let mut studio = TerrainStudio::default();
     let draw = |studio: &mut TerrainStudio, world: &World| {
         let mut actions = Vec::new();
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 actions = studio.show(
                     ui,
                     &StudioContext {
@@ -108,10 +108,10 @@ fn the_panel_snapshots_with_its_main_tools() {
             &std::path::PathBuf::from(&folder).join(file),
             egui::vec2(width, 900.0),
             vec![Vec::new(); 3],
-            |ctx| {
-                egui::SidePanel::right("terrain")
-                    .default_width(width - 20.0)
-                    .show(ctx, |ui| {
+            |ui| {
+                egui::Panel::right("terrain")
+                    .default_size(width - 20.0)
+                    .show(ui, |ui| {
                         studio.show(
                             ui,
                             &StudioContext {
@@ -185,10 +185,10 @@ fn an_open_layer_and_its_texture_menu_snapshot() {
         &folder.join("terrain-layer.png"),
         egui::vec2(300.0, 900.0),
         vec![Vec::new(); 3],
-        |ctx| {
-            egui::SidePanel::right("terrain")
-                .default_width(280.0)
-                .show(ctx, |ui| {
+        |ui| {
+            egui::Panel::right("terrain")
+                .default_size(280.0)
+                .show(ui, |ui| {
                     studio.show(
                         ui,
                         &StudioContext {
@@ -209,8 +209,8 @@ fn an_open_layer_and_its_texture_menu_snapshot() {
         &folder.join("terrain-texture-menu.png"),
         egui::vec2(280.0, 160.0),
         vec![Vec::new(); 3],
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = layers::texture_menu(ui, &sets, &mut search, "None");
             });
         },
@@ -236,8 +236,8 @@ fn a_wide_panel_names_its_tools() {
                 )),
                 ..Default::default()
             };
-            output = Some(ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     studio.show(
                         ui,
                         &StudioContext {

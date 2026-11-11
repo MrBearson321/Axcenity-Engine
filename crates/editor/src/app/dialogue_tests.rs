@@ -13,8 +13,8 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context) {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.dialogue_pane(ui));
+    let _ = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.dialogue_pane(ui));
     });
 }
 

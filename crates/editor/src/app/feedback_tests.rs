@@ -11,7 +11,7 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context) -> egui::FullOutput {
         )),
         ..Default::default()
     };
-    ctx.run(input, |ctx| app.frame(ctx, None))
+    crate::theme::run(ctx, input, |ui| app.frame(ui, None))
 }
 
 fn count_drawn(app: &mut EditorApp, ctx: &egui::Context, count: usize) -> bool {

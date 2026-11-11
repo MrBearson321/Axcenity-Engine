@@ -208,8 +208,8 @@ fn frame_while(
         ..Default::default()
     };
     let mut output = ExplorerOutput::default();
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             output = explorer.show(ui, world, &[], editable);
         });
     });
@@ -503,8 +503,8 @@ fn snapshot_of_the_filter() {
         &std::path::PathBuf::from(folder).join("explorer-filter.png"),
         egui::vec2(260.0, 220.0),
         vec![Vec::new(); 3],
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = explorer.show(ui, &world, &[], true);
             });
         },
@@ -576,8 +576,8 @@ fn rows_are_kept_until_the_tree_or_the_open_branches_change() {
         )),
         ..Default::default()
     };
-    let output = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let output = crate::theme::run(&ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             explorer.show(ui, &world, &[], true);
         });
     });

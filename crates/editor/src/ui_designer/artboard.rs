@@ -1179,7 +1179,7 @@ impl UiDesigner {
             };
             let job =
                 rich_text::layout_job(text.as_str(), size, base_size, ui.visuals(), wrap_width);
-            ui.fonts(|fonts| fonts.layout_job(job))
+            ui.fonts_mut(|fonts| fonts.layout_job(job))
         };
         let mut edit = if multi_line {
             egui::TextEdit::multiline(&mut editing.text)
@@ -1207,7 +1207,7 @@ impl UiDesigner {
         }
         if let Some(range) = output.cursor_range {
             let [start, end] = range.sorted_cursors();
-            editing.selection = Some(start.index..end.index);
+            editing.selection = Some(start.index.0..end.index.0);
         }
         if let Some(bar) = bar
             && let Some(picked) = format_bar(ui, bar)

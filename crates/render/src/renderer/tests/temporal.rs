@@ -147,8 +147,14 @@ fn read_motion(renderer: &TextureRenderer) -> Vec<Vec2> {
     buffer.slice(..).map_async(wgpu::MapMode::Read, |result| {
         result.expect("could not read the motion back");
     });
-    scene.device.poll(wgpu::PollType::Wait).unwrap();
-    let mapped = buffer.slice(..).get_mapped_range();
+    scene
+        .device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .unwrap();
+    let mapped = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("the buffer is mapped");
     mapped
         .chunks(row_bytes as usize)
         .flat_map(|row| row[..(width * 4) as usize].chunks(4))
@@ -517,5 +523,5 @@ fn motion_targets_exist_only_while_taa_or_motion_blur_use_them() {
     check(settings(Taa, Blur::Off), &plain, (1, 1, 0), true);
     check(settings(Taa, Blur::High), &streaked, (1, 1, 1), true);
     check(settings(Off, Blur::High), &plain, (0, 0, 0), false);
-    device.poll(wgpu::PollType::Wait).unwrap();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }

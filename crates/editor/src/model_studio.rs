@@ -1477,11 +1477,11 @@ impl ModelStudio {
                             wider += by;
                         }
                     }
-                    if input.raw_scroll_delta.y != 0.0 {
-                        wider += input.raw_scroll_delta.y.signum();
+                    let wheel = crate::wheel::raw(input).y;
+                    if wheel != 0.0 {
+                        wider += wheel.signum();
                     }
-                    input.raw_scroll_delta = egui::Vec2::ZERO;
-                    input.smooth_scroll_delta = egui::Vec2::ZERO;
+                    crate::wheel::take(input);
                 }
                 (grab_again, wider)
             });

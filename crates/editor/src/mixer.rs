@@ -293,12 +293,13 @@ mod tests {
         mixer.toggle_mute(music);
         let size = egui::vec2(260.0, 200.0);
         let mut fit = None;
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             let palette = theme::palette(ctx);
             let frame = egui::Frame::new()
                 .fill(palette.panel)
                 .inner_margin(egui::Margin::symmetric(8, 6));
-            egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                 let room = ui.max_rect();
                 mixer.show(ui, &groups, true);
                 fit = Some((ui.min_rect(), room));
@@ -311,7 +312,7 @@ mod tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
-            shown = format!("{:?}", ctx.run(input, &mut draw).shapes);
+            shown = format!("{:?}", crate::theme::run(&ctx, input, |ui| draw(ui)).shapes);
         }
         for name in ["Output", "Master", "Music", "SFX"] {
             assert!(shown.contains(name), "{name} isn't drawn");

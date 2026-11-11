@@ -202,11 +202,12 @@ fn every_block_draws_in_both_themes_without_changing_the_script() {
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from);
     for (theme, name) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
         let mut drawn = script.clone();
-        let mut show_all = |ctx: &egui::Context| {
+        let mut show_all = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             ctx.set_theme(theme);
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     show(
                         ui,
                         &mut drawn,
@@ -233,7 +234,7 @@ fn every_block_draws_in_both_themes_without_changing_the_script() {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 950.0))),
                         ..Default::default()
                     };
-                    let _ = ctx.run(input, &mut show_all);
+                    let _ = crate::theme::run(&ctx, input, |ui| show_all(ui));
                 }
             }
         }
@@ -269,10 +270,10 @@ pub(super) fn drag_frames(from: Pos2, to: Pos2) -> Vec<Vec<egui::Event>> {
 /// the button is let go as `name` when snapshots are asked for.
 fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str) {
     let size = vec2(1500.0, 950.0);
-    let editor = |script: &mut BlockScript, ctx: &egui::Context| {
+    let editor = |script: &mut BlockScript, ui: &mut egui::Ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 show(
                     ui,
                     script,
@@ -291,7 +292,7 @@ fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &st
         let mut replay = script.clone();
         let held = frames[..frames.len() - 2].to_vec();
         let path = std::path::PathBuf::from(folder).join(format!("{name}.png"));
-        crate::snapshot::snapshot(&path, size, held, |ctx| editor(&mut replay, ctx));
+        crate::snapshot::snapshot(&path, size, held, |ui| editor(&mut replay, ui));
     }
     let ctx = theme::test_context();
     // Half a second a frame, as the snapshot replays them, so animations
@@ -303,7 +304,7 @@ fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &st
             time: Some(index as f64 * 0.5),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| editor(script, ctx));
+        let _ = crate::theme::run(&ctx, input, |ui| editor(script, ui));
     }
 }
 

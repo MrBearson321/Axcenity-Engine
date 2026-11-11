@@ -599,9 +599,10 @@ fn coins_in_leaderstats_show_on_the_leaderboard_and_update() {
 /// `AXCENITY_SNAPSHOTS` names a folder.
 #[test]
 fn hello_spawn_draws_the_leaderboard_over_the_game() {
-    use axcenity_render::{TextureRenderer, wgpu};
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    use axcenity_render::TextureRenderer;
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         return;
     };
     let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))

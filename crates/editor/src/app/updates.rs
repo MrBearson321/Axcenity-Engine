@@ -501,13 +501,14 @@ mod tests {
         assert!(app.updates.available().is_some());
         app.settings.open = true;
         app.settings.page = settings::SettingsPage::Updates;
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |_| {});
-            app.settings_window(ctx);
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |_| {});
+            app.settings_window(&ctx);
         };
         let ctx = theme::test_context();
         for _ in 0..2 {
-            let _ = ctx.run(Default::default(), &mut draw);
+            let _ = theme::run(&ctx, Default::default(), &mut draw);
         }
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             crate::snapshot::snapshot(

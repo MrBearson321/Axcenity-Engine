@@ -417,7 +417,7 @@ impl RibbonTabs {
         // The accent line under the active tab, sliding from where it was.
         if let Some(rect) = active_rect {
             let ctx = ui.ctx();
-            let time = ctx.style().animation_time * 1.4;
+            let time = ctx.global_style().animation_time * 1.4;
             let id = egui::Id::new("ribbon tab underline");
             let left = ctx.animate_value_with_time(id.with("left"), rect.left() + 8.0, time);
             let right = ctx.animate_value_with_time(id.with("right"), rect.right() - 8.0, time);

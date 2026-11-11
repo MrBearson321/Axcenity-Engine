@@ -55,7 +55,7 @@ pub fn picker(
     ui: &mut egui::Ui,
     images: &[TexturePick],
     current: &str,
-    salt: impl std::hash::Hash,
+    salt: impl std::hash::Hash + std::fmt::Debug,
     upload: bool,
 ) -> Option<ImagePick> {
     let mut pick = None;

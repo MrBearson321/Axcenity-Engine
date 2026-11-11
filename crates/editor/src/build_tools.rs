@@ -1152,7 +1152,8 @@ mod tests {
         ] {
             let mut width = 0.0;
             for _ in 0..3 {
-                let _ = ctx.run(Default::default(), |ctx| {
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+                    let ctx = &ui.ctx().clone();
                     width = draw(ctx, section).width();
                 });
             }
@@ -1189,8 +1190,8 @@ mod tests {
         let mut settings = BuildSettings::default();
         let mut modes = Modes::default();
         let mut snap = Snap::default();
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 for tool in Tool::ALL {
                     let scene = PanelScene {
                         world: &world,

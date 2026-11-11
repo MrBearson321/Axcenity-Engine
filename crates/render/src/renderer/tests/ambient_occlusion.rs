@@ -185,7 +185,7 @@ fn with_ambient_occlusion_off_no_prepass_or_its_targets_exist() {
     }
     renderer.set_graphics(&with_occlusion(Off));
     renderer.render(&list).unwrap();
-    device.poll(wgpu::PollType::Wait).unwrap();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert_eq!(renderer.scene.occlusion_targets_alive(), 0);
     assert_eq!(renderer.stats().draw_calls, 2);
 }

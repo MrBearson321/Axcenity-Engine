@@ -287,7 +287,10 @@ fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
             time: Some(f64::from(frame) * 0.1),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| answer = dialog.show(ctx, None));
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            answer = dialog.show(ctx, None)
+        });
         answer
     };
     let click = |at: egui::Pos2| {

@@ -300,8 +300,8 @@ fn the_tab_draws_a_loop_picked_on_a_cylinder_and_the_handles_on_a_face() {
         &folder.join("model-studio-loop.png"),
         size,
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], Snap::default(), true);
             });
         },
@@ -319,8 +319,8 @@ fn the_tab_draws_a_loop_picked_on_a_cylinder_and_the_handles_on_a_face() {
         &folder.join("model-studio-face.png"),
         size,
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], Snap::default(), true);
             });
         },
@@ -372,8 +372,8 @@ pub(super) fn frames(
             events,
             ..Default::default()
         };
-        let output = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let output = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, None, &[], Snap::default(), true);
             });
         });

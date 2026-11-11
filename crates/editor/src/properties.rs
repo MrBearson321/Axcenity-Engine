@@ -2499,8 +2499,8 @@ mod attribute_section_tests {
         let size = egui::vec2(260.0, 1100.0);
         let mut fit = None;
         let mut edit = None;
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let mut draw = |ui: &mut egui::Ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let room = ui.max_rect();
                 edit = show(
                     ui,
@@ -2520,7 +2520,7 @@ mod attribute_section_tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
-            let _ = ctx.run(input, &mut draw);
+            let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
         }
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             crate::snapshot::snapshot(
@@ -2576,8 +2576,8 @@ mod physics_section_tests {
         let size = egui::vec2(260.0, 1300.0);
         let mut fit = None;
         let mut edit = None;
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let mut draw = |ui: &mut egui::Ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let room = ui.max_rect();
                 edit = show(
                     ui,
@@ -2597,7 +2597,7 @@ mod physics_section_tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
-            let _ = ctx.run(input, &mut draw);
+            let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
         }
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             crate::snapshot::snapshot(
@@ -2658,8 +2658,8 @@ mod prefab_override_tests {
         let size = egui::vec2(260.0, 700.0);
         let mut fit = None;
         let mut edit = None;
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let mut draw = |ui: &mut egui::Ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let room = ui.max_rect();
                 edit = show(
                     ui,
@@ -2679,7 +2679,7 @@ mod prefab_override_tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
-            let _ = ctx.run(input, &mut draw);
+            let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
         }
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             crate::snapshot::snapshot(
@@ -2786,8 +2786,8 @@ mod decal_section_tests {
                 )),
                 ..Default::default()
             };
-            let output = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let output = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let _ = show(ui, world, &Assets::default(), Some(id), false, &[], |_| {});
                 });
             });
@@ -2826,8 +2826,8 @@ mod decal_section_tests {
                 ..Default::default()
             };
             let mut edit = None;
-            let output = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let output = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     edit = show(
                         ui,
                         world,
@@ -2912,11 +2912,11 @@ mod decal_section_tests {
                 &std::path::PathBuf::from(folder).join("properties-reset.png"),
                 egui::vec2(300.0, 560.0),
                 frames,
-                |ctx| {
-                    ctx.data_mut(|d| {
+                |ui| {
+                    ui.data_mut(|d| {
                         d.insert_temp(egui::Id::new("properties filter"), String::new())
                     });
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let _ = show(
                             ui,
                             &world,
@@ -2982,11 +2982,11 @@ mod decal_section_tests {
                 &std::path::PathBuf::from(folder).join("properties-advanced.png"),
                 egui::vec2(300.0, 1100.0),
                 vec![Vec::new(); 3],
-                |ctx| {
-                    ctx.data_mut(|d| {
+                |ui| {
+                    ui.data_mut(|d| {
                         d.insert_temp(egui::Id::new("properties filter"), String::new())
                     });
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let _ = show(
                             ui,
                             &world,
@@ -3069,11 +3069,11 @@ mod decal_section_tests {
                     Some(egui::pos2(40.0, 427.0)),
                 ),
             ] {
-                let mut draw = |ctx: &egui::Context| {
-                    ctx.data_mut(|d| {
+                let mut draw = |ui: &mut egui::Ui| {
+                    ui.data_mut(|d| {
                         d.insert_temp(egui::Id::new("properties filter"), filter.to_owned())
                     });
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let _ = show(
                             ui,
                             &world,

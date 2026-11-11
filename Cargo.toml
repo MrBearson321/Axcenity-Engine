@@ -53,10 +53,12 @@ axcenity-workspace-hack = { path = "crates/workspace-hack" }
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 # The editor's app shell: egui plus its window and wgpu backend. `persistence`
-# remembers the theme, recent projects and window layout between runs. 0.32 is the
-# release built on wgpu 25 and winit 0.30, the versions `render` and `player`
-# use; upgrade all three together. No glow (OpenGL) backend: we render with wgpu.
-eframe = { version = "0.32", default-features = false, features = ["accesskit", "default_fonts", "persistence", "wayland", "wgpu", "x11"] }
+# remembers the theme, recent projects and window layout between runs. 0.36 is the
+# release built on wgpu 30 and winit 0.30, the versions `render` and `player`
+# use; upgrade all three together (and glyphon, egui_dock and egui-phosphor,
+# which follow them). Not 0.37 yet: egui_dock and egui-phosphor stop at 0.36.
+# No glow (OpenGL) backend: we render with wgpu.
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "persistence", "wayland", "wgpu", "x11"] }
 env_logger = "0.11"
 # Game controllers for keyboard-and-controller UI navigation, in the player
 # and editor Play (Apache-2.0 OR MIT). Windows uses Windows.Gaming.Input,
@@ -68,14 +70,15 @@ gilrs = "0.11"
 # polling where events can't be had.
 notify = "8.2"
 # Phosphor icons as a font, for the editor (MIT OR Apache-2.0; the icons are MIT).
-# 0.10 is the release for egui 0.32: upgrade it with eframe.
-egui-phosphor = { version = "0.10", default-features = false, features = ["fill", "regular"] }
+# 0.14 is the release for egui 0.36: upgrade it with eframe.
+egui-phosphor = { version = "0.14", default-features = false, features = ["fill", "regular"] }
 # Dockable, draggable editor panels (tabs, splits and floating windows), MIT.
-# 0.17 is the release for egui 0.32: upgrade it with eframe. `serde` saves the
+# 0.21 is the release for egui 0.36: upgrade it with eframe. `serde` saves the
 # layout between runs.
-egui_dock = { version = "0.17", features = ["serde"] }
+egui_dock = { version = "0.21", features = ["serde"] }
 glam = "0.34"
-glyphon = "0.9"
+# GPU text for the game's UI. 0.12 is the release for wgpu 30: upgrade it with wgpu.
+glyphon = "0.12"
 # Loads glTF 2.0 models (.gltf and .glb), MIT OR Apache-2.0. The default
 # `import` feature reads buffers and decodes PNG and JPEG textures with the
 # `image` crate (MIT OR Apache-2.0), which eframe already uses.
@@ -205,7 +208,7 @@ dioxus-devtools = "0.7"
 subsecond = "0.7"
 thiserror = "2"
 taffy = { version = "0.7", features = ["taffy_tree"] }
-wgpu = "25"
+wgpu = "30"
 winit = "0.30"
 
 [workspace.lints.rust]

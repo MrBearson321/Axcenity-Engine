@@ -79,8 +79,21 @@ impl NewKeys {
 
     /// The New keys menu, for a toolbar.
     pub fn picker(&mut self, ui: &mut egui::Ui) {
+        // A combo box doesn't wrap to the next toolbar row by itself.
+        let text = format!("New keys: {}", self.label());
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let text_width = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.clone(), font, egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        });
+        let spacing = ui.spacing();
+        let width =
+            text_width + spacing.icon_spacing + spacing.icon_width + 2.0 * spacing.button_padding.x;
+        crate::responsive::room_for(ui, width);
         egui::ComboBox::from_id_salt("new keys easing")
-            .selected_text(format!("New keys: {}", self.label()))
+            .selected_text(text)
             .show_ui(ui, |ui| {
                 for choice in Self::ALL {
                     ui.selectable_value(self, choice, choice.label());

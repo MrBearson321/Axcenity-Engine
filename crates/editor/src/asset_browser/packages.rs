@@ -601,8 +601,8 @@ mod tests {
         browser.open(Some(&folder));
         let ctx = theme::test_context();
         let size = egui::vec2(720.0, 320.0);
-        let draw = |browser: &mut AssetBrowser, ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |ui| browser.show(ui, true, false, None));
+        let draw = |browser: &mut AssetBrowser, ui: &mut egui::Ui| {
+            egui::CentralPanel::default().show(ui, |ui| browser.show(ui, true, false, None));
         };
         for view in ["all", "folder"] {
             if view == "folder" {
@@ -612,13 +612,13 @@ mod tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| draw(&mut browser, ctx));
+            let _ = crate::theme::run(&ctx, input, |ui| draw(&mut browser, ui));
             if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
                 crate::snapshot::snapshot(
                     &PathBuf::from(snapshots).join(format!("assets-panel-{view}.png")),
                     size,
                     vec![Vec::new(); 4],
-                    |ctx| draw(&mut browser, ctx),
+                    |ui| draw(&mut browser, ui),
                 );
             }
         }

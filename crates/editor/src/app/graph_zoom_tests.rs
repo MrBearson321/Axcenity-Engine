@@ -15,7 +15,7 @@ fn draw(app: &mut EditorApp) {
             )),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| app.frame(ctx, None));
+        let _ = crate::theme::run(&ctx, input, |ui| app.frame(ui, None));
     }
 }
 

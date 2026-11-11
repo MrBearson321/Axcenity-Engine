@@ -48,7 +48,7 @@ fn mouse_report(ctx: &egui::Context, area: egui::Id, dock: &DockState<Pane>) -> 
         ctx.input(|input| (input.pointer.latest_pos(), input.pointer.primary_down()));
     let to_screen = screen_pixels(ctx);
     let screen = pointer.zip(to_screen.as_ref()).map(|(at, to)| to(at));
-    let outside = pointer.is_some_and(|at| !ctx.screen_rect().contains(at));
+    let outside = pointer.is_some_and(|at| !ctx.content_rect().contains(at));
     MouseReport {
         screen,
         held,
@@ -164,7 +164,6 @@ impl EditorApp {
         let mut dock = std::mem::replace(&mut window.dock, DockState::new(Vec::new()));
         dock.translations.tab_context_menu.eject_button = "Float in New Window".to_owned();
 
-        let title = window_title(self, floating_front(&dock));
         let viewport_builder = match opens_at {
             // Points of the window it opens from: egui scales it back up.
             Some(at) => builder.with_position(egui::pos2(
@@ -173,15 +172,18 @@ impl EditorApp {
             )),
             None => builder,
         };
-        let outcome = ctx.show_viewport_immediate(viewport, viewport_builder, |ctx, class| {
-            // Its own chrome, unless it's drawn inside the main window.
-            let own_window = class != egui::ViewportClass::Embedded;
+        let outcome = ctx.show_viewport_immediate(viewport, viewport_builder, |ui, class| {
+            let ctx = &ui.ctx().clone();
+            // Its own chrome, unless it's drawn inside the main window (on
+            // a platform that can't open more windows, egui puts it in an
+            // `egui::Window` there).
+            let own_window = class != egui::ViewportClass::EmbeddedWindow;
             if own_window {
-                window_frame::panel_title_area(ctx);
+                window_frame::panel_title_area(ui);
             }
-            let style = layout::style(&ctx.style(), palette, ctx.pixels_per_point());
+            let style = layout::style(&ctx.global_style(), palette, ctx.pixels_per_point());
             let mut placeholder = ViewportOutput::default();
-            let visuals = ctx.style().visuals.clone();
+            let visuals = ctx.global_style().visuals.clone();
             let mut viewer = DockViewer {
                 app: self,
                 render_state,
@@ -195,15 +197,7 @@ impl EditorApp {
                 .style(style)
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false);
-            if class == egui::ViewportClass::Embedded {
-                // A platform that can't open more windows.
-                egui::Window::new(title.as_str())
-                    .id(area.with("embedded"))
-                    .default_size(DEFAULT_SIZE)
-                    .show(ctx, |ui| dock_area.show_inside(ui, &mut viewer));
-            } else {
-                dock_area.show(ctx, &mut viewer);
-            }
+            dock_area.show_inside(ui, &mut viewer);
             // Keyboard shortcuts go to the window with focus.
             if ctx.input(|input| input.viewport().focused == Some(true)) {
                 self.shortcuts(ctx);
@@ -286,18 +280,11 @@ fn paint_drop_outline(ctx: &egui::Context, palette: &theme::Palette) {
     let id = egui::Id::new("panel window drop outline");
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, id));
     painter.rect_stroke(
-        ctx.screen_rect(),
+        ctx.content_rect(),
         0,
         egui::Stroke::new(2.0_f32, palette.accent),
         egui::StrokeKind::Inside,
     );
-}
-
-/// The panel a dock's window is named after.
-fn floating_front(dock: &DockState<Pane>) -> Option<Pane> {
-    dock.iter_leaves()
-        .next()
-        .and_then(|(_, leaf)| leaf.tabs().get(leaf.active.0).copied())
 }
 
 #[cfg(test)]
@@ -306,7 +293,8 @@ mod tests {
     use crate::app::tests::copy_of_example;
 
     fn a_frame(app: &mut EditorApp, ctx: &egui::Context) {
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = crate::theme::run(ctx, Default::default(), |ui| {
+            let ctx = &ui.ctx().clone();
             let palette = theme::palette(ctx);
             app.floating_windows(ctx, None, &palette);
         });
@@ -334,6 +322,9 @@ mod tests {
         fn title(&mut self, tab: &mut Pane) -> egui::WidgetText {
             tab.label().into()
         }
+        fn id(&mut self, tab: &mut Pane) -> egui::Id {
+            egui::Id::new(("dock pane", *tab))
+        }
         fn ui(&mut self, _ui: &mut egui::Ui, _tab: &mut Pane) {}
     }
 
@@ -353,10 +344,11 @@ mod tests {
             ..Default::default()
         };
         let mut report = None;
-        let _ = ctx.run(input, |ctx| {
+        let _ = crate::theme::run(ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
             egui_dock::DockArea::new(dock)
                 .id(area)
-                .show(ctx, &mut NoPanels);
+                .show_inside(ui, &mut NoPanels);
             report = Some(mouse_report(ctx, area, dock));
         });
         report.unwrap()
@@ -439,7 +431,8 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
                 asked = asked.or(window_frame::panel_buttons(ctx));
             });
         }
@@ -491,11 +484,11 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let output = ctx.run(input, |ctx| {
-                window_frame::panel_title_area(ctx);
+            let output = crate::theme::run(ctx, input, |ui| {
+                window_frame::panel_title_area(ui);
                 egui_dock::DockArea::new(dock)
                     .id(area)
-                    .show(ctx, &mut NoPanels);
+                    .show_inside(ui, &mut NoPanels);
             });
             output
                 .viewport_output

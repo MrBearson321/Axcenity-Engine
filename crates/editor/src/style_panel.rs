@@ -607,10 +607,10 @@ mod tests {
         let (stylesheet, _) = axcenity_ui::parse_stylesheet("ui.css", css);
         let stylesheets = [stylesheet];
         let mut edits = Vec::new();
-        let mut draw = |ctx: &egui::Context| {
-            egui::SidePanel::right("properties")
-                .default_width(320.0)
-                .show(ctx, |ui| {
+        let mut draw = |ui: &mut egui::Ui| {
+            egui::Panel::right("properties")
+                .default_size(320.0)
+                .show(ui, |ui| {
                     crate::properties::show(
                         ui,
                         &world,
@@ -634,7 +634,7 @@ mod tests {
             None => {
                 let ctx = theme::test_context();
                 for _ in 0..3 {
-                    let _ = ctx.run(Default::default(), &mut draw);
+                    let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
                 }
             }
         }

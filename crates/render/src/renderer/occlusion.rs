@@ -79,8 +79,8 @@ impl OcclusionPasses {
         let shader = device.create_shader_module(wgpu::include_wgsl!("../ssao.wgsl"));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ambient occlusion"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let fullscreen = |label, entry| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -101,7 +101,7 @@ impl OcclusionPasses {
                     compilation_options: Default::default(),
                     targets: &[Some(OCCLUSION_FORMAT.into())],
                 }),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             })
         };
@@ -254,8 +254,8 @@ pub(super) fn create_edge_pipeline(
     let shader = device.create_shader_module(wgpu::include_wgsl!("../edges.wgsl"));
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("screen-space outlines"),
-        bind_group_layouts: &[layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("screen-space outlines"),
@@ -270,8 +270,8 @@ pub(super) fn create_edge_pipeline(
         // Over everything drawn so far, leaving the depth alone.
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Always,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -300,7 +300,7 @@ pub(super) fn create_edge_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

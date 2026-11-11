@@ -138,7 +138,9 @@ impl EditorApp {
                 .raw
                 .dropped_files
                 .iter()
-                .filter_map(|file| file.path.clone())
+                .map(|file| file.path().to_path_buf())
+                // A file handed over without a path (only bytes) can't be imported.
+                .filter(|path| !path.as_os_str().is_empty())
                 .collect()
         });
         if files.is_empty() {

@@ -265,8 +265,8 @@ impl TemporalPasses {
                 let pipeline_layout =
                     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some(label),
-                        bind_group_layouts: &[layout],
-                        push_constant_ranges: &[],
+                        bind_group_layouts: &[Some(layout)],
+                        immediate_size: 0,
                     });
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some(label),
@@ -286,7 +286,7 @@ impl TemporalPasses {
                         compilation_options: Default::default(),
                         targets: &[Some(format.into())],
                     }),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 })
             };
@@ -342,8 +342,13 @@ fn moving_pipeline(
     let shader = shader_module(device, "moving items", super::gpu::SCENE_SHADER);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("moving items"),
-        bind_group_layouts: &[frame_layout, empty_layout, skin_layout, motion_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[
+            Some(frame_layout),
+            Some(empty_layout),
+            Some(skin_layout),
+            Some(motion_layout),
+        ],
+        immediate_size: 0,
     });
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
@@ -368,7 +373,7 @@ fn moving_pipeline(
             module: &shader,
             entry_point: Some("vs_motion"),
             compilation_options: Default::default(),
-            buffers: &[vertex_layout, instance_layout],
+            buffers: &[Some(vertex_layout), Some(instance_layout)],
         },
         // Back faces are behind the front ones, so the depth test leaves
         // them out; double-sided items need theirs.
@@ -379,8 +384,8 @@ fn moving_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -391,7 +396,7 @@ fn moving_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(MOTION_FORMAT.into())],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -855,6 +860,7 @@ impl TemporalPasses {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("moving items"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {

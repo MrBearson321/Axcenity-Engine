@@ -223,8 +223,8 @@ impl VolumetricFog {
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some(label),
-                        bind_group_layouts: &[&compute_frame_layout, group],
-                        push_constant_ranges: &[],
+                        bind_group_layouts: &[Some(&compute_frame_layout), Some(group)],
+                        immediate_size: 0,
                     }),
                 ),
                 module: &shader,
@@ -240,8 +240,8 @@ impl VolumetricFog {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("volumetric fog composite"),
-                    bind_group_layouts: &[frame_layout, &composite_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(frame_layout), Some(&composite_layout)],
+                    immediate_size: 0,
                 }),
             ),
             vertex: wgpu::VertexState {
@@ -271,7 +271,7 @@ impl VolumetricFog {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -353,6 +353,7 @@ impl VolumetricFog {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("volumetric fog composite"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: hdr,
                 resolve_target: None,
                 ops: wgpu::Operations {

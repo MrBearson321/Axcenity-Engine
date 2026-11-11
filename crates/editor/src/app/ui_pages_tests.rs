@@ -15,8 +15,8 @@ fn draw_designer(app: &mut EditorApp, ctx: &egui::Context) {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    let _ = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
     });
 }
 
@@ -96,8 +96,8 @@ fn the_pages_tab_shows_every_page_and_opens_one_to_edit() {
         }],
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    let _ = crate::theme::run(&ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
     });
     assert_eq!(app.ui_designer.slide(), 1);
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
@@ -105,9 +105,9 @@ fn the_pages_tab_shows_every_page_and_opens_one_to_edit() {
             &snapshots.join("ui-designer-pages.png"),
             SIZE,
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }
@@ -167,9 +167,9 @@ fn picking_a_screen_gui_in_the_pages_tab_shows_its_page_layouts_and_pages() {
                 &snapshots.join(name),
                 size,
                 vec![Vec::new(); 3],
-                |ctx, render_state| {
+                |ui, render_state| {
                     egui::CentralPanel::default()
-                        .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                        .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
                 },
             );
         }

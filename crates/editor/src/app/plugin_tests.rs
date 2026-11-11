@@ -255,8 +255,8 @@ fn an_erroring_plugin_shows_file_and_line_in_the_console_and_panel_and_the_edito
 
     // The Plugins panel draws its errors.
     let ctx = theme::test_context();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.plugins_pane(ui));
+    let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.plugins_pane(ui));
     });
     let _ = std::fs::remove_dir_all(&folder);
 }
@@ -276,10 +276,10 @@ fn frame(
         ..Default::default()
     };
     *time += 1.0 / 30.0;
-    let _ = ctx.run(input, |ctx| {
+    let _ = crate::theme::run(ctx, input, |ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.plugin_pane(ui, pane, None));
+            .show(ui, |ui| app.plugin_pane(ui, pane, None));
     });
 }
 

@@ -295,8 +295,8 @@ mod tests {
                 ..Default::default()
             };
             let mut texts = Vec::new();
-            let output = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let output = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     if let Some(change) = show(ui, Some(&inspection), None) {
                         picked = Some(change);
                     }
@@ -329,8 +329,8 @@ mod tests {
                 &std::path::Path::new(&folder).join("lod-inspector.png"),
                 egui::vec2(360.0, 600.0),
                 vec![Vec::new(); 2],
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         show(ui, Some(&inspection), Some(2));
                     });
                 },

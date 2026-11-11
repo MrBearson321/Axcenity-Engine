@@ -21,7 +21,10 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Event>) {
         events,
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| app.palette_frame(ctx));
+    let _ = crate::theme::run(ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
+        app.palette_frame(ctx)
+    });
 }
 
 fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -307,8 +310,9 @@ fn every_searchable_setting_is_found_on_its_page() {
                 time: Some(clock),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |_| {});
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
+                egui::CentralPanel::default().show(ui, |_| {});
                 app.settings_window(ctx);
             });
         }
@@ -320,11 +324,12 @@ fn every_searchable_setting_is_found_on_its_page() {
                 &std::path::PathBuf::from(folder).join("settings-found.png"),
                 egui::vec2(900.0, 640.0),
                 vec![Vec::new(); 3],
-                |ctx| {
+                |ui| {
+                    let ctx = &ui.ctx().clone();
                     if !std::mem::replace(&mut asked, true) {
                         settings::find_setting(ctx, row.name);
                     }
-                    egui::CentralPanel::default().show(ctx, |_| {});
+                    egui::CentralPanel::default().show(ui, |_| {});
                     app.settings_window(ctx);
                 },
             );
@@ -377,8 +382,9 @@ fn universal_search_draws_categories_and_what_the_pick_does() {
     let size = egui::vec2(1100.0, 700.0);
     app.palette.toggle();
     app.palette.query = "pad".to_owned();
-    let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |_| {});
+    let mut draw = |ui: &mut egui::Ui| {
+        let ctx = &ui.ctx().clone();
+        egui::CentralPanel::default().show(ui, |_| {});
         app.palette_frame(ctx);
     };
     let ctx = theme::test_context();
@@ -387,7 +393,7 @@ fn universal_search_draws_categories_and_what_the_pick_does() {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        let _ = ctx.run(input, &mut draw);
+        let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
     }
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let folder = std::path::PathBuf::from(snapshots);
@@ -402,8 +408,9 @@ fn universal_search_draws_categories_and_what_the_pick_does() {
             &folder.join("universal-search-commands.png"),
             size,
             vec![Vec::new(); 3],
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |_| {});
+            |ui| {
+                let ctx = &ui.ctx().clone();
+                egui::CentralPanel::default().show(ui, |_| {});
                 app.palette_frame(ctx);
             },
         );
@@ -412,8 +419,9 @@ fn universal_search_draws_categories_and_what_the_pick_does() {
             &folder.join("universal-search-settings.png"),
             size,
             vec![Vec::new(); 3],
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |_| {});
+            |ui| {
+                let ctx = &ui.ctx().clone();
+                egui::CentralPanel::default().show(ui, |_| {});
                 app.palette_frame(ctx);
             },
         );

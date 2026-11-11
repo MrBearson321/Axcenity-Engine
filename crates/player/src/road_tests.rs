@@ -123,9 +123,10 @@ fn the_examples_road_and_scatters_save_only_their_settings() {
 /// saved there as `hello-roads-road.png`. Skipped without a GPU.
 #[test]
 fn the_road_is_drawn_along_its_whole_curve_with_no_gaps() {
-    use axcenity_render::{TextureRenderer, wgpu};
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    use axcenity_render::TextureRenderer;
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         return;
     };
     let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))

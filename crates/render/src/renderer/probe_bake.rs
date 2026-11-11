@@ -272,8 +272,11 @@ fn read_scene(scene: &ScenePipeline, size: u32) -> Vec<[f32; 3]> {
     buffer.slice(..).map_async(wgpu::MapMode::Read, |result| {
         result.expect("could not read the probe face back");
     });
-    device.poll(wgpu::PollType::Wait).unwrap();
-    let mapped = buffer.slice(..).get_mapped_range();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mapped = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("the buffer is mapped");
     mapped
         .chunks(row_bytes as usize)
         .flat_map(|row| row[..(size * 8) as usize].chunks(8))

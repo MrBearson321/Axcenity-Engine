@@ -85,20 +85,21 @@ const PANEL_ROW_HEIGHT: f32 = if NATIVE_BUTTONS {
 /// Lets a panel window be moved by its tab row (empty space there: its tabs
 /// stay on top and drag as tabs). On macOS, which keeps its traffic lights,
 /// it's a slim strip above the tabs instead. Call before the panels are drawn.
-pub fn panel_title_area(ctx: &egui::Context) {
+pub fn panel_title_area(ui: &mut egui::Ui) {
+    let ctx = &ui.ctx().clone();
     if NATIVE_BUTTONS {
         let palette = theme::palette(ctx);
-        egui::TopBottomPanel::top("panel window strip")
-            .exact_height(PANEL_STRIP_HEIGHT)
+        egui::Panel::top("panel window strip")
+            .exact_size(PANEL_STRIP_HEIGHT)
             .frame(egui::Frame::new().fill(palette.app_bg))
             .show_separator_line(false)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let bar = ui.max_rect();
                 drag_region(ui, bar);
             });
         return;
     }
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     let row = Rect::from_min_size(screen.min, vec2(screen.width(), PANEL_ROW_HEIGHT));
     let mut ui = egui::Ui::new(
         ctx.clone(),
@@ -114,7 +115,7 @@ pub fn panel_title_area(ctx: &egui::Context) {
 /// then close (macOS keeps its own close). Call after the panels are drawn
 /// and after [`edges`], so they stay clickable in the window's corner.
 pub fn panel_buttons(ctx: &egui::Context) -> Option<PanelAction> {
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     let cell = |from_right: f32| {
         Rect::from_min_size(
             pos2(
@@ -273,7 +274,7 @@ pub fn edges(ctx: &egui::Context) {
     if NATIVE_BUTTONS || maximized(ctx) || fullscreen(ctx) {
         return;
     }
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     let id = egui::Id::new("window edges");
     // Above the panels, so the grips win where they overlap them.
     let layer = egui::LayerId::new(egui::Order::Foreground, id);

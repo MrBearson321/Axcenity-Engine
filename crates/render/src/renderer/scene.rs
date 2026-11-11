@@ -172,7 +172,7 @@ impl ScenePipeline {
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let (texture_bytes, mesh_bytes) = (GpuBytes::default(), GpuBytes::default());
@@ -1191,6 +1191,7 @@ impl ScenePipeline {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("depth and normal prepass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        depth_slice: None,
                         view: &occlusion.normal_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
@@ -1440,6 +1441,7 @@ impl ScenePipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("turned UI text"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view: &sheet_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1467,6 +1469,7 @@ impl ScenePipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("UI overlay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -2501,6 +2504,7 @@ fn begin_scene_pass<'a>(
     };
     let color_attachment = match &targets.msaa {
         Some(msaa) => wgpu::RenderPassColorAttachment {
+            depth_slice: None,
             view: &msaa.view,
             resolve_target: Some(&targets.hdr_view),
             ops: wgpu::Operations {
@@ -2511,6 +2515,7 @@ fn begin_scene_pass<'a>(
             },
         },
         None => wgpu::RenderPassColorAttachment {
+            depth_slice: None,
             view: &targets.hdr_view,
             resolve_target: None,
             ops: wgpu::Operations {

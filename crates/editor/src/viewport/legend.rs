@@ -197,8 +197,8 @@ mod tests {
         let draw = |mode: ViewMode| {
             let ctx = crate::theme::test_context();
             let run = || {
-                ctx.run(Default::default(), |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                crate::theme::run(&ctx, Default::default(), |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         paint(ui, ui.max_rect(), mode, &stats, None);
                     });
                 })
@@ -233,8 +233,8 @@ mod tests {
                     &std::path::Path::new(&folder).join(name),
                     egui::vec2(480.0, 320.0),
                     vec![Vec::new(); 2],
-                    |ctx| {
-                        egui::CentralPanel::default().show(ctx, |ui| {
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
                             paint(ui, ui.max_rect(), mode, &stats, None);
                         });
                     },

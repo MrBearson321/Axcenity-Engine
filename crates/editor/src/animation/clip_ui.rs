@@ -23,8 +23,8 @@ impl AnimationStudio {
             Root::Selected => self.clip.objects.follow(world, select),
         }
         let stacked = ui.available_width() < STACK_BELOW;
-        let pick = egui::TopBottomPanel::top("clip toolbar")
-            .show_inside(ui, |ui| self.clip_toolbar(ui, world, stacked, root))
+        let pick = egui::Panel::top("clip toolbar")
+            .show(ui, |ui| self.clip_toolbar(ui, world, stacked, root))
             .inner;
         if let Some(pick) = pick {
             self.act(pick, project, assets, world, output, actions);
@@ -75,7 +75,7 @@ impl AnimationStudio {
         let mut convert = false;
         let mut events = Vec::new();
         if stacked {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("clip stacked")
                     .auto_shrink(false)
@@ -111,22 +111,22 @@ impl AnimationStudio {
         } else {
             // The dope sheet (a linked clip's under its timeline) grows
             // with its tracks, so it can be resized.
-            egui::TopBottomPanel::bottom("clip dope sheet")
+            egui::Panel::bottom("clip dope sheet")
                 .resizable(true)
-                .default_height(280.0)
-                .min_height(80.0)
-                .show_inside(ui, |ui| {
+                .default_size(280.0)
+                .min_size(80.0)
+                .show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("clip timeline scroll")
                         .show(ui, |ui| convert |= self.clip_timeline(ui, assets))
                 });
             if !self.clip.hide_inspector {
                 let room = ui.available_width();
-                egui::SidePanel::right("clip inspector")
+                egui::Panel::right("clip inspector")
                     .resizable(true)
-                    .default_width(260.0)
-                    .max_width(room * 0.45)
-                    .show_inside(ui, |ui| {
+                    .default_size(260.0)
+                    .max_size(room * 0.45)
+                    .show(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("clip inspector scroll")
                             .show(ui, |ui| rename = self.clip_inspector(ui))
@@ -134,18 +134,18 @@ impl AnimationStudio {
             }
             if !self.clip.hide_drawer {
                 let room = ui.available_width();
-                egui::SidePanel::left("clip drawer")
+                egui::Panel::left("clip drawer")
                     .resizable(true)
-                    .default_width(170.0)
-                    .max_width(room * 0.4)
-                    .show_inside(ui, |ui| {
+                    .default_size(170.0)
+                    .max_size(room * 0.4)
+                    .show(ui, |ui| {
                         ui.strong(self.drawer_title());
                         egui::ScrollArea::vertical()
                             .id_salt("clip drawer scroll")
                             .show(ui, |ui| events.extend(self.clip_drawer(ui, assets)))
                     });
             }
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let height = ui.available_height();
                 events.extend(self.clip_preview(
                     ui,

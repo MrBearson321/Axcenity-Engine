@@ -24,8 +24,8 @@ fn draw_designer(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Eve
         events,
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    let _ = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
     });
 }
 
@@ -150,8 +150,8 @@ fn a_graph_with_an_unconnected_required_pin_reports_its_nodes_not_lua_errors() {
             &snapshots.join("ui-event-graph-errors.png"),
             SIZE,
             vec![Vec::new(); 3],
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
             },
         );
     }
@@ -426,8 +426,8 @@ fn hovering_in_live_preview_runs_parallel_branches_and_a_hidden_screen_gui_hides
             &snapshots.join("ui-live-preview-hidden.png"),
             SIZE,
             vec![Vec::new(); 3],
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
             },
         );
     }
@@ -455,17 +455,21 @@ fn delete_over_the_event_graph_leaves_the_selected_instance_alone() {
         (egui::Key::D, egui::Modifiers::COMMAND),
     ] {
         let input = egui::RawInput {
-            modifiers,
-            events: vec![egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers,
-            }],
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                .chain(vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }])
+                .collect(),
             ..Default::default()
         };
-        let _ = egui::Context::default().run(input, |ctx| app.shortcuts(ctx));
+        let _ = crate::theme::run(&egui::Context::default(), input, |ui| {
+            let ctx = &ui.ctx().clone();
+            app.shortcuts(ctx)
+        });
     }
     assert!(app.world.is_descendant_of(settings, menu), "not deleted");
     assert_eq!(app.selected, Some(settings), "not duplicated");

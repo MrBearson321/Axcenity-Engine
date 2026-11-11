@@ -74,8 +74,8 @@ impl PostPasses {
         let pipeline = |label, layouts: &[&wgpu::BindGroupLayout], entry, format, blend| {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
-                bind_group_layouts: layouts,
-                push_constant_ranges: &[],
+                bind_group_layouts: &super::gpu::some(layouts),
+                immediate_size: 0,
             });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -99,7 +99,7 @@ impl PostPasses {
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             })
         };
@@ -235,6 +235,7 @@ pub(super) fn fullscreen_pass(
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some(label),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            depth_slice: None,
             view: target,
             resolve_target: None,
             ops: wgpu::Operations {

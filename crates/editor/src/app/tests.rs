@@ -482,9 +482,10 @@ fn the_whole_editor_draws_in_each_theme_and_density() {
         app.output.warning("A warning, to see how warnings look.");
         app.output
             .error("scripts/Pad.server.lua:3: an error, to see how errors look");
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             theme::apply(ctx, &appearance);
-            app.frame(ctx, None);
+            app.frame(ui, None);
         };
         match &snapshots {
             Some(folder) => crate::snapshot::snapshot(
@@ -496,7 +497,7 @@ fn the_whole_editor_draws_in_each_theme_and_density() {
             None => {
                 let ctx = theme::test_context();
                 for _ in 0..3 {
-                    let _ = ctx.run(Default::default(), &mut draw);
+                    let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
                 }
             }
         }
@@ -575,12 +576,13 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
         ] {
             // What was drawn, and the room there was for it.
             let mut fit = None;
-            let mut draw = |ctx: &egui::Context| {
+            let mut draw = |ui: &mut egui::Ui| {
+                let ctx = &ui.ctx().clone();
                 let palette = theme::palette(ctx);
                 let frame = egui::Frame::new()
                     .fill(palette.panel)
                     .inner_margin(egui::Margin::symmetric(8, 6));
-                egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+                egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                     let room = ui.max_rect();
                     match pane {
                         Pane::Explorer => app.explorer_pane(ui),
@@ -621,7 +623,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                     ..Default::default()
                 };
-                let _ = ctx.run(input, &mut draw);
+                let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
             }
             if let Some(folder) = &snapshots {
                 let name = pane.label().to_lowercase();
@@ -659,8 +661,8 @@ fn draw_animation_tab(app: &mut EditorApp, size: egui::Vec2) -> (egui::Rect, egu
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let room = ui.max_rect();
                 app.animation_pane(ui, None);
                 fit = Some((ui.min_rect(), room));
@@ -872,8 +874,8 @@ fn the_animation_tab_says_where_you_are_and_fits_any_shape() {
                     &snapshots.join(format!("animation-{view}-{shape}.png")),
                     size,
                     vec![Vec::new(); 3],
-                    &mut |ctx: &egui::Context| {
-                        egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+                    &mut |ui: &mut egui::Ui| {
+                        egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
                     },
                 );
             }
@@ -926,7 +928,7 @@ fn draw_until_loaded(app: &mut EditorApp, ctx: &egui::Context) {
     let deadline = Instant::now() + std::time::Duration::from_secs(30);
     while app.loading.is_some() {
         assert!(Instant::now() < deadline, "loading never finished");
-        let _ = ctx.run(Default::default(), |ctx| app.frame(ctx, None));
+        let _ = crate::theme::run(ctx, Default::default(), |ui| app.frame(ui, None));
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 }
@@ -945,7 +947,7 @@ fn a_project_opened_in_the_background_opens_once_it_is_read() {
     // The loading screen stays up while the scene first draws, then goes.
     assert!(app.cover_until.is_some());
     for _ in 0..FINISHING_FRAMES {
-        let _ = ctx.run(Default::default(), |ctx| app.frame(ctx, None));
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| app.frame(ui, None));
     }
     assert_eq!(app.cover_until, None);
 }
@@ -1535,20 +1537,24 @@ fn delete_ctrl_d_and_f2_act_on_the_selection() {
 /// lets the app read its shortcuts. No window or GPU needed.
 pub(super) fn press(app: &mut EditorApp, modifiers: egui::Modifiers, key: egui::Key) {
     let input = egui::RawInput {
-        modifiers,
-        events: vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers,
-        }],
+        events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+            .chain(vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }])
+            .collect(),
         ..Default::default()
     };
     // Only the shortcuts run here, with no Scene drawn: count it as shown,
     // as it is in a normal frame, so the tool keys work.
     app.scene_drawn_pass = Some(0);
-    let _ = egui::Context::default().run(input, |ctx| app.shortcuts(ctx));
+    let _ = crate::theme::run(&egui::Context::default(), input, |ui| {
+        let ctx = &ui.ctx().clone();
+        app.shortcuts(ctx)
+    });
 }
 
 #[test]
@@ -1925,10 +1931,10 @@ fn the_view_mode_changes_the_viewport_at_once_and_lit_comes_back() {
         &path,
         egui::vec2(320.0, 200.0),
         vec![Vec::new(); modes.len()],
-        |ctx, render_state| {
+        |ui, render_state| {
             app.view_mode = modes[frame];
             frame += 1;
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 app.scene_pane(ui, Some(render_state));
             });
             if let Some(pixels) = app.viewport.pixels() {
@@ -1974,7 +1980,10 @@ fn frames_keep_coming_for_a_second_after_input_then_stop() {
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| app.keep_frames_steady(ctx));
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            app.keep_frames_steady(ctx)
+        });
         ctx.has_requested_repaint()
     };
     // egui asks for more of its own first frames.
@@ -2012,7 +2021,10 @@ fn holding_the_refresh_rate_draws_only_while_the_window_has_focus() {
             .entry(egui::ViewportId::ROOT)
             .or_default()
             .focused = Some(focused);
-        let _ = ctx.run(input, |ctx| app.keep_frames_steady(ctx));
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            app.keep_frames_steady(ctx)
+        });
         ctx.has_requested_repaint()
     };
     frame(0.0, true);
@@ -2094,8 +2106,8 @@ fn recording_and_unkeyed_moves_are_said_above_the_timeline() {
                 events,
                 ..Default::default()
             };
-            output = Some(ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
             }));
         }
         drawn_texts(&output.unwrap())
@@ -2112,8 +2124,8 @@ fn recording_and_unkeyed_moves_are_said_above_the_timeline() {
                 &folder.join(format!("animation-{name}.png")),
                 size,
                 vec![Vec::new(); 3],
-                &mut |ctx: &egui::Context| {
-                    egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+                &mut |ui: &mut egui::Ui| {
+                    egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
                 },
             );
         }

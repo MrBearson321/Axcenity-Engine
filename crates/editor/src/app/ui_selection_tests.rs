@@ -70,15 +70,16 @@ fn click_with(
         *clock += 0.05;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
-            events,
-            modifiers,
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                .chain(events)
+                .collect(),
             time: Some(*clock),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+        let _ = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
         });
-        if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+        if !ctx.egui_is_using_pointer() && !ctx.egui_wants_keyboard_input() {
             app.history.seal();
             app.ui_drag_baselines.clear();
         }
@@ -105,13 +106,14 @@ fn keys(
     *clock += 0.05;
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
-        events,
-        modifiers,
+        events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+            .chain(events)
+            .collect(),
         time: Some(*clock),
         ..Default::default()
     };
-    let output = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    let output = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
     });
     app.history.seal();
     output
@@ -157,9 +159,9 @@ fn box_selecting_three_buttons_and_distributing_them_spaces_them_evenly_in_one_s
             &snapshots.join("ui-designer-multi-select.png"),
             SIZE,
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
         app.ui_designer = designer;
@@ -317,11 +319,15 @@ fn paste_style_matches_a_button_and_duplicate_copies_its_own_id_and_rule() {
     // Ctrl+D: an identical button with its own Id and rules.
     act(&mut app, DesignerAction::Select(Some(play)));
     let input = egui::RawInput {
-        modifiers: egui::Modifiers::COMMAND,
-        events: vec![key(egui::Key::D, egui::Modifiers::COMMAND)],
+        events: std::iter::once(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND))
+            .chain(vec![key(egui::Key::D, egui::Modifiers::COMMAND)])
+            .collect(),
         ..Default::default()
     };
-    let _ = egui::Context::default().run(input, |ctx| app.shortcuts(ctx));
+    let _ = crate::theme::run(&egui::Context::default(), input, |ui| {
+        let ctx = &ui.ctx().clone();
+        app.shortcuts(ctx)
+    });
     let copy = app.selected.unwrap();
     assert_ne!(copy, play);
     let id_of = |app: &EditorApp, id| {
@@ -528,10 +534,11 @@ fn arrow_keys_nudge_by_one_and_shift_by_ten_but_not_while_typing() {
             time: Some(clock),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
             // As the editor's frame does: its shortcuts, then the panels.
             app.shortcuts(ctx);
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.text_edit_singleline(&mut text).request_focus();
                 app.ui_designer_pane(ui, None);
             });
