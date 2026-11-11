@@ -689,6 +689,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-collab-server"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "axcenity-collab",
+ "axcenity-core",
+ "axcenity-project",
+ "axcenity-workspace-hack",
+ "env_logger",
+ "log",
+]
+
+[[package]]
 name = "axcenity-cook"
 version = "0.2.0-alpha.1"
 dependencies = [
