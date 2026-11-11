@@ -177,6 +177,8 @@ pub struct ConsoleStats {
     /// Both Lua heaps.
     pub lua_bytes: usize,
     pub instances: usize,
+    /// The game's memory by kind (roadmap G7), as last asked.
+    pub breakdown: Option<axcenity_core::memory::MemoryBreakdown>,
     /// While hosting or joined.
     pub network: Option<NetworkStats>,
     /// The average frame rate of the slowest 1% of recent frames.
@@ -554,8 +556,23 @@ pub fn stats_lines(stats: &ConsoleStats) -> Vec<String> {
         Some(bytes) => format!("Memory {}", megabytes(bytes as f64)),
         None => "Memory unknown".to_owned(),
     });
-    lines.push(format!("Lua {}", megabytes(stats.lua_bytes as f64)));
-    lines.push(format!("Instances {}", stats.instances));
+    match &stats.breakdown {
+        // Lua and the Instances are rows of the breakdown.
+        Some(breakdown) => {
+            lines.push(format!(
+                "Game (counted) {}",
+                megabytes(breakdown.total() as f64)
+            ));
+            for (name, count, bytes) in breakdown.rows() {
+                let count = count.map_or_else(String::new, |count| format!(" ({count})"));
+                lines.push(format!("  {name:<15}{:>9}{count}", megabytes(bytes as f64)));
+            }
+        }
+        None => {
+            lines.push(format!("Lua {}", megabytes(stats.lua_bytes as f64)));
+            lines.push(format!("Instances {}", stats.instances));
+        }
+    }
     match stats.network {
         Some(network) => {
             lines.push(format!(
@@ -903,6 +920,47 @@ mod tests {
         assert!(!is_command_word("print(1)") && !is_command_word("1x") && !is_command_word(""));
         assert!(looks_like_command("give -5") && looks_like_command("heal Bob 2.5"));
         assert!(!looks_like_command("x = 5") && !looks_like_command("print('hi')"));
+    }
+
+    #[test]
+    fn the_stats_tab_lists_the_memory_breakdown_when_there_is_one() {
+        use axcenity_core::memory::{InstanceMemory, MemoryBreakdown, MemoryUse};
+        let mut stats = ConsoleStats {
+            lua_bytes: 1 << 20,
+            instances: 42,
+            ..ConsoleStats::default()
+        };
+        let lines = stats_lines(&stats);
+        assert!(lines.contains(&"Instances 42".to_owned()), "{lines:?}");
+        stats.breakdown = Some(MemoryBreakdown {
+            lua: 1 << 20,
+            instances: InstanceMemory {
+                total: MemoryUse {
+                    count: 42,
+                    bytes: 2 << 20,
+                },
+                classes: Vec::new(),
+            },
+            textures: MemoryUse {
+                count: 3,
+                bytes: 5 << 20,
+            },
+            ..MemoryBreakdown::default()
+        });
+        let lines = stats_lines(&stats);
+        let text = lines.join("\n");
+        assert!(text.contains("Game (counted) 8.0 MB"), "{text}");
+        let line = |name: &str| {
+            lines
+                .iter()
+                .find(|line| line.starts_with(&format!("  {name} ")))
+                .unwrap_or_else(|| panic!("no {name} in {text}"))
+                .clone()
+        };
+        assert!(line("Instances").ends_with(" 2.0 MB (42)"), "{text}");
+        assert!(line("Textures").ends_with(" 5.0 MB (3)"), "{text}");
+        assert!(line("Lua").ends_with(" 1.0 MB"), "{text}");
+        assert!(!text.contains("Instances 42"), "a row of the breakdown now");
     }
 
     #[test]
