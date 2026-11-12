@@ -98,9 +98,7 @@ fn remote_log(url: &str, test: &str) -> Vec<checkpoint::Entry> {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dest);
-    Git::system()
-        .clone_repository(url, &dest, None)
-        .unwrap();
+    Git::system().clone_repository(url, &dest, None).unwrap();
     checkpoint::history(&Git::system(), &dest, 20).unwrap()
 }
 
@@ -126,8 +124,8 @@ fn saves_become_checkpoints_that_reach_the_repository() {
     assert!(app.save());
     app.repo_frame();
     assert_eq!(app.repo.state(), Some(&State::Pending));
-    // …unless someone asks.
-    app.repo_checkpoint(Kind::Manual, Some("Before lunch".into()));
+    // …unless someone asks (the Console's `checkpoint`, for now).
+    app.run_console_command("checkpoint Before lunch");
     frames_until(&mut app, &State::Synced);
     let log = remote_log(&url, "repo-saves");
     assert_eq!(log[0].kind, Some(Kind::Manual));
@@ -156,11 +154,14 @@ fn closing_the_editor_uploads_what_was_saved() {
     app.repo.manager = Some(manager());
     frames_until(&mut app, &State::Synced);
     std::fs::create_dir_all(folder.join("scripts")).unwrap();
-    std::fs::write(folder.join("scripts").join("Extra.server.lua"), "print('x')\n").unwrap();
+    std::fs::write(
+        folder.join("scripts").join("Extra.server.lua"),
+        "print('x')\n",
+    )
+    .unwrap();
     app.repo_changed();
     app.repo_close();
     let log = remote_log(&url, "repo-close");
     assert_eq!(log[0].kind, Some(Kind::Closing), "{:?}", log[0]);
     let _ = std::fs::remove_dir_all(&folder);
 }
-

@@ -1866,6 +1866,8 @@ mod tool_window_tests;
 mod tour_snapshots;
 
 #[cfg(test)]
+mod collab_repo_tests;
+#[cfg(test)]
 mod collab_setup_tests;
 #[cfg(test)]
 mod decal_tests;
@@ -1893,8 +1895,6 @@ mod solid_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod strings_tests;
-#[cfg(test)]
-mod collab_repo_tests;
 #[cfg(test)]
 mod team_tests;
 #[cfg(test)]
