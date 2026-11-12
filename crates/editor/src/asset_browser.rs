@@ -235,6 +235,12 @@ pub enum BrowserAction {
     View(String),
     /// Rename or move the asset at `from` to `to`, with every reference.
     RenameAsset { from: String, to: String },
+    /// Give the texture file at `path` the import preset `preset` (R12);
+    /// `None` takes away its own pick, so its folder's applies.
+    SetImportPreset {
+        path: String,
+        preset: Option<String>,
+    },
     /// Work out which of these project files nothing uses, for the Unused
     /// filter ([`AssetBrowser::set_unused`]).
     FindUnused(Vec<String>),
@@ -636,6 +642,10 @@ pub(super) enum ItemMenu {
         plugin: usize,
         action: u64,
         path: String,
+    },
+    ImportPreset {
+        path: String,
+        preset: Option<String>,
     },
     View {
         path: String,
