@@ -18,6 +18,7 @@ use crate::apply::{self, DocMut, Graveyard, Note, Refusal, Undo};
 use crate::capture;
 use crate::files::{self, Assembly, Bytes, FileHash, Manifest, Piece};
 use crate::ids::BLOCK_SIZE;
+use crate::live::LiveDoc;
 use crate::message::{Have, MemberId, ToClient, ToHost};
 use crate::op::{self, Op, Transaction};
 use crate::presence::{Collaborator, Presence};
@@ -60,6 +61,33 @@ pub enum Notice {
     /// The owner ended the session or quit: this copy stays as it is, read
     /// only, and edits not confirmed yet are in [`Client::unsent`] (TC6).
     HostLeft,
+    /// The host didn't take a change to the live document at `path`; the
+    /// copy here was opened again from the host's (C7).
+    DocRefused { path: String, reason: String },
+}
+
+/// A live document this member has open (C7).
+struct ClientDoc {
+    doc: LiveDoc,
+    /// Has had the host's state.
+    ready: bool,
+    /// The host document's origin this copy merges with.
+    origin: Option<u64>,
+    /// This member typed something the file may not have yet.
+    typed: bool,
+}
+
+impl ClientDoc {
+    fn new() -> ClientDoc {
+        let mut doc = LiveDoc::new();
+        doc.track_own_edits();
+        ClientDoc {
+            doc,
+            ready: false,
+            origin: None,
+            typed: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +162,10 @@ pub struct Client {
     epoch: Option<u64>,
     /// The host said the session is over.
     host_left: bool,
+    /// Open live scripts and stylesheets, by path (C7).
+    live: BTreeMap<String, ClientDoc>,
+    /// Live documents others changed since [`Client::take_doc_changes`].
+    live_changed: BTreeSet<String>,
 }
 
 impl Client {
@@ -167,7 +199,148 @@ impl Client {
             session: None,
             epoch: None,
             host_left: false,
+            live: BTreeMap::new(),
+            live_changed: BTreeSet::new(),
         }
+    }
+
+    /// Opens the live document of the script or stylesheet at `path`: its
+    /// text arrives from the host ([`Client::doc_text`] once ready).
+    pub fn open_doc(&mut self, path: &str) {
+        if self.live.contains_key(path) {
+            return;
+        }
+        self.live.insert(path.to_owned(), ClientDoc::new());
+        if self.is_online() {
+            self.outbox.push(ToHost::DocOpen {
+                path: path.to_owned(),
+                state_vector: Vec::new(),
+            });
+        }
+    }
+
+    /// Stops following the live document at `path`.
+    pub fn close_doc(&mut self, path: &str) {
+        self.live.remove(path);
+        self.live_changed.remove(path);
+    }
+
+    /// The live document's text, once the host's has arrived.
+    pub fn doc_text(&self, path: &str) -> Option<String> {
+        let open = self.live.get(path)?;
+        open.ready.then(|| open.doc.text())
+    }
+
+    /// This member typed: the document's text is now `text`. Sent at once
+    /// when online; offline, it's kept and merged when the connection is
+    /// back. False when the document isn't open and ready.
+    pub fn edit_doc(&mut self, path: &str, text: &str) -> bool {
+        let online = self.is_online();
+        let Some(open) = self.live.get_mut(path) else {
+            return false;
+        };
+        if !open.ready {
+            return false;
+        }
+        if let Some(update) = open.doc.set_text(text) {
+            open.typed = true;
+            if online {
+                self.outbox.push(ToHost::DocUpdate {
+                    path: path.to_owned(),
+                    update,
+                });
+            }
+        }
+        true
+    }
+
+    /// Undoes this member's last change to the live document at `path`
+    /// (others' changes stay). False when there was nothing to undo.
+    pub fn undo_doc(&mut self, path: &str) -> bool {
+        self.undo_or_redo_doc(path, true)
+    }
+
+    /// Does again what [`Client::undo_doc`] last undid.
+    pub fn redo_doc(&mut self, path: &str) -> bool {
+        self.undo_or_redo_doc(path, false)
+    }
+
+    fn undo_or_redo_doc(&mut self, path: &str, undo: bool) -> bool {
+        let online = self.is_online();
+        let Some(open) = self.live.get_mut(path).filter(|open| open.ready) else {
+            return false;
+        };
+        let update = if undo {
+            open.doc.undo()
+        } else {
+            open.doc.redo()
+        };
+        let Some(update) = update else {
+            return false;
+        };
+        open.typed = true;
+        if online {
+            self.outbox.push(ToHost::DocUpdate {
+                path: path.to_owned(),
+                update,
+            });
+        }
+        true
+    }
+
+    /// Live documents others changed since last asked.
+    pub fn take_doc_changes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.live_changed).into_iter().collect()
+    }
+
+    /// Asks the host for each open live document again, with what this
+    /// copy has (after joining).
+    fn reopen_docs(&mut self) {
+        for (path, open) in &self.live {
+            self.outbox.push(ToHost::DocOpen {
+                path: path.clone(),
+                state_vector: open.doc.state_vector(),
+            });
+        }
+    }
+
+    fn doc_state(&mut self, path: String, update: &[u8], host_has: &[u8], origin: u64) {
+        let Some(open) = self.live.get_mut(&path) else {
+            return;
+        };
+        // The host lost the document this copy grew from (its saved state
+        // was gone when it started again): the two can't merge, so this
+        // copy starts over from the host's, with this member's text made
+        // again on top if they typed something the file may lack.
+        let mut retype = None;
+        if open.origin.is_some_and(|had| had != origin) {
+            retype = (open.ready && open.typed).then(|| open.doc.text());
+            *open = ClientDoc::new();
+        }
+        if let Err(error) = open.doc.apply(update) {
+            log::warn!("Collaborate: the host's copy of `{path}` didn't apply: {error}");
+            return;
+        }
+        open.ready = true;
+        open.origin = Some(origin);
+        let retyped = retype.and_then(|text| open.doc.set_text(&text));
+        if retyped.is_some() {
+            open.typed = true;
+        }
+        // What this copy has that the host lacks (typed offline, or while
+        // the host was away).
+        let send = retyped.or_else(|| {
+            open.doc
+                .is_ahead_of(host_has)
+                .then(|| open.doc.update_since(host_has))
+        });
+        if let Some(update) = send {
+            self.outbox.push(ToHost::DocUpdate {
+                path: path.clone(),
+                update,
+            });
+        }
+        self.live_changed.insert(path);
     }
 
     /// Names the session's project, once joined (empty if the host didn't
@@ -807,6 +980,36 @@ impl Client {
             },
             ToClient::Missing(hash) => self.missing.push(hash),
             ToClient::Locks(locks) => self.locks = locks,
+            ToClient::DocState {
+                path,
+                update,
+                state_vector,
+                origin,
+            } => self.doc_state(path, &update, &state_vector, origin),
+            ToClient::DocUpdate { path, update, .. } => {
+                if let Some(open) = self.live.get_mut(&path) {
+                    match open.doc.apply(&update) {
+                        Ok(()) => {
+                            self.live_changed.insert(path);
+                        }
+                        Err(error) => {
+                            log::warn!("Collaborate: a change to `{path}` didn't apply: {error}")
+                        }
+                    }
+                }
+            }
+            ToClient::DocRefused { path, reason } => {
+                if self.live.contains_key(&path) {
+                    self.live.insert(path.clone(), ClientDoc::new());
+                    if self.is_online() {
+                        self.outbox.push(ToHost::DocOpen {
+                            path: path.clone(),
+                            state_vector: Vec::new(),
+                        });
+                    }
+                }
+                self.notices.push(Notice::DocRefused { path, reason });
+            }
             ToClient::Ended => {
                 self.host_left = true;
                 self.connection = Connection::Offline;
@@ -881,6 +1084,19 @@ impl Client {
             }
         }
         self.seq = seq;
+        // A file written with everything typed in its live document here.
+        for op in &ops {
+            if let Op::FileVersion {
+                path,
+                new: Some(new),
+                ..
+            } = op
+                && let Some(open) = self.live.get_mut(path)
+                && FileHash::of(open.doc.text().as_bytes()) == *new
+            {
+                open.typed = false;
+            }
+        }
         if author == self.member {
             // The host handles one member's transactions in order and
             // refuses before accepting later ones, so this is the oldest.
@@ -951,6 +1167,7 @@ impl Client {
             self.outbox
                 .push(ToHost::Submit(pending.transaction.clone()));
         }
+        self.reopen_docs();
         self.ask_for_ids_if_low(world);
     }
 

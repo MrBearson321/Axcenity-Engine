@@ -10,6 +10,7 @@ use crate::apply::{self, Doc, Note, Refusal};
 use crate::files::{self, Assembly, FileHash, FileStore, Manifest, MemoryStore, Piece};
 use crate::ids::{IdAllocator, IdBlock};
 use crate::journal::{self, Handled, Journal};
+use crate::live::{self, LiveDoc};
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
 use crate::presence::{Collaborator, Presence, Profile};
@@ -92,6 +93,24 @@ pub struct Host {
     /// The newest transaction number earlier runs handled from each
     /// member, from the journal's folder.
     handled: Handled,
+    /// Open live scripts and stylesheets, by path (C7).
+    live: BTreeMap<String, HostDoc>,
+}
+
+/// A live document the host keeps.
+struct HostDoc {
+    doc: LiveDoc,
+    /// Its origin number ([`live::Saved::origin`]).
+    origin: u64,
+    /// When it last changed without being written back to its file, and
+    /// who changed it.
+    unwritten: Option<(Instant, MemberId)>,
+    /// Who changed it last.
+    editor: MemberId,
+    /// Its file's hash when last written to it or opened from it.
+    file_at: Option<FileHash>,
+    /// It changed since it was last kept beside the journal.
+    unsaved: bool,
 }
 
 /// A number no earlier run of a host had (as near as random gets).
@@ -124,6 +143,7 @@ impl Host {
             snapshot_at: Instant::now(),
             epoch: new_epoch(),
             handled: Handled::new(),
+            live: BTreeMap::new(),
         }
     }
 
@@ -142,6 +162,9 @@ impl Host {
             m.last_client_seq = m
                 .last_client_seq
                 .max(self.handled.get(member).copied().unwrap_or(0));
+        }
+        for saved in journal::saved_docs(project) {
+            self.carry_on_doc(saved);
         }
         let handled = self.handled();
         self.journal = Some(Journal::start(
@@ -163,6 +186,7 @@ impl Host {
     /// Writes a fresh snapshot now, when the journal has entries.
     pub fn snapshot(&mut self) {
         self.snapshot_at = self.clock;
+        self.save_docs();
         let Some(journal) = &mut self.journal else {
             return;
         };
@@ -224,6 +248,7 @@ impl Host {
     /// [`LOCK_GRACE`] ends. Call it a few times a second.
     pub fn tick(&mut self, now: Instant) -> Vec<Outgoing> {
         self.clock = now;
+        let mut out = self.write_back(now, false);
         if now.saturating_duration_since(self.snapshot_at) >= journal::SNAPSHOT_EVERY {
             self.snapshot();
         }
@@ -232,10 +257,10 @@ impl Host {
             lock.away_since
                 .is_none_or(|since| now.saturating_duration_since(since) < LOCK_GRACE)
         });
-        if self.locks.len() == before {
-            return Vec::new();
+        if self.locks.len() != before {
+            out.extend(self.locks_to_everyone());
         }
-        self.locks_to_everyone()
+        out
     }
 
     /// Keeps only `kept` transactions for catching up (tests use a small one
@@ -265,7 +290,10 @@ impl Host {
 
     /// The owner ended the session: tells everyone connected (TC6).
     pub fn end(&mut self) -> Vec<Outgoing> {
-        self.to_everyone(ToClient::Ended)
+        // Typing not written yet goes to the files before everyone leaves.
+        let mut out = self.write_back_now();
+        out.extend(self.to_everyone(ToClient::Ended));
+        out
     }
 
     /// The transactions still kept, oldest first.
@@ -412,27 +440,23 @@ impl Host {
                 let owns = |id| blocks.iter().any(|block: &IdBlock| block.contains(id));
                 match apply::apply(&mut self.doc.view(), &transaction.ops, &owns) {
                     Ok(applied) => {
-                        self.seq += 1;
-                        let logged = Logged {
-                            seq: self.seq,
-                            author: member,
-                            client_seq: transaction.client_seq,
-                            label: transaction.label,
-                            ops: applied.ops,
-                            notes: applied.notes,
-                        };
-                        let message = accepted(&logged);
-                        // Written down before anyone hears of it.
-                        if let Some(journal) = &mut self.journal
-                            && let Err(error) = journal.append(&logged)
-                        {
-                            log::error!("Collaborate: couldn't write the journal: {error}");
+                        let saved: Vec<String> = applied
+                            .ops
+                            .iter()
+                            .filter_map(|op| match op {
+                                Op::FileVersion { path, .. } => Some(path.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        let mut out =
+                            self.commit(member, transaction.client_seq, transaction.label, applied);
+                        // A live document's file saved some other way (an
+                        // older editor, or an edit outside the session):
+                        // the document takes the file's text as a change.
+                        for path in saved {
+                            out.extend(self.doc_follows_file(&path, member));
                         }
-                        self.log.push_back(logged);
-                        while self.log.len() > self.log_kept {
-                            self.log.pop_front();
-                        }
-                        self.to_everyone(message)
+                        out
                     }
                     Err(reason) => self.refuse(member, transaction.client_seq, reason),
                 }
@@ -543,6 +567,18 @@ impl Host {
                     return self.locks_to_everyone();
                 }
                 Vec::new()
+            }
+            ToHost::DocOpen { path, state_vector } => {
+                if !self.members[&member].connected {
+                    return Vec::new();
+                }
+                self.open_doc(member, path, &state_vector)
+            }
+            ToHost::DocUpdate { path, update } => {
+                if !self.members[&member].connected {
+                    return Vec::new();
+                }
+                self.update_doc(member, path, update)
             }
             ToHost::NeedIds => {
                 let block = self.ids.block();
@@ -672,6 +708,266 @@ impl Host {
                 epoch: self.epoch,
             },
         }]
+    }
+
+    /// Numbers, journals and logs an applied transaction, and tells
+    /// everyone.
+    fn commit(
+        &mut self,
+        author: MemberId,
+        client_seq: u64,
+        label: String,
+        applied: apply::Applied,
+    ) -> Vec<Outgoing> {
+        self.seq += 1;
+        let logged = Logged {
+            seq: self.seq,
+            author,
+            client_seq,
+            label,
+            ops: applied.ops,
+            notes: applied.notes,
+        };
+        let message = accepted(&logged);
+        // Written down before anyone hears of it.
+        if let Some(journal) = &mut self.journal
+            && let Err(error) = journal.append(&logged)
+        {
+            log::error!("Collaborate: couldn't write the journal: {error}");
+        }
+        self.log.push_back(logged);
+        while self.log.len() > self.log_kept {
+            self.log.pop_front();
+        }
+        self.to_everyone(message)
+    }
+
+    /// The text of the project file at `path`, if it has one that reads as
+    /// text.
+    fn file_text(&self, path: &str) -> Option<String> {
+        let hash = self.doc.files.get(path)?;
+        let bytes = self.store.read(*hash)?;
+        String::from_utf8(bytes.to_vec()).ok()
+    }
+
+    /// `DocOpen`: opens the document (from its file the first time) and
+    /// sends the member what their copy lacks.
+    fn open_doc(&mut self, member: MemberId, path: String, seen: &[u8]) -> Vec<Outgoing> {
+        if let Err(reason) = files::check_path(&path).and_then(|()| {
+            live::is_live(&path)
+                .then_some(())
+                .ok_or_else(|| format!("`{path}` isn't a script or stylesheet"))
+        }) {
+            return vec![Outgoing {
+                to: member,
+                message: ToClient::DocRefused { path, reason },
+            }];
+        }
+        if !self.live.contains_key(&path) {
+            let text = self.file_text(&path).unwrap_or_default();
+            self.live.insert(
+                path.clone(),
+                HostDoc {
+                    doc: LiveDoc::with_text(&text),
+                    origin: new_epoch(),
+                    unwritten: None,
+                    editor: member,
+                    file_at: self.doc.files.get(&path).copied(),
+                    unsaved: true,
+                },
+            );
+        }
+        let open = &self.live[&path];
+        vec![Outgoing {
+            to: member,
+            message: ToClient::DocState {
+                update: open.doc.update_since(seen),
+                state_vector: open.doc.state_vector(),
+                origin: open.origin,
+                path,
+            },
+        }]
+    }
+
+    /// `DocUpdate`: checks and applies a member's change, and passes it on.
+    fn update_doc(&mut self, member: MemberId, path: String, update: Vec<u8>) -> Vec<Outgoing> {
+        let role = self.members[&member].role;
+        let refused = |reason: String| {
+            vec![Outgoing {
+                to: member,
+                message: ToClient::DocRefused {
+                    path: path.clone(),
+                    reason,
+                },
+            }]
+        };
+        if !may_edit_file(role, &path) {
+            return refused(Refusal::Permission.to_string());
+        }
+        let now = self.clock;
+        let Some(open) = self.live.get_mut(&path) else {
+            return refused("open the document first".to_owned());
+        };
+        if let Err(error) = open.doc.apply(&update) {
+            return refused(error.to_string());
+        }
+        open.unwritten = Some((now, member));
+        open.editor = member;
+        open.unsaved = true;
+        self.members
+            .iter()
+            .filter(|(to, m)| m.connected && **to != member)
+            .map(|(&to, _)| Outgoing {
+                to,
+                message: ToClient::DocUpdate {
+                    path: path.clone(),
+                    update: update.clone(),
+                    author: member,
+                },
+            })
+            .collect()
+    }
+
+    /// After `path`'s file changed by a save: an open document whose text
+    /// differs takes the file's text, as `author`'s change.
+    fn doc_follows_file(&mut self, path: &str, author: MemberId) -> Vec<Outgoing> {
+        if !self.live.contains_key(path) {
+            return Vec::new();
+        }
+        let text = self.file_text(path).unwrap_or_default();
+        let open = self.live.get_mut(path).expect("checked above");
+        open.file_at = self.doc.files.get(path).copied();
+        let Some(update) = open.doc.set_text(&text) else {
+            return Vec::new();
+        };
+        open.unwritten = None;
+        open.editor = author;
+        open.unsaved = true;
+        self.to_everyone(ToClient::DocUpdate {
+            path: path.to_owned(),
+            update,
+            author,
+        })
+    }
+
+    /// Writes live documents whose typing settled back to their files, as
+    /// ordinary file versions by whoever changed them last.
+    fn write_back(&mut self, now: Instant, all: bool) -> Vec<Outgoing> {
+        let due: Vec<(String, MemberId)> = self
+            .live
+            .iter()
+            .filter_map(|(path, open)| {
+                let (since, who) = open.unwritten?;
+                (all || now.saturating_duration_since(since) >= live::WRITE_BACK_AFTER)
+                    .then(|| (path.clone(), who))
+            })
+            .collect();
+        let mut out = Vec::new();
+        let wrote = !due.is_empty();
+        for (path, who) in due {
+            let open = self.live.get_mut(&path).expect("listed above");
+            open.unwritten = None;
+            let bytes: crate::files::Bytes = open.doc.text().into_bytes().into();
+            let hash = FileHash::of(&bytes);
+            open.file_at = Some(hash);
+            let base = self.doc.files.get(&path).copied();
+            if base == Some(hash) {
+                continue;
+            }
+            self.store.keep(hash, bytes);
+            let ops = vec![Op::FileVersion {
+                path: path.clone(),
+                base,
+                new: Some(hash),
+            }];
+            match apply::apply(&mut self.doc.view(), &ops, &|_| true) {
+                Ok(applied) => {
+                    let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                    // Number 0: not one of the member's own, so their
+                    // editor doesn't take it for a confirmation.
+                    out.extend(self.commit(who, 0, format!("Edit {name}"), applied));
+                }
+                Err(reason) => {
+                    log::warn!("Collaborate: couldn't write `{path}` back: {reason}");
+                }
+            }
+        }
+        if wrote {
+            self.save_docs();
+        }
+        out
+    }
+
+    /// Keeps each live document that changed beside the journal.
+    fn save_docs(&mut self) {
+        let Some(journal) = &self.journal else {
+            return;
+        };
+        for (path, open) in &mut self.live {
+            if !open.unsaved {
+                continue;
+            }
+            let saved = live::Saved {
+                path: path.clone(),
+                origin: open.origin,
+                file_at: open.file_at,
+                editor: open.editor,
+                state: open.doc.state(),
+            };
+            match journal.save_doc(&saved) {
+                Ok(()) => open.unsaved = false,
+                Err(error) => log::error!("Collaborate: couldn't keep `{path}`: {error}"),
+            }
+        }
+    }
+
+    /// A live document an earlier run kept: this run carries on with it.
+    /// When its file is as it was, typing not written yet is written soon;
+    /// when the file was saved some other way since, the document takes
+    /// the file's text. One whose file is gone is dropped.
+    fn carry_on_doc(&mut self, saved: live::Saved) {
+        let Some(&file) = self.doc.files.get(&saved.path) else {
+            return;
+        };
+        let doc = match LiveDoc::from_state(&saved.state) {
+            Ok(doc) => doc,
+            Err(error) => {
+                log::warn!(
+                    "Collaborate: `{}` kept from the last run didn't read: {error}",
+                    saved.path
+                );
+                return;
+            }
+        };
+        let mut open = HostDoc {
+            doc,
+            origin: saved.origin,
+            unwritten: None,
+            editor: saved.editor,
+            file_at: Some(file),
+            unsaved: false,
+        };
+        if saved.file_at == Some(file) {
+            if FileHash::of(open.doc.text().as_bytes()) != file {
+                open.unwritten = Some((self.clock, saved.editor));
+            }
+        } else if let Some(text) = self.file_text(&saved.path) {
+            open.unsaved = open.doc.set_text(&text).is_some();
+        }
+        self.live.insert(saved.path, open);
+    }
+
+    /// Writes every live document with changes back to its file now (on
+    /// save, and before the session ends).
+    pub fn write_back_now(&mut self) -> Vec<Outgoing> {
+        let now = self.clock;
+        self.write_back(now, true)
+    }
+
+    /// The text of the open live document at `path` (tests, the server's
+    /// status).
+    pub fn doc_text(&self, path: &str) -> Option<String> {
+        self.live.get(path).map(|open| open.doc.text())
     }
 
     fn refuse(&mut self, member: MemberId, client_seq: u64, reason: Refusal) -> Vec<Outgoing> {

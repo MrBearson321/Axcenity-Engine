@@ -118,6 +118,12 @@ impl Net {
     /// `axcenity-collab` does: the recovered World, the journal discarded,
     /// then a new journal.
     pub fn crash_host(&mut self, project: &std::path::Path) {
+        self.crash_host_into(project, Host::new);
+    }
+
+    /// [`Net::crash_host`], with the new run made by `make` from the
+    /// recovered World (to give it the project's files as they are now).
+    pub fn crash_host_into(&mut self, project: &std::path::Path, make: impl FnOnce(World) -> Host) {
         let roles: Vec<Role> = (0..self.clients.len())
             .map(|i| self.host.role(member(i)).expect("a member"))
             .collect();
@@ -131,7 +137,7 @@ impl Net {
             .expect("the journal reads")
             .expect("there's a journal");
         crate::journal::discard(project).expect("discarded");
-        self.host = Host::new(recovered.world);
+        self.host = make(recovered.world);
         for (i, role) in roles.into_iter().enumerate() {
             self.host.add_member(member(i), role);
         }

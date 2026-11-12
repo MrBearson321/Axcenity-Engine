@@ -36,6 +36,7 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | Serialization | `serde` 1, `serde_json` 1 | everywhere | MIT/Apache | |
 | Downloads | `ureq` 3 (rustls) | toolbox, editor | MIT/Apache | Not in the player |
 | Team Create transport | `tungstenite` 0.28, `rustls` 0.23 (ring, TLS 1.3), `rcgen` 0.14, `ring` 0.17 (Ed25519 keys) | collab | MIT/Apache; rustls also ISC; ring Apache-2.0 AND ISC | Synchronous, one thread per connection |
+| Collaborate live scripts | `yrs` 0.28 (with `sync`; brings `arc-swap`, `dashmap`, `smallstr`) | collab | MIT (`yrs`); MIT or Apache-2.0 | A text CRDT for scripts and stylesheets typed in together (C7, ADR-0021) |
 | Utilities | `anyhow`, `thiserror` 2, `bytemuck`, `log`, `env_logger`, `pollster`, `regex`, `memory-stats` 1.2 | various | MIT/Apache | |
 | MCP (editor only) | `rmcp` 3.9 (server, stdio), `tokio` 1.53 (rt, sync, io) | mcp | MIT/Apache | Never in the player or server |
 | Toolbox (editor only) | `rusqlite` 0.41 (bundled SQLite), `md-5` 0.11 | toolbox | MIT | `metadata.db` |

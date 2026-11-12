@@ -511,6 +511,12 @@ impl EditorApp {
         match on_disk {
             None if had_changes => tab.disk = Disk::Deleted,
             None => self.tabs.close(path),
+            // A live tab (C7) shows the session's document; its file is
+            // that document written back, so only `saved` follows it.
+            Some(source) if tab.live => {
+                tab.saved = source.to_string();
+                tab.disk = Disk::Same;
+            }
             Some(source) => {
                 tab.saved = source.to_string();
                 if had_changes && tab.text != source {

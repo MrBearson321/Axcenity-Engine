@@ -211,6 +211,10 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 ring = "0.17"
 tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+# Collaborate's live scripts and stylesheets (C7, ADR-0021): a text CRDT,
+# the Rust port of Yjs (MIT). Brings arc-swap, dashmap and smallstr (MIT OR
+# Apache-2.0); the rest of its tree was already here.
+yrs = { version = "0.28", features = ["sync"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 # The Toolbox's metadata database (`metadata.db` in the central asset
 # directory, `crates/toolbox`, editor only). `bundled` builds SQLite with `cc`

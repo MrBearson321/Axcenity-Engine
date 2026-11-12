@@ -86,6 +86,15 @@ pub struct ScriptTab {
     /// In a Collaborate session, who else is editing this file: the tab is
     /// read-only until they save or close it. The app sets it each frame.
     pub editing_elsewhere: Option<String>,
+    /// In a Collaborate session, the tab edits the file's live document
+    /// with everyone at once (C7): Undo and Redo take back only this
+    /// member's typing. The app sets it each frame.
+    pub live: bool,
+    /// Undo (true) or Redo (false) pressed in a live tab, for the app.
+    pub live_undo: Option<bool>,
+    /// The span others changed, as characters: `start`, the old end and the
+    /// new end, so the cursor stays on the text it was on.
+    remote_span: Option<(usize, usize, usize)>,
 }
 
 impl ScriptTab {
@@ -110,6 +119,17 @@ impl ScriptTab {
     #[cfg(test)]
     pub fn go_to_line(&self) -> Option<usize> {
         self.go_to_line
+    }
+
+    /// Others changed the live document: the tab shows `text` now, with
+    /// the cursor kept where it was in the text around it.
+    pub fn take_remote_text(&mut self, text: String) {
+        if text == self.text {
+            return;
+        }
+        self.remote_span = Some(changed_chars(&self.text, &text));
+        self.text = text;
+        self.highlighted = None;
     }
 
     /// The text was written to the file: no unsaved changes now.
@@ -168,6 +188,9 @@ impl ScriptTabs {
             assist: Assist::default(),
             problems: Vec::new(),
             editing_elsewhere: None,
+            live: false,
+            live_undo: None,
+            remote_span: None,
         });
         self.next_id += 1;
         self.tabs.len() - 1
@@ -471,6 +494,52 @@ pub fn mode_bar(ui: &mut egui::Ui, view: ScriptView, enabled: bool) -> Option<Sc
     switch
 }
 
+/// Moves the cursor of the text box `id` past a span others changed:
+/// `(start, old_end, new_end)` in characters. A cursor after the span moves
+/// by its change in length; one inside it goes to its new end.
+fn keep_cursor(
+    ctx: &egui::Context,
+    id: egui::Id,
+    (start, old_end, new_end): (usize, usize, usize),
+) {
+    let Some(mut state) = egui::TextEdit::load_state(ctx, id) else {
+        return;
+    };
+    let Some(range) = state.cursor.char_range() else {
+        return;
+    };
+    let shift = |cursor: egui::text::CCursor| {
+        let index = cursor.index.0;
+        let moved = if index <= start {
+            index
+        } else if index >= old_end {
+            index - old_end + new_end
+        } else {
+            new_end
+        };
+        egui::text::CCursor::new(moved)
+    };
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::two(
+            shift(range.secondary),
+            shift(range.primary),
+        )));
+    state.store(ctx, id);
+}
+
+/// The span of `old` that differs from `new`, in characters: `start`, its
+/// end in `old` and its end in `new`.
+pub fn changed_chars(old: &str, new: &str) -> (usize, usize, usize) {
+    let (start, old_end, new_end) = axcenity_collab::live::changed_span(old, new);
+    let start_chars = old[..start].chars().count();
+    (
+        start_chars,
+        start_chars + old[start..old_end].chars().count(),
+        start_chars + new[start..new_end].chars().count(),
+    )
+}
+
 /// The ID of the code editor's text box for the script at `path`. egui
 /// keeps the cursor and scroll position under it.
 pub fn editor_id(path: &str) -> egui::Id {
@@ -524,6 +593,29 @@ fn code_editor(
                 // The list's keys are taken before the text box sees them.
                 let focused = !stylesheet && ui.memory(|memory| memory.has_focus(id));
                 let keys = tab.assist.take_keys(ui, focused);
+                if let Some(span) = tab.remote_span.take() {
+                    keep_cursor(ui.ctx(), id, span);
+                }
+                // A live tab's Undo and Redo go to its live document, which
+                // takes back only this member's typing.
+                if tab.live && ui.memory(|memory| memory.has_focus(id)) {
+                    tab.live_undo = ui
+                        .input_mut(|input| {
+                            let redo = input.consume_key(
+                                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                                egui::Key::Z,
+                            ) || input
+                                .consume_key(egui::Modifiers::COMMAND, egui::Key::Y);
+                            if redo {
+                                Some(false)
+                            } else if input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z) {
+                                Some(true)
+                            } else {
+                                None
+                            }
+                        })
+                        .or(tab.live_undo);
+                }
                 let output = egui::TextEdit::multiline(&mut tab.text)
                     .id(id)
                     .interactive(tab.editing_elsewhere.is_none())
@@ -1134,6 +1226,33 @@ mod tests {
             tabs.breakpoints().is_empty(),
             "no empty entries left behind"
         );
+    }
+
+    #[test]
+    fn others_typing_keeps_the_cursor_on_its_text() {
+        let path = "scripts/live.server.lua";
+        let mut tabs = ScriptTabs::default();
+        tabs.open(path, "local a = 1\nlocal b = 2\n", Some(2));
+        let ctx = theme::test_context();
+        frame(&ctx, &mut tabs);
+        frame(&ctx, &mut tabs);
+        let cursor = |ctx: &egui::Context| {
+            let state = egui::TextEdit::load_state(ctx, editor_id(path)).unwrap();
+            state.cursor.char_range().unwrap().primary.index.0
+        };
+        assert_eq!(cursor(&ctx), 12, "the start of line 2");
+        // Someone types above the cursor: it moves down with its line.
+        let tab = tabs.get_mut(path).unwrap();
+        tab.take_remote_text("-- é☕\nlocal a = 1\nlocal b = 2\n".into());
+        frame(&ctx, &mut tabs);
+        assert_eq!(cursor(&ctx), 18);
+        // Below it: it stays.
+        let tab = tabs.get_mut(path).unwrap();
+        tab.take_remote_text("-- é☕\nlocal a = 1\nlocal b = 2\nprint(b)\n".into());
+        frame(&ctx, &mut tabs);
+        assert_eq!(cursor(&ctx), 18);
+        assert_eq!(changed_chars("abc", "abXc"), (2, 2, 3));
+        assert_eq!(changed_chars("aaa", "aa"), (2, 3, 2));
     }
 
     #[test]
