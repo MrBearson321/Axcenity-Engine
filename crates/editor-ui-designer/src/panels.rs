@@ -17,7 +17,7 @@ use super::{
     CLICK_INSERT_AT, DesignerAction, DesignerScene, PALETTE, PaletteItem, UiDesigner,
     anchor_action, container_for, hierarchy, reset_anchor_action,
 };
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::responsive;
 use crate::style_panel;
 use crate::theme;
@@ -539,7 +539,7 @@ fn look_section(
                 continue;
             };
             ui.label(label).on_hover_text(tip);
-            if let Some(value) = crate::properties::transparency_slider(ui, value) {
+            if let Some(value) = crate::widgets::transparency_slider(ui, value) {
                 actions.push(DesignerAction::Edit(
                     id,
                     Edit::Property(name, Value::Number(value)),

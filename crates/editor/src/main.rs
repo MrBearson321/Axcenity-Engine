@@ -19,6 +19,7 @@ use axcenity_editor_benchmark as graphics_benchmark;
 use axcenity_editor_model_studio as model_studio;
 use axcenity_editor_node_graph as node_graph;
 use axcenity_editor_toolbox as toolbox_panel;
+use axcenity_editor_ui_designer::{self as ui_designer, style_panel, ui_handles};
 // The viewport tools, shared with the studios, under their old module names.
 use axcenity_editor_tools::{gizmo, props, shortcuts, snapping, tree};
 
@@ -75,7 +76,6 @@ mod side_warnings;
 mod spawning;
 mod splines;
 mod start;
-mod style_panel;
 mod surface;
 mod tags;
 mod terrain_studio;
@@ -84,8 +84,6 @@ mod thumbnail;
 mod toast;
 #[cfg(test)]
 mod ui_cost_tests;
-mod ui_designer;
-mod ui_handles;
 mod version_explorer;
 mod viewport;
 mod watcher;

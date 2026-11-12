@@ -8,8 +8,8 @@ use axcenity_core::{InstanceId, Value};
 use eframe::egui;
 
 use super::{DesignerAction, DesignerScene};
-use crate::asset_browser::{AssetKind, AssetPayload, TexturePick};
-use crate::properties::Edit;
+use crate::asset_entry::{AssetKind, AssetPayload, TexturePick};
+use crate::edit::Edit;
 use crate::theme::{self, icons};
 
 /// A thumbnail's side in the picker's grid, in points.

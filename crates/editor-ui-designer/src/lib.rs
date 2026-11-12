@@ -33,18 +33,18 @@
 mod accessibility;
 mod anchor_handles;
 mod anchors;
-pub(crate) mod arrange;
+pub mod arrange;
 mod artboard;
-pub(crate) use artboard::sketch;
-pub(crate) mod bevel;
+pub use artboard::sketch;
+pub mod bevel;
 mod event_graph;
 mod fold;
 mod group;
-pub(crate) mod image;
-pub(crate) mod links;
+pub mod image;
+pub mod links;
 mod navigation;
-pub(crate) mod order;
-pub(crate) mod pages;
+pub mod order;
+pub mod pages;
 mod panels;
 mod rich_text;
 mod rotate;
@@ -53,16 +53,21 @@ mod selection;
 mod slice;
 mod states;
 mod strings;
-pub(crate) mod style_sets;
+pub mod style_sets;
 mod text_toolbar;
 mod widget_section;
+
+// The style panel and the on-screen handles, which the editor also uses
+// (the Properties panel's Style section, the viewport's UI handles).
+pub mod style_panel;
+pub mod ui_handles;
 
 pub use anchors::Pin;
 pub use arrange::UiClipboard;
 pub use event_graph::{DesignerTab, GraphPane, LivePreview};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use fold::Section;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use panels::sections;
 pub use states::state_selector;
 pub use text_toolbar::Toggle;
@@ -75,16 +80,19 @@ use axcenity_ui::{Stylesheet, UiLayout, UiState};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use crate::animation::preview::Canvas;
-use crate::node_graph::GraphView;
-use crate::properties::Edit;
-use crate::responsive;
-use crate::style_panel::StyleEdit;
-use crate::theme::{self, icons};
-use crate::tree::Insertable;
-use crate::ui_handles::{SnapGuide, UiDrag, UiDragEdit};
-use crate::widgets;
+// The editor kit's, tools' and node-graph modules under the names this code
+// used inside the editor, so `crate::theme`, `crate::shortcuts` and so on
+// work here too.
+use axcenity_editor_kit::theme::{self, icons};
+use axcenity_editor_kit::{color_palette, css_syntax, responsive, widgets};
+use axcenity_editor_node_graph::{self as node_graph, GraphView};
+use axcenity_editor_tools::edit::{self, Edit};
+use axcenity_editor_tools::preview::{self, Canvas};
+use axcenity_editor_tools::tree::{self, Insertable};
+use axcenity_editor_tools::{animatable, asset_entry, shortcuts};
 use group::GroupDrag;
+use style_panel::StyleEdit;
+use ui_handles::{SnapGuide, UiDrag, UiDragEdit};
 
 /// Screens to design at, or preview on: name, width and height.
 pub const SCREENS: [(&str, u32, u32); 8] = [
@@ -366,7 +374,7 @@ pub struct DesignerScene<'a> {
     pub assets: &'a Assets,
     /// The project's pictures, for the inspector's Image picker (empty
     /// when the selected element has no `Image`).
-    pub images: &'a [crate::asset_browser::TexturePick],
+    pub images: &'a [crate::asset_entry::TexturePick],
     /// The project's Lua scripts as the editor has them, for the
     /// inspector's Code & animation (`links.rs`).
     pub scripts: &'a [links::ScriptText<'a>],
@@ -839,39 +847,39 @@ fn scale_mode(world: &World, gui: InstanceId) -> &'static str {
 
 impl UiDesigner {
     /// The ScreenGui on the artboard.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn gui(&self) -> Option<InstanceId> {
         self.gui
     }
 
     /// The canvas inside the rulers, as drawn last, in points.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn canvas(&self) -> Option<egui::Rect> {
         self.canvas_rect
     }
 
     /// Where the artboard was drawn last, in points, and the zoom.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn board(&self) -> Option<(egui::Rect, f32)> {
         Some((self.board?, self.zoom))
     }
 
     /// Previews the ScreenGui on a `width`×`height` screen (`None` for its
     /// design size).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn preview_at(&mut self, screen: Option<(u32, u32)>) {
         self.preview = screen;
     }
 
     /// How far the artboard shows a ScrollingFrame scrolled, when it's
     /// been scrolled there.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn scrolled(&self, id: InstanceId) -> Option<[f32; 2]> {
         self.scrolled.get(&id).copied()
     }
 
     /// Picks the states editor's tab and its eye, as clicking them does.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn show_in_state(&mut self, state: UiState, show: bool) {
         self.state = state;
         self.show_state = show;
@@ -952,7 +960,7 @@ impl UiDesigner {
     }
 
     /// Draws the designer and returns what was done in it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,

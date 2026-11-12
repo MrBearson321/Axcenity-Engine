@@ -13,7 +13,7 @@ use eframe::egui;
 
 use super::text_toolbar::{css_color, number};
 use super::{DesignerAction, DesignerScene, UiDesigner, state_style_action};
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::responsive;
 use crate::style_panel;
 use crate::theme::icons;

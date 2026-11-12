@@ -10,10 +10,10 @@ use eframe::egui;
 
 use super::arrange::{self, Align};
 use super::{DesignerAction, DesignerScene, UiDesigner, container_for};
-use crate::explorer;
 use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets;
+use axcenity_editor_tools::selection::update_selection;
 
 /// A box being dragged on empty artboard to select what's inside it.
 #[derive(Clone, Debug)]
@@ -120,7 +120,7 @@ impl UiDesigner {
         order: Option<&[InstanceId]>,
     ) -> Vec<InstanceId> {
         let mut selection = self.chosen(scene, gui);
-        explorer::update_selection(&mut selection, Some(id), modifiers, order, false);
+        update_selection(&mut selection, Some(id), modifiers, order, false);
         selection.retain(|&chosen| chosen != gui);
         selection
     }

@@ -21,7 +21,7 @@ use axcenity_core::{ClassName, InstanceId, Value, World};
 use eframe::egui;
 
 use super::{DesignerAction, DesignerScene};
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::theme::{self, icons};
 use crate::widgets;
 
@@ -163,7 +163,7 @@ pub fn animations_of(world: &World, id: InstanceId) -> Vec<InstanceId> {
         .copied()
         .filter(|&child| is(child, ClassName::Animation))
         .collect();
-    if let Some(animator) = crate::animation::animator_of(world, id) {
+    if let Some(animator) = crate::animatable::animator_of(world, id) {
         animations.extend(
             children(animator)
                 .iter()
@@ -321,7 +321,7 @@ pub(super) fn links_section(
             actions.push(DesignerAction::Edit(animation, Edit::OpenClip));
         }
     }
-    if crate::animation::can_animate(instance.class()) {
+    if crate::animatable::can_animate(instance.class()) {
         let label = if own.is_empty() {
             format!("Animate {}", instance.name())
         } else {
