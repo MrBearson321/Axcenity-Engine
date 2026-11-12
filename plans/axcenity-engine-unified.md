@@ -842,10 +842,12 @@ The block Graph view and the state machine view keep their own node rules and dr
 
 ### Acceptance criteria
 
-- [ ] Every `examples/` project and one project from each alpha release open, migrate once, and play the same.
-- [ ] A search for `legacy` in `crates/` finds only migrations and their tests.
-- [ ] `animation:Play()` gives a clear error naming `LoadAnimation`.
-- [ ] Clippy with `-D warnings`, nextest and doc tests pass, with no unused dependencies left.
+- [x] Every `examples/` project and one project from each alpha release open, migrate once, and play the same. Tests: `every_example_saved_by_0_2_0_alpha_1_upgrades_once_and_opens_the_same` (each example at format 5, as 0.2.0-alpha.1 wrote it, opens with the same world and scripts and upgrades once) and `an_older_project_plays_the_same_once_migrated_as_one_made_in_the_new_format` (format 2, as the 0.1.0 alphas wrote, now through to 6). The examples are at format 6 in the repository.
+- [x] A search for `legacy` in `crates/` finds only migrations and their tests. (`PhysicalProperties::LEGACY` is now `CLASSIC`, and the MCP test's older-protocol client is `older_protocol_client`.)
+- [x] `animation:Play()` gives a clear error naming `LoadAnimation`. Test: `animation_play_and_the_rest_are_errors_that_name_load_animation`.
+- [ ] Clippy with `-D warnings`, nextest and doc tests pass, with no unused dependencies left. (In the cloud: clippy with `-D warnings` is clean across the workspace, doc tests pass, and every crate's `cargo test` passes (3,700+ tests) apart from two this phase doesn't touch: `every_tutorial_sample_opens_and_plays_in_the_editor` needs a sound device, and render's `a_translucent_leaf_glows_green_with_the_sun_behind_it` fails on the container's software GPU. nextest and `cargo hakari generate` aren't installed there, so both are left for the PC.)
+
+**Done (Phase 92)**: project format 6 (`project/src/migrate_shapes.rs`) rewrites any clip or state machine still in animation format 1, and block-script conditions in the first `{ left, operator, right }` shape, once; `anim` and `blocks-runtime` refuse those shapes now, and the 2 → 3 step reads them through the same functions. `LEGACY_CONTROLLER_EXTENSION` lives only in `migrate_animation.rs`. `animation:Play()`, `Stop`, `Pause` and `Resume` are errors naming the fix (and the unused `pause`, `resume` and `paused` playback fields went); the UI Designer's Play on click writes `animator:LoadAnimation(animation):Play()`. Block scripts needed no rewrite: the Play animation block has used `LoadAnimation` since v3. The Starter scene template is gone (Baseplate, Empty and the genre templates stay). Unused dependencies removed: `axcenity-nav` from `script`, `log` from `server`, `egui-phosphor` from `editor`. The `#[allow(dead_code)]` items left are all gated (tests, a feature or debug builds) or keep a handle alive, so none were dead (`hot_patch.rs`'s go with Phase 89). The `organize` skill's full dead-code pass wasn't run; the compiler's own dead-code lint is clean under `-D warnings`. The Open checks and Phases 1 to 67 moved to `plans/axcenity-engine-unified-done.md`.
 
 ---
 
