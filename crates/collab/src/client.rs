@@ -176,6 +176,8 @@ pub struct Client {
     chatted: VecDeque<std::time::Instant>,
     /// The session's checkpoints, newest first (C9).
     checkpoints: Vec<crate::history::Checkpoint>,
+    /// The host's audit log as last sent (C10; the Owner's).
+    audit: Vec<crate::audit::AuditEntry>,
 }
 
 impl Client {
@@ -215,6 +217,7 @@ impl Client {
             new_chat: 0,
             chatted: VecDeque::new(),
             checkpoints: Vec::new(),
+            audit: Vec::new(),
         }
     }
 
@@ -378,6 +381,21 @@ impl Client {
         }
         self.outbox.push(ToHost::Restore(id));
         Ok(())
+    }
+
+    /// Asks the host for its audit log (the Owner only); it comes back
+    /// through [`Client::audit_log`].
+    pub fn ask_for_audit_log(&mut self) -> bool {
+        if !self.is_online() || self.role != Role::Owner {
+            return false;
+        }
+        self.outbox.push(ToHost::AuditLog);
+        true
+    }
+
+    /// The host's audit log as last asked for, oldest first.
+    pub fn audit_log(&self) -> &[crate::audit::AuditEntry] {
+        &self.audit
     }
 
     /// The session's chat, oldest first.
@@ -1123,6 +1141,7 @@ impl Client {
             }
             ToClient::Checkpoints(list) => self.checkpoints = list,
             ToClient::HistoryNotice(text) => self.notices.push(Notice::History(text)),
+            ToClient::AuditLog(entries) => self.audit = entries,
             ToClient::DocRefused { path, reason } => {
                 if self.live.contains_key(&path) {
                     self.live.insert(path.clone(), ClientDoc::new());

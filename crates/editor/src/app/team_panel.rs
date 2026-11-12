@@ -161,6 +161,8 @@ enum Action {
     Chat(super::team_chat::ChatAction),
     /// Something in the History section (C9).
     History(super::team_history::HistoryAction),
+    /// Ask the host for its audit log (C10).
+    Audit,
 }
 
 /// The panel buttons tests press.
@@ -569,6 +571,11 @@ impl EditorApp {
             action = Some(Action::History(history));
         }
 
+        // Audit log (C10), for the Owner.
+        if super::team_audit::audit_section(ui, team) {
+            action = Some(Action::Audit);
+        }
+
         // Invitations.
         if hosting {
             let invite = team.invite().map(str::to_owned);
@@ -703,6 +710,7 @@ impl EditorApp {
                 self.select_from_viewport(Some(id));
             }
             Action::History(history) => self.team_history_action(history),
+            Action::Audit => self.ask_for_team_audit(),
         }
     }
 

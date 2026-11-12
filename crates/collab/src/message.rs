@@ -84,6 +84,8 @@ pub enum ToHost {
     /// Asks the host to put the session back as checkpoint `id` was, for
     /// everyone (the Owner only).
     Restore(u64),
+    /// Asks for the host's audit log (C10; the Owner only).
+    AuditLog,
 }
 
 /// From the host to a client.
@@ -184,4 +186,6 @@ pub enum ToClient {
     /// About a checkpoint or restore this member asked for: why it didn't
     /// happen, or what a restore couldn't put back.
     HistoryNotice(String),
+    /// The host's audit log, oldest first (C10), to the Owner who asked.
+    AuditLog(Vec<crate::audit::AuditEntry>),
 }

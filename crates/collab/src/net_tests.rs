@@ -718,3 +718,94 @@ fn a_member_flooding_the_host_is_cut_off_and_comes_back() {
     converge(&hosting, &mut [&mut owner, &mut sam]);
     assert!(part_named(&owner.world, "After"));
 }
+
+#[test]
+fn an_address_that_keeps_failing_to_join_is_turned_away_for_a_while() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, cert) = host(&owner_id, None);
+    let address = hosting.lock().loopback();
+    let fp = cert.fingerprint();
+    for _ in 0..crate::limits::FAILURES_MOST {
+        let eve = Arc::new(Identity::new("Eve", [0; 3]));
+        let mut guess = Member::new(Remote::join(address.clone(), fp, None, eve));
+        assert!(refused(&mut guess).contains("ask its owner for an invite"));
+    }
+    // From that address, even the owner is closed before signing in now.
+    let mut owner = Member::owner(&hosting, &cert, owner_id);
+    until(&mut [&mut owner], "being turned away", |m| m[0].lost > 0);
+    assert!(owner.refused.is_none() && owner.client.is_none());
+    let log = hosting.lock().host().audit_log();
+    assert!(
+        log.iter()
+            .any(|e| e.text.contains("turned away for a minute")),
+        "{log:#?}"
+    );
+    assert_eq!(
+        log.iter()
+            .filter(|e| e.kind == crate::audit::AuditKind::Refused)
+            .count(),
+        crate::limits::FAILURES_MOST as usize + 1
+    );
+}
+
+#[test]
+fn a_replayed_sign_in_is_refused() {
+    use crate::handshake::{Gate, GateStep, Knock, KnockStep};
+    let sam = Identity::new("Sam", [1, 2, 3]);
+    let eve = Identity::new("Eve", [0; 3]);
+    let cert = Fingerprint([7; 32]);
+    let versions = Versions::this();
+    let mut access = Access::owned_by(Identity::new("Paul", [0; 3]).public_key(), "Paul");
+    let secret = access.invite(Role::Editor, 60, access::now());
+
+    // Sam signs in with the invite; what he sent is recorded.
+    let (mut knock, hello) = Knock::new(&sam, cert, Some(secret), &versions);
+    let mut gate = Gate::new(cert, versions.clone());
+    let GateStep::Reply(challenge) = gate.receive(&hello, &mut access, access::now()) else {
+        panic!("expected a challenge")
+    };
+    let KnockStep::Reply(proof) = knock.receive(&challenge, &sam) else {
+        panic!("expected a proof")
+    };
+    assert!(matches!(
+        gate.receive(&proof, &mut access, access::now()),
+        GateStep::Admit { .. }
+    ));
+    let refusal = |step: GateStep| match step {
+        GateStep::Refuse { reason, .. } => reason,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    // The same proof again on that connection.
+    let reason = refusal(gate.receive(&proof, &mut access, access::now()));
+    assert!(reason.contains("isn't how joining"), "{reason}");
+    // On a new connection: its challenge is new, so the old proof fails.
+    let mut again = Gate::new(cert, versions.clone());
+    assert!(matches!(
+        again.receive(&hello, &mut access, access::now()),
+        GateStep::Reply(_)
+    ));
+    let reason = refusal(again.receive(&proof, &mut access, access::now()));
+    assert!(reason.contains("key didn't match"), "{reason}");
+    // Someone else with the same (used) invite.
+    let (mut knock, hello) = Knock::new(&eve, cert, Some(secret), &versions);
+    let mut gate = Gate::new(cert, versions.clone());
+    let GateStep::Reply(challenge) = gate.receive(&hello, &mut access, access::now()) else {
+        panic!("expected a challenge")
+    };
+    let KnockStep::Reply(proof) = knock.receive(&challenge, &eve) else {
+        panic!("expected a proof")
+    };
+    let reason = refusal(gate.receive(&proof, &mut access, access::now()));
+    assert!(reason.contains("already used"), "{reason}");
+    // A proof made for another host's certificate doesn't work here.
+    let (mut knock, hello) = Knock::new(&sam, Fingerprint([8; 32]), None, &versions);
+    let mut gate = Gate::new(cert, versions);
+    let GateStep::Reply(challenge) = gate.receive(&hello, &mut access, access::now()) else {
+        panic!("expected a challenge")
+    };
+    let KnockStep::Reply(proof) = knock.receive(&challenge, &sam) else {
+        panic!("expected a proof")
+    };
+    let reason = refusal(gate.receive(&proof, &mut access, access::now()));
+    assert!(reason.contains("key didn't match"), "{reason}");
+}

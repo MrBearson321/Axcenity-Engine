@@ -33,6 +33,7 @@
 
 pub mod access;
 pub mod apply;
+pub mod audit;
 pub mod capture;
 pub mod client;
 pub mod files;
@@ -43,6 +44,7 @@ pub mod hosted;
 pub mod identity;
 pub mod ids;
 pub mod journal;
+pub mod limits;
 pub mod live;
 pub mod message;
 pub mod mirror;
@@ -75,11 +77,15 @@ mod presence_tests;
 #[cfg(test)]
 mod rejoin_tests;
 #[cfg(test)]
+mod security_tests;
+#[cfg(test)]
 mod tailscale_tests;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wire_fuzz_tests;
 
 pub use apply::{Doc, Note, Refusal};
 pub use client::{Client, Notice};

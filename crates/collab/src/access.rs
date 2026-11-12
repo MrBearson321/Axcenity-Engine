@@ -160,6 +160,11 @@ pub struct Member {
     #[serde(default = "grey")]
     pub color: [u8; 3],
     pub role: Role,
+    /// The account this member's key belongs to, once an account provider
+    /// exists (design §6; nothing sets it yet). Many keys may name one
+    /// account; a key with none is a member by its key alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 fn grey() -> [u8; 3] {
@@ -211,6 +216,7 @@ impl Access {
             name,
             color,
             role,
+            account: None,
         };
         self.next_member += 1;
         self.members.push(member.clone());
@@ -253,6 +259,7 @@ impl Access {
         invite: Option<[u8; 16]>,
         now: u64,
     ) -> Result<Member, AccessRefusal> {
+        let name = &tidy_name(name);
         if let Some(member) = self.members.iter_mut().find(|m| m.key == key) {
             member.name = name.to_owned();
             member.color = color;
@@ -298,6 +305,22 @@ impl Access {
     pub fn load(path: &Path) -> std::io::Result<Access> {
         let text = std::fs::read_to_string(path)?;
         serde_json::from_str(&text).map_err(std::io::Error::other)
+    }
+}
+
+/// A joiner's name as the host keeps and shows it: one line, at most 64
+/// characters, never empty.
+pub fn tidy_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(64)
+        .collect();
+    let name = name.trim();
+    if name.is_empty() {
+        "Someone".to_owned()
+    } else {
+        name.to_owned()
     }
 }
 
@@ -361,5 +384,29 @@ mod link_tests {
         assert_eq!(Invite::parse(&control).unwrap().name, None);
         let long = format!("{}&name={}", plain.link(), "x".repeat(500));
         assert_eq!(Invite::parse(&long).unwrap().name.unwrap().len(), 80);
+    }
+
+    #[test]
+    fn members_files_without_accounts_still_read_and_names_are_one_line() {
+        let key = crate::identity::Identity::new("Sam", [1, 2, 3]).public_key();
+        let mut access = Access::owned_by(key, "Sam");
+        let json = serde_json::to_string(&access).unwrap();
+        // Nothing sets an account yet, so none is written.
+        assert!(!json.contains("account"), "{json}");
+        let back: Access = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.members(), access.members());
+        // A file from a later version that links an account reads too.
+        let linked = json.replace("\"role\":", "\"account\":\"sam@example\",\"role\":");
+        let back: Access = serde_json::from_str(&linked).unwrap();
+        assert_eq!(back.members()[0].account.as_deref(), Some("sam@example"));
+
+        let secret = access.invite(Role::Editor, 60, now());
+        let other = crate::identity::Identity::new("x", [0; 3]).public_key();
+        let joined = access
+            .admit(other, "Eve\nOwner joined\u{7}", [0; 3], Some(secret), now())
+            .unwrap();
+        assert_eq!(joined.name, "Eve Owner joined");
+        assert_eq!(tidy_name("  \n "), "Someone");
+        assert_eq!(tidy_name(&"x".repeat(200)).len(), 64);
     }
 }
