@@ -17,7 +17,7 @@
 //! `net` uses this to send a player only what's near them and `scene` to
 //! draw and upload only what's near the camera.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::spline;
 use crate::{ClassName, EnumItem, InstanceId, Value, Vector3, World};
@@ -97,6 +97,10 @@ pub struct Unit {
     pub tops: Vec<InstanceId>,
     min: Vector3,
     max: Vector3,
+    /// The members' revisions added up when the box was last measured:
+    /// the same sum means none of them changed, so it isn't measured
+    /// again (a big world is nearly all still).
+    measured: Option<u64>,
 }
 
 impl Unit {
@@ -115,9 +119,15 @@ impl Unit {
 pub struct Partition {
     units: Vec<Unit>,
     /// Each member's unit.
-    unit_of: HashMap<InstanceId, usize>,
-    /// The world's structure version this was built from.
+    unit_of: FxHashMap<InstanceId, usize>,
+    /// Each unit's index by its root.
+    by_root: FxHashMap<InstanceId, usize>,
+    /// The Workspace's BaseParts in no unit, which are always there.
+    always: Vec<InstanceId>,
+    /// The Workspace's structure version this was built from.
     structure: Option<u64>,
+    /// The characters it was built with, which stream to everyone.
+    characters: Vec<InstanceId>,
     /// The unit whose box is measured next.
     next_bounds: usize,
 }
@@ -138,11 +148,14 @@ impl Partition {
     /// or out of the tree, and otherwise measures a share of the units'
     /// boxes again. Cheap enough for every frame.
     pub fn refresh(&mut self, world: &World) {
-        // The partition is the Workspace's, and whose characters are in it.
-        let version = world.structure_version_of(world.workspace())
-            + world.structure_version_of(world.players());
-        if self.structure != Some(version) {
+        // The partition is the Workspace's, and whose characters are in
+        // it: a change elsewhere (a player's GUI, ReplicatedStorage)
+        // doesn't split a big world again.
+        let version = world.structure_version_of(world.workspace());
+        let characters = characters(world);
+        if self.structure != Some(version) || self.characters != characters {
             self.structure = Some(version);
+            self.characters = characters;
             self.next_bounds = 0;
             self.rebuild(world);
             return;
@@ -160,14 +173,22 @@ impl Partition {
     fn rebuild(&mut self, world: &World) {
         self.units.clear();
         self.unit_of.clear();
-        let characters = characters(world);
-        collect(world, world.workspace(), &characters, &mut self.units);
+        self.by_root.clear();
+        collect(world, world.workspace(), &self.characters, &mut self.units);
         for (index, unit) in self.units.iter_mut().enumerate() {
             for &member in &unit.members {
                 self.unit_of.insert(member, index);
             }
+            self.by_root.insert(unit.root, index);
             measure(world, unit);
         }
+        self.always = world
+            .descendants_iter(world.workspace())
+            .filter(|id| {
+                !self.unit_of.contains_key(id)
+                    && world.get(*id).is_some_and(|i| i.class().is_base_part())
+            })
+            .collect();
     }
 
     pub fn units(&self) -> &[Unit] {
@@ -179,6 +200,17 @@ impl Partition {
     /// seen yet).
     pub fn unit_of(&self, id: InstanceId) -> Option<usize> {
         self.unit_of.get(&id).copied()
+    }
+
+    /// The index of the unit whose root (its loose part or Model) is `root`.
+    pub fn unit_rooted_at(&self, root: InstanceId) -> Option<usize> {
+        self.by_root.get(&root).copied()
+    }
+
+    /// The Workspace's BaseParts that load with no unit (always there),
+    /// in tree order, as of the last split.
+    pub fn always_there(&self) -> &[InstanceId] {
+        &self.always
     }
 
     /// Whether `id` loads and unloads with a unit.
@@ -247,6 +279,7 @@ fn collect(world: &World, parent: InstanceId, characters: &[InstanceId], units: 
                 tops: vec![child],
                 min: Vector3::default(),
                 max: Vector3::default(),
+                measured: None,
             });
         } else if is_model(class) {
             if characters.contains(&child) {
@@ -274,6 +307,7 @@ fn collect(world: &World, parent: InstanceId, characters: &[InstanceId], units: 
                 tops,
                 min: Vector3::default(),
                 max: Vector3::default(),
+                measured: None,
             });
         }
     }
@@ -303,6 +337,17 @@ fn tree_of(world: &World, id: InstanceId, with_root: bool) -> Vec<InstanceId> {
 
 /// Measures the box around a unit's parts.
 fn measure(world: &World, unit: &mut Unit) {
+    // Revisions only go up and the members stay the same until the next
+    // split, so an unchanged sum means nothing moved or resized.
+    let revisions = unit
+        .members
+        .iter()
+        .filter_map(|&member| world.get(member))
+        .fold(0u64, |sum, instance| sum.wrapping_add(instance.revision()));
+    if unit.measured == Some(revisions) {
+        return;
+    }
+    unit.measured = Some(revisions);
     let mut min = Vector3::new(f32::MAX, f32::MAX, f32::MAX);
     let mut max = Vector3::new(f32::MIN, f32::MIN, f32::MIN);
     let mut any = false;
@@ -484,6 +529,50 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_is_measured_again_only_when_a_part_in_it_changed() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let part = part_at(&mut world, workspace, 0.0);
+        let mut partition = Partition::new(&world);
+        let near = |partition: &Partition| partition.units()[0].distance(Vector3::default());
+        assert_eq!(near(&partition), 0.0);
+        // Unchanged: the box is kept as it was, round after round.
+        let before = partition.units()[0].clone();
+        for _ in 0..BOUNDS_ROUNDS {
+            partition.refresh(&world);
+        }
+        assert_eq!(partition.units()[0], before);
+        // Moved: within a round of refreshes the box follows it.
+        world
+            .set_property(
+                part,
+                "Position",
+                Value::Vector3(Vector3::new(500.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        for _ in 0..BOUNDS_ROUNDS {
+            partition.refresh(&world);
+        }
+        assert!(near(&partition) > 400.0);
+    }
+
+    #[test]
+    fn a_change_outside_the_workspace_keeps_the_split() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        part_at(&mut world, workspace, 0.0);
+        let mut partition = Partition::new(&world);
+        let structure = partition.structure;
+        let folder = world.create(ClassName::Folder).unwrap();
+        world
+            .set_parent(folder, Some(world.replicated_storage()))
+            .unwrap();
+        partition.refresh(&world);
+        assert_eq!(partition.structure, structure);
+        assert_eq!(partition.units().len(), 1);
+    }
+
+    #[test]
     fn distance_is_to_the_box() {
         let unit = Unit {
             root: InstanceId::from_bits(1),
@@ -492,6 +581,7 @@ mod tests {
             tops: Vec::new(),
             min: Vector3::new(0.0, 0.0, 0.0),
             max: Vector3::new(10.0, 10.0, 10.0),
+            measured: None,
         };
         assert_eq!(unit.distance(Vector3::new(5.0, 5.0, 5.0)), 0.0);
         assert_eq!(unit.distance(Vector3::new(13.0, 5.0, 5.0)), 3.0);

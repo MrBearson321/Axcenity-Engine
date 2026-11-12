@@ -23,6 +23,7 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 | Item | PR | Area | Headline (Measured) | Machine |
 |---|---|---|---|---|
 | Collaborate packing and the world load | C11 | Collaborate, project | S10k join message 953 → 82 KiB; `project::load` of S10k 5.66 → 0.19 s | Container |
+| Streaming world: only what changed | Phase 80 (unified plan) | Network, ownership | Server with 1 player: Network send 16.7 → 2.0 ms, frame 21.9 → 4.2 ms | Container |
 | DirectX 12 shader compiler and parallel pipelines | #172, #182 | Startup | Wet Patch assets loaded 11.4 → 2.25 s on DirectX 12 (Vulkan 0.98 s) | Desktop |
 | Render planning pool | #88 | Render | Unpinned Render step 6–18% less CPU (S10k 2.60 → 2.14 ms) | Desktop |
 | Physics own pool | #86, #93 | Physics | Unpinned S10k Physics 2.71 → 2.19 ms, frame 3.37 → 2.81 | Desktop |
@@ -72,6 +73,22 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 | **Hardware** | Container |
 | **Trade-offs** | A new dependency (zstd, BSD-3); the wire format number went up. Snapshot streaming and more presence coalescing were measured as not needed at S10k's size |
 | **Detail** | `docs/benchmarks.md`, "Collaborate on S10k (C11)"; `docs/research/collaborate.md` §9.6 |
+
+### Streaming world: read only what changed (2026-11-12)
+
+| | |
+|---|---|
+| **Roadmap item / PR** | Unified plan Phase 80 (the 4 × 4 km criterion), branch `phase80-streaming-bench` |
+| **Evidence** | Measured |
+| **Problem** | The streaming world (50,000 anchored parts, 1,000 crates, streaming on) cost the server 16.7 ms of Network send a frame with one joined player |
+| **Root cause** | Callgrind: `owned_parts` read every part's `Anchored` and regrouped assemblies every frame; SipHash on Instance IDs in the replicator, partition and player sets; unit boxes measured whether or not they moved; the always-there parts list walked the Workspace each tick; `Abilities::step` walked the Workspace; any tree change anywhere split the partition and rebuilt replication with B-trees of 51,000 IDs; a leaving unit was found by linear search |
+| **Solution** | Revision-keyed caches (ownership's parts, units' boxes), the Workspace moves log for ownership, Fx hash maps, the class index for abilities, partition keyed on the Workspace and the characters, units indexed by root |
+| **Affected components** | `crates/script/src/ownership.rs`, `crates/core/src/streaming.rs`, `crates/net/src/{replicate,streaming,motion}.rs`, `crates/gameplay/src/ability.rs` |
+| **Before → after** | Server medians: Network send 16.71 → 2.00–2.14 ms, Heartbeat 1.20 → 0.02, frame 21.86 → 4.20–4.47, worst 86 → 45 ms. Test runner frame 4.83 → 3.29 ms |
+| **Method** | `axcenity-server <streaming> --bench 600 --bench-clients 1` and `axcenity-test <streaming> --bench 600`, release, two runs after |
+| **Hardware** | Container |
+| **Trade-offs** | Ownership keeps a map of every part's revision (about 1 MB at 50,000 parts). A change to the Workspace's tree still splits the whole partition |
+| **Detail** | `docs/benchmarks.md`, "The streaming world (Phase 80)" |
 
 ### DirectX 12 startup (2026-11-11)
 

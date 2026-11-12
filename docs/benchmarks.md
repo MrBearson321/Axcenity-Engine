@@ -15,6 +15,16 @@ S10k is the standard measurement scene. `axcenity-test --make-s10k <folder>` wri
 
 The crowd scene measures the multithreaded frame (unified Phase 93). `axcenity-test --make-crowd <folder>` writes it (`testing/src/crowd.rs`): the graphics reference scene (`examples/hello-graphics`, its world and files) with **200 animated characters** (hello-animation's Noodle, each with an Animator, in a 20 × 10 grid behind the reference objects; `crowd.server.lua` gives each a Speed from 0 to 4, so their poses differ) and **2,000 physics bodies** (a 20 × 10 × 10 block of balls and blocks over the floor's far half; the same script lifts 100 back up every second). Run it like S10k (`--bench 600` on any host). To compare thread counts, run it with `AXCENITY_ANIM_THREADS=1 AXCENITY_PHYSICS_THREADS=1 AXCENITY_RENDER_THREADS=1` and then without them (or with 8): the Animation step is where posing across threads shows, and the editor's Profiler lists posing time per thread under **Posing by thread**.
 
+## The streaming world
+
+The streaming world measures Phase 80's frame budget: a 4 × 4 km map with world streaming on. `axcenity-test --make-streaming <folder>` writes it (`testing/src/streaming_world.rs`): **50,000 anchored parts** in Models of 8 (each Model a group in its own place, as in the player's `bench_50000_parts_streaming`), **64 ground tiles** of 500 studs, **1,000 loose crates** across the map (far physics puts them to sleep), `StreamingTargetRadius` 512 and a SpawnLocation in the middle. `tour.server.lua` moves every player's character to the next stop of a lap of the map every 5 seconds, asking for the region first with `RequestStreamAroundAsync`, so what each device has keeps changing. Run it like S10k; `--bench-clients <n>` on the server counts what streaming to `n` joined players costs, and the player's `--bench` is the host's own screen (meshes, chunks and far physics around the camera). Phase 80's criterion is the player, and the server with one joined player, inside 16.7 ms on the reference machine:
+
+```text
+cargo run --release -p axcenity-testing -- --make-streaming target/streaming
+cargo run --release -p axcenity-player  -- target/streaming --bench 600
+cargo run --release -p axcenity-server  -- target/streaming --bench 600 --bench-clients 1
+```
+
 ## Running it
 
 Build in release. Each host runs a 60-frame warm-up, then measures the frames asked for at a fixed 1/60 s of game time per frame, so every host does the same work per frame. It prints a table (mean, median, 95th percentile and worst time of each frame step) and one JSON line for tools.
@@ -622,6 +632,31 @@ These are on one computer. Over Tailscale the member also waits for the bytes: a
 **Idle.** With nothing changing, `team_frame` on the hosting editor costs a median of 12–19 µs and a mean of 48–57 µs a frame; on the member a median of 2–3 µs and a mean of 34–36 µs (300 frames 16 ms apart). Both are under the 0.1 ms goal. The mean is mostly one frame in 31: every 0.5 s each editor's folder is compared with the session's files (`Mirror::sync`, for saves made outside the editor), about 0.4 ms in the collab crate (0.2 ms of it listing and reading the length and time of S10k's 209 synced files) and about 1 ms in the editor frame. One member run had a single 26 ms frame among those (others' worst was 1.1–1.4 ms); it didn't repeat. In process, without the editor, an idle host tick is 59 ns and an idle member's capture 37 ns.
 
 **Presence and chat.** A busy member's presence (ten selected, the camera, a field being dragged, a caret in a script) is 125 bytes up and 126 down. Each editor sends at most 10 a second and only when it changed, the host drops one that didn't change, and each connection writes everything queued before one flush, so four busy members are about 19 KiB a second through the host (160 messages). Chat is held to 5 lines a second by the client and the host's budget. Nothing more to coalesce at this size.
+
+### The streaming world (Phase 80)
+
+The first run of the streaming world (`--make-streaming`) on the server with one joined player spent 16.7 ms a frame in Network send, the whole 60 fps budget on its own. Callgrind found per-frame passes over all 51,000 parts, each paying more than it had to:
+
+- **Ownership** (`script::ownership::owned_parts`) read every part's `Anchored` and regrouped every loose part into assemblies every frame. It now keeps the parts with their revisions, rereads only those that changed, catches up from the Workspace's moves log when the tree changes (as physics does), and regroups only when the loose parts or the welds change.
+- **Std's SipHash** on Instance IDs in the replicator's sent table, the partition's member map and each player's sent set: now `FxHashMap`/`FxHashSet`, as `core` already uses.
+- **Measuring units**: the partition measured a fifteenth of the units' boxes every frame. A unit whose members' revisions add up the same is skipped.
+- **Each player's parts list** walked the whole Workspace five times a second for the parts that are always there; the partition lists those when it splits.
+- **Abilities** (`gameplay::ability::Abilities::step`) walked the Workspace every frame for Ability and Effect Instances; it asks the class index.
+- **A change anywhere** (a player's GUI, ReplicatedStorage) split the partition again and rebuilt replication's tree with `BTreeSet`s of 51,000 IDs. The partition now splits only when the Workspace changes or a character comes or goes, and the replicator's rebuild uses a hash set (29 → 5 ms here). A unit leaving a player's range was found by a search of all 7,300 units; the partition indexes them by root.
+
+Container, release, `--bench 600`, medians in ms (two runs after, within 10% of each other):
+
+| Host | Step | Before | After |
+|---|---|---|---|
+| Server, 1 joined player | Network send | 16.71 | 2.00–2.14 |
+| | Heartbeat | 1.20 | 0.02 |
+| | Physics | 3.88 | 2.12–2.22 |
+| | frame | 21.86 | 4.20–4.47 |
+| | worst frame | 86.2 | 45.2 |
+| Test runner | Heartbeat | 0.95 | 0.03 |
+| | frame | 4.83 | 3.29 |
+
+The worst frame is a teleport: the tick after `RequestStreamAroundAsync` sends up to a second's budget of Instances (`INSTANCES_PER_SECOND`) at once, about 14 ms of `replicate::create` here. The container is about 2.5 times slower than the reference desktop, so the server frame should be near 2 ms there; Phase 80's criterion is ticked from the desktop's numbers.
 
 ### Calibrating against the rendering baseline
 

@@ -28,7 +28,9 @@
 //! server only overwrites what it changes itself.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use axcenity_core::{
     ClassName, Instance, InstanceId, LayerWeight, MOTION_PROPERTIES, Parameter, Value, World,
@@ -447,7 +449,7 @@ pub(crate) fn create(world: &World, id: InstanceId) -> Option<Op> {
 /// last sent.
 #[derive(Default)]
 pub struct Replicator {
-    sent: HashMap<InstanceId, Sent>,
+    sent: FxHashMap<InstanceId, Sent>,
     animators: BTreeMap<InstanceId, SentAnimator>,
     /// What's sent, as `replicated` lists it, for the tree as it was at
     /// `structure` (the tree rarely changes, and walking it is most of the
@@ -555,7 +557,10 @@ impl Replicator {
         }
         self.animators = now_animators.into_iter().collect();
         let mut ops = Vec::new();
-        let mut seen = BTreeSet::new();
+        let mut seen = FxHashSet::default();
+        if tree_changed {
+            seen.reserve(self.services.len() + self.inside.len());
+        }
         for &id in self.services.iter().chain(&self.inside) {
             if tree_changed {
                 seen.insert(id);

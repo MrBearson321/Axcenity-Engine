@@ -55,6 +55,8 @@ During Play with streaming on, the viewport streams around the camera as the hos
 
 `Physics` reads only the parts whose `Instance::revision` changed (`sync_changed_parts`), and runs its full sync when the tree, a weld, ragdoll or inventory, or the held parts change. Set against a 60 frames a second budget of 16.7 ms, `bench_50000_parts_streaming` (50,000 parts over 4 km in Models of 8, target radius 512, release build, Radeon RX 9070 XT) measured 6.2 ms physics, 0.7 ms streaming, 3.9 ms network send for one joined player, 6.1 ms building the draw list and 1.2 ms drawing: about 14 ms on the host alone and 18 ms with a joined player, before scripts, characters and UI. Run it with `cargo test -p axcenity-player --release -- --ignored bench_50000 --nocapture --test-threads 1`.
 
+The streaming world (`axcenity-test --make-streaming <folder>`, `docs/benchmarks.md`) is the same map as a project, so every host's `--bench` measures a whole frame with it, and the server's `--bench-clients` counts its joined players. The first runs found per-frame passes over every part in ownership, replication and the partition; they now read only what changed (revisions, the Workspace's moves log, Fx hash maps), and a change outside the Workspace no longer splits the partition again. Server with one joined player, cloud container: 21.9 → 4.2 ms a frame, Network send 16.7 → 2.0 ms ("The streaming world" in `docs/benchmarks.md`).
+
 ## Testing it by hand
 
 `examples/hello-streaming` builds a town of about 8,000 parts across 4 km and teleports the player across it after a few seconds. Raise `PARTS` in its script to 50,000 to measure the frame budget: `cargo run --release -p axcenity-player -- examples/hello-streaming`, and F9 for frame times.

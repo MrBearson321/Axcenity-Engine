@@ -14,6 +14,7 @@ pub mod crowd;
 pub mod game;
 pub mod junit;
 pub mod s10k;
+pub mod streaming_world;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
