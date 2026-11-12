@@ -37,7 +37,7 @@ ADR-0020 built Team Create as one session authority ordering typed operations, w
 
 1. **Scripts are live shared documents.** Lua scripts and stylesheets are `yrs` documents; members send updates, the host checks capability, size and that the update decodes, applies it and passes it on, and writes the text back to the plain `.lua` file. Other documents keep ADR-0020's soft lock. This supersedes ADR-0020's D3 for those two kinds. *Built in C7:* the host also keeps each document's whole state beside its journal, so a restarted host carries on with the same document; undo takes back only the member's own typing.
 2. **Tailscale is the supported way to connect.** Axcenity reads and drives the installed Tailscale client (`tailscale status --json`, `up`, `whois`), invites name the host by its MagicDNS name, and an in-editor wizard covers install, sign-in, sharing and a connection test. Tailscale provides the network path only: membership, roles and the signed handshake stay Collaborate's own. LAN and forwarded ports keep working.
-3. **No hosted service.** ADR-0020's TC8 (Axcenity accounts and a hosted service) is replaced by an `IdentityProvider` seam with today's device keys as its only implementation, an optional account link in the members file, and a document describing the future website integration. Nothing is deployed.
+3. **No hosted service.** ADR-0020's TC8 (Axcenity accounts and a hosted service) is replaced by an `IdentityProvider` seam with today's device keys as its only implementation, an optional account link in the members file, and a document describing the future website integration (`docs/research/collaborate-accounts.md`, C12: device-key-bound, per-project tokens; the host keeps authority over roles). Nothing is deployed.
 4. **The feature is called Collaborate** in everything users see. "Team Create" is Roblox's product name. Old invite links and `--team-*` flags keep working; internal identifiers are renamed only when their files are next changed.
 
 ## Reasons
@@ -55,4 +55,5 @@ See `docs/research/collaborate.md` §2–§6.
 
 - Audit and plan: `docs/research/collaborate.md` (phases C1–C12)
 - ADR-0020's built system: `crates/collab`, `crates/collab-server`, `crates/editor/src/app/team.rs`
-- Nothing of this ADR is implemented yet (C1 is the audit).
+- Built: C7 live documents (`crates/collab/src/live.rs`), C3 Tailscale (`tailscale.rs`), C10 identity seam (`identity.rs`, `access::Member::account`)
+- The future account integration: `docs/research/collaborate-accounts.md` (C12, document only)
