@@ -502,7 +502,7 @@ impl EditorApp {
         match reach {
             Some(note) => self.output.info(format!("Collaborate: {note}")),
             None => self.output.info(
-                "Collaborate: Tailscale isn't connected, so the invite works on this network                  only",
+                "Collaborate: Tailscale isn't connected, so the invite works on this network only",
             ),
         }
         Ok(invite)
