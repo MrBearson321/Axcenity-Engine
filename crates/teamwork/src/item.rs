@@ -18,14 +18,25 @@ pub enum Kind {
     /// Something to do.
     #[default]
     Task,
+    /// Something that's wrong (T2), with [`BugInfo`].
+    Bug,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 1] = [Kind::Task];
+    pub const ALL: [Kind; 2] = [Kind::Task, Kind::Bug];
 
     pub fn name(self) -> &'static str {
         match self {
             Kind::Task => "Task",
+            Kind::Bug => "Bug",
+        }
+    }
+
+    /// "tasks", "bugs".
+    pub fn plural(self) -> &'static str {
+        match self {
+            Kind::Task => "tasks",
+            Kind::Bug => "bugs",
         }
     }
 }
@@ -63,6 +74,11 @@ impl Status {
             (Kind::Task, Status::InReview) => "In review",
             (Kind::Task, Status::Done) => "Done",
             (Kind::Task, Status::Closed) => "Won't do",
+            (Kind::Bug, Status::Todo) => "Open",
+            (Kind::Bug, Status::InProgress) => "In progress",
+            (Kind::Bug, Status::InReview) => "Fix in review",
+            (Kind::Bug, Status::Done) => "Fixed",
+            (Kind::Bug, Status::Closed) => "Won't fix",
         }
     }
 
@@ -102,6 +118,63 @@ impl Priority {
             Priority::Low => "Low",
         }
     }
+}
+
+/// How bad a bug is.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    /// Nothing else can go on (a crash, lost work).
+    Blocker,
+    /// Something important doesn't work.
+    Major,
+    #[default]
+    Minor,
+    /// Cosmetic.
+    Trivial,
+}
+
+impl Severity {
+    /// Worst first.
+    pub const ALL: [Severity; 4] = [
+        Severity::Blocker,
+        Severity::Major,
+        Severity::Minor,
+        Severity::Trivial,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Severity::Blocker => "Blocker",
+            Severity::Major => "Major",
+            Severity::Minor => "Minor",
+            Severity::Trivial => "Trivial",
+        }
+    }
+}
+
+/// What a bug report says besides an item's own fields (T2).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BugInfo {
+    #[serde(default)]
+    pub severity: Severity,
+    /// How to make it happen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub steps: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub expected: String,
+    /// What happens instead (an error message, say).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub actual: String,
+    /// Where it was seen: the engine version and system ("0.2.0-alpha.1 on
+    /// Windows").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub found_in: String,
+    /// What fixed it: a checkpoint, a commit, a version.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub fixed_in: String,
 }
 
 /// Something in the project an item is about.
@@ -162,6 +235,7 @@ pub enum Change {
     Priority { to: Priority },
     Due { to: Option<Date> },
     Renamed { from: String },
+    Severity { to: Severity },
 }
 
 /// A change, who made it and when.
@@ -189,6 +263,7 @@ impl Event {
             Change::Due { to: Some(date) } => format!("{who} set it due {date}"),
             Change::Due { to: None } => format!("{who} took the due date off"),
             Change::Renamed { from } => format!("{who} renamed it from “{from}”"),
+            Change::Severity { to } => format!("{who} set the severity to {}", to.name()),
         }
     }
 }
@@ -220,6 +295,9 @@ pub struct Item {
     pub comments: Vec<Comment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
+    /// A bug's report (T2); `None` for other kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bug: Option<BugInfo>,
     pub created_by: String,
     pub created_at: u64,
     pub updated_by: String,
@@ -263,11 +341,45 @@ impl Item {
                 who: who.to_owned(),
                 change: Change::Created,
             }],
+            bug: (kind == Kind::Bug).then(BugInfo::default),
             created_by: who.to_owned(),
             created_at: now,
             updated_by: who.to_owned(),
             updated_at: now,
         }
+    }
+
+    /// A bug report from an error message: its first line is the title
+    /// (cut short), the whole message what happened, and `found_in` where.
+    pub fn bug_from_error(message: &str, found_in: &str, who: &str, now: u64) -> Item {
+        let first = message.lines().next().unwrap_or("").trim();
+        let title = if first.chars().count() > 90 {
+            format!("{}…", first.chars().take(89).collect::<String>())
+        } else {
+            first.to_owned()
+        };
+        let mut item = Item::new(Kind::Bug, &title, who, now);
+        let bug = item.bug.get_or_insert_with(BugInfo::default);
+        bug.actual = tidy(message, MAX_TEXT);
+        bug.found_in = tidy(found_in, MAX_TITLE);
+        item
+    }
+
+    /// The bug report, made if this item had none.
+    pub fn bug_mut(&mut self) -> &mut BugInfo {
+        self.bug.get_or_insert_with(BugInfo::default)
+    }
+
+    pub fn set_severity(&mut self, severity: Severity, who: &str, now: u64) {
+        if self.bug.as_ref().map(|b| b.severity) != Some(severity) {
+            self.bug_mut().severity = severity;
+            self.record(who, now, Change::Severity { to: severity });
+        }
+    }
+
+    /// A bug's severity (Minor for other kinds).
+    pub fn severity(&self) -> Severity {
+        self.bug.as_ref().map(|b| b.severity).unwrap_or_default()
     }
 
     /// "#4f2k9": how people point at it in chat.

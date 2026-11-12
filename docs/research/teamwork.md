@@ -40,9 +40,12 @@ An item (`item.rs`) has an ID (10 letters from 32, from the time and a per-proce
 
 `crates/teamwork/src/tests.rs`: round trip and the readable file, a damaged file, two people's changes to one task (session copy and repository copy, merged; left alone when asked), filters and order, tidying. Editor `app/team_board_tests.rs`: a task made, assigned, moved, linked and deleted through the panel's actions and read back by another editor (snapshots `team-board-list`, `team-board-columns`, `team-board-task`); a teammate's task reaching the host over real sockets with "Sam assigned you …", and the host's change coming back; a Viewer seeing the board but changing nothing.
 
-## 4. T2: bug tracking (planned)
+## 4. T2: bug tracking
 
-A Bug kind with severity, steps to reproduce, expected and actual, where it was found (engine version, OS, the build), and the checkpoint or commit that fixed it. Report a bug from an Output error (the message, script and line, filled in), from an Explorer row (linked to the Instance) or from the board. Bug statuses: Open, In progress, Fix in review, Fixed, Won't fix.
+- **Data:** `Kind::Bug` with `BugInfo` (`item.bug`, absent on tasks so a task's file is unchanged): severity (Blocker, Major, Minor, Trivial), steps to reproduce, expected, what happens, where it was found (`found_in`, "0.2.0-alpha.1 on linux": the build's version and the OS) and what fixed it (`fixed_in`: a checkpoint, commit or version, typed). A severity change is an event like a priority change. Bugs share the five statuses, named for bugs: Open, In progress, Fix in review, Fixed, Won't fix. `Item::bug_from_error` makes a bug from an error line: the first line (cut to 90 characters) is the title, the whole message is "what happens".
+- **Board:** the Tasks and Bugs chips filter by kind; within a status, bugs sort by severity after priority. `Board::open_bugs` gives "N open bugs, M blocking" over the list.
+- **Reporting:** the add field has a kind menu (Task or Bug). With Bug chosen and an error in the Output, **Report the last error** files it, linked to the script and line the message names. The Explorer's row menu has **Report a Bug…**, which links the Instance. Each opens the new bug's window.
+- **Tests:** `a_bug_reports_what_happened_and_sorts_by_severity` (crate), `bugs_are_reported_from_the_last_error_and_from_the_explorer` (editor; snapshots `team-board-bug`, `team-board-bugs`).
 
 ## 5. T3: goals and milestones (planned)
 

@@ -220,6 +220,8 @@ pub enum Action {
     KeepPlayChanges(InstanceId),
     /// Apply, revert or unpack a placed prefab copy (Phase 49).
     Prefab(crate::prefab_menu::PrefabAction),
+    /// Report a bug about `id` on the Team Board (teamwork T2).
+    ReportBug(InstanceId),
 }
 
 /// What happened in the Explorer this frame.
@@ -1076,6 +1078,8 @@ enum RowCommand {
     SaveMaterial,
     /// From the Prefab ▸ submenu of a placed copy.
     Prefab(crate::prefab_menu::PrefabAction),
+    /// Report a bug about it on the Team Board.
+    ReportBug,
     Rename,
     Duplicate,
     Delete,
@@ -1098,6 +1102,7 @@ impl RowCommand {
             RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
             RowCommand::SaveMaterial => Some(Action::SaveMaterial(id)),
+            RowCommand::ReportBug => Some(Action::ReportBug(id)),
             RowCommand::MakeUnique => Some(Action::MakeUnique(id)),
             RowCommand::Prefab(action) => Some(Action::Prefab(action)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
@@ -1401,6 +1406,14 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     }
     if let Some(action) = crate::prefab_menu::row_menu(ui, world, id) {
         chosen = Some(RowCommand::Prefab(action));
+    }
+    if id != world.root()
+        && ui
+            .button(theme::menu_item(ui.ctx(), icons::BUG, "Report a Bug…"))
+            .on_hover_text("Add a bug about it to the Team Board, linked to it")
+            .clicked()
+    {
+        chosen = Some(RowCommand::ReportBug);
     }
     ui.separator();
 

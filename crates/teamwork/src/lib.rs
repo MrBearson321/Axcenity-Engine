@@ -15,7 +15,9 @@ pub mod time;
 mod tests;
 
 pub use board::{Board, Copies, Filter, Loaded, Whose};
-pub use item::{Change, Check, Comment, Event, Item, Kind, Link, Priority, Status};
+pub use item::{
+    BugInfo, Change, Check, Comment, Event, Item, Kind, Link, Priority, Severity, Status,
+};
 pub use time::Date;
 
 use std::hash::{BuildHasher, Hasher};
