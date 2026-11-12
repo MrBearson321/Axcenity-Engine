@@ -80,7 +80,7 @@ In particular (status checked on main `5143a5a`):
 ## 2.1 Reconciliation notes
 
 - **One ID per piece of work.** Roadmap items that are G items keep their G ID; the new items (sequence 12, 13, 15–20) are named here as **R12, R13, R15, R16, R17, R18, R19, R20** by their place in section 12.
-- **Model Studio (6.6) and Phase 90.** On 12 Nov 2026 the unified plan's Phase 90 took sculpting, retopology and baking out of Model Studio on purpose ("creators sculpt and bake in Blender and import the `.glb`", `plans/axcenity-engine-unified.md`, about 5,600 lines removed). Section 6.6 asks to improve sculpting and baking. Until Paul decides otherwise, R15 improves what Model Studio still has (modeling, UVs, paint, rigging, weights, collision, LODs, previews, Blender round trip) and leaves sculpting and baking to Blender, which section 9 ("Full Blender replacement: do not pursue") also supports.
+- **Model Studio (6.6) and Phase 90.** On 12 Nov 2026 the unified plan's Phase 90 took sculpting, retopology and baking out of Model Studio (about 5,600 lines). Asked the same day, **Paul chose to bring sculpting and baking back** (12 Nov 2026, 20:42Z), as section 6.6 asks: R15 restores them from Phase 90's removal and builds on them. Section 9's "no full Blender replacement" still holds: Blender stays the target for advanced work.
 - **Collaboration (7.2) is largely built.** Collaborate 2.0 (#208–#219) gives persistent projects without a fixed host, Git-backed sync and checkpoints, host handoff, per-file conflicts and the guide; C1–C12 add Tailscale, live scripts, chat, permissions and the account seam (C12, a document). What's left is Paul's hand checks, so 7.2 needs no new work.
 - **Accounts (7.1)** have a design already: [collaborate-accounts.md](collaborate-accounts.md) (C12). The online-services architecture (R19) builds on it.
 - **Phases 4 and 5 are documents only.** The [development policy](../development-policy.md) says no infrastructure before it's needed and desktop first; so R19 and R20 are research and design, and nothing hosted is built unless Paul says so.
@@ -630,7 +630,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed on purpose by Phase 90 on 12 Nov 2026; see section 2.1.
+**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1).
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -1106,7 +1106,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; editor diagnostics partial | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
-| In-editor modeling | Implemented (sculpt, retopology, bake removed on purpose) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Improve what's kept |
+| In-editor modeling | Partial: sculpt and bake to come back (Paul, 12 Nov) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
 | Humanoid retargeting | Missing | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Implement |
 | Runtime IK | Implemented | Control Rig | SkeletonIK3D | IK | Animation Rigging | `anim/src/ik_control.rs` | — | anim | Keep |
 
@@ -1150,7 +1150,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 12 | Advanced asset management | New (R12) | Partial | Duplicates, import presets |
 | 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial | Within Phase 90's scope (section 2.1) |
+| 15 | Advanced Model Studio workflows | New (R15) | Partial | Bring sculpting and baking back (Paul's decision, section 2.1) |
 | 16 | Large-world rendering and authoring | New (R16) | Partial | Streaming diagnostics in the editor |
 | 17 | Visual effects editor | New (R17) | Missing | Design, then curves and an effect asset |
 | 18 | Global illumination improvements | New (R18) | Partial | Measure and document options |
