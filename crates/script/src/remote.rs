@@ -181,8 +181,36 @@ fn deliver_one(lua: &Lua, message: &Message) -> mlua::Result<()> {
         args.push(from_remote(lua, arg)?);
     }
     let owner = Owner::Instance(message.remote);
+    // A RemoteEvent in a Tool with `LagCompensated` on: the server's
+    // raycasts in its handlers (until they first wait) are the sender's
+    // shots (Phase 81).
+    let compensated = message.to == Side::Server && in_compensated_tool(lua, message.remote)?;
+    if compensated {
+        lua.set_app_data(crate::lag::Compensating(Some(message.player)));
+    }
     events::fire(lua, owner, event, MultiValue::from_vec(args));
+    if compensated {
+        lua.remove_app_data::<crate::lag::Compensating>();
+    }
     Ok(())
+}
+
+/// True if `remote` is inside a Tool with `LagCompensated` on.
+fn in_compensated_tool(lua: &Lua, remote: InstanceId) -> mlua::Result<bool> {
+    let world = world(lua)?;
+    let mut at = world.get(remote).and_then(|instance| instance.parent());
+    while let Some(id) = at {
+        let Some(instance) = world.get(id) else {
+            break;
+        };
+        if instance.class() == ClassName::Tool {
+            return Ok(
+                instance.property("LagCompensated") == Some(&axcenity_core::Value::Bool(true))
+            );
+        }
+        at = instance.parent();
+    }
+    Ok(false)
 }
 
 /// True if `message` is for the player on this device.

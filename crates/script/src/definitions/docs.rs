@@ -3024,6 +3024,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Tool,
+        "LagCompensated",
+        "If true, the server's `workspace:Raycast` calls in handlers of a RemoteEvent inside this Tool are lag compensated for the Player who fired it, until the handler first waits (see RaycastParams.CompensateFor).",
+    ),
+    (
+        ClassName::Tool,
         "CanBeDropped",
         "If false, the Drop action and tool:Drop() leave it carried.",
     ),

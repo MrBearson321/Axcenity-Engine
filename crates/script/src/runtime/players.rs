@@ -70,6 +70,19 @@ impl ScriptRuntime {
         ownership::owned_parts(&self.ownership, world)
     }
 
+    /// Lag compensation (Phase 81): a server hosting players notes where
+    /// the parts that moved are at its `clock`, each frame, and how far
+    /// back each player's shots are turned (their round trip plus the
+    /// smoothing delay; 0 for its own player).
+    pub fn record_lag(&mut self, world: &World, clock: f64, rewinds: &[(InstanceId, f64)]) {
+        let mut lag = self.lag.0.borrow_mut();
+        lag.record(world, clock);
+        for &(player, seconds) in rewinds {
+            lag.set_rewind(player, seconds);
+        }
+        lag.keep_players(world);
+    }
+
     /// A player on another device leaves: `PlayerRemoving` fires on both
     /// sides, then the Player (and its character) go. The player on this
     /// device never leaves this way.

@@ -308,6 +308,8 @@ declare extern type RaycastParams with
 	RespectCanCollide: boolean
 	--- Kept for familiarity; there's no water yet, so it changes nothing.
 	IgnoreWater: boolean
+	--- Lag compensation: on a server, `workspace:Raycast` for this Player's shot tests moving parts where that Player saw them when they fired (their round trip plus the smoothing delay, at most 1 second back); their own character is tested where it is. nil at first.
+	CompensateFor: Player?
 	--- Adds an Instance, or a list of them, to `FilterDescendantsInstances`.
 	function AddToFilter(self, instances: Instance | {Instance}): ()
 end
@@ -4609,6 +4611,8 @@ declare extern type Tool extends Instance with
 	TextureId: string
 	--- The data-table row it is, as "table:key" (such as "weapons:sword"), for scripts to read with DataService. Save slots keep it. Empty for none.
 	Item: string
+	--- If true, the server's `workspace:Raycast` calls in handlers of a RemoteEvent inside this Tool are lag compensated for the Player who fired it, until the handler first waits (see RaycastParams.CompensateFor).
+	LagCompensated: boolean
 	--- Fires when it goes into the hand: Equip, the hotbar, or a save slot loading with it in hand.
 	Equipped: Signal
 	--- Fires when it leaves the hand: put away, another equipped, dropped or removed.

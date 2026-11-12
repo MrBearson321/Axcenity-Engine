@@ -230,6 +230,22 @@ fn candidates(
     assets: &Assets,
     filter: &Filter,
     reach: Reach,
+    visit: impl FnMut(InstanceId, &PartState, &Collider, bool),
+) {
+    candidates_at(world, assets, filter, reach, &|_| None, visit);
+}
+
+/// A part's place at another moment: its Position and Orientation.
+pub type PastPose = (Vector3, Vector3);
+
+/// [`candidates`], with each part `rewound` gives a pose tested there
+/// instead of where it is now (lag compensation, Phase 81).
+fn candidates_at(
+    world: &World,
+    assets: &Assets,
+    filter: &Filter,
+    reach: Reach,
+    rewound: &dyn Fn(InstanceId) -> Option<PastPose>,
     mut visit: impl FnMut(InstanceId, &PartState, &Collider, bool),
 ) {
     let mut bounds = WorkspaceBounds::take(world);
@@ -249,12 +265,18 @@ fn candidates(
         let Some((center, radius)) = entry.ball else {
             continue;
         };
+        let then = rewound(entry.id);
+        let center = then.map_or(center, |(position, _)| to_vec3(position));
         if !reach.touches(center, radius) {
             continue;
         }
-        let Some(state) = PartState::read(world, entry.id, assets) else {
+        let Some(mut state) = PartState::read(world, entry.id, assets) else {
             continue;
         };
+        if let Some((position, orientation)) = then {
+            state.position = position;
+            state.orientation = orientation;
+        }
         if filter.admits(entry.id, &state, state.can_collide) {
             let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
             collider.set_position(state.pose() * *collider.position());
@@ -427,6 +449,20 @@ pub fn raycast(
     direction: Vector3,
     params: &QueryParams,
 ) -> Option<RayHit> {
+    raycast_rewound(world, assets, origin, direction, params, &|_| None)
+}
+
+/// [`raycast`] against the world as it was (lag compensation, Phase 81):
+/// each part `rewound` gives a pose for is tested there, the rest where
+/// they are now.
+pub fn raycast_rewound(
+    world: &World,
+    assets: &Assets,
+    origin: Vector3,
+    direction: Vector3,
+    params: &QueryParams,
+    rewound: &dyn Fn(InstanceId) -> Option<PastPose>,
+) -> Option<RayHit> {
     let dir = to_vec3(direction);
     let max_toi = dir.length();
     if !finite(origin) || !max_toi.is_finite() || max_toi <= f32::EPSILON {
@@ -436,26 +472,33 @@ pub fn raycast(
     let filter = Filter::new(world, params);
     let reach = Reach::ray(ray.origin, dir);
     let mut best: Option<RayHit> = None;
-    candidates(world, assets, &filter, reach, |id, _, collider, solid| {
-        let Some(hit) =
-            collider
-                .shape()
-                .cast_ray_and_get_normal(collider.position(), &ray, max_toi, true)
-        else {
-            return;
-        };
-        if best.is_some_and(|best| hit.time_of_impact >= best.distance) {
-            return;
-        }
-        let point = ray.origin + ray.dir * hit.time_of_impact;
-        best = Some(RayHit {
-            instance: id,
-            position: to_vector3(point),
-            normal: to_vector3(hit.normal),
-            distance: hit.time_of_impact,
-            can_collide: solid,
-        });
-    });
+    candidates_at(
+        world,
+        assets,
+        &filter,
+        reach,
+        rewound,
+        |id, _, collider, solid| {
+            let Some(hit) =
+                collider
+                    .shape()
+                    .cast_ray_and_get_normal(collider.position(), &ray, max_toi, true)
+            else {
+                return;
+            };
+            if best.is_some_and(|best| hit.time_of_impact >= best.distance) {
+                return;
+            }
+            let point = ray.origin + ray.dir * hit.time_of_impact;
+            best = Some(RayHit {
+                instance: id,
+                position: to_vector3(point),
+                normal: to_vector3(hit.normal),
+                distance: hit.time_of_impact,
+                can_collide: solid,
+            });
+        },
+    );
     best
 }
 

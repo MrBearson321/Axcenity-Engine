@@ -833,6 +833,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "boolean",
                 doc: "Kept for familiarity; there's no water yet, so it changes nothing.",
             },
+            Field {
+                name: "CompensateFor",
+                ty: "Player?",
+                doc: "Lag compensation: on a server, `workspace:Raycast` for this Player's shot tests moving parts where that Player saw them when they fired (their round trip plus the smoothing delay, at most 1 second back); their own character is tested where it is. nil at first.",
+            },
         ],
         operators: &[],
         methods: &[Function {

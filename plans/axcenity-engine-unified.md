@@ -61,7 +61,7 @@ These were decided in the developer's interview of 2026-10-27.
 | 4 | Phase 92: legacy paths, old templates and dead weight | Done in this phase's PR (format 6; see the phase). | `project::FORMAT_VERSION` is already 5 (the release system's engine record, #98 era), so this phase bumps it to **6**, not 5. There are four alpha releases now (`releases/history`: 0.1.0-alpha.1 to .3 and 0.2.0-alpha.1). |
 | 5 | Phase 93: a multithreaded frame | Built in this phase's PR apart from the desktop measurement (see the phase). Before it, about half done by the roadmap. Physics runs on rapier's parallel feature in its own pool of at most 12 threads with the same results at any thread count (M3 #25, `physics/src/threads.rs`). Frame planning and culling run on the renderer's pool (`render/src/renderer/parallel.rs`). The nav mesh builds on a worker (M13 #32). The retained draw list (M4 #23) removed most of the draw-list build. | Left: animator posing across threads, mesh decoding on a shared pool, per-thread time in the Profiler, the 200-character and 2,000-body benchmark, and test runs with 1 and 8 threads. The modernization report (§ `rayon` usage) asks for the same: posing, audio diff and nav fingerprint over `&World`, applied in index order. "Limited on mobile" is deferred with Milestone 20. |
 | 6 | Phase 80's open criterion: the 4 × 4 km benchmark | Correction: `bench_50000_parts_streaming` (player) existed and measured about 14 ms on the host but about 18 ms with a joined player, over budget. Only a whole-frame scene for every host was missing. | Built the streaming world as a project (`--make-streaming`) and cut the server's per-frame passes over every part (see Phase 80). Ticking needs the desktop's numbers. |
-| 7 | Phase 81: lag compensation and replays | Not started. | Builds on `net` replication (Phases 63 to 66), not on Collaborate, which is a separate editor-sync system with its own thread. Replays record the replication stream, so they don't need cross-machine determinism, which the development policy rules out. |
+| 7 | Phase 81: lag compensation and replays | Lag compensation built (criterion 1); replays next. | Builds on `net` replication (Phases 63 to 66), not on Collaborate, which is a separate editor-sync system with its own thread. Replays record the replication stream, so they don't need cross-machine determinism, which the development policy rules out. |
 
 **Hand checks.** These need a person, the developer's PC or Mac, or two computers. They stay unticked until checked, and the PC and Mac are booked through the project's coordinator.
 
@@ -459,9 +459,13 @@ cargo run --release -p axcenity-server  -- target/streaming --bench 600 --bench-
 
 Replays work in single-player too, because it runs over the same replication.
 
+### Built (lag compensation, 2026-11-12)
+
+`script/src/lag.rs` keeps a second of poses for parts that moved (read by `motion_revision`, so still parts cost nothing) and each remote player's rewind: their round trip plus the 0.1 s smoothing delay, at most 1 s. The host's `Network::send` records it each frame. `workspace:Raycast` with `RaycastParams.CompensateFor`, or in a RemoteEvent handler inside a Tool with `LagCompensated` on (until the handler first waits), tests moving parts where the shooter saw them through `physics::raycast_rewound`; their own character stays where it is. Shape casts and overlap queries aren't compensated. `Tool.LagCompensated` is a new class default, so the network protocol is 12. Criterion 1 is `net`'s `lag_tests` (150 ms each way, a 4-stud target at 10 studs a second: the compensated ray hits, the plain one misses). Docs: `docs/architecture/networking.md#lag-compensation`.
+
 ### Acceptance criteria
 
-- [ ] With 150 ms of emulated latency, a shot that hits a moving target on the shooter's screen counts on the server.
+- [x] With 150 ms of emulated latency, a shot that hits a moving target on the shooter's screen counts on the server.
 - [ ] A recorded two-minute multiplayer match plays back, and the same frame looks the same each time.
 - [ ] A kill cam shows the last 5 seconds from the killer's view.
 

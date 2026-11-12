@@ -70,6 +70,14 @@ Tool.Item: string
 
 The data-table row it is, as "table:key" (such as "weapons:sword"), for scripts to read with DataService. Save slots keep it. Empty for none.
 
+#### LagCompensated
+
+```luau
+Tool.LagCompensated: boolean
+```
+
+If true, the server's `workspace:Raycast` calls in handlers of a RemoteEvent inside this Tool are lag compensated for the Player who fired it, until the handler first waits (see RaycastParams.CompensateFor).
+
 ### Events
 
 #### Equipped

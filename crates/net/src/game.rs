@@ -632,6 +632,20 @@ impl Network {
                 } else {
                     self.replicator.parts(world)
                 };
+                // Lag compensation (Phase 81): where moving parts are now,
+                // and how late each player sees them: their round trip
+                // plus the smoothing delay.
+                if !self.players.is_empty() {
+                    let rewinds: Vec<(InstanceId, f64)> = self
+                        .players
+                        .iter()
+                        .map(|(&peer, &player)| {
+                            let rtt = host.stats_of(peer).map_or(0.0, |stats| stats.rtt);
+                            (player, rtt + crate::motion::DELAY)
+                        })
+                        .collect();
+                    scripts.record_lag(world, self.clock, &rewinds);
+                }
                 // Who moves what (Phase 66): each player their character,
                 // and the assemblies the server gives them.
                 let owned = scripts.owned_parts(world);
