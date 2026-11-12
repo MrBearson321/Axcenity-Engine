@@ -33,7 +33,7 @@ Paul wants hardware ray tracing as an optional GPU feature: the most performant 
 
 ## Decision
 
-Ray tracing is an optional tier built on wgpu's ray queries: devices are opened with them where the adapter has them (`adapters::with_ray_queries`), the renderer keeps a BLAS per mesh and a TLAS of the items within the ray tracing distance only while a ray traced effect (or the Ray Hits view) is on, and each effect (sun shadows, AO, probe GI, reflections, in RT1–RT5) is its own setting, off at every preset, with today's renderer as its fallback.
+Ray tracing is an optional tier built on wgpu's ray queries: devices are opened with them only when the machine's Hardware ray tracing setting is on and the adapter has them (`adapters::with_ray_queries`; see the amendment below), the renderer keeps a BLAS per mesh and a TLAS of the items within the ray tracing distance only while a ray traced effect (or the Ray Hits view) is on, and each effect (sun shadows, AO, probe GI, reflections, in RT1–RT5) is its own setting, off at every preset, with today's renderer as its fallback.
 
 ## Reasons
 
@@ -48,6 +48,7 @@ Ray tracing is an optional tier built on wgpu's ray queries: devices are opened 
 - wgpu's ray query API may change between majors: an upgrade (M12-style) must check `ray_tracing.rs` and `ray_hits.wgsl`.
 - Every moved item rebuilds the whole TLAS (no refit); scenes with tens of thousands of moving items need RT5's work (splitting static and dynamic, or fewer instances).
 - Skinned items aren't traced until they're posed into a buffer of their own.
+- Amendment (2026-11-12): RT0 first opened every capable device with ray queries. On an RX 9070 XT under DirectX 12 that made a white square flash in the editor's viewport even with every effect off, and opening without them stopped it, so opening with them is now its own setting (`GraphicsSettings::ray_tracing`, off at every preset, taking effect at the next start). Turning an effect on means turning that on first.
 - Revisit if wgpu gains refit or a stable ray tracing API, or if path tracing becomes affordable on mid-range GPUs.
 
 ## Implementation references

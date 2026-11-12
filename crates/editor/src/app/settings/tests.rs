@@ -140,6 +140,7 @@ fn graphics_settings_survive_a_restart() {
         sharpen: Some(false),
         motion_blur: Some(MotionBlurQuality::Low),
         ray_tracing_distance: Some(300.0),
+        ray_tracing: Some(true),
     };
     let mut storage = MemoryStorage::default();
     eframe::App::save(&mut app, &mut storage);
@@ -365,4 +366,14 @@ fn branding_is_kept_in_the_manifest_used_by_branding_paths_and_previewed() {
             .is_some_and(|p| p.contains("400×400"))
     );
     assert_eq!(banner.problem(Picture::Icon), None);
+}
+
+#[test]
+fn the_ray_tracing_section_says_what_a_restart_will_do() {
+    use super::graphics::ray_tracing_status;
+    assert!(ray_tracing_status(false, false, true).contains("can't ray trace"));
+    assert!(ray_tracing_status(false, true, false).contains("Turn on Hardware ray tracing"));
+    assert!(ray_tracing_status(false, true, true).contains("turns on when the editor restarts"));
+    assert!(ray_tracing_status(true, true, false).contains("turns off"));
+    assert!(ray_tracing_status(true, true, true).contains("is on"));
 }

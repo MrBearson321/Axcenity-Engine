@@ -112,8 +112,8 @@ pub fn ray_hits_lines(stats: &RenderStats) -> Vec<(Option<Color32>, String)> {
     if rays.meshes == 0 && rays.meshes_waiting == 0 {
         return vec![(
             None,
-            "Nothing traced: this GPU can't ray trace (Settings > Graphics says so), or \
-             nothing is within the ray tracing distance."
+            "Nothing traced: Hardware ray tracing is off or this GPU can't ray trace \
+             (Settings > Graphics says which), or nothing is within the ray tracing distance."
                 .to_owned(),
         )];
     }
@@ -247,7 +247,10 @@ mod tests {
     fn the_ray_hits_legend_counts_the_scene_or_says_why_its_empty() {
         let empty = ray_hits_lines(&RenderStats::default());
         assert_eq!(empty.len(), 1);
-        assert!(empty[0].1.contains("can't ray trace"), "{empty:?}");
+        assert!(
+            empty[0].1.contains("Hardware ray tracing is off"),
+            "{empty:?}"
+        );
         let stats = RenderStats {
             ray_tracing: axcenity_render::RayTracingStats {
                 instances: 40,

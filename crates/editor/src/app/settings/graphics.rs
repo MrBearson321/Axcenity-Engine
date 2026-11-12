@@ -406,7 +406,7 @@ pub(super) fn graphics_page(
             effective.ray_tracing_distance.round()
         )
     } else {
-        "Ray tracing: not available on this GPU".to_owned()
+        "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available".to_owned()
     });
     ui.label(match effective.cloud_quality.steps() {
         (0, _) => "Clouds: Low, a flat sheet".to_owned(),
@@ -474,19 +474,32 @@ fn ray_tracing_section(
     let palette = theme::palette(ui.ctx());
     section(ui, "Ray tracing");
     ui.label(
-        egui::RichText::new(if capabilities.ray_queries {
-            "This GPU can ray trace. No ray traced effects yet: View Mode > Ray Hits shows \
-             what rays would hit."
-        } else {
-            "This GPU can't ray trace (it needs DirectX 12 ray tracing tier 1.1, Vulkan ray \
-             queries or Metal on macOS 15). Everything is drawn without it."
-        })
+        egui::RichText::new(ray_tracing_status(
+            capabilities.ray_queries,
+            axcenity_render::adapters::adapter_can_ray_trace(),
+            settings.ray_tracing(),
+        ))
         .color(palette.text_secondary),
     );
     egui::Grid::new("ray tracing settings")
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
+            found_label(ui, "Hardware ray tracing");
+            let mut on = settings.ray_tracing();
+            if ui
+                .checkbox(&mut on, "On (after a restart)")
+                .on_hover_text(
+                    "Opens the GPU with ray tracing the next time the editor starts, so ray \
+                     traced effects and View Mode > Ray Hits can be used. Off, the GPU is \
+                     opened as before ray tracing existed.",
+                )
+                .changed()
+            {
+                settings.ray_tracing = on.then_some(true);
+            }
+            ui.end_row();
+
             found_label(ui, "Ray tracing distance");
             ui.horizontal(|ui| {
                 let mut custom = settings.ray_tracing_distance.is_some();
@@ -522,4 +535,26 @@ fn ray_tracing_section(
             });
             ui.end_row();
         });
+}
+
+/// What the Ray tracing section says about this GPU: whether the device
+/// was `opened` with ray tracing, whether its adapter `can` ray trace, and
+/// whether it's set to be opened with it (`wanted`) at the next start.
+pub(super) fn ray_tracing_status(opened: bool, can: bool, wanted: bool) -> &'static str {
+    match (opened, can, wanted) {
+        (true, _, true) => {
+            "Hardware ray tracing is on. Each ray traced effect is off until turned on; \
+             View Mode > Ray Hits shows what rays hit."
+        }
+        (true, _, false) => "Hardware ray tracing turns off when the editor restarts.",
+        (false, true, true) => "Hardware ray tracing turns on when the editor restarts.",
+        (false, true, false) => {
+            "This GPU can ray trace. Turn on Hardware ray tracing and restart the editor to \
+             use it; until then the GPU is opened without it."
+        }
+        (false, false, _) => {
+            "This GPU can't ray trace (it needs DirectX 12 ray tracing tier 1.1, Vulkan ray \
+             queries or Metal on macOS 15). Everything is drawn without it."
+        }
+    }
 }

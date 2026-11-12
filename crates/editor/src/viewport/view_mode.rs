@@ -139,6 +139,7 @@ mod tests {
                 .and_then(|adapter| {
                     // With ray queries where the GPU has them, for Ray Hits.
                     let mut descriptor = axcenity_render::wgpu::DeviceDescriptor::default();
+                    axcenity_render::adapters::want_ray_tracing(true);
                     axcenity_render::adapters::with_ray_queries(&adapter, &mut descriptor);
                     pollster::block_on(adapter.request_device(&descriptor)).ok()
                 })

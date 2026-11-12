@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "renderer"
+title = "A white square no longer flashes in the viewport"
+details = "Since hardware ray tracing came in, the GPU was opened with ray tracing whenever it could, and on an RX 9070 XT under DirectX 12 a white square flashed in the editor's viewport now and then. The GPU is now opened with ray tracing only when Settings > Graphics > Ray tracing > Hardware ray tracing is on (off by default; it takes effect at the next start). Bloom also ignores pixels that aren't numbers and caps how much one pixel adds, so one broken pixel can't grow into a square."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
