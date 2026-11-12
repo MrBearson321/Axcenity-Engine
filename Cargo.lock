@@ -736,6 +736,7 @@ dependencies = [
  "axcenity-core",
  "axcenity-editor-benchmark",
  "axcenity-editor-kit",
+ "axcenity-editor-model-studio",
  "axcenity-editor-toolbox",
  "axcenity-editor-tools",
  "axcenity-gameplay",
@@ -816,6 +817,22 @@ dependencies = [
  "pollster 0.4.0",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "axcenity-editor-model-studio"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-editor-tools",
+ "axcenity-mesh-edit",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "image",
 ]
 
 [[package]]

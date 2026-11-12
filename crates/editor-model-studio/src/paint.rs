@@ -257,7 +257,7 @@ impl StudioDoc {
     /// Changes the active object's set for `slot` (a layer added, hidden,
     /// moved…) and puts it on the material again, as one undo step named
     /// `label`; with `join`, part of the step the last joined change made.
-    pub(crate) fn change_paint(
+    pub fn change_paint(
         &mut self,
         slot: u32,
         label: &str,
@@ -597,8 +597,8 @@ impl ModelStudio {
 
     /// A whole stroke through `points` in the 3D view, as dragging the
     /// mouse along them paints it: one undo step.
-    #[cfg(test)]
-    pub(crate) fn paint_stroke(&mut self, screen: &Screen, points: &[egui::Pos2]) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn paint_stroke(&mut self, screen: &Screen, points: &[egui::Pos2]) -> bool {
         if !self.begin_stroke() {
             return false;
         }
@@ -895,7 +895,7 @@ impl ModelStudio {
 
     /// What's wrong with the active object's uvs for painting, if
     /// anything, worked out again only when the mesh or object changes.
-    pub(crate) fn paint_uv_problem(&mut self) -> Option<UvProblem> {
+    pub fn paint_uv_problem(&mut self) -> Option<UvProblem> {
         let doc = self.doc.as_ref()?;
         let key = (doc.revision, doc.active);
         if let Some((revision, active, problem)) = self.paint.uv_check

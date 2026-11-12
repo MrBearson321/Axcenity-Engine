@@ -14,6 +14,7 @@ use axcenity_editor_kit::snapshot;
 use axcenity_editor_kit::{color_palette, lua_syntax, responsive, screen, wheel, widgets};
 // Panel families in crates of their own, under their old module names.
 use axcenity_editor_benchmark as graphics_benchmark;
+use axcenity_editor_model_studio as model_studio;
 use axcenity_editor_toolbox as toolbox_panel;
 // The viewport tools, shared with the studios, under their old module names.
 use axcenity_editor_tools::{gizmo, shortcuts, snapping};
@@ -53,7 +54,6 @@ mod luau_check;
 mod material_editor;
 mod material_graph;
 mod mixer;
-mod model_studio;
 mod node_graph;
 mod output;
 mod placing;

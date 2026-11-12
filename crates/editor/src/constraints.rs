@@ -25,8 +25,8 @@ use axcenity_render::glam::{Quat, Vec3};
 use axcenity_scene::{orientation_from_rotation, rotation_from_orientation};
 use eframe::egui;
 
-pub use axcenity_editor_tools::attachments::{on_one_of, world_pose};
 use axcenity_editor_tools::attachments::part_frame;
+pub use axcenity_editor_tools::attachments::{on_one_of, world_pose};
 
 use crate::gizmo::{PartValues, Pose};
 use crate::screen::Screen;

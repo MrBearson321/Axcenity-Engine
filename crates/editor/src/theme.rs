@@ -149,7 +149,10 @@ mod tests {
                 "ui_designer/rulers.rs",
                 include_str!("ui_designer/rulers.rs"),
             ),
-            ("model_studio/view.rs", include_str!("model_studio/view.rs")),
+            (
+                "model_studio/view.rs",
+                include_str!("../../editor-model-studio/src/view.rs"),
+            ),
         ];
         let tokens = [
             overlay::SELECTED,

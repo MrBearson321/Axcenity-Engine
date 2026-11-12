@@ -189,7 +189,7 @@ fn make_low_poly_adds_an_unwrapped_copy_under_the_count_as_one_step() {
 
 /// A New UV sphere voxel remeshed, sculpted into a face from the front
 /// (brow, nose, mouth) and subdivided: the high-poly reference.
-pub(crate) fn sculpted_face_studio() -> ModelStudio {
+pub fn sculpted_face_studio() -> ModelStudio {
     let mut studio = remeshed_sphere();
     let screen = front();
     for (tool, from, to) in [

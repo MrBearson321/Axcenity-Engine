@@ -135,7 +135,7 @@ pub(super) fn shows_bones(mode: Mode) -> bool {
 impl StudioDoc {
     /// Changes the armature (made if there's none), as one undo step.
     /// `change` returns false to leave it as it was.
-    pub(crate) fn edit_armature(
+    pub fn edit_armature(
         &mut self,
         label: &str,
         change: impl FnOnce(&mut Armature, &mut [axcenity_mesh_edit::DocObject]) -> bool,
@@ -161,7 +161,7 @@ impl StudioDoc {
 
 impl ModelStudio {
     /// The active bone, if it's still one of the armature's.
-    pub(crate) fn active_bone(&self) -> Option<usize> {
+    pub fn active_bone(&self) -> Option<usize> {
         let armature = self.doc.as_ref()?.model.armature.as_ref()?;
         self.rig.bone.filter(|&bone| bone < armature.bones.len())
     }
@@ -169,7 +169,7 @@ impl ModelStudio {
     /// Add Humanoid: the template rig fitted to the active object's box
     /// (or the model's), in place of any armature; skins on the old one
     /// go. One undo step.
-    pub(crate) fn add_humanoid(&mut self) -> bool {
+    pub fn add_humanoid(&mut self) -> bool {
         let Some(doc) = &mut self.doc else {
             return false;
         };
@@ -203,7 +203,7 @@ impl ModelStudio {
 
     /// Add Bone: a bone standing up from the 3D cursor, a tenth of the
     /// model's size long, inside the active bone. One undo step.
-    pub(crate) fn add_bone(&mut self) -> Option<usize> {
+    pub fn add_bone(&mut self) -> Option<usize> {
         let parent = self.active_bone();
         let cursor = self.moves.cursor;
         let doc = self.doc.as_mut()?;
@@ -221,7 +221,7 @@ impl ModelStudio {
 
     /// E: a child of the active bone from its tail, as one undo step;
     /// in the view its tail then follows the mouse from `at`.
-    pub(crate) fn extrude_bone(&mut self, at: Option<egui::Pos2>) -> Option<usize> {
+    pub fn extrude_bone(&mut self, at: Option<egui::Pos2>) -> Option<usize> {
         let bone = self.active_bone()?;
         let doc = self.doc.as_mut()?;
         let before = doc.snapshot();
@@ -379,7 +379,7 @@ impl ModelStudio {
     }
 
     /// Renames the active bone (made unique), as one undo step.
-    pub(crate) fn rename_bone(&mut self, name: &str) -> bool {
+    pub fn rename_bone(&mut self, name: &str) -> bool {
         let (Some(bone), Some(doc)) = (self.active_bone(), &mut self.doc) else {
             return false;
         };
@@ -390,7 +390,7 @@ impl ModelStudio {
     }
 
     /// Makes `parent` the active bone's parent, as one undo step.
-    pub(crate) fn parent_bone(&mut self, parent: Option<usize>) -> bool {
+    pub fn parent_bone(&mut self, parent: Option<usize>) -> bool {
         let (Some(bone), Some(doc)) = (self.active_bone(), &mut self.doc) else {
             return false;
         };
@@ -401,7 +401,7 @@ impl ModelStudio {
 
     /// Sets the active bone's roll (degrees); a drag joins one undo step
     /// until [`end_roll`](Self::end_roll).
-    pub(crate) fn set_roll(&mut self, degrees: f32) {
+    pub fn set_roll(&mut self, degrees: f32) {
         let (Some(bone), Some(doc)) = (self.active_bone(), &mut self.doc) else {
             return;
         };
@@ -414,7 +414,7 @@ impl ModelStudio {
         }
     }
 
-    pub(crate) fn end_roll(&mut self) {
+    pub fn end_roll(&mut self) {
         if let (Some(before), Some(doc)) = (self.rig.rolling.take(), &mut self.doc) {
             doc.record("Roll Bone", before);
         }
@@ -422,7 +422,7 @@ impl ModelStudio {
 
     /// Deletes the active bone; its children go to its parent and its
     /// weights go. One undo step.
-    pub(crate) fn delete_bone(&mut self) -> bool {
+    pub fn delete_bone(&mut self) -> bool {
         let (Some(bone), Some(doc)) = (self.active_bone(), &mut self.doc) else {
             return false;
         };
@@ -447,7 +447,7 @@ impl ModelStudio {
 
     /// Symmetrize: the active bone and those inside it mirrored across
     /// X = 0 with their sides' names swapped. One undo step.
-    pub(crate) fn symmetrize_bones(&mut self) -> usize {
+    pub fn symmetrize_bones(&mut self) -> usize {
         let (Some(bone), Some(doc)) = (self.active_bone(), &mut self.doc) else {
             return 0;
         };
@@ -484,7 +484,7 @@ impl ModelStudio {
 
     /// Automatic Weights (bone heat) or, with `by_distance`, Weights by
     /// Distance, on the picked objects, as one undo step.
-    pub(crate) fn weigh(&mut self, by_distance: bool) -> bool {
+    pub fn weigh(&mut self, by_distance: bool) -> bool {
         let Some(doc) = &mut self.doc else {
             return false;
         };
@@ -525,7 +525,7 @@ impl ModelStudio {
 
     /// Normalize All, Limit Total (to 4) or Mirror on the active object's
     /// weights, as one undo step.
-    pub(crate) fn weight_action(&mut self, action: WeightAction) -> bool {
+    pub fn weight_action(&mut self, action: WeightAction) -> bool {
         let bone = self.active_bone();
         let Some(doc) = &mut self.doc else {
             return false;
@@ -575,7 +575,7 @@ impl ModelStudio {
     }
 
     /// Pose mode: turns `bone` to `degrees` from rest (round its X, Y, Z).
-    pub(crate) fn set_pose(&mut self, bone: usize, degrees: Vec3) {
+    pub fn set_pose(&mut self, bone: usize, degrees: Vec3) {
         let count = self
             .doc
             .as_ref()
@@ -589,13 +589,13 @@ impl ModelStudio {
         self.rig.version += 1;
     }
 
-    pub(crate) fn reset_pose(&mut self) {
+    pub fn reset_pose(&mut self) {
         self.rig.pose.clear();
         self.rig.version += 1;
     }
 
     /// The pose being tested, in the saved rig's order.
-    pub(crate) fn test_pose(&self) -> Option<axcenity_assets::Pose> {
+    pub fn test_pose(&self) -> Option<axcenity_assets::Pose> {
         let armature = self.doc.as_ref()?.model.armature.as_ref()?;
         Some(armature.pose(&self.rig.turns(armature)))
     }
@@ -623,7 +623,7 @@ impl ModelStudio {
         Some(hasher.finish() | 1)
     }
 
-    pub(crate) fn rig_model(&self) -> Option<axcenity_assets::Model> {
+    pub fn rig_model(&self) -> Option<axcenity_assets::Model> {
         let doc = self.doc.as_ref()?;
         let armature = doc.model.armature.as_ref()?;
         match doc.mode {
@@ -742,8 +742,8 @@ impl ModelStudio {
     }
 
     /// A whole weight stroke through `points` in the 3D view.
-    #[cfg(test)]
-    pub(crate) fn weight_stroke(&mut self, screen: &Screen, points: &[egui::Pos2]) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn weight_stroke(&mut self, screen: &Screen, points: &[egui::Pos2]) -> bool {
         if !self.begin_weights() {
             return false;
         }

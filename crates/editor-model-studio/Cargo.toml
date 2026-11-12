@@ -1,0 +1,34 @@
+[package]
+name = "axcenity-editor-model-studio"
+description = "The Axcenity editor's Model Studio: modeling, modifiers, UVs, texture paint, sculpting, retopology and rigging for .glb models."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+axcenity-editor-kit.workspace = true
+axcenity-editor-tools.workspace = true
+axcenity-mesh-edit.workspace = true
+axcenity-render.workspace = true
+axcenity-scene.workspace = true
+eframe.workspace = true
+image.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[features]
+# The test modules' helpers (`tests::cube_doc`, `rig_tests::humanoid_doc`...)
+# for the editor's tests. Turn it on from `[dev-dependencies]` only.
+test-support = [
+    "axcenity-editor-kit/test-support",
+    "axcenity-editor-tools/test-support",
+]
+
+[dev-dependencies]
+axcenity-editor-kit = { workspace = true, features = ["test-support"] }
+axcenity-editor-tools = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

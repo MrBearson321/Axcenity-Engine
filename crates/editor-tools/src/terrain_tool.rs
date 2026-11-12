@@ -2,8 +2,8 @@
 //! Terrain Studio itself is in the editor; the tool list lives here so the
 //! shortcut table can name each tool.
 
-use eframe::egui;
 use axcenity_editor_kit::theme::icons;
+use eframe::egui;
 
 /// One of the Terrain Studio's tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

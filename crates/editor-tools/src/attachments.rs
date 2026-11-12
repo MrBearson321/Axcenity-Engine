@@ -3,7 +3,7 @@
 //! The transform tools and snapping read its world pose from here; the
 //! editor's `constraints` module does the rest of Attachments and welds.
 
-use axcenity_core::{Instance, InstanceId, ClassName, Value, Vector3, World};
+use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use axcenity_render::glam::{Quat, Vec3};
 use axcenity_scene::rotation_from_orientation;
 

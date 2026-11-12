@@ -40,8 +40,8 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use super::{Modal, Mode, Moving, StudioDoc};
-use crate::animation::preview::Canvas;
 use crate::gizmo::{self, Drag, Modes, MoveAxes, Pointer, Pose, Snap, Tool};
+use crate::preview::Canvas;
 use crate::screen::Screen;
 use crate::theme;
 
