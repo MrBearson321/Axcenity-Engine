@@ -489,7 +489,6 @@ pub use many::{count_name, show_many};
 use files::*;
 use groups::*;
 pub use groups::{is_advanced, is_map, sections};
-pub use values::transparency_slider;
 use values::*;
 pub(crate) use values::{color_control, enum_items};
 
@@ -895,6 +894,19 @@ pub fn description(class: ClassName, name: &str) -> Option<&'static str> {
 /// straight to a property (`app/search.rs`). Every selection shares it.
 pub fn set_filter(ctx: &egui::Context, text: &str) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("properties filter"), text.to_owned()));
+}
+
+/// A transparency from 0 to 1 as a 0–100% slider. Returns the new value.
+pub fn transparency_slider(ui: &mut egui::Ui, value: f64) -> Option<f64> {
+    let mut percent = (value * 100.0).clamp(0.0, 100.0);
+    ui.add(
+        egui::Slider::new(&mut percent, 0.0..=100.0)
+            .suffix("%")
+            .max_decimals(0)
+            .clamping(egui::SliderClamping::Always),
+    )
+    .changed()
+    .then_some((percent / 100.0).clamp(0.0, 1.0))
 }
 
 /// Whether a property `name` (or a section titled `name`) matches what's

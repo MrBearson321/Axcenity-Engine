@@ -12,19 +12,6 @@ pub(super) fn is_ui_transparency(name: &str) -> bool {
     )
 }
 
-/// A transparency from 0 to 1 as a 0–100% slider. Returns the new value.
-pub fn transparency_slider(ui: &mut egui::Ui, value: f64) -> Option<f64> {
-    let mut percent = (value * 100.0).clamp(0.0, 100.0);
-    ui.add(
-        egui::Slider::new(&mut percent, 0.0..=100.0)
-            .suffix("%")
-            .max_decimals(0)
-            .clamping(egui::SliderClamping::Always),
-    )
-    .changed()
-    .then_some((percent / 100.0).clamp(0.0, 1.0))
-}
-
 /// Draws the control for a property's value and returns its new value if
 /// the user changed it this frame.
 pub(super) fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
