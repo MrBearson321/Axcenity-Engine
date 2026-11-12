@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done. C2 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 onwards follow the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -169,7 +169,7 @@ One phase per priority in the brief, in order. Each is one or more PRs to `main`
 | Phase | Builds | Tests (RED first) | Security | Performance | Done when |
 |---|---|---|---|---|---|
 | **C1** Audit | This document, ADR-0021 | `check-wiki.py` | — | — | Merged |
-| **C2** Architecture and protocol | Protocol spec section here: message kinds per content type (world operations, document updates, files, presence, chat, checkpoints), versioning rule, batching; the wire gains room for document and chat messages without breaking the format byte; the rename to Collaborate in names users see (old link and `--team-*` flags still accepted) | Wire round-trip tests for each new message; old invite links still parse; refusal text for an older wire version | Size limits for each new message kind from the start | No change to idle cost (measured with the existing idle-session test) | Spec reviewed, wire version bumped, rename merged |
+| **C2** Architecture and protocol | The protocol spec ([§9](#9-protocol-c2)): message kinds per content type, identifiers and recovery, versioning, batching (new message kinds land with the phase that uses them, at the end of the enums); the rename to Collaborate in names users see (old link and `--team-*` flags still accepted) | Wire round-trip tests for each new message; old invite links still parse; refusal text for an older wire version | Size limits for each new message kind from the start | No change to idle cost (measured with the existing idle-session test) | Spec reviewed, wire version bumped, rename merged |
 | **C3** Tailscale connectivity | `collab::tailscale` (find, status, sign-in URL, reachability check, whois), invites name the MagicDNS host, host binds where the C3 checks say | Parse tests from recorded `status --json` of each state and platform; a fake `tailscale` script in tests for the commands; reachability check against a closed and an open port | Tailscale identity is display-only (test: a tailnet peer with no membership is refused at the handshake) | `status` runs off the UI thread, at most every 2 s while the wizard is open | Paul's PC hosts and the Mac joins over Tailscale from another network |
 | **C4** Five-minute setup | Collaborate menu, first-run wizard (explain, check, install, sign in, connect test, ready), Start Session dialog (name, role, lifetime), Join wizard, `axcenity://` handler and single-instance hand-off, contextual help, the setup guide in `documentation/learn/` with pictures | Wizard state machine tests (each Tailscale state leads to the right step, coming back from the browser resumes); snapshot images of each step; link hand-off test | Links never auto-join without a confirmation showing who and where | Wizard adds nothing to the editor frame when closed | A person new to Tailscale does first setup in five minutes and a later session in under one, timed on Paul's machines |
 | **C5** Initial sync and recovery | Recovery checkpoints (host at session start; member's mirror before re-sending offline work), "Compare my copy with the session" for refused offline work, the stop-after-write double-apply fix | Fault tests: host killed between journal write and broadcast; member offline across a host restart; incompatible versions | Recovery files stay outside the project folder | Join time of S10k and Paul's projects recorded | Every fault test passes; nothing is lost in the two-machine cut test over Tailscale |
@@ -181,14 +181,59 @@ One phase per priority in the brief, in order. Each is one or more PRs to `main`
 | **C11** Performance | zstd for big messages, snapshot streaming in pieces for big worlds, presence and chat coalescing, measured on S10k and Paul's projects with 3–4 members | Benchmarks recorded in `docs/benchmarks.md` and the wiki | — | The phase *is* performance | Idle session adds under 0.1 ms; join of S10k under 10 s over Tailscale |
 | **C12** Django account integration (document only) | The integration document: providers, token checks, account linking of existing members, migration of ownership, roles and attribution, the versioned API calls the website would offer | Documentation checks only | Threat model for tokens | — | Document merged; no service built |
 
-## 9. Risks
+## 9. Protocol (C2)
+
+The session protocol as built by TC3–TC6, with the messages C3–C9 add. One rule holds throughout: **the host is the only place anything is accepted**; a client's copy is a cache it reconciles with what the host says.
+
+### 9.1 Layers
+
+1. **Transport:** WebSocket over TLS 1.3 on TCP (`socket.rs`), one connection per member, the host's self-signed certificate pinned by the fingerprint in the invite. A connection quiet for 15 s counts as lost. Over Tailscale (C3) the same connection runs inside Tailscale's WireGuard tunnel; Collaborate's TLS and signatures stay, so nothing depends on Tailscale for authentication.
+2. **Handshake** (`handshake.rs`, JSON): hello (protocol `PROTOCOL`, engine version, build, class-defaults fingerprint, the host epoch the client last saw), the host's random challenge, the member's Ed25519 signature over the challenge and the certificate fingerprint, then admitted (with the role) or refused with a sentence for the joiner.
+3. **Messages** (`wire.rs`): a format byte (`wire::FORMAT`), then postcard. `ToHost` from a member, `ToClient` from the host.
+
+### 9.2 Messages by content
+
+| Content | Messages | Order and delivery | Kept | Checked by the host | Limits |
+|---|---|---|---|---|---|
+| Scene, components, properties, terrain, string cells | `Submit(Transaction)` → `Accepted { seq, … }` / `Rejected { client_seq, reason }` | Host sequence numbers; clients apply strictly in order and resync on a gap | Journal, then snapshot | Capability per op, classes, property types, tree rules, all-or-nothing | 32 MiB a message, 1,000 messages a second per connection |
+| IDs for new Instances | `NeedIds` → `Ids(IdBlock)` | — | Per member in the host | — | 256 IDs a block |
+| Asset and other files | `Upload` pieces (1 MiB) then a `FileVersion` op inside a transaction; `Fetch` → `File` / `Missing` | Content-addressed; the op is ordered like any transaction | Host's file store by SHA-256 | Capability by path kind, compare-and-swap on the base hash, path inside the project, extension allow-list | 256 MiB a file (configurable) |
+| Structured documents (block scripts, graphs, materials, data tables, dialogues, behavior trees) | `Lock` / `Unlock` → `Locks` | Host grants one member at a time; a lock outlives a drop by one minute | Memory | Edit capability for the path | — |
+| **Scripts and stylesheets (C7)** | `DocOpen { path, state_vector }` → `DocState { path, update }`; `DocUpdate { path, update }` both ways | Any order: `yrs` merges converge; the host passes an update on only after applying it | Host's document store (per path, `yrs` v1 state) and the `.lua` file it writes back | Edit-scripts capability, the update decodes, size | 1 MiB an update; documents up to the per-file limit |
+| Presence | `Presence(Presence)` → `Presence { member, … }`, `Roster` | Latest wins; at most 10 a second per member | Memory (late joiners get the latest) | Selection trimmed to shared Instances, text clipped | — |
+| **Text cursors (C7/C8)** | Inside `Presence`: `script: Option<(path, anchor, head)>` as `yrs` sticky indexes | As presence | Memory | Clipped | — |
+| **Chat (C8)** | `Chat { text }` → `Chat { member, at, text }`; `ChatHistory` to a joiner | Host order | The host's last 200 messages, in memory only (never in the project or the journal) | Any member, Viewers included | 2,000 characters, 5 a second per member |
+| **Version history (C9)** | `Checkpoint { message }` → `Checkpoints(list)`; `Restore { id }` (Owner) | Host order; a restore is one transaction for everyone | Host's data folder, files by hash | Save-checkpoint capability; restore is Owner only | — |
+| Membership | `RoleChanged`, `Ended` | Host order | Members file in the host's data folder | Owner only for roles, removal, ending | — |
+
+### 9.3 Identifiers, duplicates and recovery
+
+- **Every edit has an identity:** (member, `client_seq`) from the client and `seq` from the host, within a host **epoch** (one run of the host). The journal stores the host's order; a re-sent `client_seq` that the host already applied is dropped, so nothing applies twice.
+- **A member's copy says what it has** in its hello (`Have`: epoch and last `seq`). Same epoch: the host replays the journal from there. Another epoch, or older than the journal: a fresh snapshot, and the member's unconfirmed edits are re-sent with their new Instances moved into its new ID block.
+- **Documents** catch up by state vector, not by sequence: whatever the member is missing comes back as one update, and whatever the host is missing goes up as one.
+- **Nothing newer is overwritten silently:** a re-sent edit goes through the normal checks; refused or partly applied ones go to Recovered Changes, file saves that lose compare-and-swap become conflict copies, and offline text merges.
+
+### 9.4 Versioning
+
+- Any change to a message's shape raises `wire::FORMAT`; any change to the handshake or to what a message means raises `handshake::PROTOCOL`. Both, and the engine version and build, must match the host's in v1: a mismatch is refused with a sentence naming the versions, and the update chip fixes it.
+- New message kinds go at the **end** of `ToHost` and `ToClient` (postcard numbers variants by position), and each new kind comes with a wire round-trip test and its limits in the same PR.
+- When mixed versions become worth supporting, the hello will carry the highest format each side reads and the host will speak the lower; nothing does that yet.
+
+### 9.5 Batching
+
+- **World edits:** one transaction per frame from the World's edit journal (`capture.rs`); an open gesture (a drag) is held and sent at most 20 times a second, then once at the end.
+- **Text:** `yrs` updates typed within one frame are merged (`yrs::merge_updates_v1`) into one `DocUpdate`.
+- **Presence and cursors:** coalesced to the latest, at most 10 a second.
+- **Large messages** (snapshots, big transactions, file pieces) get zstd in C11, measured first; small ones stay as they are.
+
+## 10. Risks
 
 - **Tailscale is a third-party service.** If Tailscale is down or a user can't use it (blocked at work), LAN and a forwarded port keep working; nothing in sync depends on Tailscale.
 - **Cross-tailnet sharing has a manual step** in Tailscale's admin console. The wizard can only open the page and explain it; automating it would need a Tailscale API key from the user, which is worse for beginners.
 - **CRDT and the host's validation.** A CRDT update can't be half-refused. The host refuses whole updates (size, capability, decode) and never edits them, so all copies stay in step.
 - **Rename churn.** Renaming every internal identifier would touch thousands of lines across open work. Only user-facing text, docs, flags and the link change now; internal names follow when those files are next edited.
 
-## 10. Sources
+## 11. Sources
 
 - Tailscale, [Share your machines with other users](https://tailscale.com/docs/features/sharing), [Inviting users vs sharing a device](https://tailscale.com/docs/reference/inviting-vs-sharing), [Share a private game server with friends](https://tailscale.com/docs/use-cases/personal-or-at-home-use/share-private-game-server), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [`tailscale up`](https://tailscale.com/docs/reference/tailscale-cli/up), [Windows firewall](https://tailscale.com/blog/windows-firewall) (all read 2026-11-12).
 - `yrs` 0.28.1 on crates.io: [y-crdt/y-crdt](https://github.com/y-crdt/y-crdt) (MIT); dependencies checked against `Cargo.lock` at `d45d70b`.
