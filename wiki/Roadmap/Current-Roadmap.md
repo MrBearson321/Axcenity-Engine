@@ -2,9 +2,9 @@
 title: Current roadmap
 type: roadmap
 status: current
-verified: 2026-11-11
-verified_commit: 19c7179d
-docs: [docs/research/engine-modernization-report.md, docs/research/engine-gap-analysis.md, docs/development-policy.md, plans/axcenity-engine-unified.md, plans/axcenity-engine-graphics.md, docs/research/usability/design-system.md, docs/research/usability/usability-audit.md, docs/research/release-system/README.md]
+verified: 2026-11-12
+verified_commit: 5143a5a
+docs: [docs/research/engine-modernization-report.md, docs/research/engine-gap-analysis.md, docs/research/competitive-development-roadmap.md, docs/development-policy.md, plans/axcenity-engine-unified.md, plans/axcenity-engine-graphics.md, docs/research/usability/design-system.md, docs/research/usability/usability-audit.md, docs/research/release-system/README.md]
 tags: [roadmap]
 ---
 
@@ -66,10 +66,10 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107) |
 | G2 | Scripts inside objects (`SourceFile` references, `objects/` folder) | **Done** (#91 design, #111, #114, #115, #117 on players' devices, in levels and characters, #120) |
 | G3 | Physics render interpolation | **Done** (#110) |
-| G4 | Script completion and diagnostics in the editor | Stage 1 (completion and signature hints) and stage 2 (luau-lsp errors and lints in code tabs) in review |
+| G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); go to definition is the open gap (competitive roadmap item 4) |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
-| G6 | Debugger stepping and watches | Planned |
-| G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126) |
+| G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; a coroutine the script made itself still can't pause |
+| G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126); memory over time, peaks and budgets are the competitive roadmap's item 5 |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
 | G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |
@@ -78,9 +78,13 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
 | G14–G16 | Run without a player; physics debug views; humanoid retargeting | Planned |
 | TC1–TC8 | Team Create (live collaboration; brief of 2026-11-11 §8): design approved ([ADR-0020](../Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md), #134); TC1 sync core in `collab` (#140); TC2 editor sync (edit journal, capture, two-editor tests, #150); TC3 network and identity (device keys, invites, TLS WebSocket, `--team-host`/`--team-join`, #154); TC4 interface (roster and presence #156, panel, title bar chip, others' selections #160); TC5 files (content-addressed saves with compare-and-swap, document locks, members' mirror folders, conflict copies; sync core #168, editor #169, every document tab and start-screen Join #170); TC6 reliability (host journal and crash recovery, size and rate limits #175; host epochs, members' recovery files, Recovered Changes, read-only when the host leaves, camera follow, Settings > Team Create, #180); TC7 the self-hosted `axcenity-collab` server (persistence, crash recovery, admin command line); tested on two machines over a LAN with a 5-minute cut, both ending identical (2026-11-12, results in `docs/research/team-create.md` §12; PR #195) | Done except TC8, which C12 replaces |
-| C1–C12 | Collaborate (Team Create renamed; Paul's brief of 2026-11-12): audit and plan in `docs/research/collaborate.md`, [ADR-0021](../Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md); C1–C6 merged (audit, protocol and rename, Tailscale, setup wizard, recovery, scene presence; two-machine tests passed), C7 live scripts (`yrs`) merged; C8 chat and cursors merged; C9 host checkpoints and restores merged; C10 permissions and hardening built (identity seam, budgets per message kind, audit log, security review); C11 performance built (big messages packed with zstd, S10k measured: idle under 0.1 ms, and S10k's load 5.7 → 0.19 s); C12 Django account integration written as a document only (`docs/research/collaborate-accounts.md`) | In progress |
-| P0–P7 | Collaborate 2.0 (Paul's brief of 2026-11-12, persistent collaboration and automatic host handoff): design in `docs/research/collaborate-persistent.md`, [ADR-0022](../Architecture/Architecture-Decisions/ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md); P0 design done (#208); P1 repository integration (#209), P2 automatic sync and checkpoints (#212) P3 persistent projects (#213), P4 host election and handoff (#214), P5 conflicts and recovery (#217), P6 interface (#218) and P7 scenarios A–E end to end and the guide built; PRs await merge in order and Paul's hand checks | In review |
+| C1–C12 | Collaborate (Team Create renamed; Paul's brief of 2026-11-12): audit and plan in `docs/research/collaborate.md`, [ADR-0021](../Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md); C1–C6 merged (audit, protocol and rename, Tailscale, setup wizard, recovery, scene presence; two-machine tests passed), C7 live scripts (`yrs`) merged; C8 chat and cursors merged; C9 host checkpoints and restores merged; C10 permissions and hardening built (identity seam, budgets per message kind, audit log, security review); C11 performance built (big messages packed with zstd, S10k measured: idle under 0.1 ms, and S10k's load 5.7 → 0.19 s); C12 Django account integration written as a document only (`docs/research/collaborate-accounts.md`) | **Done** (C10 #211, C11 #215, C12 #216); S10k join timing over Tailscale deferred by Paul |
+| P0–P7 | Collaborate 2.0 (Paul's brief of 2026-11-12, persistent collaboration and automatic host handoff): design in `docs/research/collaborate-persistent.md`, [ADR-0022](../Architecture/Architecture-Decisions/ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md); P0 design done (#208); P1 repository integration (#209), P2 automatic sync and checkpoints (#212) P3 persistent projects (#213), P4 host election and handoff (#214), P5 conflicts and recovery (#217), P6 interface (#218) and P7 scenarios A–E end to end and the guide built; merged by 2026-11-12 13:57Z (#208–#219) | **Done**; Paul's hand checks listed in each PR |
 | Priority 4 | GPU-driven drawing, occlusion culling, dynamic GI, ray tracing, AI assistant in the editor, Parallel Luau, … | Future, each with a trigger in the gap analysis |
+
+## Competitive development roadmap (Paul's of 2026-11-12)
+
+`docs/research/competitive-development-roadmap.md` carries the G items forward and adds R12–R20 (asset management, build profiles and reports, Model Studio within Phase 90's scope, large worlds, a VFX editor, GI, online services and platforms as documents only). Its section 11 is the living feature matrix against Unreal, Godot, s&box and Unity; section 12 is the order of work with each item's status. Update both when an item lands.
 
 ## Feature plan (unified plan, Phases 1–93)
 
