@@ -155,6 +155,8 @@ enum Action {
     SetRole(MemberId, MemberRole),
     Remove(MemberId),
     Leave,
+    /// The host ends the session even when someone else could host it.
+    EndForEveryone,
     /// Follows a member's camera, or stops with `None`.
     Follow(Option<MemberId>),
     /// Something in the Chat section (C8).
@@ -651,26 +653,28 @@ impl EditorApp {
         }
 
         ui.add_space(theme::space::M);
-        let leave = if hosting {
-            widgets::button(
-                widgets::Role::Danger,
-                Some(icons::SIGN_OUT),
-                "End session",
-                &palette,
-            )
-        } else {
-            widgets::button(
-                widgets::Role::Secondary,
-                Some(icons::SIGN_OUT),
-                "Leave session",
-                &palette,
-            )
-        };
+        let leave = widgets::button(
+            widgets::Role::Secondary,
+            Some(icons::SIGN_OUT),
+            "Leave session",
+            &palette,
+        );
         let hover = if hosting {
-            "Disconnects everyone. Your World stays as it is."
+            "The session goes on with the next host when someone else can host; otherwise it \
+             ends. Your World stays as it is."
         } else {
             "Your copy stays open here, no longer in step."
         };
+        if hosting {
+            let end = widgets::button(widgets::Role::Danger, None, "End for everyone", &palette);
+            if ui
+                .add(end)
+                .on_hover_text("Disconnects everyone. Your World stays as it is.")
+                .clicked()
+            {
+                action = Some(Action::EndForEveryone);
+            }
+        }
         if ui.add(leave).on_hover_text(hover).clicked() {
             action = Some(Action::Leave);
         }
@@ -701,6 +705,7 @@ impl EditorApp {
             Action::SetRole(member, role) => self.set_team_role(member, role),
             Action::Remove(member) => self.remove_team_member(member),
             Action::Leave => self.leave_team_session(),
+            Action::EndForEveryone => self.end_team_session(),
             Action::Follow(member) => {
                 self.team_panel.following = member;
                 self.team_panel.followed_to = None;

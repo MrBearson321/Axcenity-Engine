@@ -219,6 +219,27 @@ impl HostSession {
         }
     }
 
+    /// The member whose editor runs this host: never its own successor
+    /// (Collaborate 2.0, P4).
+    pub fn set_hosted_by(&mut self, member: Option<MemberId>) {
+        let out = self.host.set_hosted_by(member);
+        self.route(out);
+    }
+
+    /// Names the member who hosts next (`None`: the usual order).
+    pub fn set_backup(&mut self, member: Option<MemberId>) {
+        let out = self.host.set_backup(member);
+        self.route(out);
+    }
+
+    /// Tells everyone who hosts next and stops taking edits; returns the
+    /// successor. Then drop the [`Hosting`] with [`Hosting::hand_off`].
+    pub fn hand_off(&mut self) -> Option<crate::project::HostCard> {
+        let (to, out) = self.host.hand_off();
+        self.route(out);
+        to
+    }
+
     /// Takes a member out of the project and closes their connection.
     pub fn remove(&mut self, member: MemberId) {
         self.access.remove(member);
@@ -554,6 +575,15 @@ impl Hosting {
     /// members keep trying to reconnect (tests).
     pub fn stop_without_a_word(mut self) {
         self.say_ended = false;
+    }
+
+    /// Leaves the session to the next host ([`HostSession::hand_off`]):
+    /// everyone hears who it is, what's queued is sent, and the
+    /// connections close without ending the session. Returns the
+    /// successor.
+    pub fn hand_off(mut self) -> Option<crate::project::HostCard> {
+        self.say_ended = false;
+        self.lock().hand_off()
     }
 }
 

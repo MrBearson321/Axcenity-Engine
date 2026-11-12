@@ -86,6 +86,27 @@ pub enum ToHost {
     Restore(u64),
     /// Asks for the host's audit log (C10; the Owner only).
     AuditLog,
+    /// How to reach this member's computer if it hosts (Collaborate 2.0,
+    /// P4): its address (`host:port`) and its host certificate. It came on
+    /// this member's own connection, which the handshake tied to their key.
+    HostCard {
+        address: String,
+        cert: crate::identity::Fingerprint,
+    },
+    /// Answers [`ToClient::SendTail`]: the old host's transactions this
+    /// member applied after the number asked for, oldest first.
+    Tail(Vec<TailEntry>),
+}
+
+/// One transaction a host accepted, as a member keeps it in case a new
+/// host needs it ([`ToClient::SendTail`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TailEntry {
+    pub seq: u64,
+    pub author: MemberId,
+    pub client_seq: u64,
+    pub label: String,
+    pub ops: Vec<Op>,
 }
 
 /// From the host to a client.
@@ -192,4 +213,21 @@ pub enum ToClient {
     /// may host (Editors and the Owner), when they join and whenever the
     /// list changes, so any of them can host the project later.
     Members(crate::project::MembersList),
+    /// Who hosts if the host goes, best first (Collaborate 2.0, P4), to
+    /// everyone, whenever it changes; and the next Instance ID the host
+    /// would hand out, so a successor never hands out one in use.
+    Successors {
+        hosts: Vec<crate::project::HostCard>,
+        next_id: u32,
+    },
+    /// The host is leaving: `to` hosts from now (`None`: nobody can, so
+    /// the session pauses), once it has every transaction up to `last_seq`.
+    /// Nothing more comes from this host.
+    HandingOff {
+        to: Option<crate::project::HostCard>,
+        last_seq: u64,
+    },
+    /// A new host recovering from a lost one asks a member that's ahead of
+    /// it for the old host's transactions after `after`.
+    SendTail { after: u64 },
 }

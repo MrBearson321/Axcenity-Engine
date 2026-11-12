@@ -299,13 +299,13 @@ pub(crate) struct Team {
     client: Option<Client>,
     /// The host was asked for its audit log (the Owner's, C10).
     audit_asked: bool,
-    link: Link,
+    pub(super) link: Link,
     /// The host refused this editor: the session is over for it.
     ended: bool,
     /// When this editor last said what it's doing.
     presence_sent: Option<std::time::Instant>,
     /// Why the connection is down, or why the host refused this editor.
-    problem: Option<String>,
+    pub(super) problem: Option<String>,
     /// When hosting over Tailscale: how others reach this computer, for
     /// the panel (C3).
     pub(crate) tailscale: Option<String>,
@@ -344,6 +344,20 @@ pub(crate) struct Team {
     /// The members list version last written to the record (`Some(None)`:
     /// recorded before any list arrived).
     pub(super) recorded: Option<Option<u64>>,
+    /// Handing on (Collaborate 2.0, P4, `collab_handoff.rs`): whether this
+    /// computer offers to host when the host goes, the address it offers
+    /// (tests set one), and whether its card went this session.
+    pub(super) lets_others_host: bool,
+    pub(super) card_address: Option<String>,
+    pub(super) card_sent: bool,
+    /// When the connection to the host was lost without a word.
+    pub(super) lost_at: Option<std::time::Instant>,
+    /// The handoff already followed (its last transaction).
+    pub(super) followed_handoff: Option<u64>,
+    /// The grace period and each successor's turn (tests shorten them).
+    pub(super) timing: axcenity_collab::election::Timing,
+    /// How long a new host gathers a lost host's transactions.
+    pub(super) recovery_wait: std::time::Duration,
 }
 
 impl Team {
@@ -370,7 +384,22 @@ impl Team {
             data: None,
             host_cert: None,
             recorded: None,
+            lets_others_host: true,
+            card_address: None,
+            card_sent: false,
+            lost_at: None,
+            followed_handoff: None,
+            timing: axcenity_collab::election::Timing::default(),
+            recovery_wait: axcenity_collab::host::RECOVERY_WAIT,
         }
+    }
+
+    pub(super) fn client_mut(&mut self) -> Option<&mut Client> {
+        self.client.as_mut()
+    }
+
+    pub(super) fn set_address(&mut self, address: String) {
+        self.address = address;
     }
 
     /// The folder this editor keeps the session's files in, once it has one.
@@ -920,11 +949,28 @@ impl EditorApp {
         }
     }
 
-    /// Leaves the session (or ends it, when this editor hosts). The World
-    /// stays as it is, for this editor alone. A hosted session with changes
-    /// not saved yet keeps its journal: saving lets it go, and if the
-    /// editor stops first, opening the project brings the changes back.
+    /// Leaves the session. When this editor hosts and someone else can,
+    /// the session goes on under them (Collaborate 2.0); otherwise it ends.
+    /// The World stays as it is, for this editor alone.
     pub(crate) fn leave_team_session(&mut self) {
+        self.leave_or_end_team_session(true);
+    }
+
+    /// Ends the session for everyone, even when someone else could host
+    /// it ("End for everyone").
+    pub(crate) fn end_team_session(&mut self) {
+        self.leave_or_end_team_session(false);
+    }
+
+    /// A hosted session with changes not saved yet keeps its journal:
+    /// saving lets it go, and if the editor stops first, opening the
+    /// project brings the changes back.
+    fn leave_or_end_team_session(&mut self, hand_on: bool) {
+        // Others are still working: the session goes on under the next
+        // host instead of ending for everyone.
+        let handed_on = hand_on
+            && self.team.as_ref().is_some_and(|t| t.hosting().is_some())
+            && self.hand_off_hosting();
         let Some(team) = self.team.take() else {
             return;
         };
@@ -948,6 +994,15 @@ impl EditorApp {
         drop(team);
         self.world.stop_recording_edits();
         self.history.set_shared(false);
+        if handed_on {
+            if unsaved {
+                self.output.info(
+                    "Collaborate: your copy stays open with the session's changes; save to keep \
+                     them here too",
+                );
+            }
+            return;
+        }
         self.output.info(match (hosted, unsaved) {
             (true, false) => "Collaborate: you ended the session",
             (true, true) => {
@@ -961,6 +1016,9 @@ impl EditorApp {
     /// The editor is closing, its changes saved or let go: a hosted
     /// session ends with nothing left to recover.
     pub(crate) fn end_team_for_quit(&mut self) {
+        if self.team.as_ref().is_some_and(|t| t.hosting().is_some()) {
+            self.hand_off_hosting();
+        }
         let Some(team) = self.team.take() else {
             return;
         };
@@ -1101,6 +1159,11 @@ impl EditorApp {
                 RemoteEvent::Message(message) => inbox.push(message),
                 RemoteEvent::Lost { why, retry } => {
                     if let Some(client) = &mut team.client {
+                        // The host went quiet: the successors' turn comes
+                        // after the grace period (`collab_handoff.rs`).
+                        if client.is_joined() && team.lost_at.is_none() {
+                            team.lost_at = Some(std::time::Instant::now());
+                        }
                         client.disconnected();
                     }
                     team.problem = Some(why.clone());
@@ -1207,6 +1270,7 @@ impl EditorApp {
         self.count_unread_chat();
         self.team_locks();
         self.keep_unsent();
+        self.team_handoff_frame();
         self.record_joined_project();
         self.follow_member();
     }

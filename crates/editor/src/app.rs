@@ -63,6 +63,7 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod collab_handoff;
 mod collab_project;
 mod collab_repo;
 mod collab_setup;
@@ -1861,6 +1862,8 @@ mod tool_window_tests;
 #[cfg(test)]
 mod tour_snapshots;
 
+#[cfg(test)]
+mod collab_handoff_tests;
 #[cfg(test)]
 mod collab_project_tests;
 #[cfg(test)]
