@@ -70,6 +70,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 | Asset Check and fixes | `asset_check.rs`, `app/asset_fixes.rs` over `project::check_assets`, `plan_fix`; duplicate files (R12) `project::find_duplicates`, Merge `project::plan_merge` |
 | Engine rebuild and relaunch (debug, source tree, `engine-dev` feature; engine hot-patching removed in Phase 89) | `rebuild.rs`, `relaunch.rs`, `app/engine.rs` |
 | Build Game, `--build-game`, `--cook` | `build_game.rs`, `cooking.rs` |
+| Build profiles (R13: menu, picked profile, report in Output) | `app/files/export.rs`, `app/chrome/menus.rs` (`build_profile_menu`), `app/native_menu.rs` |
 | Visual-debug overlays, debug views (`debug-views` feature of `render`) | `viewport/overlays.rs`, `viewport/view_mode.rs` |
 | Steady frames on VRR displays | `EditorApp::keep_frames_steady` ([Hardware notes](../Performance/Hardware-Notes.md)) |
 

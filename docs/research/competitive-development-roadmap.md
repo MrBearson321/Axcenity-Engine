@@ -376,7 +376,7 @@ Extend the prefab system to support reusable UI components.
 ## 5.4 Advanced asset management
 
 **Priority:** High
-**Status:** Partial (R12). Built: Asset Check (missing files, broken references and dependencies, with fixes), Find References, the Unused chip (never deletes), Rename or Move with references, `ax://` IDs, packages (`.axpkg`) and global assets for moving assets between projects. Duplicate detection with Merge is in (Asset Check's Duplicate file rows). Missing: import presets, texture compression and mesh optimization profiles.
+**Status:** Implemented (R12: #260, #262). Built: Asset Check (missing files, broken references and dependencies, with fixes), Find References, the Unused chip (never deletes), Rename or Move with references, `ax://` IDs, packages (`.axpkg`) and global assets for moving assets between projects. Duplicate detection with Merge is in (Asset Check's Duplicate file rows, #260). Import presets are in (#262): a texture's preset, kept in its `.import.json` sidecar or set for a folder in `import-presets.json`, picks its compression (auto, color, normal map or none) and largest size, and a change cooks it again. Left for later: mesh presets (LOD settings at import), if a project needs them.
 
 Expand asset management beyond discovery and downloading.
 
@@ -1074,7 +1074,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
 | Duplicate detection | Done (Asset Check Merge) | Audit tools | — | — | Third-party | R12 | Medium | project | Implement |
-| Import presets and compression profiles | Missing | Texture groups, LOD settings | `.import` presets | Per asset | Presets, platform overrides | R12 | Medium | assets, cook | Implement |
+| Import presets and compression profiles | Done (textures, #262) | Texture groups, LOD settings | `.import` presets | Per asset | Presets, platform overrides | R12 | Medium | assets, cook | Implement |
 | Cooked textures and models | Implemented | Cooking | Import cache | Compiled assets | Import pipeline | L2, `crates/cook` | Critical | cook | Keep |
 | Cooked-only game packages | Implemented (#243) | Cooked pak | `.pck` | Compiled | Built player | G12 | High | cook, project | Keep |
 | Build profiles and reports | Missing | Build profiles, cook reports | Export presets | Publish wizard | Build profiles, build report | R13 | High | project | Implement |
@@ -1149,7 +1149,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 9 | Cooked-only games | G12 | Implemented (#243) | Hand check a real game's size on the PC |
 | 10 | Humanoid retargeting | G16 | Implemented (stage 1, #244) | Hand-edited maps, profiles, fingers |
 | 11 | Plugin API improvements | G10 | Implemented | #265, #267, #270, #274 (scripting thread) |
-| 12 | Advanced asset management | New (R12) | Partial | Duplicates, import presets |
+| 12 | Advanced asset management | New (R12) | Implemented (#260, #262) | Mesh presets later, if needed |
 | 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
 | 15 | Advanced Model Studio workflows | New (R15) | Partial | Bring sculpting and baking back (Paul's decision, section 2.1) |

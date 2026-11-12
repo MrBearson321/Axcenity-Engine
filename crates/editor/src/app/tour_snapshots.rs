@@ -291,6 +291,7 @@ fn editor_tour_snapshots() {
     });
     for (name, mode) in [
         ("23-studio-paint", crate::model_studio::Mode::Paint),
+        ("24-studio-sculpt", crate::model_studio::Mode::Sculpt),
         ("25-studio-rig", crate::model_studio::Mode::Armature),
     ] {
         run(name, Some("hello-part"), &|app| {

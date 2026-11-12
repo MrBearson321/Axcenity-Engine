@@ -6,6 +6,8 @@
 //! wgpu 25 managed (`docs/rendering/pipeline.md`, "Graphics API").
 //! `WGPU_BACKEND=vulkan` (or `dx12`, `metal`, `gl`) picks one by hand.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// A wgpu instance for every API this machine has, or only the ones
 /// `WGPU_BACKEND` names.
 pub fn instance() -> wgpu::Instance {
@@ -67,21 +69,49 @@ fn preference(info: &wgpu::AdapterInfo, windows: bool) -> (u8, u8) {
     (kind, api)
 }
 
-/// Adds hardware ray tracing to `descriptor` when `adapter` has it: wgpu's
-/// ray queries (an experimental wgpu feature) and the adapter's
-/// acceleration structure limits. Ray traced effects are off until a
-/// setting turns one on (`docs/rendering/ray-tracing.md`), but the device
-/// must be opened with the feature for them to be turned on later.
-/// `AXCENITY_RAY_TRACING=0` opens devices without it.
+/// Whether the next device is opened with hardware ray tracing: the
+/// saved `GraphicsSettings::ray_tracing`, which hosts hand in before they
+/// open one ([`want_ray_tracing`]).
+static RAY_TRACING_WANTED: AtomicBool = AtomicBool::new(false);
+/// Whether an adapter offered hardware ray tracing to [`with_ray_queries`],
+/// opened with it or not, so the settings can say it's there to turn on.
+static RAY_TRACING_OFFERED: AtomicBool = AtomicBool::new(false);
+
+/// Opens later devices with hardware ray tracing (through
+/// [`with_ray_queries`]) if `on`. Hosts call it with the saved
+/// `GraphicsSettings::ray_tracing()` before the device exists; changing the
+/// setting takes effect at the next start.
+pub fn want_ray_tracing(on: bool) {
+    RAY_TRACING_WANTED.store(on, Ordering::Relaxed);
+}
+
+/// Whether the adapter a device was last opened on can ray trace, whether
+/// or not it was opened with it.
+pub fn adapter_can_ray_trace() -> bool {
+    RAY_TRACING_OFFERED.load(Ordering::Relaxed)
+}
+
+/// Adds hardware ray tracing to `descriptor` when it's wanted
+/// ([`want_ray_tracing`]) and `adapter` has it: wgpu's ray queries (an
+/// experimental wgpu feature) and the adapter's acceleration structure
+/// limits. It's off by default: a device opened with it behaves
+/// differently even while no ray traced effect is on (a white square
+/// flashed in the editor's viewport on an RX 9070 XT under DirectX 12).
+/// `AXCENITY_RAY_TRACING=1` opens devices with it whatever the setting,
+/// and `=0` without it.
 // The one unsafe call is wgpu's opt-in to its experimental features.
 #[allow(unsafe_code)]
 pub fn with_ray_queries(adapter: &wgpu::Adapter, descriptor: &mut wgpu::DeviceDescriptor<'_>) {
-    let wanted = std::env::var("AXCENITY_RAY_TRACING").map_or(true, |value| value != "0");
-    if !wanted
-        || !adapter
-            .features()
-            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
-    {
+    let offered = adapter
+        .features()
+        .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    RAY_TRACING_OFFERED.store(offered, Ordering::Relaxed);
+    let wanted = match std::env::var("AXCENITY_RAY_TRACING").as_deref() {
+        Ok("0") => false,
+        Ok("1") => true,
+        _ => RAY_TRACING_WANTED.load(Ordering::Relaxed),
+    };
+    if !wanted || !offered {
         return;
     }
     descriptor.required_features |= wgpu::Features::EXPERIMENTAL_RAY_QUERY;

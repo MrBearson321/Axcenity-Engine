@@ -29,16 +29,24 @@
 //! - [`paint`] paints a material's maps in layers on an object's uvs
 //!   ([`PaintSet`], brushes through a [`TexelMap`]); saving flattens them
 //!   into PNGs named by role ([`ModelDoc::bake_paint`]).
-//! - [`subdivide`] cuts every face into four (Catmull-Clark). Sculpting,
-//!   retopology and baking were removed in Phase 90: creators sculpt and
-//!   bake in Blender and import the result.
-//! - Rigging's bone heat uses a [`Reference`] (the surface in a bounding
-//!   volume hierarchy, for occlusion rays) and the Humanoid template's
-//!   distance-field body (`remesh::field_mesh`).
+//! - [`sculpt`] pushes an object's surface about with brushes on a
+//!   [`Sculpt`] (a hierarchy of boxes keeps them fast; chunks say what to
+//!   draw again), masks it, and adds detail ([`voxel_remesh`],
+//!   [`subdivide`]).
+//! - [`bake`] puts a high-poly [`Reference`]'s detail into maps on a
+//!   lighter object's uvs ([`ModelDoc::bake`]: normal, ambient occlusion,
+//!   curvature, base color); Make Low Poly makes that object
+//!   ([`decimate_to`], [`relax`]). Retopology by hand (Poly Build) stays
+//!   out (Phase 90): creators retopologise in Blender.
+//! - Rigging's bone heat casts occlusion rays at a [`Reference`], and the
+//!   Humanoid template's body is a distance field (`remesh::field_mesh`).
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
 
+pub mod bake;
+#[cfg(test)]
+mod bake_tests;
 mod bvh;
 mod csg;
 #[cfg(test)]
@@ -49,6 +57,7 @@ mod fracture;
 mod generate;
 mod glb;
 mod half_edge;
+mod low_poly;
 mod merge;
 mod model_doc;
 mod modifiers;
@@ -66,6 +75,9 @@ mod remesh;
 pub mod rig;
 #[cfg(test)]
 mod rig_tests;
+pub mod sculpt;
+#[cfg(test)]
+mod sculpt_tests;
 mod select;
 mod shapes;
 mod sidecar;
@@ -78,11 +90,13 @@ pub mod uv;
 #[cfg(test)]
 mod uv_tests;
 
+pub use bake::{BakeReport, BakeSettings, Overlap};
 pub use csg::{Operation, boolean};
 pub use fracture::{Pattern, fracture, seed_points, voronoi_pieces};
 pub use generate::{Settings, generate, generate_for};
 pub use glb::{GlbMaterial, write_glb};
 pub use half_edge::{EditMesh, Face, HalfEdge, Polygon};
+pub use low_poly::{decimate_to, relax};
 pub use model_doc::{DocObject, LOD_RATIOS, ModelDoc, from_model};
 pub use modifiers::{
     Axis, Evaluated, MAX_COPIES, MAX_LEVELS, Modifier, ModifierKind, Purpose, clip, evaluate,
@@ -92,9 +106,9 @@ pub use ops::{
 };
 pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
-pub use reference::Reference;
-pub use remesh::subdivide;
+pub use reference::{Reference, SurfacePoint};
 pub use rig::{ArmBone, Armature, Skin};
+pub use sculpt::{Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;
 pub use solid::{Combined, Solid, combine, combine_parts, save_pieces, save_union, solid_of};

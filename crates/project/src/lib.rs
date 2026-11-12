@@ -34,6 +34,7 @@ mod asset_fix;
 mod asset_refs;
 mod backup;
 pub mod branding;
+mod build_profiles;
 mod collaborate_file;
 mod compat;
 mod default_sky;
@@ -109,6 +110,11 @@ pub use asset_refs::{
 pub use backup::{
     BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,
 };
+pub use build_profiles::{
+    BUILD_PROFILES_FILE, BUILD_REPORT_FILE, BUILD_REPORT_TEXT_FILE, BuildProfile, BuildProfiles,
+    BuildReport, LARGEST_LISTED, RELEASE_PROFILE, ReportFile, ReportGroup, TARGET_NAMES,
+    built_in_profiles, report_group, size_text as file_size_text,
+};
 pub use collaborate_file::{
     COLLABORATE_FILE, CollaborateFile, RepositoryLink, load_collaborate_file, save_collaborate_file,
 };
@@ -129,7 +135,10 @@ pub use package::{
     package_contents, package_contents_with_scripts, package_scripts, plan_import, read_package,
     script_tables, without_scripts, write_package,
 };
-pub use packed::{PackError, PackOptions, pack_game, pack_game_with, unpack_game};
+pub use packed::{
+    PackError, PackOptions, PackReport, PackedEntry, pack_game, pack_game_reporting,
+    pack_game_with, unpack_game,
+};
 pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};
 pub use starter_character::load_starter_character;
 pub use terrain_files::{

@@ -407,8 +407,8 @@ fn generated_lods_are_the_levels_the_renderer_draws() {
     );
 }
 
-/// Phase 90: a sidecar with fields this Axcenity no longer reads (a sculpt
-/// or a retopology reference from an older or newer editor) still opens
+/// Phase 90: a sidecar with fields this Axcenity doesn't read (a sculpt
+/// or a retopology reference from another editor) still opens
 /// with the same shape, and saving again leaves those fields out.
 #[test]
 fn a_sidecar_with_fields_no_longer_read_still_opens_and_saves_without_them() {

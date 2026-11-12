@@ -549,6 +549,12 @@ pub struct GraphicsSettings {
     /// a ray traced effect is on (`docs/rendering/ray-tracing.md`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_tracing_distance: Option<f32>,
+    /// Whether the GPU is opened with hardware ray tracing at the next
+    /// start: off unless turned on (at every preset), since opening it
+    /// changes the device even while no ray traced effect is on. Read once,
+    /// before the device exists (`render::adapters::want_ray_tracing`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_tracing: Option<bool>,
 }
 
 impl GraphicsSettings {
@@ -740,6 +746,12 @@ impl GraphicsSettings {
             Quality::Medium => MotionBlurQuality::Low,
             Quality::High | Quality::Ultra => MotionBlurQuality::High,
         })
+    }
+
+    /// Whether the GPU is opened with hardware ray tracing at the next
+    /// start: the override, or off.
+    pub fn ray_tracing(&self) -> bool {
+        self.ray_tracing.unwrap_or(false)
     }
 
     /// How far ray traced effects see, in studs: the override, kept within
@@ -1386,6 +1398,7 @@ mod tests {
             sharpen: Some(true),
             motion_blur: Some(MotionBlurQuality::Low),
             ray_tracing_distance: Some(600.0),
+            ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1611,6 +1624,19 @@ mod tests {
     }
 
     #[test]
+    fn hardware_ray_tracing_is_off_unless_turned_on() {
+        for quality in Quality::ALL {
+            assert!(!GraphicsSettings::preset(quality).ray_tracing());
+        }
+        let on = GraphicsSettings {
+            ray_tracing: Some(true),
+            ..GraphicsSettings::default()
+        };
+        assert!(on.ray_tracing());
+        assert!(!GraphicsSettings::default().ray_tracing());
+    }
+
+    #[test]
     fn ray_tracing_distance_follows_the_preset_and_stays_in_range() {
         let distances = Quality::ALL.map(|q| GraphicsSettings::preset(q).ray_tracing_distance());
         assert_eq!(distances, [150.0, 250.0, 400.0, 800.0]);
@@ -1689,6 +1715,7 @@ mod tests {
                         sharpen: post,
                         motion_blur: Some(MotionBlurQuality::Low),
                         ray_tracing_distance: None,
+                        ray_tracing: post,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);

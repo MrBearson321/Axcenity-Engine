@@ -61,6 +61,7 @@ mod model_studio;
 mod native_menu;
 mod nav_overlay;
 mod open;
+mod people_history;
 mod plugins;
 mod prefabs;
 mod probes;
@@ -69,7 +70,7 @@ mod save_template;
 mod search;
 mod sequencer;
 mod session;
-mod settings;
+pub(crate) mod settings;
 
 mod collab_conflicts;
 mod collab_handoff;
@@ -349,6 +350,9 @@ pub struct EditorApp {
     luau: luau_checks::LuauChecks,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
+    /// A script that is a file in its service, dragged onto an object,
+    /// while "Attach it?" is asked: the script and the object.
+    confirm_attach: Option<(InstanceId, InstanceId)>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
     confirm_sky: Option<String>,
     /// The Levels panel's typing and the level it acts on (`app/levels.rs`).
@@ -985,6 +989,7 @@ impl EditorApp {
             tabs: ScriptTabs::default(),
             luau: Default::default(),
             confirm_delete: None,
+            confirm_attach: None,
             confirm_sky: None,
             levels_panel: Default::default(),
             play_from_start: false,
@@ -1225,6 +1230,8 @@ impl eframe::App for EditorApp {
     /// Saves the look, the layout and the recent projects. eframe calls
     /// this now and then, and when the window closes.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // History lines still folding go to the project's files.
+        self.flush_history();
         storage.set_string(APPEARANCE_KEY, self.appearance.to_text());
         storage.set_string(updates::UPDATES_KEY, self.updates.to_text());
         let recent: Vec<String> = self
@@ -1290,6 +1297,7 @@ impl eframe::App for EditorApp {
         if let Ok(text) = serde_json::to_string(&self.graphics) {
             storage.set_string(GRAPHICS_KEY, text);
         }
+        settings::remember_ray_tracing(self.graphics.ray_tracing());
         if let Some(text) = self.benchmark.saved() {
             storage.set_string(crate::graphics_benchmark::REPORT_KEY, text);
         }
@@ -1836,6 +1844,7 @@ impl EditorApp {
         self.unsaved_changes_prompt(ctx);
         self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
+        self.attach_script_prompt(ctx);
         self.sky_prompt(ctx);
         self.autorecover_prompt(ctx);
         self.autorecover_frame();

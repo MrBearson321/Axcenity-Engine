@@ -1,5 +1,5 @@
 //! U20, Model Studio PR 2 (`docs/research/usability/model-studio.md`):
-//! Modifiers shown while modeling, the Mesh menu saying why it's
+//! Bake folded until used, the Mesh menu saying why it's
 //! greyed, and Paint warning about uvs that would surprise a beginner.
 
 use axcenity_mesh_edit::{ModelDoc, PrimitiveSettings};
@@ -13,15 +13,29 @@ fn says(shown: &[(String, egui::Pos2)], words: &str) -> bool {
     shown.iter().any(|(text, _)| text.contains(words))
 }
 
-/// MS4: modeling shows Modifiers, and nothing of the retopology and
-/// baking Phase 90 removed.
+/// MS4: modeling shows Modifiers and a closed Bake fold (R15); it opens
+/// by itself once a reference is set, and a click opens it too.
 #[test]
-fn modeling_shows_modifiers_and_no_retopology_or_bake() {
+fn bake_stays_folded_until_used() {
     let ctx = crate::theme::test_context();
     let mut studio = studio_with(cube_doc());
     let shown = frames(&ctx, &mut studio, Vec::new());
     assert!(says(&shown, "Add Modifier"), "{shown:?}");
-    assert!(!says(&shown, "Make Low Poly") && !says(&shown, "Bake"));
+    let header = *button(&shown, bake::BAKE_HEADER).expect("the fold's header");
+    assert!(!says(&shown, "Make Low Poly") && !says(&shown, "Occlusion"));
+
+    let shown = frames(&ctx, &mut studio, click(header));
+    assert!(says(&shown, "Make Low Poly") && says(&shown, "Occlusion"));
+    let shown = frames(&ctx, &mut studio, click(header));
+    assert!(!says(&shown, "Make Low Poly"), "a second click folds it");
+
+    // A second object as the reference opens it, whatever it was.
+    let doc = studio.doc.as_mut().unwrap();
+    let copy = doc.model.objects[0].clone();
+    doc.model.objects.push(copy);
+    doc.reference = Some(1);
+    let shown = frames(&ctx, &mut studio, Vec::new());
+    assert!(says(&shown, "Make Low Poly"), "{shown:?}");
 }
 
 /// MS5: the Mesh menu in Object mode says its operations need Edit mode

@@ -1,10 +1,12 @@
 //! A bounding volume hierarchy over a mesh's triangles: boxes in boxes,
-//! so a ray only looks at the triangles near it (rigging's occlusion rays,
-//! through [`crate::Reference`]).
+//! so a ray or a brush's sphere only looks at the triangles near it (a
+//! sculpt's brushes, and a [`crate::Reference`]'s rays for baking and
+//! rigging's bone heat).
 //!
 //! Each node covers a run of `order` (the triangles sorted so every
 //! node's are together), split at the median along its longest side. A
-//! node's children come after it in `nodes`.
+//! node's children come after it in `nodes`, so going through the nodes
+//! backwards visits children before their parents (how `refit` works).
 
 use glam::Vec3;
 
@@ -20,6 +22,7 @@ struct Node {
     count: u32,
     /// The first child (the second is next to it), or 0 for a leaf.
     left: u32,
+    parent: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -51,6 +54,7 @@ impl Bvh {
             start: 0,
             count: triangles.len() as u32,
             left: 0,
+            parent: 0,
         });
         let mut stack = vec![0usize];
         while let Some(index) = stack.pop() {
@@ -90,6 +94,7 @@ impl Bvh {
                     start: start as u32,
                     count: count as u32,
                     left: 0,
+                    parent: index as u32,
                 });
             }
             stack.push(left + 1);
@@ -123,6 +128,78 @@ impl Bvh {
         };
         self.nodes[index].min = min;
         self.nodes[index].max = max;
+    }
+
+    /// Fits the boxes again round `triangles` (which moved) and every box
+    /// holding them.
+    pub(crate) fn refit(
+        &mut self,
+        changed: impl IntoIterator<Item = u32>,
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+    ) {
+        let mut nodes = Vec::new();
+        for triangle in changed {
+            let mut node = self.leaf_of[triangle as usize] as usize;
+            while !self.marked[node] {
+                self.marked[node] = true;
+                nodes.push(node);
+                if node == 0 {
+                    break;
+                }
+                node = self.nodes[node].parent as usize;
+            }
+        }
+        // Children have larger numbers than their parents.
+        nodes.sort_unstable_by(|a, b| b.cmp(a));
+        for &node in &nodes {
+            self.fit(node, positions, triangles);
+            self.marked[node] = false;
+        }
+    }
+
+    /// The nearest triangle `origin + t·direction` hits (from either
+    /// side, t > 0), passing over those `skip` says, and its t.
+    pub(crate) fn ray(
+        &self,
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+        origin: Vec3,
+        direction: Vec3,
+        skip: impl Fn(u32) -> bool,
+    ) -> Option<(u32, f32)> {
+        if self.order.is_empty() {
+            return None;
+        }
+        let inverse = direction.recip();
+        let mut best: Option<(u32, f32)> = None;
+        let mut stack = vec![0usize];
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            let Some(near) = slab(node.min, node.max, origin, inverse) else {
+                continue;
+            };
+            if best.is_some_and(|(_, t)| near > t) {
+                continue;
+            }
+            if node.left != 0 {
+                stack.push(node.left as usize + 1);
+                stack.push(node.left as usize);
+                continue;
+            }
+            for &triangle in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                if skip(triangle) {
+                    continue;
+                }
+                let corners = triangles[triangle as usize].map(|v| positions[v as usize]);
+                if let Some(t) = hit(origin, direction, corners)
+                    && best.is_none_or(|(_, best)| t < best)
+                {
+                    best = Some((triangle, t));
+                }
+            }
+        }
+        best
     }
 
     /// True if the ray hits any triangle closer than `limit` (a ray
@@ -160,6 +237,94 @@ impl Bvh {
         }
         false
     }
+
+    /// The triangle nearest `point`, the nearest point on it and that
+    /// point's barycentric weights.
+    pub(crate) fn nearest(
+        &self,
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+        point: Vec3,
+    ) -> Option<(u32, Vec3, [f32; 3])> {
+        if self.order.is_empty() {
+            return None;
+        }
+        let mut best: Option<(u32, Vec3, [f32; 3], f32)> = None;
+        let mut stack = vec![0usize];
+        let box_distance = |node: &Node| point.clamp(node.min, node.max).distance_squared(point);
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            if best.is_some_and(|(.., d)| box_distance(node) >= d) {
+                continue;
+            }
+            if node.left != 0 {
+                // The nearer child first (pushed last), so the other is
+                // more often passed over.
+                let (a, b) = (node.left as usize, node.left as usize + 1);
+                if box_distance(&self.nodes[a]) <= box_distance(&self.nodes[b]) {
+                    stack.push(b);
+                    stack.push(a);
+                } else {
+                    stack.push(a);
+                    stack.push(b);
+                }
+                continue;
+            }
+            for &triangle in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                let corners = triangles[triangle as usize].map(|v| positions[v as usize]);
+                let (on, weights) = closest_on_triangle(point, corners);
+                let distance = on.distance_squared(point);
+                if best.is_none_or(|(.., d)| distance < d) {
+                    best = Some((triangle, on, weights, distance));
+                }
+            }
+        }
+        best.map(|(triangle, on, weights, _)| (triangle, on, weights))
+    }
+
+    /// Adds to `out` every triangle in a leaf whose box comes within
+    /// `radius` of `center`.
+    pub(crate) fn sphere(&self, center: Vec3, radius: f32, out: &mut Vec<u32>) {
+        if self.order.is_empty() {
+            return;
+        }
+        let mut stack = vec![0usize];
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            let nearest = center.clamp(node.min, node.max);
+            if nearest.distance_squared(center) > radius * radius {
+                continue;
+            }
+            if node.left != 0 {
+                stack.push(node.left as usize + 1);
+                stack.push(node.left as usize);
+            } else {
+                out.extend_from_slice(
+                    &self.order[node.start as usize..(node.start + node.count) as usize],
+                );
+            }
+        }
+    }
+
+    /// The runs of `order` with at most `size` triangles that make up the
+    /// whole, each a node's (so its triangles are near each other).
+    pub(crate) fn runs(&self, size: usize) -> Vec<std::ops::Range<usize>> {
+        let mut runs = Vec::new();
+        if self.order.is_empty() {
+            return runs;
+        }
+        let mut stack = vec![0usize];
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            if node.count as usize <= size || node.left == 0 {
+                runs.push(node.start as usize..(node.start + node.count) as usize);
+            } else {
+                stack.push(node.left as usize + 1);
+                stack.push(node.left as usize);
+            }
+        }
+        runs
+    }
 }
 
 /// Where a ray (with `inverse` its direction's reciprocal) enters the box,
@@ -171,6 +336,49 @@ fn slab(min: Vec3, max: Vec3, origin: Vec3, inverse: Vec3) -> Option<f32> {
     let near = a.min(b).max_element();
     let far = a.max(b).min_element();
     (far >= near.max(0.0)).then_some(near.max(0.0))
+}
+
+/// The point of the triangle `a b c` nearest `p`, and its barycentric
+/// weights (Ericson, *Real-Time Collision Detection*, 5.1.5: which of the
+/// corners, edges or inside it's nearest, by where `p` is against them).
+pub(crate) fn closest_on_triangle(p: Vec3, [a, b, c]: [Vec3; 3]) -> (Vec3, [f32; 3]) {
+    let (ab, ac, ap) = (b - a, c - a, p - a);
+    let (d1, d2) = (ab.dot(ap), ac.dot(ap));
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return (a, [1.0, 0.0, 0.0]);
+    }
+    let bp = p - b;
+    let (d3, d4) = (ab.dot(bp), ac.dot(bp));
+    if d3 >= 0.0 && d4 <= d3 {
+        return (b, [0.0, 1.0, 0.0]);
+    }
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let v = d1 / (d1 - d3);
+        return (a + ab * v, [1.0 - v, v, 0.0]);
+    }
+    let cp = p - c;
+    let (d5, d6) = (ab.dot(cp), ac.dot(cp));
+    if d6 >= 0.0 && d5 <= d6 {
+        return (c, [0.0, 0.0, 1.0]);
+    }
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let w = d2 / (d2 - d6);
+        return (a + ac * w, [1.0 - w, 0.0, w]);
+    }
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
+        let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return (b + (c - b) * w, [0.0, 1.0 - w, w]);
+    }
+    let total = va + vb + vc;
+    if total.abs() < 1e-30 {
+        // No area: its first corner will do.
+        return (a, [1.0, 0.0, 0.0]);
+    }
+    let (v, w) = (vb / total, vc / total);
+    (a + ab * v + ac * w, [1.0 - v - w, v, w])
 }
 
 /// How far along the ray it hits `a b c`, from either side. Worked out in
