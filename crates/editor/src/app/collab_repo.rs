@@ -133,6 +133,32 @@ impl EditorApp {
         }
     }
 
+    /// The Console's `checkpoint [label]` (Sync now, until the panel has
+    /// a button): asks for a manual checkpoint and says where sync stands.
+    pub(super) fn checkpoint_command(&mut self, label: &str) {
+        let Some(state) = self.repo.state().cloned() else {
+            self.output.info(
+                "This project isn't linked to a repository, so there's nothing to upload \
+                 checkpoints to.",
+            );
+            return;
+        };
+        if !self.repo_commits_here() {
+            self.output.info(
+                "In a session the host makes the checkpoints: ask them, or use the \
+                 session's own checkpoints.",
+            );
+            return;
+        }
+        let label = (!label.is_empty()).then(|| label.to_owned());
+        self.repo_checkpoint(Kind::Manual, label);
+        self.output.info(format!(
+            "Checkpoint asked for. Sync is {}: {}",
+            state.word(),
+            state.explain()
+        ));
+    }
+
     fn repo_run(&mut self, folder: &Path, kind: Kind, label: Option<String>) {
         let Some(link) = self.repo.link.clone() else {
             return;
