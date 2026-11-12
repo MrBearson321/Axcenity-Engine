@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate 2.0 – Persistent Collaboration & Automatic Host Handoff" (2026-11-12) asks that a Collaborate project stop depending on the computer that started its session: anyone may leave, the session carries on under another host, and the project can be picked up later from a Git remote when nobody is online. This document is phase 0 of that brief: an audit of how host-dependent Collaborate is today, and the design and plan for phases 1–7 (here called **P1–P7**, so they don't clash with C1–C12 of [collaborate.md](collaborate.md)). The decisions are [ADR-0022](../../wiki/Architecture/Architecture-Decisions/ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md).
 
-- **Status:** P0 (this document) done. P1–P7 follow §6.
+- **Status:** P0 (this document) done. P1 built (§8.1). P2–P7 follow §6.
 - **Date:** 2026-11-12
 - **Engine:** `main` at `eac9e61` (PR #207)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations, epochs), ADR-0021 (live `yrs` scripts, Tailscale, identity seam), the [development policy](../development-policy.md) (no infrastructure before it's needed, local tests).
@@ -182,7 +182,19 @@ One PR each, against `main`, each branch on top of the one before it (Paul merge
 - **Large worlds in Git.** `world.json` is text and diffs well; a 10,000-part world is a few MB. Binary assets go through LFS when installed.
 - **Commits by a successor who isn't signed in to GitHub.** Its checkpoints stay local (Sync Pending) and upload when that person signs in, or when a later host who is signed in takes over; the panel says so.
 
-## 8. Sources
+## 8. Built
+
+### 8.1 P1: repository integration
+
+- **`crates/repo`** (no engine dependency, no new third-party crate): `git.rs` runs the installed `git` through `Runner` (background-safe: no terminal or window prompts, `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, no console window on Windows, a timeout). A token goes only to commands that reach the remote, through a one-off credential helper reading `AXCENITY_GIT_TOKEN` from that child's environment; every error is scrubbed (`secret::redact`). Pushes are `HEAD:refs/heads/<branch>`, never forced; a rejected push comes back as `Pushed::Behind`. `merge_check` uses `git merge-tree --write-tree` (git 2.38+, `Git::is_recent_enough`).
+- **GitHub** (`github.rs`): device flow (`start_sign_in`, `poll_sign_in` with pending, slow-down, denied and expired), `user`, `repository` (default branch, push permission), `create_repository` (private by default, empty), reference parsing (`owner/name`, HTTPS, SSH forms). The OAuth App's client ID comes from `AXCENITY_GITHUB_CLIENT_ID` (running or at build time); without one the editor offers `gh auth token` (`credentials::github_cli_token`) or a pasted token, both checked with `/user` before they're kept.
+- **Credentials** (`credentials.rs`): `git credential approve/fill/reject` for `https://github.com`, so the token lands in whatever store Git uses (Git Credential Manager, Keychain, libsecret); `Stored::MemoryOnly` when Git has no helper.
+- **Linking** (`repository.rs`, `manager.rs`): as §4.6, plus: a remote with commits and a folder with no history is *adopted* and its differences listed; nothing is uploaded until the person picks **Upload my version** (`upload_my_version`: a checkpoint on top of the remote's) or **Use the repository's version** (`take_remote_version`: the folder's own files go into a Git stash first). A folder whose history is unrelated to the remote's is refused, and the remote is put back as it was. An existing `origin` naming another URL is kept unless replacing is chosen. Unlinking removes the remote only.
+- **`collaborate.json`** (`crates/project/src/collaborate_file.rs`): project ID, name, repository (provider, URL, branch); refuses to write a URL with credentials in it; removed when empty.
+- **Tests** (37): `repo`'s run the real `git` against bare `file://` remotes with the machine's Git settings shut out (`testing::ConfigRunner`): first upload, adoption with and without differences, both choices after adopting, the remote's default branch, a project inside another repository, another remote kept, unrelated history refused, an unreachable remote changing nothing, unlink and relink, LFS attributes; GitHub over a fake `Http` (device flow states, repository lookup and creation, 401, offline); the token never in arguments, errors or the project folder; credentials round-tripping through a helper and memory-only without one. `project`'s `collaborate_file` tests.
+- **Hand checks for Paul:** sign in with a real OAuth App (register one with device flow enabled and set `AXCENITY_GITHUB_CLIENT_ID`), connect and create a private repository on github.com, Windows with Git Credential Manager (the token should appear under `git:https://github.com` in Windows Credential Manager).
+
+## 9. Sources
 
 - GitHub Docs: [Authorizing OAuth apps — device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow), [Scopes for OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps), [REST: create a repository for the authenticated user](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user), [REST: get a repository](https://docs.github.com/en/rest/repos/repos#get-a-repository).
 - Git: [`git merge-tree --write-tree`](https://git-scm.com/docs/git-merge-tree) (2.38+), [gitcredentials](https://git-scm.com/docs/gitcredentials) (helpers starting with `!` run in the shell, also on Git for Windows), [Git LFS](https://git-lfs.com/).
