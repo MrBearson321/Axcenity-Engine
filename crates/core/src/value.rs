@@ -116,8 +116,9 @@ pub struct PhysicalProperties {
 }
 
 impl PhysicalProperties {
-    /// What every part used before materials had their own (Phase 34).
-    pub const LEGACY: Self = Self::new(1.0, 0.5, 0.25, 1.0, 1.0);
+    /// What every part used before materials had their own (Phase 34);
+    /// Plastic, Glass and Neon still do.
+    pub const CLASSIC: Self = Self::new(1.0, 0.5, 0.25, 1.0, 1.0);
 
     /// The smallest density: a part with none couldn't be simulated.
     pub const MIN_DENSITY: f32 = 0.0001;

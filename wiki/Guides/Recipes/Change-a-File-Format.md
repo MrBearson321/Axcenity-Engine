@@ -19,9 +19,9 @@ tags: [guide, recipe, file-formats]
 | You change | Version | Migration |
 |---|---|---|
 | A new **optional** project file | None | — |
-| The shape of an existing project file | `project::FORMAT_VERSION` (now 5; the editor asks before upgrading and puts the project back if the upgrade fails) | A step in `migrate.rs` that keeps a copy of the previous files in `.axcenity/previous/<version>/` |
+| The shape of an existing project file | `project::FORMAT_VERSION` (now 6; the editor asks before upgrading and puts the project back if the upgrade fails) | A step in `migrate.rs` that keeps a copy of the previous files in `.axcenity/previous/<version>/` |
 | A save slot's shape | `save::SAVE_VERSION` (now 2) | A step in `save/src/migrate.rs` and an old slot under `save/src/fixtures/` that a test loads |
-| An animation file's shape | `anim::files::FORMAT_VERSION` (now 2) | Older shapes still read (`ClipFile::from_json` converts) |
+| An animation file's shape | `anim::files::FORMAT_VERSION` (now 2) | Older shapes are refused by the readers; the project upgrade rewrites them (`project/src/migrate_shapes.rs`, Phase 92), so a new anim format also needs a project format step |
 | A network message or a class default | `net::PROTOCOL_VERSION` (now 10) | None: mismatched versions are refused with a reason; `Hello`/`Refused` stay JSON |
 | A field on `Model`, `Primitive`, `ModelMaterial`, `Rig` | Cooked models re-stamp automatically (`AXCENITY_ASSETS_SOURCE_HASH`) | Encode it in `cooked_model.rs` (won't compile otherwise) |
 | `.axtex`, `.axgame` | Their own header versions | Old ones still read (`.axgame` v1 unpacks) |

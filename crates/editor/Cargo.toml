@@ -47,7 +47,6 @@ axcenity-updater = { workspace = true, features = ["http"] }
 axcenity-ui.workspace = true
 anyhow.workspace = true
 eframe.workspace = true
-egui-phosphor.workspace = true
 egui_dock.workspace = true
 env_logger.workspace = true
 log.workspace = true

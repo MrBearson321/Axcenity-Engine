@@ -1562,7 +1562,7 @@ fn load_animation_gives_a_track_to_play_stop_and_hear() {
 }
 
 #[test]
-fn animation_play_still_works_and_says_once_what_the_new_way_is() {
+fn animation_play_and_the_rest_are_errors_that_name_load_animation() {
     let mut world = World::new();
     let animation = world.create(ClassName::Animation).unwrap();
     world
@@ -1571,13 +1571,28 @@ fn animation_play_still_works_and_says_once_what_the_new_way_is() {
     let output = output_of(
         &mut world,
         "local a = workspace.Animation
-         a:Play()
-         a:Stop()
-         a:Play()",
+         for _, method in { 'Play', 'Stop', 'Pause', 'Resume' } do
+             local ok, err = pcall(function() a[method](a) end)
+             print(ok, err)
+         end",
     );
-    assert_eq!(output.len(), 1, "{output:?}");
-    assert!(output[0].contains("LoadAnimation"), "{}", output[0]);
-    assert!(world.property_animation(animation).unwrap().play);
+    assert_eq!(output.len(), 4, "{output:?}");
+    for (line, (method, then)) in output.iter().zip([
+        ("Play", "track:Play()"),
+        ("Stop", "track:Stop()"),
+        ("Pause", "track:AdjustSpeed(0)"),
+        ("Resume", "track:AdjustSpeed(1)"),
+    ]) {
+        assert!(line.starts_with("false\t"), "{line}");
+        assert!(
+            line.contains(&format!("animation:{method}() was removed")),
+            "{line}"
+        );
+        assert!(line.contains("animator:LoadAnimation(animation)"), "{line}");
+        assert!(line.contains(then), "{line}");
+    }
+    // Nothing was asked of the Animator.
+    assert!(!world.property_animation(animation).is_some_and(|s| s.play));
 }
 
 #[test]

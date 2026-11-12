@@ -1,6 +1,6 @@
 {
   "name": "Hello Loading",
-  "format_version": 5,
+  "format_version": 6,
   "loading_screen": {
     "screen_gui": "Loading",
     "min_seconds": 2.0,

@@ -776,7 +776,6 @@ dependencies = [
  "axcenity-updater",
  "axcenity-workspace-hack",
  "eframe",
- "egui-phosphor",
  "egui_dock",
  "env_logger",
  "flate2",
@@ -1167,7 +1166,6 @@ dependencies = [
  "axcenity-character",
  "axcenity-core",
  "axcenity-mesh-edit",
- "axcenity-nav",
  "axcenity-physics",
  "axcenity-procedural",
  "axcenity-render-types",
@@ -1196,7 +1194,6 @@ dependencies = [
  "axcenity-sim",
  "axcenity-workspace-hack",
  "env_logger",
- "log",
  "profiling",
 ]
 

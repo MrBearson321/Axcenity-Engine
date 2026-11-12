@@ -199,7 +199,7 @@ impl Material {
     /// gives its Metal parts those values too.
     pub fn physical(self) -> PhysicalProperties {
         match self {
-            Material::Plastic | Material::Glass | Material::Neon => PhysicalProperties::LEGACY,
+            Material::Plastic | Material::Glass | Material::Neon => PhysicalProperties::CLASSIC,
             Material::SmoothPlastic => PhysicalProperties::new(0.7, 0.2, 0.5, 1.0, 1.0),
             Material::Wood | Material::WoodPlanks => {
                 PhysicalProperties::new(0.35, 0.48, 0.2, 1.0, 1.0)

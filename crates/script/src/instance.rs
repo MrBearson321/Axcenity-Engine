@@ -956,62 +956,31 @@ fn set_track_field(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> 
     }
 }
 
-/// Tells scripts once, per side, that `animation:Play()` and the rest
-/// still work but `animator:LoadAnimation(animation)` is the new way.
-fn note_legacy_animation(lua: &Lua, method: &str) {
-    struct Noted;
-    if lua.app_data_ref::<Noted>().is_some() {
-        return;
-    }
-    lua.set_app_data(Noted);
-    crate::push_output(
-        lua,
-        crate::OutputKind::Print,
-        format!(
-            "animation:{method}() still works, through the Animator beside the Animation; animator:LoadAnimation(animation) is the new way, and gives an AnimationTrack to play, stop and blend."
-        ),
-    );
-}
-
-/// `Animation` methods kept from before AnimationTracks: Play, Stop, Pause
-/// and Resume, played by the Animator on the same parent.
+/// `Animation` methods from before AnimationTracks: Play, Stop, Pause and
+/// Resume. Since unified Phase 92 each is an error that names the fix:
+/// `animator:LoadAnimation(animation)` gives an AnimationTrack that does
+/// all of them. (AutoPlay still plays an Animation on its own.)
 pub fn property_animation_methods(
     lua: &Lua,
 ) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
-    let play = lua.create_function(|lua, this: LuaInstance| {
-        note_legacy_animation(lua, "Play");
-        let mut world = world_mut(lua)?;
-        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
-        live.play = true;
-        Ok(())
-    })?;
-    let stop = lua.create_function(|lua, this: LuaInstance| {
-        note_legacy_animation(lua, "Stop");
-        let mut world = world_mut(lua)?;
-        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
-        live.stop = true;
-        Ok(())
-    })?;
-    let pause = lua.create_function(|lua, this: LuaInstance| {
-        note_legacy_animation(lua, "Pause");
-        let mut world = world_mut(lua)?;
-        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
-        live.pause = true;
-        Ok(())
-    })?;
-    let resume = lua.create_function(|lua, this: LuaInstance| {
-        note_legacy_animation(lua, "Resume");
-        let mut world = world_mut(lua)?;
-        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
-        live.resume = true;
-        Ok(())
-    })?;
-    Ok(vec![
-        (ClassName::Animation, "Play", play),
-        (ClassName::Animation, "Stop", stop),
-        (ClassName::Animation, "Pause", pause),
-        (ClassName::Animation, "Resume", resume),
-    ])
+    ["Play", "Stop", "Pause", "Resume"]
+        .into_iter()
+        .map(|method| {
+            // A track pauses with AdjustSpeed(0) and resumes with its speed.
+            let then = match method {
+                "Pause" => "track:AdjustSpeed(0)",
+                "Resume" => "track:AdjustSpeed(1)",
+                "Play" => "track:Play()",
+                _ => "track:Stop()",
+            };
+            let removed = lua.create_function(move |_, _: mlua::MultiValue| -> mlua::Result<()> {
+                Err(mlua::Error::runtime(format!(
+                    "animation:{method}() was removed: use local track = animator:LoadAnimation(animation), then {then}"
+                )))
+            })?;
+            Ok((ClassName::Animation, method, removed))
+        })
+        .collect()
 }
 
 /// A parameter's name, given to `method`.

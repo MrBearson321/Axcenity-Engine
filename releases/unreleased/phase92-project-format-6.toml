@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "project"
+title = "Projects move to format 6, and the oldest clip and block-script shapes are upgraded once on open"
+details = "Opening a project upgrades it to format 6 and keeps a copy of the previous files in .axcenity/previous/5, as earlier upgrades did. Clips and state machines still in animation format 1, and block-script conditions saved in the first block format, are rewritten in the current shape; the engine no longer reads the old shapes anywhere else. An older Axcenity can't open a format 6 project. The Starter scene template is gone from New Project (the genre templates replace it); projects made from it open as before."
+features = []
+fixes = []
+introduces_issues = []
+prs = [223]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

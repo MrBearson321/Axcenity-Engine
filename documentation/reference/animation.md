@@ -40,7 +40,7 @@ end)
 
 ## Property animation
 
-An **Animation** Instance plays a property clip on its parent: a door's Position, a light's Brightness, a UI element's Size and colour. `Animation:Play()`, `Animation:Pause()`, `Animation:Resume()`, `Animation:Stop()` and `Animation.Completed`. When a player turns on **reduced motion** (`GuiService.ReducedMotion`), UI animations hold still.
+An **Animation** Instance plays a property clip on its parent: a door's Position, a light's Brightness, a UI element's Size and colour. Tick **AutoPlay** to play it when the game starts, or play it from a script with `animator:LoadAnimation(animation)`, which gives an AnimationTrack (`Animation:Play()` and the rest were removed and now give an error that says this). When a player turns on **reduced motion** (`GuiService.ReducedMotion`), UI animations hold still.
 
 ## IK and ragdolls
 

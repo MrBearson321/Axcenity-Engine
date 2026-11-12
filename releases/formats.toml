@@ -7,7 +7,7 @@
 #   save              axcenity_save::SAVE_VERSION (game saves)
 #   network_protocol  axcenity_net::PROTOCOL_VERSION (hosts and clients must match)
 [formats]
-project = 5
+project = 6
 world = 2
 axgame = 2
 save = 2

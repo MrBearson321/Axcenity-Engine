@@ -21,7 +21,7 @@ tags: [system/project, serialization, file-formats]
 ```mermaid
 flowchart TB
   LOAD["project::load(folder)"] --> MAN[axcenity.json<br/>refuse a newer format_version]
-  MAN --> MIG["migrate.rs: ask first (format 5), copy previous files,<br/>upgrade 1→2→3→4→5, put back on failure"]
+  MAN --> MIG["migrate.rs: ask first (format 5), copy previous files,<br/>upgrade 1→2→3→4→5→6, put back on failure"]
   MIG --> WF["world_file.rs: world.json → World<br/>(class defaults; Material before dependents)"]
   WF --> SCR[scripts, block scripts → Lua,<br/>stylesheets, ui graphs → LocalScripts]
   SCR --> PF["prefabs.rs: Prefabs::refresh<br/>(placed copies, nested, variants)"]

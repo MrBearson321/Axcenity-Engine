@@ -3001,7 +3001,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Animation,
         Function {
             name: "Play",
-            doc: "Plays this Animation's clip from the start, through the Animator on the same parent. `animator:LoadAnimation(animation)` is the newer way, with fades and weights.",
+            doc: "Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.",
             params: &[],
             returns: "()",
         },
@@ -3010,7 +3010,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Animation,
         Function {
             name: "Stop",
-            doc: "Stops playback and goes back to the start of the clip.",
+            doc: "Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.",
             params: &[],
             returns: "()",
         },
@@ -3019,7 +3019,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Animation,
         Function {
             name: "Pause",
-            doc: "Pauses at the current time. Resume continues from there.",
+            doc: "Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.",
             params: &[],
             returns: "()",
         },
@@ -3028,7 +3028,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Animation,
         Function {
             name: "Resume",
-            doc: "Continues after Pause.",
+            doc: "Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.",
             params: &[],
             returns: "()",
         },

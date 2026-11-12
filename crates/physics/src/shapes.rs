@@ -26,8 +26,8 @@ pub(crate) const MIN_SIZE: f32 = 0.01;
 /// How much terrains and foliage grip (0 is ice) and bounce (0 is no
 /// bounce): what every part had before materials had their own. Parts get
 /// theirs afterwards (`material::apply`).
-const FRICTION: f32 = PhysicalProperties::LEGACY.friction;
-const RESTITUTION: f32 = PhysicalProperties::LEGACY.elasticity;
+const FRICTION: f32 = PhysicalProperties::CLASSIC.friction;
+const RESTITUTION: f32 = PhysicalProperties::CLASSIC.elasticity;
 
 /// What a part collides as.
 #[derive(Clone, PartialEq)]

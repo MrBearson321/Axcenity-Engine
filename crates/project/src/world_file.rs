@@ -738,7 +738,7 @@ fn physical_properties(json: &Json) -> Result<Value, String> {
     {
         return Err(format!("{EXPECTED} (there is no \"{unknown}\")"));
     }
-    let mut numbers = axcenity_core::PhysicalProperties::LEGACY.to_array();
+    let mut numbers = axcenity_core::PhysicalProperties::CLASSIC.to_array();
     for (number, field) in numbers.iter_mut().zip(PHYSICAL_FIELDS) {
         if let Some(value) = fields.get(field) {
             *number = value

@@ -3950,18 +3950,18 @@ declare extern type Animation extends Instance with
 	Speed: number
 	--- If true, playback repeats instead of firing Completed at the end.
 	Looped: boolean
-	--- Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.
+	--- Fires when the Animation, played by AutoPlay, reaches the end of a clip that doesn't loop. The handler gets no arguments.
 	Completed: Signal
-	--- Fires when `animation:Play()` passes one of the clip's events. The handler gets the event's name.
+	--- Fires when the Animation, played by AutoPlay, passes one of the clip's events. The handler gets the event's name.
 	AnimationEvent: Signal
 	[string]: any
-	--- Plays this Animation's clip from the start, through the Animator on the same parent. `animator:LoadAnimation(animation)` is the newer way, with fades and weights.
+	--- Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 	function Play(self): ()
-	--- Stops playback and goes back to the start of the clip.
+	--- Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 	function Stop(self): ()
-	--- Pauses at the current time. Resume continues from there.
+	--- Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 	function Pause(self): ()
-	--- Continues after Pause.
+	--- Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 	function Resume(self): ()
 end
 

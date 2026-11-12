@@ -117,6 +117,10 @@ fn step(from: u32) -> Option<(&'static str, Migration)> {
             "The manifest records the Axcenity version that saved the project.",
             migrate_v4_to_v5,
         )),
+        5 => Some((
+            "Old clips and block-script conditions are rewritten in the current shape.",
+            migrate_v5_to_v6,
+        )),
         _ => None,
     }
 }
@@ -146,6 +150,13 @@ fn migrate_v4_to_v5(folder: &Path) -> Result<(), String> {
     let engine =
         serde_json::json!({ "saved_with": axcenity_release::Version::current().to_string() });
     write_manifest(folder, 5, Some(("engine", engine)))
+}
+
+/// File shapes from before format 3 that the readers dropped (unified
+/// Phase 92): see `migrate_shapes.rs`.
+fn migrate_v5_to_v6(folder: &Path) -> Result<(), String> {
+    crate::migrate_shapes::migrate(folder)?;
+    write_manifest_version(folder, 6)
 }
 
 fn write_manifest_version(folder: &Path, version: u32) -> Result<(), String> {
@@ -592,7 +603,7 @@ mod tests {
             axcenity_release::Version::current().to_string()
         );
         let on_disk = read_manifest(&folder).unwrap();
-        assert_eq!(on_disk.format_version, 5);
+        assert_eq!(on_disk.format_version, FORMAT_VERSION);
         assert_eq!(on_disk.engine, Some(engine));
 
         // Saving again with the same engine doesn't touch the manifest.
@@ -655,7 +666,10 @@ mod tests {
         let project = load(&folder).unwrap();
         assert_eq!(project.migrated_from, Some(4));
         assert!(!project.world_loaded);
-        assert_eq!(read_manifest(&folder).unwrap().format_version, 5);
+        assert_eq!(
+            read_manifest(&folder).unwrap().format_version,
+            FORMAT_VERSION
+        );
         assert!(!folder.join(FAILED_UPGRADE_DIR).exists());
         fs::remove_dir_all(&folder).unwrap();
     }
@@ -663,11 +677,13 @@ mod tests {
     #[test]
     fn a_newer_manifest_this_engine_cant_parse_is_refused_not_opened() {
         let folder = temp_folder("newer-fields");
-        let manifest = "{\"name\": \"Later\", \"format_version\": 6, \"something_new\": 1}\n";
-        fs::write(folder.join(MANIFEST_FILE), manifest).unwrap();
+        let newer = FORMAT_VERSION + 1;
+        let manifest =
+            format!("{{\"name\": \"Later\", \"format_version\": {newer}, \"something_new\": 1}}\n");
+        fs::write(folder.join(MANIFEST_FILE), &manifest).unwrap();
         fs::write(folder.join(WORLD_FILE), "{\"format_version\": 1}\n").unwrap();
         let result = load(&folder);
-        assert!(matches!(result, Err(LoadError::TooNew { found: 6, .. })));
+        assert!(matches!(result, Err(LoadError::TooNew { found, .. }) if found == newer));
         assert_eq!(
             fs::read_to_string(folder.join(MANIFEST_FILE)).unwrap(),
             manifest

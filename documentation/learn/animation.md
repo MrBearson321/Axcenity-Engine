@@ -53,7 +53,7 @@ animator:SetTrigger("Jump")
 
 ## Playing clips from scripts
 
-An Animation with **AutoPlay** starts when the game starts. Scripts call `Animation:Play()`, `Animation:Pause()`, `Animation:Resume()` and `Animation:Stop()`, and `Animation.Completed` fires when a clip that doesn't loop ends. For a one-off clip on an Animator, `Animator:LoadAnimation()` returns an **AnimationTrack** to play, stop and fade.
+An Animation with **AutoPlay** starts when the game starts. `Animation.Completed` fires when a clip that doesn't loop ends. Scripts play an Animation through its Animator: `Animator:LoadAnimation(animation)` returns an **AnimationTrack** to play, stop, fade and pause (`track:AdjustSpeed(0)`).
 
 ## Importing animated models
 

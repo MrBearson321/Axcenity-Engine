@@ -189,7 +189,6 @@ pub(super) fn template_icon(template: Template) -> &'static str {
     match template {
         Template::Baseplate => icons::SQUARE,
         Template::Empty => icons::FILE_DASHED,
-        Template::Starter => icons::SPARKLE,
         Template::FirstPerson => icons::CROSSHAIR,
         Template::ThirdPerson => icons::PERSON_SIMPLE_RUN,
         Template::Vehicle => icons::CAR_PROFILE,

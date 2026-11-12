@@ -465,7 +465,7 @@ impl PartState {
             orientation: Vector3::default(),
             wind_affected: false,
             massless: false,
-            physical: PhysicalProperties::LEGACY,
+            physical: PhysicalProperties::CLASSIC,
             velocity: Vector3::default(),
             spin: Vector3::default(),
             groups: Groups::of(world, axcenity_core::DEFAULT_GROUP),

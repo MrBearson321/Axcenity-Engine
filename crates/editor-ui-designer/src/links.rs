@@ -9,7 +9,8 @@
 //!   that names the ScreenGui's path, else a new one named after it) and
 //!   opens it with the cursor in the function (`handler_script`,
 //!   `app/ui_links.rs`). A button's **Play on click** does the same with
-//!   `animation:Play()` in it, for an Animation in its ScreenGui.
+//!   `animator:LoadAnimation(animation):Play()` in it, for an Animation in
+//!   its ScreenGui.
 //! - **In scripts**: each line of a Lua script that names the element
 //!   (`.Play`, `"Play"`), which opens that script at that line.
 //! - **Animations**: the element's Animations (its own, or its Animator's),
@@ -270,13 +271,16 @@ pub(super) fn links_section(
                         world.get(object).map_or("", |i| i.name()),
                         clip_name(world, animation)
                     );
+                    let animator = crate::animatable::animator_of(world, object)
+                        .and_then(|animator| lua_path(world, animator));
                     if ui.button(label).clicked()
                         && let Some(path) = lua_path(world, animation)
+                        && let Some(animator) = animator
                     {
                         actions.push(DesignerAction::AddHandler {
                             id,
                             event: "Activated".to_owned(),
-                            body: Some(format!("{path}:Play()")),
+                            body: Some(format!("{animator}:LoadAnimation({path}):Play()")),
                         });
                         ui.close();
                     }

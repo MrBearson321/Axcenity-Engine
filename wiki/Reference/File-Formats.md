@@ -17,7 +17,7 @@ Every file the engine reads or writes, with its owner and where the full format 
 
 | File | Holds | Owner | Version | Format doc |
 |---|---|---|---|---|
-| `axcenity.json` | Manifest: name, `format_version`, `engine` (`created_with`, `saved_with`), `version`, start level, loading screen, splash, developer console | `project` | `FORMAT_VERSION` 5 | `docs/project/world.md` |
+| `axcenity.json` | Manifest: name, `format_version`, `engine` (`created_with`, `saved_with`), `version`, start level, loading screen, splash, developer console | `project` | `FORMAT_VERSION` 6 | `docs/project/world.md` |
 | `world.json`, `levels/<name>.world.json` | Instances (services, Workspace) | `project::world_file` | project's | `docs/project/world.md`, `levels.md` |
 | `scripts/**/*.server.lua`, `*.client.lua`, `*.module.lua` | Luau | `project`, `script` | — | `docs/scripting/client-server.md`, `modules.md` |
 | `*.server.blocks.json`, `*.client.blocks.json` | Block scripts (+ Graph view layout) | `blocks-runtime` | — | `docs/project/world.md` |
