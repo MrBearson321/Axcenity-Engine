@@ -1248,6 +1248,46 @@ pub fn check_move(world: &World, id: InstanceId, parent: InstanceId) -> Result<(
     Ok(())
 }
 
+/// Whether `id` can be dragged onto `object` in the Explorer, or why not:
+/// [`check_move`], except for a Script or LocalScript that is a file in
+/// its service, which is **attached** to the object instead (its file moves
+/// into `objects/`, as a script inside an object, G2).
+pub fn check_attach(world: &World, id: InstanceId, object: InstanceId) -> Result<(), &'static str> {
+    let instance = world.get(id).ok_or("It no longer exists.")?;
+    if !is_file_script(instance) {
+        return check_move(world, id, object);
+    }
+    if !can_attach(instance) {
+        return Err(
+            "A ModuleScript stays where require finds it. Drag a Script or a LocalScript onto an \
+             object to attach it.",
+        );
+    }
+    let target = world.get(object).ok_or("It no longer exists.")?;
+    if target.class().is_service() {
+        return Err("Drag it onto an object to attach it, such as a part, a Model or a Folder.");
+    }
+    if target.class().is_script() {
+        return Err("Scripts can't hold other things. Use a Folder or a Model.");
+    }
+    if !is_saved(world, object) {
+        return Err(
+            "Only things in the Workspace and ReplicatedStorage are saved, so it has to go in one of them.",
+        );
+    }
+    if world.is_locked(object) {
+        return Err("It's locked. Right-click it in the Explorer to unlock it.");
+    }
+    Ok(())
+}
+
+/// Whether `instance`, a script that is a file in its service, can be
+/// dragged onto an object to attach it ([`check_attach`]).
+pub fn can_attach(instance: &axcenity_core::Instance) -> bool {
+    is_file_script(instance)
+        && matches!(instance.class(), ClassName::Script | ClassName::LocalScript)
+}
+
 /// True if `id` can go in a prefab: something in the Workspace that isn't
 /// a script or a service. UI can (G5): a ScreenGui, or elements inside one,
 /// with the scripts inside them that have a `SourceFile`.

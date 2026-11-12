@@ -349,6 +349,9 @@ pub struct EditorApp {
     luau: luau_checks::LuauChecks,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
+    /// A script that is a file in its service, dragged onto an object,
+    /// while "Attach it?" is asked: the script and the object.
+    confirm_attach: Option<(InstanceId, InstanceId)>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
     confirm_sky: Option<String>,
     /// The Levels panel's typing and the level it acts on (`app/levels.rs`).
@@ -985,6 +988,7 @@ impl EditorApp {
             tabs: ScriptTabs::default(),
             luau: Default::default(),
             confirm_delete: None,
+            confirm_attach: None,
             confirm_sky: None,
             levels_panel: Default::default(),
             play_from_start: false,
@@ -1832,6 +1836,7 @@ impl EditorApp {
         self.unsaved_changes_prompt(ctx);
         self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
+        self.attach_script_prompt(ctx);
         self.sky_prompt(ctx);
         self.autorecover_prompt(ctx);
         self.autorecover_frame();
