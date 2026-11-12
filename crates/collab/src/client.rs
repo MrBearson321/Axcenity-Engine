@@ -181,6 +181,48 @@ pub struct Client {
     /// The project's members as the host last sent them (Collaborate 2.0,
     /// P3), kept so this computer can host the project later.
     members: Option<crate::project::MembersList>,
+    /// Handing on (Collaborate 2.0, P4): see [`Handover`].
+    handover: Handover,
+}
+
+/// The most transactions a member keeps for a new host
+/// ([`ToClient::SendTail`]).
+pub const TAIL_KEPT: usize = 2_000;
+
+/// What a member keeps so the session can go on under another host.
+#[derive(Default)]
+struct Handover {
+    /// The transactions of the current host it applied, newest last.
+    tail: VecDeque<crate::message::TailEntry>,
+    /// The previous host's, kept after joining a new one, with its epoch,
+    /// for when the new host asks.
+    old_tail: Option<(u64, VecDeque<crate::message::TailEntry>)>,
+    /// Who hosts next, as the host last said, and its next Instance ID.
+    successors: Vec<crate::project::HostCard>,
+    next_id: u32,
+    /// The host said it's leaving.
+    leaving: Option<Handoff>,
+    /// How to reach this computer if it hosts, sent on every join.
+    card: Option<(String, crate::identity::Fingerprint)>,
+}
+
+/// The host is leaving ([`ToClient::HandingOff`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Handoff {
+    /// Who hosts from now; `None` if nobody can.
+    pub to: Option<crate::project::HostCard>,
+    /// The transaction to have before going there.
+    pub last_seq: u64,
+}
+
+/// A member's copy without its unconfirmed edits: what it would host from.
+pub struct Confirmed {
+    pub world: World,
+    pub graveyard: Graveyard,
+    pub files: Manifest,
+    /// The host's epoch and the last of its transactions in it.
+    pub epoch: Option<u64>,
+    pub seq: u64,
 }
 
 impl Client {
@@ -222,6 +264,7 @@ impl Client {
             checkpoints: Vec::new(),
             audit: Vec::new(),
             members: None,
+            handover: Handover::default(),
         }
     }
 
@@ -403,6 +446,54 @@ impl Client {
     }
 
     /// The session's chat, oldest first.
+    /// How to reach this computer if it hosts (Collaborate 2.0, P4): sent
+    /// now if connected, and on every join.
+    pub fn set_card(&mut self, address: String, cert: crate::identity::Fingerprint) {
+        if self.handover.card.as_ref() == Some(&(address.clone(), cert)) {
+            return;
+        }
+        self.handover.card = Some((address.clone(), cert));
+        if self.is_online() {
+            self.outbox.push(ToHost::HostCard { address, cert });
+        }
+    }
+
+    /// Who hosts next, best first, as the host last said.
+    pub fn successors(&self) -> &[crate::project::HostCard] {
+        &self.handover.successors
+    }
+
+    /// The next Instance ID the host would have handed out.
+    pub fn next_id(&self) -> u32 {
+        self.handover.next_id
+    }
+
+    /// The host said it's leaving, and who hosts next.
+    pub fn handoff(&self) -> Option<&Handoff> {
+        self.handover.leaving.as_ref()
+    }
+
+    /// The run of the host this copy is from.
+    pub fn epoch(&self) -> Option<u64> {
+        self.epoch
+    }
+
+    /// This copy without its unconfirmed edits, to host from: the World,
+    /// where deleted Instances were, and the files, as of the host's last
+    /// transaction here. The copy itself is left as it was.
+    pub fn confirmed(&mut self, world: &mut World) -> Confirmed {
+        self.take_pending_off(world);
+        let confirmed = Confirmed {
+            world: world.clone(),
+            graveyard: self.graveyard.clone(),
+            files: self.files.clone(),
+            epoch: self.epoch,
+            seq: self.seq,
+        };
+        self.put_pending_on(world);
+        confirmed
+    }
+
     /// The project's members as the host last sent them, if this member
     /// may host (Editors and the Owner get it; Viewers don't).
     pub fn members_list(&self) -> Option<&crate::project::MembersList> {
@@ -852,6 +943,12 @@ impl Client {
             seq: self.seq,
         });
         self.outbox.push(ToHost::Hello { have });
+        if let Some((address, cert)) = &self.handover.card {
+            self.outbox.push(ToHost::HostCard {
+                address: address.clone(),
+                cert: *cert,
+            });
+        }
         if self.presence != Presence::default() {
             self.outbox.push(ToHost::Presence(self.presence.clone()));
         }
@@ -1011,6 +1108,12 @@ impl Client {
                     pending.undo = None;
                 }
                 let restarted = self.epoch.is_some_and(|old| old != epoch);
+                // The old host's transactions, for a new host that asks.
+                if let Some(old) = self.epoch.filter(|_| restarted) {
+                    let tail = std::mem::take(&mut self.handover.tail);
+                    self.handover.old_tail = Some((old, tail));
+                }
+                self.handover.leaving = None;
                 self.epoch = Some(epoch);
                 let blocks = if restarted {
                     Vec::new()
@@ -1152,6 +1255,24 @@ impl Client {
             ToClient::Checkpoints(list) => self.checkpoints = list,
             ToClient::HistoryNotice(text) => self.notices.push(Notice::History(text)),
             ToClient::AuditLog(entries) => self.audit = entries,
+            ToClient::Successors { hosts, next_id } => {
+                self.handover.successors = hosts;
+                self.handover.next_id = next_id;
+            }
+            ToClient::HandingOff { to, last_seq } => {
+                self.handover.leaving = Some(Handoff { to, last_seq });
+            }
+            ToClient::SendTail { after } => {
+                let entries: Vec<_> = self
+                    .handover
+                    .old_tail
+                    .iter()
+                    .flat_map(|(_, tail)| tail.iter())
+                    .filter(|entry| entry.seq > after)
+                    .cloned()
+                    .collect();
+                self.outbox.push(ToHost::Tail(entries));
+            }
             ToClient::Members(list) => {
                 if list.is_newer_than(self.members.as_ref()) {
                     self.members = Some(list);
@@ -1243,6 +1364,16 @@ impl Client {
             }
         }
         self.seq = seq;
+        self.handover.tail.push_back(crate::message::TailEntry {
+            seq,
+            author,
+            client_seq,
+            label: label.clone(),
+            ops: ops.clone(),
+        });
+        while self.handover.tail.len() > TAIL_KEPT {
+            self.handover.tail.pop_front();
+        }
         // A file written with everything typed in its live document here.
         for op in &ops {
             if let Op::FileVersion {

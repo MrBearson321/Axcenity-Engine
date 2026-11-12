@@ -38,6 +38,17 @@ impl IdAllocator {
         Self { next: first }
     }
 
+    /// The first index the next block would start at.
+    pub fn next_index(&self) -> u32 {
+        self.next
+    }
+
+    /// Never hands out an index below `next` (a successor host starts after
+    /// the old host's blocks).
+    pub fn skip_to(&mut self, next: u32) {
+        self.next = self.next.max(next);
+    }
+
     /// The next block; `None` once the indices a World can hold (2^31)
     /// are used up, which takes two million blocks.
     pub fn block(&mut self) -> Option<IdBlock> {
