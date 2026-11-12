@@ -66,6 +66,8 @@ mod terrain_edit;
 mod values;
 
 #[cfg(test)]
+mod benchmarks;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use live::AiConnections;

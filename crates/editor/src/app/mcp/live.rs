@@ -321,6 +321,9 @@ fn greet(
     token: &str,
     waker: Waker,
 ) -> std::io::Result<()> {
+    // Answers go out as they're written: with Nagle's algorithm on, a
+    // short answer waits for the client's delayed ACK (about 40 ms).
+    stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(HELLO_WAIT))?;
     let line = read_line(&mut stream)?;
     let hello = match Hello::from_line(&line, token) {
@@ -412,6 +415,7 @@ pub(super) fn connect(folder: &Path, hello: &Hello) -> Result<Option<TcpStream>,
         return Ok(None);
     };
     let said = (|| {
+        stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(HELLO_WAIT))?;
         writeln!(stream, "{}", hello.to_line(&token))?;
         read_line(&mut stream)
