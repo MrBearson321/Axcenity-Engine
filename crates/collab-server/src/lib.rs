@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use axcenity_collab::access::{Access, Invite};
-use axcenity_collab::hosted::{members_file, session_id, session_world};
+use axcenity_collab::hosted::{members_file, session_world};
+use axcenity_collab::identity::Fingerprint;
 use axcenity_collab::session::{HostSession, Hosting};
 use axcenity_collab::socket::{DEFAULT_PORT, HostCert};
 use axcenity_collab::{FolderStore, Host, MemberId, Role, journal};
@@ -179,6 +180,8 @@ impl Server {
         }
         let cert = HostCert::load_or_make(&data.join("host-certificate.json"))
             .context("couldn't read or make the server's certificate")?;
+        // Before the files are read: a new collaborate.json is one of them.
+        let id = project_id(&cert.fingerprint(), &project, &mut said);
         let members = members_file(&data, &project);
         let access = match Access::load(&members) {
             Ok(access) => access,
@@ -189,7 +192,7 @@ impl Server {
             FolderStore::open(&project).context("couldn't read the project's files")?;
         let mut host = Host::new(session_world(world))
             .with_files(files, Box::new(store))
-            .with_session(session_id(&cert.fingerprint(), &project));
+            .with_session(id);
         host.start_journal(&project)
             .context("couldn't start the session's journal")?;
         let mut session = HostSession::start(
@@ -543,4 +546,21 @@ fn same_folder(a: &Path, b: &Path) -> bool {
 #[cfg(not(unix))]
 fn same_folder(_: &Path, _: &Path) -> bool {
     false
+}
+
+/// The project's persistent ID (Collaborate 2.0): from its
+/// `collaborate.json`, else the session ID this server always used,
+/// written into the file so every later host uses it too.
+fn project_id(cert: &Fingerprint, project: &Path, said: &mut Vec<String>) -> String {
+    let mut file = axcenity_project::load_collaborate_file(project).unwrap_or_default();
+    let id = axcenity_collab::project::project_id(file.project.as_deref(), cert, project);
+    if file.project.as_deref() != Some(id.as_str()) {
+        file.project = Some(id.clone());
+        if let Err(error) = axcenity_project::save_collaborate_file(project, &file) {
+            said.push(format!(
+                "warning: couldn't write the project's ID into collaborate.json: {error}"
+            ));
+        }
+    }
+    id
 }

@@ -406,6 +406,16 @@ impl Git {
         out.success.then(|| out.stdout.trim().to_owned())
     }
 
+    /// A Git setting as `git` would use it in `dir` (the person's own
+    /// settings included), if set.
+    pub fn config_value(&self, dir: &Path, key: &str) -> Option<String> {
+        let out = self
+            .call(Some(dir), &["config", "--get", key], None, false)
+            .ok()?;
+        let value = out.stdout.trim().to_owned();
+        (out.success && !value.is_empty()).then_some(value)
+    }
+
     /// Points remote `name` at `url`, adding it if there's none.
     pub fn set_remote(&self, dir: &Path, name: &str, url: &str) -> Result<(), GitError> {
         if self.remote_url(dir, name).is_some() {
@@ -718,6 +728,37 @@ impl Git {
     /// Runs any other command that must succeed (used by sync steps here).
     pub(crate) fn run(&self, dir: &Path, args: &[&str]) -> Result<String, GitError> {
         self.ok(Some(dir), args)
+    }
+
+    /// Runs a local command that must succeed, with `env` for that child
+    /// only (a temporary index for conflict copies).
+    pub(crate) fn run_env(
+        &self,
+        dir: &Path,
+        args: &[&str],
+        env: &[(&str, &Path)],
+    ) -> Result<String, GitError> {
+        let mut all = Vec::new();
+        all.extend(args.iter().map(|a| a.to_string()));
+        let call = Invocation {
+            dir: Some(dir),
+            args: all,
+            env: env
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), Secret::new(value.to_string_lossy())))
+                .collect(),
+            stdin: None,
+            timeout: LOCAL_TIMEOUT,
+        };
+        let output = self
+            .runner
+            .run(&call)
+            .map_err(|error| GitError::Failed(format!("couldn't run git: {error}")))?;
+        if output.success {
+            Ok(output.stdout)
+        } else {
+            Err(GitError::Failed(failure(args, &self.scrub(&output.stderr))))
+        }
     }
 
     /// Runs any command; its output whatever the result.

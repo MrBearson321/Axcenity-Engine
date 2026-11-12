@@ -59,17 +59,52 @@ pub fn git() -> Git {
     ])))
 }
 
-/// A new empty folder of its own under the temp folder.
+/// A new empty folder of its own under this test run's temp folder
+/// (`axcenity-repo-<process>`; folders left by earlier runs whose process
+/// is gone are removed the first time).
 pub fn temp(name: &str) -> PathBuf {
     static NEXT: AtomicU32 = AtomicU32::new(0);
-    let path = std::env::temp_dir().join(format!(
-        "axcenity-repo-{name}-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
+    static SWEEP: std::sync::Once = std::sync::Once::new();
+    let base = std::env::temp_dir();
+    SWEEP.call_once(|| sweep_old_runs(&base));
+    let path = base
+        .join(format!("axcenity-repo-{}", std::process::id()))
+        .join(format!("{name}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).unwrap();
     path
+}
+
+/// Removes `axcenity-repo-<process>` folders of test runs that ended (on
+/// Linux by their process; elsewhere once a day old).
+fn sweep_old_runs(base: &Path) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("axcenity-repo-"))
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == std::process::id() {
+            continue;
+        }
+        let ended = if cfg!(target_os = "linux") {
+            !Path::new("/proc").join(pid.to_string()).exists()
+        } else {
+            entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t.elapsed().unwrap_or_default().as_secs() > 24 * 60 * 60)
+        };
+        if ended {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 /// A bare repository to push to, and its `file://` URL.

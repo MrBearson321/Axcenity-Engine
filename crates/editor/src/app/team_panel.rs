@@ -45,6 +45,9 @@ pub(crate) struct TeamPanel {
     pub(crate) chat_unread: usize,
     /// Why the last chat message didn't go.
     pub(crate) chat_problem: Option<String>,
+    /// "Let others host from my computer" is off (Settings > Collaborate,
+    /// the Project section; Collaborate 2.0 P6).
+    pub(crate) no_host_offer: bool,
     /// The name being typed for a new checkpoint (C9).
     pub(crate) checkpoint_label: String,
     /// The checkpoint the Owner pressed Restore on, asking once more.
@@ -109,7 +112,8 @@ impl TeamPanel {
             InviteLifetime::Month => "month",
         };
         let ready = if self.setup.done { " ready" } else { "" };
-        format!("{role} {lifetime}{ready}")
+        let offer = if self.no_host_offer { " nohost" } else { "" };
+        format!("{role} {lifetime}{ready}{offer}")
     }
 
     /// Reads what [`TeamPanel::to_text`] wrote; unknown words keep the
@@ -123,6 +127,7 @@ impl TeamPanel {
                 "week" => self.invite_lifetime = InviteLifetime::Week,
                 "month" => self.invite_lifetime = InviteLifetime::Month,
                 "ready" => self.setup.done = true,
+                "nohost" => self.no_host_offer = true,
                 _ => {}
             }
         }
@@ -155,6 +160,8 @@ enum Action {
     SetRole(MemberId, MemberRole),
     Remove(MemberId),
     Leave,
+    /// The host ends the session even when someone else could host it.
+    EndForEveryone,
     /// Follows a member's camera, or stops with `None`.
     Follow(Option<MemberId>),
     /// Something in the Chat section (C8).
@@ -290,6 +297,7 @@ impl EditorApp {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                self.project_section_ui(ui);
                 action = if self.team.is_some() {
                     self.team_session_ui(ui)
                 } else {
@@ -651,26 +659,28 @@ impl EditorApp {
         }
 
         ui.add_space(theme::space::M);
-        let leave = if hosting {
-            widgets::button(
-                widgets::Role::Danger,
-                Some(icons::SIGN_OUT),
-                "End session",
-                &palette,
-            )
-        } else {
-            widgets::button(
-                widgets::Role::Secondary,
-                Some(icons::SIGN_OUT),
-                "Leave session",
-                &palette,
-            )
-        };
+        let leave = widgets::button(
+            widgets::Role::Secondary,
+            Some(icons::SIGN_OUT),
+            "Leave session",
+            &palette,
+        );
         let hover = if hosting {
-            "Disconnects everyone. Your World stays as it is."
+            "The session goes on with the next host when someone else can host; otherwise it \
+             ends. Your World stays as it is."
         } else {
             "Your copy stays open here, no longer in step."
         };
+        if hosting {
+            let end = widgets::button(widgets::Role::Danger, None, "End for everyone", &palette);
+            if ui
+                .add(end)
+                .on_hover_text("Disconnects everyone. Your World stays as it is.")
+                .clicked()
+            {
+                action = Some(Action::EndForEveryone);
+            }
+        }
         if ui.add(leave).on_hover_text(hover).clicked() {
             action = Some(Action::Leave);
         }
@@ -701,6 +711,7 @@ impl EditorApp {
             Action::SetRole(member, role) => self.set_team_role(member, role),
             Action::Remove(member) => self.remove_team_member(member),
             Action::Leave => self.leave_team_session(),
+            Action::EndForEveryone => self.end_team_session(),
             Action::Follow(member) => {
                 self.team_panel.following = member;
                 self.team_panel.followed_to = None;
@@ -937,6 +948,20 @@ impl EditorApp {
         weak(
             ui,
             "Each link works once. Revoke unused ones from the Collaborate panel.",
+        );
+        ui.add_space(theme::space::M);
+        settings::section(ui, "Hosting");
+        let mut offer = !self.team_panel.no_host_offer;
+        if ui
+            .checkbox(&mut offer, "Let others host from my computer")
+            .changed()
+        {
+            self.set_host_offer(offer);
+        }
+        weak(
+            ui,
+            "If a session's host leaves or is lost, it can go on from this computer (it \
+             listens on port 47810). Off: this computer is never picked.",
         );
     }
 

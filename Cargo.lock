@@ -764,6 +764,7 @@ dependencies = [
  "axcenity-project",
  "axcenity-release",
  "axcenity-render",
+ "axcenity-repo",
  "axcenity-save",
  "axcenity-scene",
  "axcenity-script",
