@@ -110,7 +110,7 @@ Audit and plan: `docs/research/cohesion-pass.md` (findings CF1–CF22, phases CP
 |---|---|
 | CP1 audit and plan | **Done** |
 | CP2 shared UI foundation, start-screen pages, welcome page | Planned |
-| CP3 documents and saving, open action, script views | Planned |
+| CP3 documents and saving, open action, script views | In progress: saving (Don't Save, modified documents) in review |
 | CP4 node catalogue and tooltips | Planned |
 | CP5 Object Viewer | Planned |
 | CP6 physics module split and properties | Planned |
