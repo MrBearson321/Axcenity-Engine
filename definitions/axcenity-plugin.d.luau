@@ -68,6 +68,28 @@ type DrawOptions = {
 	Thickness: number?,
 }
 
+--- A dot in the Scene View the user drags (`plugin:CreateHandle`).
+declare extern type PluginHandle with
+	--- Where it is. Setting it moves it (without firing Dragged).
+	Position: Vector3
+	--- Fires with the new position each time the user drags it.
+	Dragged: PluginSignal
+	--- Fires with the final position when the user lets go: a good place for `ChangeHistoryService:SetWaypoint`.
+	DragEnded: PluginSignal
+	--- Takes the handle out of the Scene View and disconnects its events.
+	function Remove(self): ()
+end
+
+--- How a handle looks and moves.
+type HandleOptions = {
+	--- Its colour (left out: orange).
+	Color: Color3?,
+	--- Its radius in points, 3 to 24 (left out: 7).
+	Size: number?,
+	--- A direction to slide along (left out: it moves in the plane facing the camera).
+	Axis: Vector3?,
+}
+
 --- What a dock widget starts with.
 type DockWidgetInfo = {
 	--- The tab's title (left out: the widget's id).
@@ -108,6 +130,8 @@ declare extern type Plugin with
 	function DrawText(self, position: Vector3, text: string, options: DrawOptions?): PluginDrawing
 	--- Removes everything the plugin drew.
 	function ClearDrawings(self): ()
+	--- A handle at `position` the user can drag in the Scene View while editing; the Move snap applies. At most 256 at once.
+	function CreateHandle(self, position: Vector3, options: HandleOptions?): PluginHandle
 end
 
 --- What's selected in the editor.

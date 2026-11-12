@@ -466,6 +466,58 @@ fn align_to_grid_draws_where_the_selection_would_snap_until_aligned() {
     assert!(app.plugins.entries[index].drawings.is_empty());
 }
 
+/// Roadmap G10: Part Tools puts a height handle on the selected part;
+/// dragging it resizes the part, the whole drag is one undo step, and the
+/// handle follows the part.
+#[test]
+fn dragging_part_tools_height_handle_resizes_the_part_as_one_undo_step() {
+    let mut app = opened("plugin-handles");
+    let index = plugin_index(&app, "project/part-tools");
+    assert!(app.plugins.entries[index].handles.is_empty());
+    let crate_part = part(&app, "Crate");
+    app.select_many(vec![crate_part]);
+    app.plugins_frame(1.0 / 60.0);
+    let handles = app.plugins.entries[index].handles.clone();
+    assert_eq!(handles.len(), 1, "{handles:?}");
+    assert_eq!(handles[0].position, Vector3::new(2.3, 2.6, -3.7));
+    assert_eq!(handles[0].axis, Some(Vector3::new(0.0, 1.0, 0.0)));
+
+    let size = |app: &EditorApp| match app.world.get(crate_part).unwrap().property("Size") {
+        Some(Value::Vector3(v)) => *v,
+        other => panic!("{other:?}"),
+    };
+    let moved = |y: f32, ended: bool| crate::viewport::HandleMove {
+        plugin: index,
+        id: handles[0].id,
+        position: Vector3::new(2.3, y, -3.7),
+        ended,
+    };
+    app.drag_plugin_handle(moved(3.6, false));
+    app.drag_plugin_handle(moved(4.6, false));
+    app.drag_plugin_handle(moved(4.6, true));
+    assert_eq!(size(&app), Vector3::new(2.0, 4.0, 2.0));
+    assert!((position(&app, crate_part).y - 2.6).abs() < 1e-5);
+    assert_eq!(app.history.undo_label(), Some("Resize Height"));
+    // The handle went to the part's new top.
+    let handles = &app.plugins.entries[index].handles;
+    assert_eq!(handles.len(), 1);
+    assert!((handles[0].position.y - 4.6).abs() < 1e-5);
+
+    app.undo();
+    assert_eq!(size(&app), Vector3::new(2.0, 2.0, 2.0));
+    assert_eq!(position(&app, crate_part), Vector3::new(2.3, 1.6, -3.7));
+    assert_eq!(
+        app.history.undo_label(),
+        None,
+        "the whole drag was one step"
+    );
+
+    // Nothing selected, no handle.
+    app.select_many(Vec::new());
+    app.plugins_frame(1.0 / 60.0);
+    assert!(app.plugins.entries[index].handles.is_empty());
+}
+
 #[test]
 fn turning_a_plugin_off_takes_its_tab_and_buttons_away() {
     let mut app = opened("plugin-off");

@@ -31,6 +31,9 @@ pub(crate) enum SignalKey {
     Move,
     /// `plugin.Deactivation`: another plugin or tool took the mouse.
     Deactivation,
+    /// A handle's `Dragged` and `DragEnded`, by the handle's number.
+    HandleDragged(u64),
+    HandleDragEnded(u64),
 }
 
 /// A handler connected to a plugin event.
@@ -70,6 +73,8 @@ pub(crate) struct PluginState {
     pub(crate) env: Option<Table>,
     /// What it drew in the Scene View (`plugin:DrawLine` and the rest).
     pub(crate) drawings: crate::draw::Drawings,
+    /// Its handles in the Scene View (`plugin:CreateHandle`).
+    pub(crate) handles: crate::draw::Handles,
 }
 
 pub(crate) fn state(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, PluginState>> {
@@ -209,6 +214,7 @@ impl UserData for LuaPlugin {
         methods.add_method("DrawSphere", |lua, _, args| draw::sphere(lua, args));
         methods.add_method("DrawText", |lua, _, args| draw::text(lua, args));
         methods.add_method("ClearDrawings", |lua, _, ()| draw::clear(lua, ()));
+        methods.add_method("CreateHandle", |lua, _, args| draw::handle(lua, args));
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("Plugin"));
     }
 }
@@ -399,7 +405,7 @@ impl UserData for LuaMouse {
 }
 
 /// One of the plugin API's events.
-struct LuaSignal(SignalKey);
+pub(crate) struct LuaSignal(pub(crate) SignalKey);
 
 impl UserData for LuaSignal {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

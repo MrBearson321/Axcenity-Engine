@@ -58,6 +58,9 @@ pub struct Entry {
     /// What it draws over the Scene View (`plugin:DrawLine` and the rest),
     /// as of its last call.
     pub drawings: Vec<axcenity_plugins::Drawing>,
+    /// Its handles in the Scene View (`plugin:CreateHandle`), as of its
+    /// last call.
+    pub handles: Vec<axcenity_plugins::Handle>,
 }
 
 /// How many of a plugin's errors the panel keeps.

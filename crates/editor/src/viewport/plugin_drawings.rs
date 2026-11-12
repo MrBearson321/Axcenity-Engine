@@ -59,7 +59,7 @@ fn line(painter: &egui::Painter, screen: &Screen, a: Vec3, b: Vec3, stroke: egui
     }
 }
 
-fn color32(color: axcenity_core::Color3) -> egui::Color32 {
+pub(super) fn color32(color: axcenity_core::Color3) -> egui::Color32 {
     let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
     egui::Color32::from_rgb(byte(color.r), byte(color.g), byte(color.b))
 }
