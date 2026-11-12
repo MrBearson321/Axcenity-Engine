@@ -143,7 +143,7 @@ pub fn find_all(world: &World, text: &str) -> Vec<InstanceId> {
 
 /// The Instance at a dotted path. The first part is `game`, `workspace`, or
 /// one of `game`'s children (a service, such as `Workspace` or `Lighting`).
-fn resolve_path(world: &World, path: &str) -> Option<InstanceId> {
+pub(crate) fn resolve_path(world: &World, path: &str) -> Option<InstanceId> {
     let mut parts = path.split('.');
     let mut current = match parts.next()? {
         "game" => world.root(),

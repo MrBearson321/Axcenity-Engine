@@ -29,6 +29,9 @@ use crate::{css_syntax, lua_syntax};
 pub use axcenity_editor_kit::widgets::locked_banner;
 
 mod assist;
+mod others;
+
+pub use others::OtherCursor;
 
 pub use assist::Assist;
 
@@ -95,6 +98,12 @@ pub struct ScriptTab {
     /// The span others changed, as characters: `start`, the old end and the
     /// new end, so the cursor stays on the text it was on.
     remote_span: Option<(usize, usize, usize)>,
+    /// This member's selection while the text box has the focus, as
+    /// characters (anchor, head), for others to see (C8).
+    pub cursor: Option<(usize, usize)>,
+    /// Others' cursors in this tab's live document. The app sets them
+    /// each frame.
+    pub others: Vec<OtherCursor>,
 }
 
 impl ScriptTab {
@@ -191,6 +200,8 @@ impl ScriptTabs {
             live: false,
             live_undo: None,
             remote_span: None,
+            cursor: None,
+            others: Vec::new(),
         });
         self.next_id += 1;
         self.tabs.len() - 1
@@ -223,7 +234,6 @@ impl ScriptTabs {
     }
 
     /// The script tab used last, if the viewport wasn't.
-    #[cfg(test)]
     pub fn active(&self) -> Option<&ScriptTab> {
         self.tabs.get(self.active?)
     }
@@ -629,6 +639,13 @@ fn code_editor(
                 if output.response.changed() {
                     tab.highlighted = None;
                 }
+                tab.cursor = output
+                    .response
+                    .has_focus()
+                    .then(|| output.state.cursor.char_range())
+                    .flatten()
+                    .map(|range| (range.secondary.index.0, range.primary.index.0));
+                others::paint(ui, &tab.text, &output, &tab.others);
                 if !stylesheet {
                     underline_problems(ui, &tab.text, &tab.problems, &output);
                     assist(ui, tab, &output, keys, world);
@@ -1251,8 +1268,53 @@ mod tests {
         tab.take_remote_text("-- é☕\nlocal a = 1\nlocal b = 2\nprint(b)\n".into());
         frame(&ctx, &mut tabs);
         assert_eq!(cursor(&ctx), 18);
+        // The tab says where its cursor is, for others to see (C8).
+        assert_eq!(tabs.get(path).unwrap().cursor, Some((18, 18)));
         assert_eq!(changed_chars("abc", "abXc"), (2, 2, 3));
         assert_eq!(changed_chars("aaa", "aa"), (2, 3, 2));
+    }
+
+    #[test]
+    fn others_cursors_show_in_the_tab_with_their_names() {
+        let path = "scripts/live.server.lua";
+        let code = "local door = workspace.Door\nlocal open = false\n\nprint(door)\n";
+        let mut tabs = ScriptTabs::default();
+        tabs.open(path, code, None);
+        let tab = tabs.get_mut(path).unwrap();
+        tab.others = vec![
+            OtherCursor {
+                name: "Sam".into(),
+                color: egui::Color32::from_rgb(230, 120, 60),
+                anchor: 6,
+                head: 6,
+            },
+            // A selection over three lines, its caret at the start.
+            OtherCursor {
+                name: "Ana".into(),
+                color: egui::Color32::from_rgb(80, 160, 240),
+                anchor: 49,
+                head: 33,
+            },
+        ];
+        // A selection is one band per line, an empty line included.
+        assert_eq!(
+            others::selection_rows(code, 33, 49),
+            [(33, 46), (47, 47), (48, 49)]
+        );
+        assert_eq!(others::selection_rows(code, 6, 6), [(6, 6)]);
+        let ctx = theme::test_context();
+        frame(&ctx, &mut tabs);
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
+            crate::snapshot::snapshot(
+                &folder.join("script-others-cursors.png"),
+                egui::vec2(420.0, 160.0),
+                vec![Vec::new(); 2],
+                |ui| {
+                    egui::CentralPanel::default()
+                        .show(ui, |ui| tabs.show(ui, path, &World::default()));
+                },
+            );
+        }
     }
 
     #[test]

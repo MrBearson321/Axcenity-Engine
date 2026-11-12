@@ -86,7 +86,7 @@ pub use ids::IdBlock;
 pub use message::{Have, MemberId, ToClient, ToHost};
 pub use mirror::Mirror;
 pub use op::{NodeSpec, Op, Transaction};
-pub use presence::{Camera, Collaborator, Presence, Profile};
+pub use presence::{Camera, ChatLine, Collaborator, Presence, Profile, TextCursor};
 pub use role::{Capability, Role};
 
 pub use axcenity_core::World;

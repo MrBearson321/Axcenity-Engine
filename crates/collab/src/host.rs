@@ -13,7 +13,7 @@ use crate::journal::{self, Handled, Journal};
 use crate::live::{self, LiveDoc};
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
-use crate::presence::{Collaborator, Presence, Profile};
+use crate::presence::{self, ChatLine, Collaborator, Presence, Profile};
 use crate::role::{Capability, Role};
 
 /// How many applied transactions the host keeps to catch a reconnecting
@@ -67,6 +67,8 @@ struct Member {
     presence: Presence,
     /// Files they're uploading, by hash.
     uploads: HashMap<FileHash, Assembly>,
+    /// When their last chat lines arrived, for the rate limit.
+    chatted: VecDeque<Instant>,
 }
 
 /// The authority of one Collaborate session.
@@ -95,6 +97,8 @@ pub struct Host {
     handled: Handled,
     /// Open live scripts and stylesheets, by path (C7).
     live: BTreeMap<String, HostDoc>,
+    /// The chat's last [`presence::CHAT_KEPT`] lines, in memory only (C8).
+    chat: VecDeque<ChatLine>,
 }
 
 /// A live document the host keeps.
@@ -144,6 +148,7 @@ impl Host {
             epoch: new_epoch(),
             handled: Handled::new(),
             live: BTreeMap::new(),
+            chat: VecDeque::new(),
         }
     }
 
@@ -321,6 +326,7 @@ impl Host {
                 profile: Profile::unnamed(member),
                 presence: Presence::default(),
                 uploads: HashMap::new(),
+                chatted: VecDeque::new(),
             },
         );
     }
@@ -580,6 +586,7 @@ impl Host {
                 }
                 self.update_doc(member, path, update)
             }
+            ToHost::Chat(text) => self.chat(member, &text),
             ToHost::NeedIds => {
                 let block = self.ids.block();
                 let m = self.members.get_mut(&member).expect("checked above");
@@ -643,6 +650,12 @@ impl Host {
         // Who's here, to everyone (the member is online now), and what the
         // others are doing, to the member.
         out.extend(self.roster_to_everyone());
+        if !self.chat.is_empty() {
+            out.push(Outgoing {
+                to: member,
+                message: ToClient::ChatHistory(self.chat.iter().cloned().collect()),
+            });
+        }
         for (&other, m) in &self.members {
             if other != member && m.connected && m.presence != Presence::default() {
                 out.push(Outgoing {
@@ -708,6 +721,44 @@ impl Host {
                 epoch: self.epoch,
             },
         }]
+    }
+
+    /// `Chat`: any connected member, Viewers too, at most
+    /// [`presence::CHAT_PER_SECOND`] lines a second; tidied, kept and sent
+    /// to everyone (the sender too, so everyone sees the host's order).
+    fn chat(&mut self, member: MemberId, text: &str) -> Vec<Outgoing> {
+        let now = self.clock;
+        let m = self.members.get_mut(&member).expect("checked by receive");
+        if !m.connected {
+            return Vec::new();
+        }
+        while m
+            .chatted
+            .front()
+            .is_some_and(|&at| now.saturating_duration_since(at) >= Duration::from_secs(1))
+        {
+            m.chatted.pop_front();
+        }
+        if m.chatted.len() >= presence::CHAT_PER_SECOND {
+            log::warn!(
+                "Collaborate: member {} is chatting too fast; a line was dropped",
+                member.0
+            );
+            return Vec::new();
+        }
+        let Some(text) = presence::tidy_chat(text) else {
+            return Vec::new();
+        };
+        m.chatted.push_back(now);
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        let line = ChatLine { member, at, text };
+        self.chat.push_back(line.clone());
+        while self.chat.len() > presence::CHAT_KEPT {
+            self.chat.pop_front();
+        }
+        self.to_everyone(ToClient::Chat(line))
     }
 
     /// Numbers, journals and logs an applied transaction, and tells

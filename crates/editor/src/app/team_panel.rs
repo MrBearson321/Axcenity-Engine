@@ -39,6 +39,12 @@ pub(crate) struct TeamPanel {
     pub(crate) editing_field: Option<String>,
     /// The setup wizard and Start Session dialog (C4).
     pub(crate) setup: super::collab_setup::Setup,
+    /// The chat message being typed (C8).
+    pub(crate) chat_draft: String,
+    /// Others' chat lines since the chat was last shown, for the chip.
+    pub(crate) chat_unread: usize,
+    /// Why the last chat message didn't go.
+    pub(crate) chat_problem: Option<String>,
     /// This computer's identity, for Settings > Collaborate (read when the
     /// page first shows).
     identity: Option<Result<Identity, String>>,
@@ -145,6 +151,8 @@ enum Action {
     Leave,
     /// Follows a member's camera, or stops with `None`.
     Follow(Option<MemberId>),
+    /// Something in the Chat section (C8).
+    Chat(super::team_chat::ChatAction),
 }
 
 /// The panel buttons tests press.
@@ -220,6 +228,7 @@ impl EditorApp {
         };
         let palette = theme::palette(ui.ctx());
         let status = team.status();
+        let unread = self.team_panel.chat_unread;
         let here: Vec<_> = team.roster().iter().filter(|c| c.online).cloned().collect();
         let response = ui
             .horizontal(|ui| {
@@ -236,11 +245,17 @@ impl EditorApp {
                         palette.text_weak,
                     ));
                 }
+                if unread > 0 {
+                    ui.label(widgets::micro(
+                        &format!("{} {unread}", icons::CHAT_CIRCLE_TEXT),
+                        palette.accent,
+                    ));
+                }
             })
             .response
             .interact(egui::Sense::click());
         let names: Vec<&str> = here.iter().map(|c| c.profile.name.as_str()).collect();
-        let hover = format!(
+        let mut hover = format!(
             "Collaborate: {}. Here: {}.",
             status_text(&status),
             if names.is_empty() {
@@ -249,6 +264,11 @@ impl EditorApp {
                 names.join(", ")
             }
         );
+        match unread {
+            0 => {}
+            1 => hover.push_str(" 1 new chat message."),
+            n => hover.push_str(&format!(" {n} new chat messages.")),
+        }
         if response.on_hover_text(hover).clicked() {
             self.layout.open(Pane::TeamCreate);
         }
@@ -524,6 +544,17 @@ impl EditorApp {
             }
         });
 
+        // Chat (C8).
+        if let Some(chat) = super::team_chat::chat_section(
+            ui,
+            &mut self.team_panel,
+            team,
+            &self.world,
+            self.selected,
+        ) {
+            action = Some(Action::Chat(chat));
+        }
+
         // Invitations.
         if hosting {
             let invite = team.invite().map(str::to_owned);
@@ -652,6 +683,10 @@ impl EditorApp {
             Action::Follow(member) => {
                 self.team_panel.following = member;
                 self.team_panel.followed_to = None;
+            }
+            Action::Chat(super::team_chat::ChatAction::Send) => self.send_team_chat(),
+            Action::Chat(super::team_chat::ChatAction::Select(id)) => {
+                self.select_from_viewport(Some(id));
             }
         }
     }

@@ -12,7 +12,7 @@ use crate::apply::{Note, Place, Refusal};
 use crate::files::{FileHash, Manifest, Piece};
 use crate::ids::IdBlock;
 use crate::op::{Op, Transaction};
-use crate::presence::{Collaborator, Presence};
+use crate::presence::{ChatLine, Collaborator, Presence};
 use crate::role::Role;
 
 /// Who a member is within one hosted project. TC3 ties it to a signed-in
@@ -77,6 +77,8 @@ pub enum ToHost {
     DocOpen { path: String, state_vector: Vec<u8> },
     /// A change to an open live document: a `yrs` v1 update.
     DocUpdate { path: String, update: Vec<u8> },
+    /// A line for the session's chat (C8).
+    Chat(String),
 }
 
 /// From the host to a client.
@@ -166,4 +168,9 @@ pub enum ToClient {
     /// The host didn't take the member's change to a live document, and
     /// why. Their copy should open the document again.
     DocRefused { path: String, reason: String },
+    /// A line of the session's chat, to everyone, the sender included
+    /// (C8).
+    Chat(ChatLine),
+    /// The chat so far, to someone joining.
+    ChatHistory(Vec<ChatLine>),
 }

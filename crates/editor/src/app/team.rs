@@ -418,6 +418,19 @@ impl Team {
         self.client.as_ref().map(Client::role)
     }
 
+    /// Sends a line to the session's chat (C8).
+    pub(crate) fn send_chat(&mut self, text: &str) -> Result<(), String> {
+        match self.client.as_mut() {
+            Some(client) => client.send_chat(text),
+            None => Err("Not in the session yet".to_owned()),
+        }
+    }
+
+    /// Others' chat lines since last asked.
+    pub(crate) fn take_new_chat(&mut self) -> usize {
+        self.client.as_mut().map_or(0, Client::take_new_chat)
+    }
+
     /// This editor's member, once let in.
     pub(crate) fn me(&self) -> Option<MemberId> {
         self.client.as_ref().map(Client::member)
@@ -1080,6 +1093,7 @@ impl EditorApp {
         self.team_file_changes(file_changes, file_problem);
         self.open_team_mirror_when_ready();
         self.team_live_docs();
+        self.count_unread_chat();
         self.team_locks();
         self.keep_unsent();
         self.follow_member();
@@ -1460,6 +1474,7 @@ impl EditorApp {
                 tab.take_remote_text(text);
             }
             *agreed = Some(tab.text.clone());
+            tab.others = others_in(client, &tab.path);
         }
     }
 
@@ -1515,7 +1530,17 @@ impl EditorApp {
                 look: look.to_array(),
             }),
             editing: self.team_panel.editing_field.clone(),
+            script: self.script_cursor(),
         }
+    }
+
+    /// This member's cursor in the shown live script or stylesheet, while
+    /// its text box has the focus (C8).
+    fn script_cursor(&self) -> Option<axcenity_collab::TextCursor> {
+        let client = self.team.as_ref()?.client.as_ref()?;
+        let tab = self.tabs.active().filter(|tab| tab.live)?;
+        let (anchor, head) = tab.cursor?;
+        client.doc_cursor(&tab.path, anchor, head)
     }
 
     /// Tells the others what this editor is doing, at most 10 times a
@@ -1708,4 +1733,28 @@ impl EditorApp {
         );
         true
     }
+}
+
+/// Others' cursors in the live document at `path`, where this copy has
+/// them, named and coloured as in the roster (C8).
+fn others_in(client: &Client, path: &str) -> Vec<crate::scripts::OtherCursor> {
+    let mut others: Vec<_> = client
+        .presences()
+        .iter()
+        .filter(|(member, _)| **member != client.member())
+        .filter_map(|(member, presence)| {
+            let cursor = presence.script.as_ref().filter(|c| c.path == path)?;
+            let (anchor, head) = client.resolve_cursor(cursor)?;
+            let who = client.roster().iter().find(|c| c.member == *member)?;
+            Some(crate::scripts::OtherCursor {
+                name: who.profile.name.clone(),
+                color: super::team_panel::member_color(who.profile.color),
+                anchor,
+                head,
+            })
+        })
+        .collect();
+    // The same order every frame, whatever order the map keeps.
+    others.sort_by(|a, b| a.name.cmp(&b.name));
+    others
 }
