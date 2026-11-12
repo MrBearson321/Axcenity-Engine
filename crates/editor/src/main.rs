@@ -59,6 +59,7 @@ mod material_editor;
 mod material_graph;
 mod mixer;
 mod output;
+mod people_history;
 mod placing;
 mod play;
 mod plugins;

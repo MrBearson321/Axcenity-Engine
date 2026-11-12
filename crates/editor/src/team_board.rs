@@ -120,6 +120,8 @@ pub struct BoardPanel {
     pub new_kind: Kind,
     /// The item whose window is open.
     pub open: Option<String>,
+    /// The People window is open (T4).
+    pub people: bool,
     draft: Draft,
 }
 
@@ -149,7 +151,7 @@ pub fn person_color(person: &str) -> egui::Color32 {
 }
 
 /// The person's initials in a small round badge; hover for the name.
-fn avatar(ui: &mut egui::Ui, person: &str) -> egui::Response {
+pub fn avatar(ui: &mut egui::Ui, person: &str) -> egui::Response {
     let initials: String = person
         .split_whitespace()
         .filter_map(|w| w.chars().next())
@@ -379,6 +381,16 @@ impl BoardPanel {
                 views.map(|(view, icon, name)| (view, Some(icon), name))
             };
             widgets::segmented_tips(ui, &mut self.view, &options, &names);
+            if widgets::icon_button(
+                ui,
+                icons::USERS,
+                "People: everything each person changed",
+                self.people,
+            )
+            .clicked()
+            {
+                self.people = !self.people;
+            }
             crate::responsive::room_for(ui, 150.0);
             widgets::search_field(ui, &mut self.filter.text, "Filter", 110.0);
         });

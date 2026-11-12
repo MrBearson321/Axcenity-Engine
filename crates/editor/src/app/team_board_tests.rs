@@ -356,3 +356,123 @@ fn a_goal_counts_its_tasks_and_my_work_lists_mine_soonest_first() {
         "Sam took it out of its goal"
     );
 }
+
+/// Renames `id` as one undo step.
+fn rename(app: &mut EditorApp, id: axcenity_core::InstanceId, name: &str) {
+    app.change(
+        id,
+        axcenity_editor_tools::edit::Field::Name,
+        format!("Rename to {name}"),
+        vec![crate::properties::Edit::Name(name.into())],
+    );
+    app.history.seal();
+}
+
+#[test]
+fn each_persons_saves_board_changes_and_session_edits_are_kept_and_shown() {
+    use axcenity_teamwork::history::{History, What};
+    use axcenity_teamwork::{Kind, Link};
+    let project = copy_of_example("hello-part", "team-history");
+    let mut a = EditorApp::new(Some(&project));
+    as_person(&mut a, "Paul");
+    a.team_board.history.computer = Some("PC".into());
+
+    // Outside a session: a save says what changed, and board changes are
+    // kept as they're made.
+    let block = crate::console::resolve_path(&a.world, "Workspace.Block").unwrap();
+    rename(&mut a, block, "Plank");
+    assert!(a.save());
+    rename(&mut a, block, "Door");
+    assert!(a.save());
+    a.apply_board_actions(vec![BoardAction::Create {
+        kind: Kind::Task,
+        title: "Hinge the door".into(),
+    }]);
+    let mut task = task_named(&mut a, "Hinge the door").unwrap();
+    task.set_status(Status::Done, "Paul", task.created_at + 1);
+    a.apply_board_actions(vec![BoardAction::Save(Box::new(task.clone()))]);
+    let month = Date::of(axcenity_teamwork::time::now());
+    let file = project.join(format!(
+        "team/history/paul/{:04}-{:02}.pc.jsonl",
+        month.year, month.month
+    ));
+    assert!(file.exists(), "{}", file.display());
+    let read = History::load(&project);
+    let saves = read.of("Paul", Some(What::Save));
+    assert_eq!(saves.len(), 2, "{:?}", read.entries());
+    assert_eq!(saves[1].text, "Saved the first version");
+    assert!(
+        saves[0]
+            .links
+            .contains(&Link::Instance("Workspace.Door".into())),
+        "{:?}",
+        saves[0]
+    );
+    let board_lines: Vec<&str> = read
+        .of("Paul", Some(What::Board))
+        .iter()
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(
+        board_lines,
+        [
+            "“Hinge the door”: moved it to Done",
+            "Created task “Hinge the door”"
+        ]
+    );
+
+    // In a session the host records each member's edits from its log, and
+    // the members record nothing themselves.
+    let invite = over_loopback(
+        a.host_network_session(Some(&team_folder("history-host")), 0)
+            .expect("hosting"),
+    );
+    let mut b = EditorApp::new(None);
+    as_person(&mut b, "Sam");
+    b.join_network_session(&invite, Some(&team_folder("history-joiner")))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |_, b| b.project.is_some());
+    let joiner = b
+        .team
+        .as_ref()
+        .and_then(|team| team.client())
+        .and_then(|client| {
+            client
+                .roster()
+                .iter()
+                .find(|c| c.member == client.member())
+                .map(|c| c.profile.name.clone())
+        })
+        .expect("the joiner is in the roster");
+    let theirs = crate::console::resolve_path(&b.world, "Workspace.Door").unwrap();
+    for name in ["Gate", "Gate 2", "Gate 3"] {
+        rename(&mut b, theirs, name);
+        let path = format!("Workspace.{name}");
+        settle_net(&mut a, &mut b, |a, _| {
+            crate::console::resolve_path(&a.world, &path).is_some()
+        });
+    }
+    a.harvest_host_log(axcenity_teamwork::time::now());
+    a.flush_history();
+    let read = History::load(&project);
+    let edits = read.of(&joiner, Some(What::Edit));
+    assert_eq!(edits.len(), 3, "{:?}", read.entries());
+    assert!(
+        edits.iter().any(|e| e.text == "Rename to Gate 2"
+            && e.links == [Link::Instance("Workspace.Gate 3".into())])
+    );
+    // The joiner's own folder has no history of its own.
+    let joined = b.project.as_ref().unwrap().folder.clone();
+    assert!(!joined.join("team/history").exists());
+
+    a.team_board.panel.open = None;
+    a.team_board.panel.people = true;
+    a.team_board.history.window.person = Some("Paul".into());
+    draw_board(&mut a, "team-board-people", egui::vec2(520.0, 620.0));
+    a.team_board.history.window.person = Some(joiner);
+    draw_board(
+        &mut a,
+        "team-board-people-session",
+        egui::vec2(520.0, 420.0),
+    );
+}

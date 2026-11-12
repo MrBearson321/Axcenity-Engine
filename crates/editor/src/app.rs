@@ -61,6 +61,7 @@ mod model_studio;
 mod native_menu;
 mod nav_overlay;
 mod open;
+mod people_history;
 mod plugins;
 mod prefabs;
 mod probes;
@@ -1229,6 +1230,8 @@ impl eframe::App for EditorApp {
     /// Saves the look, the layout and the recent projects. eframe calls
     /// this now and then, and when the window closes.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // History lines still folding go to the project's files.
+        self.flush_history();
         storage.set_string(APPEARANCE_KEY, self.appearance.to_text());
         storage.set_string(updates::UPDATES_KEY, self.updates.to_text());
         let recent: Vec<String> = self

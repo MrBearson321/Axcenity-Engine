@@ -23,6 +23,7 @@ A project is a folder of readable text files plus your assets, so it works well 
 | `input.json` | The input map: actions and the keys and buttons bound to them. |
 | `collision-groups.json` | Collision groups and which collide. |
 | `tests/` | Game tests (`.spec.lua`). |
+| `team/` | The Team Board (`board/`, one file per task, bug or goal) and each person's history of changes (`history/<person>/`, one file per month and computer). Keep it in version control so the team shares it. |
 | `.axcenity/` | Per-computer files; don't commit it (see below). |
 | `thumbnail.png` | The picture on the start screen's project card. |
 

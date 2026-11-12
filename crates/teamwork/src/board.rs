@@ -64,6 +64,15 @@ pub fn is_board_path(path: &str) -> bool {
         .is_some_and(|name| !name.contains('/') && item_of(name).is_some())
 }
 
+/// The ID of the item whose own file `path` is (not a copy's).
+pub fn item_id(path: &str) -> Option<String> {
+    let name = path.strip_prefix(BOARD_FOLDER)?.strip_prefix('/')?;
+    match item_of(name)? {
+        (id, false) if !name.contains('/') => Some(id.to_owned()),
+        _ => None,
+    }
+}
+
 fn read_item(path: &Path) -> Result<Item, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     serde_json::from_str(&text).map_err(|e| e.to_string())
