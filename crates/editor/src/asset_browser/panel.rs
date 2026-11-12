@@ -296,6 +296,7 @@ impl AssetBrowser {
             ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
             ItemMenu::EditModel { path } => return Some(BrowserAction::EditModel(path)),
             ItemMenu::FindReferences { path } => return Some(BrowserAction::FindReferences(path)),
+            ItemMenu::View { path } => return Some(BrowserAction::View(path)),
             ItemMenu::Move { path } => {
                 self.dialog = Some(AssetDialog::Move {
                     to: path.clone(),
@@ -924,6 +925,15 @@ impl AssetBrowser {
                 .cloned()
                 .collect();
             response.context_menu(|ui| {
+                if (model || prefab || material)
+                    && ui
+                        .button(format!("{} View", icons::CUBE))
+                        .on_hover_text("Look at it from every side in the Object Viewer.")
+                        .clicked()
+                {
+                    menu = Some(ItemMenu::View { path: path.clone() });
+                    ui.close();
+                }
                 if local
                     && ui
                         .button(format!("{} Find References", icons::MAGNIFYING_GLASS))

@@ -88,12 +88,10 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
+| 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP5: an Object Viewer tab for looking at one object, model, prefab or material from every side |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP4: every block and node explains itself in one tooltip card |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP3: Explorer double-click opens the right editor; scripts inside objects switch Code ↔ Blocks |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP2: one look for menus and ribbon, a welcome page when nothing is open |
 | 2026-11-12 | Roadmap | Saving: Don't Save leaves files as they were saved |
-| 2026-11-12 | ADR-0024, roadmap | Cohesion pass audit and plan (CP1–CP9) |
-| 2026-11-12 | ADR-0021, roadmap | Collaborate C12: how a future account website would plug in (document only) |
-| 2026-11-12 | Optimization log, benchmark history | Collaborate C11 measurements; S10k's `world.json` loads in 0.19 s instead of 5.7 |
 
 Keep the five newest rows here; the full list is [Documentation history](Changelog/Documentation-History.md).

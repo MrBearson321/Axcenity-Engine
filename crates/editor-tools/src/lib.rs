@@ -21,6 +21,7 @@ pub mod asset_entry;
 pub mod attachments;
 pub mod edit;
 pub mod gizmo;
+pub mod object_viewer;
 pub mod posing;
 pub mod preview;
 pub mod props;

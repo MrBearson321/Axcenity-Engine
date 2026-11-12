@@ -231,6 +231,8 @@ pub enum BrowserAction {
     EditModel(String),
     /// List what uses the asset at this path (Phase 70).
     FindReferences(String),
+    /// Show the model or prefab at this path in the Object Viewer (CW5.2).
+    View(String),
     /// Rename or move the asset at `from` to `to`, with every reference.
     RenameAsset { from: String, to: String },
     /// Work out which of these project files nothing uses, for the Unused
@@ -616,6 +618,9 @@ pub fn icon_of(entry: &AssetEntry) -> &'static str {
 /// What a tile's right-click menu asked for.
 pub(super) enum ItemMenu {
     FindReferences {
+        path: String,
+    },
+    View {
         path: String,
     },
     /// Rename or move a project asset (not a prefab, which has its own).
