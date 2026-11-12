@@ -38,7 +38,7 @@ flowchart TB
 
 ## Integration
 
-All four hosts load through `project::load`. The editor adds save, version history (`versions.rs`: pins, checkpoints, restores), backups (`backup.rs`), Asset Check (`validate.rs`, `asset_fix.rs`: plans without writing), asset references and rename (`asset_refs.rs`), and Build Game (`editor/src/build_game.rs` pairs `game.axgame` with a player executable per OS).
+All four hosts load through `project::load`. The editor adds save, version history (`versions.rs`: pins, checkpoints, restores), backups (`backup.rs`), Asset Check (`validate.rs`, `asset_fix.rs`: plans without writing; identical textures, models and sounds from `duplicates.rs`, R12), asset references, rename and merge (`asset_refs.rs`), and Build Game (`editor/src/build_game.rs` pairs `game.axgame` with a player executable per OS).
 
 ## Performance
 
