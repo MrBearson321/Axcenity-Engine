@@ -67,7 +67,7 @@ In particular (status checked on main `5143a5a`):
 | G7 | Memory profiling | **Implemented** (#125, #126; history, peaks and budget warnings #241) |
 | G8 | Audio occlusion | **Implemented** (#128) |
 | G9 | Upscaling | **Partial**: stage 1 spatial FSR-class upscale (#155, timings #171); stage 2 (temporal, inside TAA) not started |
-| G10 | Plugin API | **Implemented**: viewport drawing #265, drag handles #267, Properties rows #270, importers, Assets panel items and `plugin.ApiVersion` (this PR), on Phase 54's toolbars, dock widgets, selection, settings, files and mouse |
+| G10 | Plugin API | **Implemented**: viewport drawing #265, drag handles #267, Properties rows #270, importers, Assets panel items and `plugin.ApiVersion` #274, on Phase 54's toolbars, dock widgets, selection, settings, files and mouse |
 | G11 | Editor modularization | **Implemented** for every planned move (#162, #164, #166, #189, #193, #194); further moves as they pay off |
 | G12 | Cooked-only games | **Implemented** (#243): Build Game leaves texture sources out; reading the pack in place not planned |
 | G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines |
@@ -434,7 +434,7 @@ Improve the game build pipeline.
 
 **Priority:** Medium-High
 **Existing reference:** G10
-**Status:** Implemented. Lua plugins have toolbars, dock widgets made of UI Instances, selection, undo waypoints, settings, project files behind a permission, the viewport mouse and `.axcenity-plugin` sharing (Phase 54), and since G10: retained viewport drawing (#265), drag handles (#267), declared Properties rows and buttons (#270), importers for file kinds the editor doesn't import, `plugin.AssetImported`, Assets panel menu items and `plugin.ApiVersion` (2). All in `docs/editor/plugins.md`. Not done: a native extension ABI (deliberately, as below) and permissions beyond `files`.
+**Status:** Implemented. Lua plugins have toolbars, dock widgets made of UI Instances, selection, undo waypoints, settings, project files behind a permission, the viewport mouse and `.axcenity-plugin` sharing (Phase 54), and since G10: retained viewport drawing (#265), drag handles (#267), declared Properties rows and buttons (#270), and (#274) importers for file kinds the editor doesn't import, `plugin.AssetImported`, Assets panel menu items and `plugin.ApiVersion` (2). All in `docs/editor/plugins.md`. Not done: a native extension ABI (deliberately, as below) and permissions beyond `files`.
 
 Expand the existing Lua plugin architecture.
 
@@ -1148,7 +1148,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 8 | UI prefabs | G5 | Implemented (#122) | Nothing |
 | 9 | Cooked-only games | G12 | Implemented (#243) | Hand check a real game's size on the PC |
 | 10 | Humanoid retargeting | G16 | Implemented (stage 1, #244) | Hand-edited maps, profiles, fingers |
-| 11 | Plugin API improvements | G10 | Implemented | #265, #267, #270 and the importer PR (scripting thread) |
+| 11 | Plugin API improvements | G10 | Implemented | #265, #267, #270, #274 (scripting thread) |
 | 12 | Advanced asset management | New (R12) | Partial | Duplicates, import presets |
 | 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
