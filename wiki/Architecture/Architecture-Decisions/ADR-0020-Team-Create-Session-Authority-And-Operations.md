@@ -4,6 +4,7 @@ type: adr
 adr: 20
 adr_status: Accepted
 date: 2026-11-11
+superseded_by: ADR-0021 (in part)
 affects: [editor, core, net, project]
 source: [crates/editor/src/history.rs, crates/core/src/arena.rs, crates/core/src/world.rs, crates/net/src/handshake.rs]
 docs: [docs/research/team-create.md]
@@ -12,7 +13,7 @@ tags: [adr, networking, editor, collaboration]
 
 # ADR-0020: Team Create uses one session authority and host-ordered operations
 
-- **Status:** Accepted (Paul, 2026-11-11: the recommended plan with defaults D1–D5)
+- **Status:** Accepted (Paul, 2026-11-11: the recommended plan with defaults D1–D5). Superseded in part by [ADR-0021](ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md) (2026-11-12): Lua scripts and stylesheets become live shared documents instead of D3's locks, TC8's hosted service is dropped for an identity seam, and the feature is called Collaborate
 - **Date:** 2026-11-11
 - **Affected systems:** editor (undo history, panels), core (arena ID allocation), net (wire encoding, handshake checks), project (saving)
 
