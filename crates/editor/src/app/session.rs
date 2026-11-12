@@ -537,6 +537,7 @@ impl EditorApp {
             game,
             &scripts,
             self.tabs.breakpoints(),
+            self.tabs.breakpoint_rules(),
             &mut self.output,
             self.assets.clone(),
             CameraState {
@@ -628,6 +629,26 @@ impl EditorApp {
     pub(super) fn paused(&self) -> bool {
         self.tabs.paused.is_some()
     }
+    /// Pauses at the next script line the game runs (the Pause button). A
+    /// game whose scripts are all waiting pauses when one wakes.
+    pub(super) fn pause_play(&mut self) {
+        if self.paused() {
+            return;
+        }
+        if let Some(session) = &mut self.play {
+            session.request_pause(true);
+            self.pause_pressed = true;
+            self.output.info(
+                "Pausing at the next line a script runs. If every script is waiting, Play \
+                 pauses when one wakes."
+                    .to_owned(),
+            );
+        }
+    }
+    /// Whether Pause was pressed and no script has run a line since.
+    pub(super) fn pausing(&self) -> bool {
+        !self.paused() && self.play.as_ref().is_some_and(Play::pause_requested)
+    }
     /// After the game ran scripts: if it has just paused at a breakpoint,
     /// says so and shows that line in its tab, with the locals under it.
     pub(super) fn follow_pause(&mut self) {
@@ -637,6 +658,11 @@ impl EditorApp {
         }
         self.tabs.paused = pause.clone();
         if let Some(pause) = pause {
+            // Pause was pressed, or a breakpoint came first: either way no
+            // device should pause again after Continue.
+            if let Some(session) = &mut self.play {
+                session.request_pause(false);
+            }
             // A step's pause is shown in its tab; only the first pause and
             // errors say so in Output.
             if let Some(error) = &pause.error {
@@ -645,7 +671,7 @@ impl EditorApp {
                      tab. Press Continue (F5) to run the rest of the game, or Stop (Shift+F5).",
                     pause.path, pause.line
                 ));
-            } else if pause.breakpoint {
+            } else if pause.breakpoint || self.pause_pressed {
                 self.output.info(format!(
                     "Paused at {}:{}, before that line runs; its locals are under it in its \
                      tab. Press Continue (F5) to carry on, Step Over (F10), Step Into (F11) or \
@@ -653,6 +679,7 @@ impl EditorApp {
                     pause.path, pause.line
                 ));
             }
+            self.pause_pressed = false;
             self.open_script(&pause.path, Some(pause.line));
             self.evaluate_watches();
         }
@@ -710,6 +737,7 @@ impl EditorApp {
             return;
         };
         session.set_breakpoints(self.tabs.breakpoints());
+        session.set_breakpoint_rules(self.tabs.breakpoint_rules());
         let breakpoints = self.tabs.breakpoints();
         // Only a breakpoint's pause: a step's or an error's has none.
         let cleared = self.tabs.paused.as_ref().is_some_and(|pause| {
@@ -727,6 +755,7 @@ impl EditorApp {
     /// values kept from Play, which are copied in as one undo step.
     pub(super) fn stop(&mut self) {
         self.tabs.paused = None;
+        self.pause_pressed = false;
         if let Some(session) = self.play.take() {
             self.viewport.clear_particles();
             self.viewport.clear_ui();
