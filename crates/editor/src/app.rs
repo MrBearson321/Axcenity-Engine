@@ -62,6 +62,7 @@ mod plugins;
 mod prefabs;
 mod probes;
 mod project_upgrade;
+mod save_template;
 mod search;
 mod sequencer;
 mod session;
@@ -446,6 +447,11 @@ pub struct EditorApp {
     ribbon_tabs: RibbonTabs,
     /// View > Light Cones: show every light's reach in the viewport, not
     /// just the selected one's. Saved between runs.
+    /// Where Save as Template… writes and New Project lists the user's
+    /// templates (`app/save_template.rs`).
+    templates_folder: Option<PathBuf>,
+    /// Save as Template…, while it's open.
+    template_draft: Option<save_template::TemplateDraft>,
     light_cones: bool,
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
@@ -1010,6 +1016,8 @@ impl EditorApp {
             layout_name: None,
             pending_layout: None,
             ribbon_tabs: RibbonTabs::default(),
+            templates_folder: None,
+            template_draft: None,
             light_cones: false,
             view_cube: true,
             ai: Default::default(),
@@ -1787,6 +1795,7 @@ impl EditorApp {
         self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.sky_prompt(ctx);
+        self.save_template_dialog(ctx);
         self.import_dropped(ctx);
         self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);

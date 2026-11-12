@@ -187,27 +187,8 @@ pub fn create_project_from(
     name: &str,
     template: Template,
 ) -> Result<PathBuf, SaveError> {
+    let folder = make_project_folder(parent, name)?;
     let name = name.trim();
-    let folder_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_control() || "<>:\"/\\|?*".contains(c) {
-                '-'
-            } else {
-                c
-            }
-        })
-        .collect();
-    let folder_name = folder_name.trim().trim_end_matches('.');
-    let folder = parent.join(folder_name);
-    if name.is_empty() || folder_name.is_empty() {
-        return Err(SaveError::new(&folder)(std::io::Error::new(
-            ErrorKind::InvalidInput,
-            "the project needs a name",
-        )));
-    }
-    // `create_dir` (not `_all`) fails if the folder is already there.
-    fs::create_dir(&folder).map_err(SaveError::new(&folder))?;
     let engine = axcenity_release::Version::current().to_string();
     let manifest = serde_json::json!({
         "name": name,
@@ -235,5 +216,34 @@ pub fn create_project_from(
         let _ = fs::remove_dir_all(&folder);
         return Err(err);
     }
+    Ok(folder)
+}
+
+/// Makes the empty folder for a new project called `name` inside `parent`,
+/// named after it (characters file systems don't allow become `-`), and
+/// returns it. Fails (see [`SaveError::already_exists`]) rather than touch
+/// a folder that exists.
+pub(crate) fn make_project_folder(parent: &Path, name: &str) -> Result<PathBuf, SaveError> {
+    let name = name.trim();
+    let folder_name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let folder_name = folder_name.trim().trim_end_matches('.');
+    let folder = parent.join(folder_name);
+    if name.is_empty() || folder_name.is_empty() {
+        return Err(SaveError::new(&folder)(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "the project needs a name",
+        )));
+    }
+    // `create_dir` (not `_all`) fails if the folder is already there.
+    fs::create_dir(&folder).map_err(SaveError::new(&folder))?;
     Ok(folder)
 }

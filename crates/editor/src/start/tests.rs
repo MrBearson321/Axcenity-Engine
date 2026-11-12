@@ -1508,3 +1508,127 @@ fn the_team_projects_page_lists_records_and_shares_projects() {
     assert!(start.team.records.is_none());
     std::fs::remove_dir_all(&here).ok();
 }
+
+/// New Project lists the user's templates (Save as Template…'s files) and
+/// makes a project from the one picked; Import… copies a template file in.
+#[test]
+fn new_project_lists_your_templates_and_makes_projects_from_them() {
+    let parent = std::env::temp_dir().join(format!(
+        "axcenity-start-user-templates-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&parent);
+    std::fs::create_dir_all(&parent).unwrap();
+    let source = axcenity_project::create_project(&parent, "Source").unwrap();
+    let templates = parent.join("Templates");
+    let file = templates.join("Mine.axtemplate");
+    axcenity_project::save_template(&source, &file, "Mine", "My own start").unwrap();
+
+    // Import… copies a file from elsewhere under a free name.
+    let elsewhere = parent.join("Mine.axtemplate");
+    std::fs::copy(&file, &elsewhere).unwrap();
+    let copy = import_template(&templates, &elsewhere).unwrap();
+    assert_eq!(copy, templates.join("Mine 2.axtemplate"));
+    assert!(import_template(&templates, &source.join("world.json")).is_err());
+    std::fs::remove_file(&copy).unwrap();
+
+    let mut start = StartScreen::default();
+    start.set_templates_folder(Some(templates.clone()));
+    assert_eq!(start.user_templates().len(), 1);
+    start.new_project(Template::Baseplate);
+    if let Some(Dialog::New {
+        name,
+        parent: folder,
+        user_template,
+        ..
+    }) = &mut start.dialog
+    {
+        *name = "From Mine".to_owned();
+        *folder = Some(parent.clone());
+        *user_template = Some(file.clone());
+    }
+
+    if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        let mut shown = StartScreen::default();
+        shown.set_templates_folder(Some(templates.clone()));
+        shown.new_project(Template::Baseplate);
+        if let Some(Dialog::New { user_template, .. }) = &mut shown.dialog {
+            *user_template = Some(file.clone());
+        }
+        let mut projects = Vec::new();
+        crate::snapshot::snapshot(
+            &snapshots.join("start-new-project-your-templates.png"),
+            vec2(1280.0, 900.0),
+            vec![Vec::new(); 3],
+            |ui| {
+                let ctx = &ui.ctx().clone();
+                theme::apply(ctx, &theme::Appearance::default());
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                    .show(ui, |ui| {
+                        let brand = Brand::load(ui.ctx());
+                        let _ = shown.show(ui, &mut projects, &brand);
+                    });
+            },
+        );
+    }
+
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    let mut projects = Vec::new();
+    let mut clock = 0.0;
+    let mut frame = |start: &mut StartScreen, events: Vec<egui::Event>| {
+        clock += 10.0;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 900.0))),
+            time: Some(clock),
+            events,
+            ..Default::default()
+        };
+        let output = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let brand = Brand::load(ui.ctx());
+                start.show(ui, &mut projects, &brand);
+            });
+        });
+        drawn_text(&output)
+    };
+    // The dialog settles over a frame before its buttons are where they stay.
+    frame(&mut start, Vec::new());
+    let drawn = frame(&mut start, Vec::new());
+    assert!(
+        drawn.iter().any(|(text, ..)| text.contains("My own start")),
+        "the picked template's description: {drawn:?}"
+    );
+    let (_, left, right, top, bottom) = drawn
+        .iter()
+        .find(|(text, ..)| text == "Create Project")
+        .cloned()
+        .expect("Create Project is drawn");
+    let at = pos2((left + right) / 2.0, (top + bottom) / 2.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    frame(
+        &mut start,
+        vec![egui::Event::PointerMoved(at), press(true), press(false)],
+    );
+    let made = parent.join("From Mine");
+    let error = match &start.dialog {
+        Some(Dialog::New { error, .. }) => error.clone(),
+        _ => None,
+    };
+    let project = axcenity_project::load(&made)
+        .unwrap_or_else(|err| panic!("made from the template: {err:?} (dialog error {error:?})"));
+    assert_eq!(project.manifest.name, "From Mine");
+    assert!(
+        project
+            .world
+            .find_first_child(project.world.workspace(), "Baseplate")
+            .is_some()
+    );
+    let _ = std::fs::remove_dir_all(parent);
+}

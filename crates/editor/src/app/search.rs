@@ -439,6 +439,9 @@ fn command_description(command: &Command) -> String {
         }
         Command::SaveCheckpoint => "Keep a named copy of the project as it is now.",
         Command::BackUpProject => "Write a zip of the whole project.",
+        Command::SaveAsTemplate => {
+            "Keep this project as a template that New Project offers for new ones."
+        }
         Command::Input => {
             "The project's input map: actions and the keys, buttons and sticks that do them."
         }

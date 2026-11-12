@@ -60,6 +60,7 @@ mod strings;
 mod stylesheets;
 mod templates;
 mod ui_graphs;
+mod user_templates;
 
 pub use collision_groups::{
     COLLISION_GROUPS_FILE, parse_collision_groups, save_collision_groups, write_collision_groups,
@@ -70,6 +71,11 @@ pub use strings::{STRINGS_FILE, parse_strings, save_strings, write_strings};
 pub use stylesheets::*;
 pub use templates::*;
 pub use ui_graphs::*;
+pub use user_templates::{
+    TEMPLATE_EXTENSION, TemplateError, TemplateInfo, UserTemplate,
+    create_project_from_template_file, list_templates, read_template, save_template,
+    template_file_name,
+};
 
 #[cfg(test)]
 use axcenity_blocks_runtime::{Block, BlockKind};
