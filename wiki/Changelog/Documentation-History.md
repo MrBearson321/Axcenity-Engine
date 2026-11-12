@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP4: node catalogue (`blocks-runtime/src/catalogue.rs`) and one tooltip card for every visual scripting view | Claude |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP3: Explorer double-click opens each Instance in its own editor or frames it in the viewport; Code ↔ Blocks and Blocks tabs for scripts inside objects (`plan_switch`) | Claude |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP2: category hues (`theme::Hue`) on the ribbon, one menu button and menu-item shape (Menu icons setting), ribbon caption baseline, Console and Blocks bar overflow, reading glass only on reading pages, the Welcome tab when no document is open | Claude |
 | 2026-11-12 | Roadmap | Cohesion pass, saving (CW3.1): one list of modified documents (`app/documents.rs`); Don't Save puts back clips, state machines and sequences written since the save and drops unwritten clip and Model Studio changes | Claude |

@@ -486,7 +486,10 @@ pub fn mode_bar(ui: &mut egui::Ui, view: ScriptView, enabled: bool) -> Option<Sc
                 .on_hover_text(
                     "Code: type the script as Lua. Blocks: snap it together from blocks. \
                      Graph: wire nodes together, as in Unreal Blueprints. Lua that has no \
-                     blocks shows as grey Lua blocks and nodes, so nothing is lost.",
+                     blocks shows as grey Lua blocks and nodes, so nothing is lost. A script \
+                     inside a part switches for every copy of it, as one undo step. UI Event \
+                     Graphs, behavior trees and dialogues are graphs of their own and stay \
+                     graphs.",
                 )
                 .on_disabled_hover_text("Press Stop to switch.");
             switch = (picked != view).then_some(picked);

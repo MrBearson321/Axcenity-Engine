@@ -268,7 +268,9 @@ pub(super) fn drag_frames(from: Pos2, to: Pos2) -> Vec<Vec<egui::Event>> {
 
 /// Runs `frames` of the editor on `script`, saving the frame before
 /// the button is let go as `name` when snapshots are asked for.
-fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str) {
+/// Runs the editor on `script` through `frames`; returns the texts the
+/// last frame drew.
+fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str) -> Vec<String> {
     let size = vec2(1500.0, 950.0);
     let editor = |script: &mut BlockScript, ui: &mut egui::Ui| {
         egui::CentralPanel::default()
@@ -297,6 +299,7 @@ fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &st
     let ctx = theme::test_context();
     // Half a second a frame, as the snapshot replays them, so animations
     // (a palette scrolling to a category) finish.
+    let mut texts = Vec::new();
     for (index, events) in frames.into_iter().enumerate() {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
@@ -304,8 +307,17 @@ fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &st
             time: Some(index as f64 * 0.5),
             ..Default::default()
         };
-        let _ = crate::theme::run(&ctx, input, |ui| editor(script, ui));
+        let output = crate::theme::run(&ctx, input, |ui| editor(script, ui));
+        texts = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
     }
+    texts
 }
 
 #[test]
@@ -501,8 +513,19 @@ fn hovering_a_palette_block_says_the_lua_it_becomes() {
         Vec::new(),
     ];
     let before = script.clone();
-    run_editor(&mut script, frames, "palette-hover");
+    let texts = run_editor(&mut script, frames, "palette-hover");
     assert_eq!(script, before, "hovering changes nothing");
+    // The catalogue's card, then the Lua (cohesion pass CW4.2).
+    for words in [
+        "When the game starts",
+        "Runs the blocks inside once",
+        "It becomes this Lua:",
+    ] {
+        assert!(
+            texts.iter().any(|text| text.contains(words)),
+            "{words}: {texts:?}"
+        );
+    }
     assert_eq!(
         palette::item_lua(&PaletteItem::Block(Box::new(BlockKind::WhenStarted {
             body: Vec::new()
@@ -721,6 +744,32 @@ fn the_toolbar_hint_never_runs_under_its_buttons() {
                     .any(|(text, _)| text.starts_with("Drag blocks")),
                 "{width}: there's room for the hint: {texts:?}"
             );
+        }
+    }
+}
+
+/// Every block and reporter the palette offers is in the catalogue (CW4.1):
+/// a title, what it does, and words for each of its inputs.
+#[test]
+fn every_palette_block_and_reporter_has_a_tooltip_card() {
+    for client in [false, true] {
+        for category in Category::ALL {
+            for item in palette(category, client, &[], &["score".to_owned()]) {
+                let Some(info) = palette::item_info(&item) else {
+                    continue;
+                };
+                assert!(
+                    !info.title.is_empty() && !info.description.is_empty(),
+                    "{item:?}"
+                );
+                for (name, _) in &info.inputs {
+                    assert!(
+                        axcenity_blocks::catalogue::field_help(&name.replace(' ', "_")).is_some(),
+                        "no words for the input `{name}` of {}",
+                        info.title
+                    );
+                }
+            }
         }
     }
 }

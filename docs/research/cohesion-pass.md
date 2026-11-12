@@ -120,6 +120,7 @@ One PR per phase (bigger phases may split), each from `main`, each with RED/GREE
 - **CW4.1** `blocks-runtime/src/catalogue.rs`: `NodeInfo { name, description, purpose, inputs, outputs, lua, example }` for every `BlockKind`, reporter and `NodeSpec`, with tests that none is missing.
 - **CW4.2** One tooltip card (kit) used by the Blocks palette, block canvas, Graph menu and nodes, and NodeGraph views.
 - **CW4.3** Shared `Diagnostic` type for validation errors across BlockScript translation and NodeGraph compilation, shown the same way on blocks and nodes.
+- *Status (CP4 PR):* CW4.1, CW4.2 and CW4.4 done. CW4.3 is deferred: most `TranslateError`s carry no block, so a shared `Diagnostic` would only rename `GraphError` today; it's worth doing once translation reports the block at fault.
 - **CW4.4** Conversion limits stated where they apply (Code → Blocks keeps unknown Lua as grey blocks; NodeGraph ↔ blocks is not offered).
 
 ### CP5. Object Viewer

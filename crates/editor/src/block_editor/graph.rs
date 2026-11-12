@@ -1087,7 +1087,13 @@ fn draw_node(
             .interact(rect, id, Sense::click_and_drag())
             .on_hover_cursor(CursorIcon::Grab);
         let response = if runs {
-            response
+            response.on_hover_ui(|ui| {
+                let info = match &body {
+                    Body::Block(kind) => axcenity_blocks::catalogue::block_info(kind),
+                    Body::Value(value) => axcenity_blocks::catalogue::expression_info(value),
+                };
+                crate::node_graph::node_card(ui, &info, "");
+            })
         } else {
             response.on_hover_text("Not wired to an event, so it doesn't run.")
         };

@@ -116,7 +116,8 @@ pub(super) fn show(
         title,
         &entries,
         Some(&|ui: &mut egui::Ui, index: usize| {
-            ui.label(specs[index].help);
+            let info = axcenity_blocks::catalogue::node_info(specs[index]);
+            node_card(ui, &info, "Click to add it.");
         }),
     )
 }

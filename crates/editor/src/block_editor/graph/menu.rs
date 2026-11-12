@@ -120,7 +120,8 @@ pub(super) fn show_menu(
         title,
         &entries,
         Some(&|ui: &mut egui::Ui, index: usize| {
-            lua_hint(ui, "Click to add it.", item_lua(&items[index].item));
+            let item = &items[index].item;
+            lua_hint(ui, "Click to add it.", item_info(item), item_lua(item));
         }),
     )
 }

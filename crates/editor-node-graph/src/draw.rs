@@ -68,7 +68,9 @@ pub(super) fn draw_node(
         let response = ui
             .interact(rect, id, Sense::click_and_drag())
             .on_hover_cursor(CursorIcon::Grab)
-            .on_hover_text(spec.help);
+            .on_hover_ui(|ui| {
+                node_card(ui, &axcenity_blocks::catalogue::node_info(spec), "");
+            });
         if response.clicked() {
             let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
             events.push(Event::Select(node.id, add));

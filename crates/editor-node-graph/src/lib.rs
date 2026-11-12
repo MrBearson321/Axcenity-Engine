@@ -55,6 +55,23 @@ use draw::{NodeDraw, draw_node, scale_style};
 use menu::NodeMenu;
 pub use variables::variables_panel;
 
+/// Shows the catalogue's words about a block, reporter or node as the kit's
+/// tooltip card (cohesion pass CW4.2), with `how` to use it here: the one
+/// card every visual scripting view shows.
+pub fn node_card(ui: &mut egui::Ui, info: &axcenity_blocks::catalogue::NodeInfo, how: &str) {
+    axcenity_editor_kit::widgets::info_card(
+        ui,
+        &axcenity_editor_kit::widgets::InfoCard {
+            title: info.title,
+            description: info.description,
+            example: info.example,
+            inputs: &info.inputs,
+            output: info.output.as_deref(),
+            how,
+        },
+    );
+}
+
 // Sizes at zoom 1, in graph units (points).
 const HEADER: f32 = 28.0;
 const ROW: f32 = 26.0;
