@@ -11,6 +11,10 @@ S10k is the standard measurement scene. `axcenity-test --make-s10k <folder>` wri
 - **50 looping Sounds** (hello-audio's chime), **20 animated characters** (hello-animation's Noodle, each with an Animator) along one edge, and **10 navigation agents** walking across the grid and back every 8 seconds.
 - A SpawnLocation in a corner, so the player's and test runner's character stands clear of the grid.
 
+## The crowd scene
+
+The crowd scene measures the multithreaded frame (unified Phase 93). `axcenity-test --make-crowd <folder>` writes it (`testing/src/crowd.rs`): the graphics reference scene (`examples/hello-graphics`, its world and files) with **200 animated characters** (hello-animation's Noodle, each with an Animator, in a 20 × 10 grid behind the reference objects; `crowd.server.lua` gives each a Speed from 0 to 4, so their poses differ) and **2,000 physics bodies** (a 20 × 10 × 10 block of balls and blocks over the floor's far half; the same script lifts 100 back up every second). Run it like S10k (`--bench 600` on any host). To compare thread counts, run it with `AXCENITY_ANIM_THREADS=1 AXCENITY_PHYSICS_THREADS=1 AXCENITY_RENDER_THREADS=1` and then without them (or with 8): the Animation step is where posing across threads shows, and the editor's Profiler lists posing time per thread under **Posing by thread**.
+
 ## Running it
 
 Build in release. Each host runs a 60-frame warm-up, then measures the frames asked for at a fixed 1/60 s of game time per frame, so every host does the same work per frame. It prints a table (mean, median, 95th percentile and worst time of each frame step) and one JSON line for tools.

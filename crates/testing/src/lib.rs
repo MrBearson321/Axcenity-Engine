@@ -10,6 +10,7 @@
 //! [`Runner`], so they find the same tests and get the same results.
 //! Exported games never include the `tests` folder (`project::pack_game`).
 
+pub mod crowd;
 pub mod game;
 pub mod junit;
 pub mod s10k;

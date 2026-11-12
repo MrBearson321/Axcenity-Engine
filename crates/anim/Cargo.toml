@@ -12,6 +12,7 @@ authors.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 glam.workspace = true
+rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 axcenity-workspace-hack.workspace = true

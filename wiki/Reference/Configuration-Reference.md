@@ -38,6 +38,7 @@ Command-line flags, environment variables, Cargo features and settings files. Ga
 | `AXCENITY_DUMP` | `dump_every_example` output file |
 | `AXCENITY_RETAINED_DRAW_LIST=off` | Build the draw list from scratch each frame |
 | `AXCENITY_PHYSICS_THREADS` | Physics' rayon pool size (default at most 12) |
+| `AXCENITY_ANIM_THREADS` | The animation posing pool's size (default at most 8; 1 = the calling thread) |
 | `AXCENITY_RENDER_THREADS` | The renderer's planning pool size (default at most 12; 0 = rayon's global pool) |
 | `AXCENITY_TOOLBOX` | Path to the built `axcenity-toolbox` binary for the Python package's tests |
 | `AXCENITY_PHYSICS_VERIFY` | Debug: cross-check incremental physics sync |

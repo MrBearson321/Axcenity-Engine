@@ -24,11 +24,13 @@
 //! ([`Animators::reload`]) is bound again at the next update, and each
 //! Animator using it stays in the state it was in, matched by name.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Slot, Take};
-use axcenity_core::{ClassName, InstanceId, LayerWeight, PlayRequest, Value, Vector3, World};
+use axcenity_core::{
+    ClassName, InstanceId, LayerWeight, Parameter, PlayRequest, Value, Vector3, World,
+};
 use glam::{EulerRot, Quat, Vec3};
 
 use crate::clip::{Clip, RootMotion};
@@ -40,6 +42,7 @@ use crate::files::{
 use crate::ik_control;
 use crate::property_clip::{Applied, apply_evaluated, blend_evaluated};
 use crate::ragdoll;
+use crate::threads::{ThreadTimes, Threads};
 
 /// Each animated MeshPart's posed model, by the MeshPart. The draw list
 /// uses these in place of the model's still triangles.
@@ -123,6 +126,24 @@ pub struct Animators {
     /// How foot placement finds the ground. Without one, feet stay where
     /// the animation has them.
     ground: Option<GroundProbe>,
+    /// Where poses are worked out (unified Phase 93).
+    threads: Threads,
+    /// How long each thread spent posing in the last update.
+    thread_times: ThreadTimes,
+}
+
+/// A pose to work out off the calling thread: everything it needs from
+/// the World, read beforehand. Its state machine is the owner's in
+/// `Animators::running`, which nothing changes while poses are made.
+struct PoseJob {
+    owner: InstanceId,
+    model: Arc<Model>,
+    rig: Arc<Rig>,
+    parameters: BTreeMap<String, Parameter>,
+    /// Each state machine layer's weight, in the file's order.
+    layer_weights: Vec<f32>,
+    /// What plays over the state machine and moves bones, in order.
+    bone_layers: Vec<Layer>,
 }
 
 /// One animated thing being played.
@@ -172,6 +193,7 @@ struct RunningMachine {
 }
 
 /// Something playing over the state machine this frame.
+#[derive(Clone)]
 struct Layer {
     clip: Arc<Clip>,
     /// Phase in the clip (0 to 1, or more for a loop's later passes).
@@ -193,6 +215,23 @@ struct Parts {
 impl Animators {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Animators that work out poses on `threads` threads of their own (1:
+    /// the calling thread), for tests and benchmarks; [`Animators::new`]
+    /// shares one pool (see `threads.rs`).
+    pub fn with_threads(threads: usize) -> Self {
+        Self {
+            threads: Threads::of(threads),
+            ..Self::default()
+        }
+    }
+
+    /// How long each thread spent working out poses in the last
+    /// [`Animators::update`], by the thread's name (`main` is the calling
+    /// thread), for the Profiler.
+    pub fn thread_times(&self) -> &ThreadTimes {
+        &self.thread_times
     }
 
     /// One whose characters can plant their feet (`FootPlacement`), finding
@@ -341,9 +380,45 @@ impl Animators {
 
         let mut events = Vec::new();
         let mut posed = HashSet::new();
+        let mut jobs = Vec::new();
         for (owner, parts) in owners {
-            if self.update_one(world, assets, owner, &parts, &changed, dt, &mut events) {
+            if self.update_one(
+                world,
+                assets,
+                owner,
+                &parts,
+                &changed,
+                dt,
+                &mut events,
+                &mut jobs,
+            ) {
                 posed.insert(owner);
+            }
+        }
+        // The poses that need nothing more from the World, across threads.
+        let running = &self.running;
+        let (made, times) = self.threads.map(&jobs, |job| {
+            let machine = running
+                .get(&job.owner)
+                .and_then(|running| running.machine.as_ref());
+            let pose = pose_of(
+                machine,
+                &job.rig,
+                &job.parameters,
+                &job.layer_weights,
+                &job.bone_layers,
+            );
+            job.model.pose(&pose)
+        });
+        self.thread_times = times;
+        for (job, pose) in jobs.iter().zip(made) {
+            match pose {
+                Some(pose) => {
+                    self.poses.insert(job.owner, Arc::new(pose));
+                }
+                None => {
+                    posed.remove(&job.owner);
+                }
             }
         }
         // A MeshPart nothing poses any more goes back to its still model.
@@ -363,6 +438,7 @@ impl Animators {
         changed: &HashSet<String>,
         dt: f64,
         events: &mut Vec<AnimatorEvent>,
+        jobs: &mut Vec<PoseJob>,
     ) -> bool {
         let model = skeleton_model(world, assets, owner);
         let rig = model.as_ref().and_then(|model| model.rig.clone());
@@ -576,9 +652,10 @@ impl Animators {
         // Bones: the state machine's pose, then each layer over it.
         let mut posed = false;
         if let (Some(model), Some(rig)) = (&model, &rig) {
-            let bone_layers: Vec<&Layer> = layers
+            let bone_layers: Vec<Layer> = layers
                 .iter()
                 .filter(|layer| layer.clip.animated_bones().iter().any(|&moved| moved))
+                .cloned()
                 .collect();
             // A controller's foot placement needs a pose under it, and one
             // just turned off still has its feet to bring back.
@@ -591,94 +668,106 @@ impl Animators {
                 || wants_feet
                 || running.feet.busy()
             {
-                let mut pose = match (&running.machine, parts.animator) {
-                    (Some(machine), Some(animator)) => {
-                        let live = world.animator(animator);
-                        let parameters =
-                            live.map(|live| live.parameters.clone()).unwrap_or_default();
-                        let mut pose = machine.machine.pose(&machine.compiled, rig, &parameters);
-                        // Each layer over the ones under it, the last on top.
-                        for (layer, run) in machine.compiled.layers().iter().zip(&machine.layers) {
-                            let weight = live
-                                .and_then(|live| live.layer_weights.get(&layer.name))
-                                .map_or(layer.weight, |w| w.weight);
-                            if weight <= 0.0 {
-                                continue;
-                            }
-                            let (over, cover) = run.layer_pose(&layer.machine, rig, &parameters);
-                            layer.mix(&mut pose, &over, &cover, weight as f32, rig);
-                        }
-                        pose
-                    }
-                    _ => rig.rest_pose(),
-                };
-                for layer in bone_layers {
-                    let mut over = rig.rest_pose();
-                    layer.clip.sample(layer.phase, rig, &mut over);
-                    for (bone, moved) in layer.clip.animated_bones().iter().enumerate() {
-                        if *moved
-                            && let (Some(under), Some(over)) = (pose.get_mut(bone), over.get(bone))
-                        {
-                            *under = under.lerp(over, layer.weight);
-                        }
-                    }
-                }
-                if let Some(ragdoll) = parts.ragdoll {
-                    pose = run_ragdoll(
-                        world,
-                        owner,
-                        ragdoll,
-                        rig,
-                        pose,
-                        &mut running.ragdoll,
-                        game_dt,
-                    );
-                }
-                // A ragdoll that's on is physics' to pose: IK waits.
-                if parts.ragdoll.is_some_and(|ragdoll| is_on(world, ragdoll)) {
-                    running.feet = feet::Run::default();
+                let live = parts.animator.and_then(|animator| world.animator(animator));
+                let parameters = live.map(|live| live.parameters.clone()).unwrap_or_default();
+                let layer_weights = running
+                    .machine
+                    .as_ref()
+                    .map(|machine| {
+                        machine
+                            .compiled
+                            .layers()
+                            .iter()
+                            .map(|layer| {
+                                live.and_then(|live| live.layer_weights.get(&layer.name))
+                                    .map_or(layer.weight, |w| w.weight)
+                                    as f32
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // Nothing after the clips reads the World: the pose can be
+                // made on another thread, with the others (`update`).
+                let only_clips = parts.ragdoll.is_none()
+                    && parts.ik.is_empty()
+                    && !wants_feet
+                    && !running.feet.busy();
+                if only_clips {
                     running.ik.clear();
+                    jobs.push(PoseJob {
+                        owner,
+                        model: Arc::clone(model),
+                        rig: Arc::clone(rig),
+                        parameters,
+                        layer_weights,
+                        bone_layers,
+                    });
+                    posed = true;
                 } else {
-                    if let (Some(probe), Some((on, holder))) = (self.ground, controller) {
-                        match &running.legs {
-                            Some(legs) => feet::plant(
-                                world,
-                                assets,
-                                probe,
-                                owner,
-                                holder,
-                                rig,
-                                legs,
-                                &mut pose,
-                                &mut running.feet,
-                                on,
-                                game_dt,
-                            ),
-                            None if on => {
-                                let name = world.full_name(owner).unwrap_or_default();
-                                self.report(format!(
-                                    "`{name}` has FootPlacement on, but its skeleton has no legs (bones named such as `LeftFoot` and `RightFoot`), so its feet stay where the animation has them."
-                                ));
+                    let mut pose = pose_of(
+                        running.machine.as_ref(),
+                        rig,
+                        &parameters,
+                        &layer_weights,
+                        &bone_layers,
+                    );
+                    if let Some(ragdoll) = parts.ragdoll {
+                        pose = run_ragdoll(
+                            world,
+                            owner,
+                            ragdoll,
+                            rig,
+                            pose,
+                            &mut running.ragdoll,
+                            game_dt,
+                        );
+                    }
+                    // A ragdoll that's on is physics' to pose: IK waits.
+                    if parts.ragdoll.is_some_and(|ragdoll| is_on(world, ragdoll)) {
+                        running.feet = feet::Run::default();
+                        running.ik.clear();
+                    } else {
+                        if let (Some(probe), Some((on, holder))) = (self.ground, controller) {
+                            match &running.legs {
+                                Some(legs) => feet::plant(
+                                    world,
+                                    assets,
+                                    probe,
+                                    owner,
+                                    holder,
+                                    rig,
+                                    legs,
+                                    &mut pose,
+                                    &mut running.feet,
+                                    on,
+                                    game_dt,
+                                ),
+                                None if on => {
+                                    let name = world.full_name(owner).unwrap_or_default();
+                                    self.report(format!(
+                                        "`{name}` has FootPlacement on, but its skeleton has no legs (bones named such as `LeftFoot` and `RightFoot`), so its feet stay where the animation has them."
+                                    ));
+                                }
+                                None => {}
                             }
-                            None => {}
+                        }
+                        let problems = ik_control::apply(
+                            world,
+                            owner,
+                            rig,
+                            &mut pose,
+                            &parts.ik,
+                            &mut running.ik,
+                            game_dt,
+                        );
+                        for problem in problems {
+                            self.report(problem);
                         }
                     }
-                    let problems = ik_control::apply(
-                        world,
-                        owner,
-                        rig,
-                        &mut pose,
-                        &parts.ik,
-                        &mut running.ik,
-                        game_dt,
-                    );
-                    for problem in problems {
-                        self.report(problem);
+                    if let Some(pose) = model.pose(&pose) {
+                        self.poses.insert(owner, Arc::new(pose));
+                        posed = true;
                     }
-                }
-                if let Some(pose) = model.pose(&pose) {
-                    self.poses.insert(owner, Arc::new(pose));
-                    posed = true;
                 }
             }
         } else if let Some(&control) = parts.ik.first() {
@@ -1192,6 +1281,50 @@ fn settings(world: &World, id: InstanceId) -> (bool, f64) {
         .filter(|speed| speed.is_finite())
         .unwrap_or(1.0);
     (enabled, speed)
+}
+
+/// The pose the clips make: the state machine's (each of its layers over
+/// the ones under it, at `layer_weights`), or the rest pose without one,
+/// then each of `bone_layers` over that. Reads nothing but its arguments,
+/// so it runs on any thread.
+fn pose_of(
+    machine: Option<&RunningMachine>,
+    rig: &Rig,
+    parameters: &BTreeMap<String, Parameter>,
+    layer_weights: &[f32],
+    bone_layers: &[Layer],
+) -> axcenity_assets::Pose {
+    let mut pose = match machine {
+        Some(machine) => {
+            let mut pose = machine.machine.pose(&machine.compiled, rig, parameters);
+            // Each layer over the ones under it, the last on top.
+            for ((layer, run), &weight) in machine
+                .compiled
+                .layers()
+                .iter()
+                .zip(&machine.layers)
+                .zip(layer_weights)
+            {
+                if weight <= 0.0 {
+                    continue;
+                }
+                let (over, cover) = run.layer_pose(&layer.machine, rig, parameters);
+                layer.mix(&mut pose, &over, &cover, weight, rig);
+            }
+            pose
+        }
+        None => rig.rest_pose(),
+    };
+    for layer in bone_layers {
+        let mut over = rig.rest_pose();
+        layer.clip.sample(layer.phase, rig, &mut over);
+        for (bone, moved) in layer.clip.animated_bones().iter().enumerate() {
+            if *moved && let (Some(under), Some(over)) = (pose.get_mut(bone), over.get(bone)) {
+                *under = under.lerp(over, layer.weight);
+            }
+        }
+    }
+    pose
 }
 
 /// The model of `owner` if it's a MeshPart whose model has a skeleton.

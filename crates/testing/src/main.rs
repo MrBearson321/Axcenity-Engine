@@ -3,7 +3,8 @@
 //! as JUnit XML.
 //!
 //! Benchmarks (roadmap I1, `docs/development/benchmarks.md`):
-//! `--make-s10k <folder>` writes the S10k measurement scene there, and
+//! `--make-s10k <folder>` writes the S10k measurement scene there,
+//! `--make-crowd <folder>` the crowd scene (unified Phase 93), and
 //! `--bench <frames>` runs a project's start level headless, as a test
 //! does, and prints each frame step's times instead of running tests.
 
@@ -15,6 +16,7 @@ use axcenity_testing::{RunEvent, Runner, Selection, junit};
 
 const USAGE: &str = "usage: axcenity-test <project-folder> [--junit <results.xml>] [--bench <frames>]\n\
                      \x20      axcenity-test --make-s10k <folder>\n\
+                     \x20      axcenity-test --make-crowd <folder>\n\
                      example: cargo run -p axcenity-testing -- examples/hello-character";
 
 fn main() -> ExitCode {
@@ -50,6 +52,21 @@ fn main() -> ExitCode {
             println!(
                 "{} written to `{}`",
                 axcenity_testing::s10k::summary(),
+                folder.display()
+            );
+            return ExitCode::SUCCESS;
+        } else if arg == "--make-crowd" {
+            let Some(folder) = args.next() else {
+                return usage("--make-crowd needs a folder to write the scene in");
+            };
+            let folder = PathBuf::from(folder);
+            if let Err(err) = axcenity_testing::crowd::write(&folder) {
+                eprintln!("error: could not write `{}`: {err}", folder.display());
+                return ExitCode::from(2);
+            }
+            println!(
+                "{} written to `{}`",
+                axcenity_testing::crowd::summary(),
                 folder.display()
             );
             return ExitCode::SUCCESS;
