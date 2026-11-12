@@ -616,3 +616,16 @@ fn luau_builtins_the_sandbox_replaces_or_leaves_out_stay_that_way() {
     }
     assert!(output[4].contains("__gc isn't supported"), "{output:?}");
 }
+
+#[test]
+fn syntax_errors_are_found_without_running_anything() {
+    assert_eq!(
+        crate::find_syntax_error("print('fine')\nlocal x = 1\n"),
+        None
+    );
+    let error = crate::find_syntax_error("local function f()\n  print(1)\n").unwrap();
+    assert_eq!(error.line, 3, "{error:?}");
+    assert!(error.message.contains("Expected 'end'"), "{error:?}");
+    let error = crate::find_syntax_error("local x = \nprint(x +)\n").unwrap();
+    assert_eq!(error.line, 2, "{error:?}");
+}

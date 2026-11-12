@@ -43,6 +43,9 @@ pub enum ItemKind {
     Function,
     Enum,
     EnumItem,
+    /// A name written as text: a service, class, property, attribute,
+    /// child or tag inside a call's string argument.
+    Name,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,7 +94,7 @@ pub struct Signature {
 pub fn complete(source: &str, cursor: usize, world: &World) -> Option<Completions> {
     let cursor = floor_char(source, cursor);
     if in_string_or_comment(source, cursor) {
-        return None;
+        return arguments::complete(source, cursor, world);
     }
     let before = &source[..cursor];
     let start = before.rfind(|c: char| !is_word(c)).map_or(0, |at| {
@@ -212,6 +215,10 @@ struct Api {
     enum_items: HashMap<String, Vec<ApiEntry>>,
     /// Lua's own globals and the sandbox's, such as `print` and `math`.
     builtins: Vec<&'static str>,
+    /// The services that aren't in the game tree (`RunService`, `Debris`),
+    /// read from their descriptions: each says it comes from
+    /// `game:GetService("Name")`.
+    service_names: Vec<String>,
 }
 
 fn api() -> &'static Api {
@@ -225,8 +232,16 @@ fn api() -> &'static Api {
             enums: Vec::new(),
             enum_items: HashMap::new(),
             builtins: axcenity_script::global_names(),
+            service_names: Vec::new(),
         };
         for entry in axcenity_script::api_reference() {
+            if entry.kind == ApiKind::Type
+                && entry
+                    .doc
+                    .contains(&format!("GetService(\"{}\")", entry.name))
+            {
+                api.service_names.push(entry.name.clone());
+            }
             match entry.kind {
                 ApiKind::Class => {
                     api.classes.insert(entry.name.clone());
@@ -1086,6 +1101,9 @@ fn floor_char(text: &str, mut at: usize) -> usize {
     }
     at
 }
+
+mod arguments;
+pub(crate) mod lint;
 
 #[cfg(test)]
 mod tests;
