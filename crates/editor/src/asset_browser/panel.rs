@@ -296,6 +296,17 @@ impl AssetBrowser {
             ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
             ItemMenu::EditModel { path } => return Some(BrowserAction::EditModel(path)),
             ItemMenu::FindReferences { path } => return Some(BrowserAction::FindReferences(path)),
+            ItemMenu::Plugin {
+                plugin,
+                action,
+                path,
+            } => {
+                return Some(BrowserAction::PluginAction {
+                    plugin,
+                    action,
+                    path,
+                });
+            }
             ItemMenu::View { path } => return Some(BrowserAction::View(path)),
             ItemMenu::Move { path } => {
                 self.dialog = Some(AssetDialog::Move {
@@ -945,6 +956,28 @@ impl AssetBrowser {
                 {
                     menu = Some(ItemMenu::FindReferences { path: path.clone() });
                     ui.close();
+                }
+                // Plugins' items (`plugin:AddAssetAction`), for the project's own files.
+                if local && can_edit {
+                    for (plugin, action) in &self.plugin_actions {
+                        if !action.offered_for(&path) {
+                            continue;
+                        }
+                        let button = ui.button(format!("{} {}", icons::PUZZLE_PIECE, action.label));
+                        let button = if action.tooltip.is_empty() {
+                            button
+                        } else {
+                            button.on_hover_text(&action.tooltip)
+                        };
+                        if button.clicked() {
+                            menu = Some(ItemMenu::Plugin {
+                                plugin: *plugin,
+                                action: action.id,
+                                path: path.clone(),
+                            });
+                            ui.close();
+                        }
+                    }
                 }
                 if let Some(picked) = self.global_checkbox(ui, &path) {
                     menu = Some(picked);

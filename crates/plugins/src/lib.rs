@@ -12,6 +12,7 @@
 //! for ([`Plugin::take_requests`]), and its output.
 
 mod api;
+mod assets;
 pub mod bundle;
 mod draw;
 pub mod files;
@@ -25,6 +26,7 @@ use axcenity_core::{InstanceId, RecordedChange, Value, Vector3, World};
 use axcenity_script::{EditRuntime, OutputLine};
 use mlua::{IntoLuaMulti, MultiValue};
 
+pub use assets::{AssetAction, Importer, MAX_ASSET_HOOKS, MAX_IMPORT_BYTES, extension_of};
 pub use bundle::{
     Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
 };
@@ -40,6 +42,13 @@ pub use rows::{MAX_ROWS, PropertyRow, RowKind};
 pub use serde_json::Value as Json;
 
 use api::{PluginState, SignalKey};
+
+/// The plugin API's version, `plugin.ApiVersion`: 1 was Phase 54's
+/// (toolbars, dock widgets, selection, undo, settings, files, the mouse);
+/// 2 added viewport drawing, handles, Properties rows, importers and
+/// Assets panel items (roadmap G10). Raise it when the API grows, and list
+/// what came in `docs/editor/plugins.md`; never take a name away.
+pub const PLUGIN_API_VERSION: u32 = 2;
 
 /// The luau-lsp definitions of the plugin API, to load after the engine's
 /// (`definitions/axcenity-plugin.d.luau`).
@@ -174,6 +183,7 @@ impl Plugin {
             drawings: Default::default(),
             handles: Default::default(),
             rows: Default::default(),
+            assets: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -261,6 +271,64 @@ impl Plugin {
         };
         let instance = axcenity_script::LuaInstance(instance);
         self.fire(world, SignalKey::RowChanged(row), (instance, value));
+    }
+
+    /// Its importers and Assets panel actions, when they changed since the
+    /// last call.
+    pub fn take_asset_hooks(&self) -> Option<(Vec<Importer>, Vec<AssetAction>)> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        let hooks = &mut state.assets;
+        std::mem::take(&mut hooks.changed).then(|| {
+            (
+                hooks.importers.values().cloned().collect(),
+                hooks.actions.values().cloned().collect(),
+            )
+        })
+    }
+
+    /// The file `name` (its name only, no folders) with `contents` is
+    /// imported with the importer numbered `importer`: fires its
+    /// `Imported(name, contents)`. `false` when it has no such importer.
+    pub fn import_file(
+        &self,
+        world: &mut World,
+        importer: u64,
+        name: &str,
+        contents: &[u8],
+    ) -> bool {
+        let known = self
+            .state()
+            .is_some_and(|state| state.assets.importers.contains_key(&importer));
+        if !known {
+            return false;
+        }
+        let lua = self.runtime.lua();
+        let Ok(contents) = lua.create_string(contents) else {
+            return false;
+        };
+        self.fire(
+            world,
+            SignalKey::Imported(importer),
+            (name.to_owned(), contents),
+        );
+        true
+    }
+
+    /// Its asset action numbered `action` was picked for the project asset
+    /// at `path`: fires its `Activated(path)`.
+    pub fn asset_action(&self, world: &mut World, action: u64, path: &str) {
+        let known = self
+            .state()
+            .is_some_and(|state| state.assets.actions.contains_key(&action));
+        if known {
+            self.fire(world, SignalKey::AssetAction(action), path.to_owned());
+        }
+    }
+
+    /// The editor imported a file itself, now the project file at `path`:
+    /// fires `plugin.AssetImported(path)`.
+    pub fn asset_imported(&self, world: &mut World, path: &str) {
+        self.fire(world, SignalKey::AssetImported, path.to_owned());
     }
 
     fn has_row(&self, row: u64) -> bool {

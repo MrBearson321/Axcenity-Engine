@@ -601,6 +601,73 @@ fn properties_rows_are_declared_and_fire_when_used() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+#[test]
+fn importers_asset_actions_and_asset_imported_reach_the_plugin() {
+    let folder = temp_folder("importers");
+    let found = project_with_plugin(
+        &folder,
+        "importers",
+        MANIFEST,
+        "local csv = plugin:AddImporter({ Name = 'Level layout', Extensions = { '.CSV', 'txt', 'csv' } })\n\
+         csv.Imported:Connect(function(name, contents)\n\
+         \tfor line in contents:gmatch('[^\\n]+') do\n\
+         \t\tlocal x, y, z = line:match('(%-?%d+),(%-?%d+),(%-?%d+)')\n\
+         \t\tlocal part = Instance.new('Part')\n\
+         \t\tpart.Name = name\n\
+         \t\tpart.Position = Vector3.new(tonumber(x), tonumber(y), tonumber(z))\n\
+         \t\tpart.Parent = workspace\n\
+         \tend\n\
+         end)\n\
+         local open = plugin:AddAssetAction({ Label = 'Count bytes', Extensions = { 'glb' } })\n\
+         open.Activated:Connect(function(path) print('action', path) end)\n\
+         plugin.AssetImported:Connect(function(path) print('imported', path) end)\n\
+         assert(plugin.ApiVersion == 2)\n\
+         print(pcall(plugin.AddImporter, plugin, { Name = 'x', Extensions = {} }))\n\
+         print(pcall(plugin.AddImporter, plugin, { Name = 'x', Extensions = { 'a/b' } }))\n\
+         print(pcall(plugin.AddAssetAction, plugin, { }))\n",
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed.len(), 3, "{printed:?}");
+    assert!(printed[0].contains("needs Extensions"), "{}", printed[0]);
+    assert!(printed[1].contains("isn't a file ending"), "{}", printed[1]);
+    assert!(printed[2].contains("needs a Label"), "{}", printed[2]);
+    let (importers, actions) = plugin.take_asset_hooks().unwrap();
+    assert_eq!(importers.len(), 1);
+    assert_eq!(importers[0].name, "Level layout");
+    assert_eq!(importers[0].extensions, ["csv", "txt"]);
+    assert!(importers[0].takes("C:/levels/One.CSV") && !importers[0].takes("a.glb"));
+    assert_eq!(actions[0].label, "Count bytes");
+    assert!(plugin.take_asset_hooks().is_none());
+
+    assert!(plugin.import_file(&mut world, importers[0].id, "one.csv", b"1,2,3\n-4,0,8\n"));
+    assert!(!plugin.import_file(&mut world, 999, "one.csv", b""));
+    let made: Vec<Vector3> = world
+        .get(world.workspace())
+        .unwrap()
+        .children()
+        .iter()
+        .map(|&id| position(&world, id))
+        .collect();
+    assert_eq!(
+        made,
+        [Vector3::new(1.0, 2.0, 3.0), Vector3::new(-4.0, 0.0, 8.0)]
+    );
+    plugin.asset_action(&mut world, actions[0].id, "assets/models/tree.glb");
+    plugin.asset_imported(&mut world, "assets/textures/bark.png");
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(
+        printed,
+        [
+            "action\tassets/models/tree.glb",
+            "imported\tassets/textures/bark.png"
+        ]
+    );
+    assert!(errors(&plugin).is_empty());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// The luau-lsp file names every global, method, field and event the
 /// plugin API has.
 #[test]
@@ -654,6 +721,11 @@ fn the_definitions_name_the_whole_plugin_api() {
         "function AddPropertyButton(",
         "Activated: PluginSignal",
         "Changed: PluginSignal",
+        "function AddImporter(",
+        "function AddAssetAction(",
+        "Imported: PluginSignal",
+        "AssetImported: PluginSignal",
+        "ApiVersion: number",
     ];
     for name in names {
         assert!(
@@ -666,6 +738,7 @@ fn the_definitions_name_the_whole_plugin_api() {
         include_str!("api.rs"),
         include_str!("draw.rs"),
         include_str!("rows.rs"),
+        include_str!("assets.rs"),
     ]
     .concat();
     for line in api.lines() {
