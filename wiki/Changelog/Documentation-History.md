@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | ADR-0021, inventory, roadmap | Collaborate C12: the future Django account integration as a document (`docs/research/collaborate-accounts.md`): providers, token checks, linking members, ownership, the website's API, threat model | Claude |
 | 2026-11-12 | Optimization log, benchmark history, performance overview, known bottlenecks, project and serialization, known limitations, ADR-0016, inventory, roadmap | Collaborate C11: zstd for big messages, S10k session measurements, and the quadratic `world.json` load fixed (S10k 5.66 → 0.19 s) | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C10: `IdentityProvider` seam, per-member budgets for each message kind and handshake limits (`crates/collab/src/limits.rs`), the host's audit log (`audit.rs`), security review in `docs/research/collaborate.md` §6.1 | Claude |
 | 2026-11-12 | ADR-0022, ADR index, system inventory, roadmap | Collaborate 2.0 design (P0): host handoff by deterministic successor, members list replicated, persistent project ID, optional Git remote (`docs/research/collaborate-persistent.md`) | Claude |

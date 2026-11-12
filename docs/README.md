@@ -49,6 +49,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Editor plugins (`plugins/`, the plugin API, the Plugins panel) | [editor/plugins.md](editor/plugins.md) |
 | Team Create (real-time collaboration): the proposed architecture, sync model, identity and phases TC0–TC8 | [research/team-create.md](research/team-create.md) |
 | Collaborate (Team Create's new name, brief of 2026-11-12): audit of what exists, Tailscale setup, live shared scripts, identity seam, phases C1–C12 | [research/collaborate.md](research/collaborate.md) |
+| Collaborate accounts (C12, document only): how a future Django account manager would plug in (tokens bound to device keys, linking members, ownership, the website's API, threat model) | [research/collaborate-accounts.md](research/collaborate-accounts.md) |
 | Collaborate 2.0 (brief of 2026-11-12): persistent projects without a fixed host, Git/GitHub sync and checkpoints, automatic host election and handoff, phases P0–P7 | [research/collaborate-persistent.md](research/collaborate-persistent.md) |
 | The MCP server for AI clients (`axcenity-editor --mcp`, its tools, connecting Claude Code, Cursor or Codex) | [editor/mcp.md](editor/mcp.md) |
 | Setting up an AI assistant with a project (user guide: `--mcp --check`, client configs, profiles, local models, troubleshooting) | [mcp/README.md](mcp/README.md) |
