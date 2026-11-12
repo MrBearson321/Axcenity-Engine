@@ -172,7 +172,6 @@ impl ModelStudio {
     /// Runs `op` on what's picked as one undo step. False (with the reason
     /// in the Console and the view) if it couldn't run.
     pub fn run_op(&mut self, op: MeshOp) -> bool {
-        self.refresh_snap();
         let Some(doc) = &mut self.doc else {
             return false;
         };
@@ -192,7 +191,6 @@ impl ModelStudio {
     /// Runs the last operation again with `op`'s settings (the adjust
     /// panel), with no new undo step.
     pub fn adjust_op(&mut self, op: MeshOp) -> bool {
-        self.refresh_snap();
         let Some(doc) = &mut self.doc else {
             return false;
         };

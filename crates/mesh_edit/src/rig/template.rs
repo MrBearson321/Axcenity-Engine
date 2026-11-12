@@ -341,6 +341,6 @@ impl Armature {
             .min(ball - ball_radius)
             .max(Vec3::new(f32::MIN, ground, f32::MIN));
         let max = max.max(ball + ball_radius);
-        crate::sculpt::remesh::field_mesh(min, max, size, distance).ok()
+        crate::remesh::field_mesh(min, max, size, distance).ok()
     }
 }

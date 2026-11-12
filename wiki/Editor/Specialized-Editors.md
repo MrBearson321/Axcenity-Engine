@@ -17,7 +17,7 @@ The editor's tabs beyond the Scene, Explorer and Properties. Each is a module (o
 
 | Tab | Module | Edits | Saves as | Engine side |
 |---|---|---|---|---|
-| Model Studio | the `editor-model-studio` crate (G11) | Meshes: modeling ops, modifiers, UVs, paint, sculpt, retopology, bake, rig, weights, pose | `.glb` + `.meshedit.json` sidecar | `mesh_edit` ([Mesh editing and CSG](../Engine-Systems/Mesh-Editing-and-CSG.md)) |
+| Model Studio | the `editor-model-studio` crate (G11) | Meshes: modeling ops, modifiers, UVs, paint, rig, weights, pose | `.glb` + `.meshedit.json` sidecar | `mesh_edit` ([Mesh editing and CSG](../Engine-Systems/Mesh-Editing-and-CSG.md)) |
 | Animation | `animation.rs`, `animation/` | Clips (dope sheet, curves, Record), state machines (Blueprint-style), posing, IK | `*.anim.json`, `*.statemachine.json` | `anim` |
 | Sequencer | `sequencer.rs` | Cutscene sequences on a timeline (reuses Animation's dope sheet and curves) | `*.sequence.json` | `anim::sequence`, `script::sequence` |
 | UI Designer | the `editor-ui-designer` crate (G11) | ScreenGuis on an artboard (anchors, rulers, palette, inspector), Event Graph, Live Preview | world + `ui/*.uigraph.json` | `ui`, `blocks-runtime::ui_graph` |
@@ -30,7 +30,7 @@ The editor's tabs beyond the Scene, Explorer and Properties. Each is a module (o
 
 ## Model Studio
 
-Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws through `View::use_model` and sculpt chunk meshes (`view::Frame::sculpt`). The Pose test skins exactly as `assets::Posed` does. Phase 90 ("A narrower Model Studio") plans to trim it; not started.
+Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws through `View::use_model`. The Pose test skins exactly as `assets::Posed` does. Phase 90 ("A narrower Model Studio") removed Sculpt mode, retopology and Bake (about 5,600 lines): creators sculpt and bake in Blender and import the `.glb`.
 
 ## Animation tab and sequencer
 

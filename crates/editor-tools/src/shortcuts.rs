@@ -43,8 +43,8 @@ pub enum Context {
     Camera,
     /// While the Terrain Studio has a tool.
     Terrain,
-    /// The Terrain Studio's brush, and the Model Studio's Sculpt, Paint and
-    /// Weights brushes.
+    /// The Terrain Studio's brush, and the Model Studio's Paint and Weights
+    /// brushes.
     Brushes,
     /// Typing in the Console's command line.
     Console,
@@ -62,7 +62,6 @@ pub enum Context {
     StudioMoving,
     /// While a Model Studio tool's amount is being typed.
     StudioValue,
-    PolyBuild,
     UvEditor,
     /// While a move in the UV editor follows the mouse.
     UvMoving,
@@ -73,7 +72,7 @@ pub enum Context {
 }
 
 impl Context {
-    pub const ALL: [Context; 19] = [
+    pub const ALL: [Context; 18] = [
         Context::Everywhere,
         Context::Scene,
         Context::Explorer,
@@ -88,7 +87,6 @@ impl Context {
         Context::ModelStudio,
         Context::StudioMoving,
         Context::StudioValue,
-        Context::PolyBuild,
         Context::UvEditor,
         Context::UvMoving,
         Context::Rig,
@@ -111,7 +109,6 @@ impl Context {
             Context::ModelStudio => "Model Studio",
             Context::StudioMoving => "Model Studio, while moving",
             Context::StudioValue => "Model Studio, while typing an amount",
-            Context::PolyBuild => "Model Studio's Poly Build",
             Context::UvEditor => "Model Studio's UV editor",
             Context::UvMoving => "UV editor, while moving",
             Context::Rig => "Model Studio's Armature and Pose modes",
@@ -127,7 +124,7 @@ impl Context {
             Context::Explorer => "After clicking in the Explorer or tabbing to it.",
             Context::Camera => "Over the Scene view.",
             Context::Terrain => "While a terrain tool is picked.",
-            Context::Brushes => "The terrain brush, and Sculpt, Paint and Weights.",
+            Context::Brushes => "The terrain brush, and Paint and Weights.",
             Context::Console => "While its command line has the cursor.",
             Context::Animation => "With the mouse over a clip or a sequence.",
             Context::Graphs => {
@@ -139,7 +136,6 @@ impl Context {
             Context::ModelStudio => "Over the 3D view, in Object or Edit mode.",
             Context::StudioMoving => "While a move, turn or scale follows the mouse.",
             Context::StudioValue => "While a tool's amount is being typed.",
-            Context::PolyBuild => "While Poly Build is on.",
             Context::UvEditor => "Over the UV editor.",
             Context::UvMoving => "While a move in the UV editor follows the mouse.",
             Context::Rig => "Over the 3D view.",
@@ -318,10 +314,6 @@ pub enum Action {
     ApplyAmount,
     CancelAmount,
 
-    // Poly Build.
-    DropPoint,
-    EndPolyBuild,
-
     // UV editor.
     Pin,
     Unpin,
@@ -464,8 +456,6 @@ impl Action {
             EraseAmountDigit,
             ApplyAmount,
             CancelAmount,
-            DropPoint,
-            EndPolyBuild,
             Pin,
             Unpin,
             Stitch,
@@ -609,9 +599,9 @@ impl Action {
             LockAxis => keys![NONE X, NONE Y, NONE Z],
             EdgeSlide => keys![NONE G],
             ProportionalRadius => keys![NONE PageUp, NONE PageDown],
-            EraseDigit | EraseAmountDigit | DropPoint => keys![NONE Backspace],
+            EraseDigit | EraseAmountDigit => keys![NONE Backspace],
             FinishMove | FinishUvMove | FinishBoneMove => keys![NONE Enter],
-            CancelMove | CancelAmount | EndPolyBuild | CancelUvMove | CancelBoneMove => {
+            CancelMove | CancelAmount | CancelUvMove | CancelBoneMove => {
                 keys![NONE Escape]
             }
             ApplyAmount => keys![NONE Enter, NONE Space],
@@ -681,7 +671,6 @@ impl Action {
                 Context::StudioMoving
             }
             EraseAmountDigit | ApplyAmount | CancelAmount => Context::StudioValue,
-            DropPoint | EndPolyBuild => Context::PolyBuild,
             Pin | Unpin | Stitch | SelectAllUvs | GrabUvs | TurnUvs | ResizeUvs => {
                 Context::UvEditor
             }
@@ -795,8 +784,6 @@ impl Action {
             FinishMove | FinishUvMove | FinishBoneMove => "Finish",
             ApplyAmount => "Apply",
             CancelMove | CancelAmount | CancelUvMove | CancelBoneMove => "Cancel",
-            DropPoint => "Drop the last point",
-            EndPolyBuild => "End Poly Build",
             Pin => "Pin",
             Unpin => "Unpin",
             Stitch => "Stitch",
