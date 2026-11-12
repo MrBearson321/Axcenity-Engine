@@ -1,5 +1,5 @@
 category = "feature"
-subsystem = "render"
+subsystem = "renderer"
 title = "Ray traced sun shadows (optional)"
 details = "With Hardware ray tracing on, Settings > Graphics > Ray tracing > Ray traced shadows (Off, Low, Medium, High) traces the sun's shadows as rays from each pixel within the ray tracing distance: exact up close, soft by how far the caster is (from Lighting's ShadowSoftness), with the shadow maps past the reach and for see-through surfaces. Low, Medium and High trace 1, 2 or 4 rays a pixel for soft shadows. Off at every preset. LocalScripts can set UserGameSettings.RayTracedShadows, and blocks have it under set graphics option."
 features = []
