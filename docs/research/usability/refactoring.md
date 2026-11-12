@@ -47,4 +47,15 @@ Files over ~1,500 lines were read and sorted into three kinds: several responsib
 
 ## Verification
 
-Behavior can't change from a verbatim move, and the compiler checks every path. Each PR runs the affected crates' full test suites before and after (results in the PR), plus `cargo clippy` on them. Known cloud-only failures (no audio device, GPU-less tests) are listed as such.
+Behavior can't change from a verbatim move, and the compiler checks every path. Each move was also checked by script: the lines of the old file and of the new files, with indentation and `pub(super)`/`pub(crate)` stripped, are the same apart from the new `mod`/`use` lines, the `//!` comments and rustfmt re-wrapping a signature whose visibility made it longer.
+
+Cloud container (Linux, lavapipe), 2026-11-12, on the branch `refactor-phase6` after merging main at `1dc69b5`:
+
+| Check | Result |
+|---|---|
+| `cargo clippy --workspace --all-targets -- -D warnings` | Clean |
+| `axcenity-editor` tests | 1,089 passed (Model Studio's tests moved to its own crate on main); 1 failed: `every_tutorial_sample_opens_and_plays_in_the_editor`, which fails in the cloud on main too (no audio device) |
+| `axcenity-script` tests | 375 passed |
+| `axcenity-scene` tests | 161 passed |
+| `axcenity-player` tests | 149 passed |
+| `python scripts/check-wiki.py` | 0 errors (the warnings are the shallow clone missing older `verified_commit`s) |
