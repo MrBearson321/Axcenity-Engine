@@ -19,6 +19,8 @@ tags: [architecture, platforms]
 | Android, iOS | **Deferred** (Milestone 20, Phases 82–88) | — |
 | Web | **Deferred**; Luau native code has no wasm path | — |
 
+Minimum and recommended hardware for users (processor, memory, GPU, network, storage, ray tracing) is the user page `documentation/reference/system-requirements.md`; update it when a platform, a GPU requirement or a port changes.
+
 Decision and revisit point: [ADR-0011](Architecture-Decisions/ADR-0011-Desktop-First-Local-Verification.md) and `docs/development-policy.md#platforms`.
 
 ## Where platform differences live
