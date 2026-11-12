@@ -118,8 +118,9 @@ fn changes_has_a_row_for_every_setting() {
         chromatic_aberration: _,
         sharpen: _,
         motion_blur: _,
+        ray_tracing_distance: _,
     } = &high;
-    let edits: [fn(&mut GraphicsSettings); 21] = [
+    let edits: [fn(&mut GraphicsSettings); 22] = [
         |s| s.quality = Quality::Low,
         |s| s.automatic = !s.automatic,
         |s| s.shadow_quality = other(s.shadow_quality(), ShadowQuality::Low, ShadowQuality::Ultra),
@@ -171,6 +172,7 @@ fn changes_has_a_row_for_every_setting() {
                 MotionBlurQuality::High,
             )
         },
+        |s| s.ray_tracing_distance = Some(s.ray_tracing_distance() + 100.0),
     ];
     for (index, edit) in edits.iter().enumerate() {
         let mut edited = high.clone();

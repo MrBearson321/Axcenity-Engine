@@ -567,7 +567,7 @@ pub(super) struct Cached<T> {
 }
 
 /// Which mesh a batch draws: a built-in shape, or a caller's by its key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum MeshKey {
     Block,
     Sphere,
@@ -1060,6 +1060,9 @@ pub(super) struct ScenePipeline {
     pub(super) culling_bounds: Vec<CullingBounds>,
     /// Each item's level of detail, kept between frames.
     pub(super) lods: LodStates,
+    /// Hardware ray tracing's acceleration structures, while something
+    /// traces rays (renderer/ray_tracing.rs).
+    pub(super) ray_scene: Option<Box<super::ray_tracing::RayScene>>,
     /// The editor's debug view, while one is shown (renderer/debug_views.rs).
     #[cfg(feature = "debug-views")]
     pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,

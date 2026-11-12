@@ -438,6 +438,10 @@ pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
 /// megabytes (MiB).
 pub const TEXTURE_BUDGET_RANGE: std::ops::RangeInclusive<u32> = 16..=65_536;
 
+/// The nearest and farthest ray tracing can reach from the camera, in
+/// studs: what's past it is left out of the ray traced scene.
+pub const RAY_TRACING_DISTANCE_RANGE: std::ops::RangeInclusive<f32> = 50.0..=5000.0;
+
 /// A shadow map's size in texels per side, and its number of cascades
 /// (one layer each).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -540,6 +544,11 @@ pub struct GraphicsSettings {
     /// How a world's `MotionBlurEffect` is drawn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub motion_blur: Option<MotionBlurQuality>,
+    /// How far from the camera ray traced effects see, in studs: items
+    /// farther away are left out of the ray traced scene. Only used while
+    /// a ray traced effect is on (`docs/rendering/ray-tracing.md`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_tracing_distance: Option<f32>,
 }
 
 impl GraphicsSettings {
@@ -733,6 +742,26 @@ impl GraphicsSettings {
         })
     }
 
+    /// How far ray traced effects see, in studs: the override, kept within
+    /// [`RAY_TRACING_DISTANCE_RANGE`], or the preset's. An override that
+    /// isn't a number is ignored.
+    pub fn ray_tracing_distance(&self) -> f32 {
+        let preset = match self.quality {
+            Quality::Low => 150.0,
+            Quality::Medium => 250.0,
+            Quality::High => 400.0,
+            Quality::Ultra => 800.0,
+        };
+        self.ray_tracing_distance
+            .filter(|distance| distance.is_finite())
+            .map_or(preset, |distance| {
+                distance.clamp(
+                    *RAY_TRACING_DISTANCE_RANGE.start(),
+                    *RAY_TRACING_DISTANCE_RANGE.end(),
+                )
+            })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -840,6 +869,8 @@ impl GraphicsSettings {
             motion_blur: self.motion_blur(),
             // Every GPU can draw them: boxes read against the prepass.
             decals: self.quality.decal_limits(),
+            ray_queries: capabilities.ray_queries,
+            ray_tracing_distance: self.ray_tracing_distance(),
             notes,
         }
     }
@@ -861,6 +892,10 @@ pub struct Capabilities {
     pub msaa_samples: u32,
     /// Whether compute shaders can run (with a storage buffer to write).
     pub compute_shaders: bool,
+    /// Whether the GPU traces rays in hardware through wgpu's ray queries
+    /// (and the device was opened with them), so ray traced effects can
+    /// be turned on.
+    pub ray_queries: bool,
 }
 
 impl Capabilities {
@@ -882,6 +917,8 @@ impl Default for Capabilities {
             // 1× and the 4× wgpu guarantees for the scene's formats.
             msaa_samples: 1 | 4,
             compute_shaders: true,
+            // An optional feature: wgpu's defaults have none.
+            ray_queries: false,
         }
     }
 }
@@ -921,6 +958,11 @@ pub struct EffectiveGraphics {
     /// The projected decals drawn (they need the prepass's depth and
     /// normals while any are drawn).
     pub decals: DecalLimits,
+    /// Whether ray traced effects can be drawn: the GPU has hardware ray
+    /// queries. Each effect's own setting says whether it is.
+    pub ray_queries: bool,
+    /// How far from the camera ray traced effects see, in studs.
+    pub ray_tracing_distance: f32,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1343,6 +1385,7 @@ mod tests {
             chromatic_aberration: Some(false),
             sharpen: Some(true),
             motion_blur: Some(MotionBlurQuality::Low),
+            ray_tracing_distance: Some(600.0),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1568,6 +1611,27 @@ mod tests {
     }
 
     #[test]
+    fn ray_tracing_distance_follows_the_preset_and_stays_in_range() {
+        let distances = Quality::ALL.map(|q| GraphicsSettings::preset(q).ray_tracing_distance());
+        assert_eq!(distances, [150.0, 250.0, 400.0, 800.0]);
+        let with = |distance| GraphicsSettings {
+            ray_tracing_distance: Some(distance),
+            ..GraphicsSettings::default()
+        };
+        assert_eq!(with(1200.0).ray_tracing_distance(), 1200.0);
+        assert_eq!(with(1.0).ray_tracing_distance(), 50.0);
+        assert_eq!(with(1e9).ray_tracing_distance(), 5000.0);
+        assert_eq!(with(f32::NAN).ray_tracing_distance(), 400.0);
+        // The capability passes through; the GPU decides it, not a setting.
+        let gpu = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        assert!(GraphicsSettings::default().effective(&gpu).ray_queries);
+        assert!(!EffectiveGraphics::default().ray_queries);
+    }
+
+    #[test]
     fn effective_never_raises_a_setting() {
         let capabilities = [
             Capabilities::default(),
@@ -1578,6 +1642,7 @@ mod tests {
                 software: false,
                 msaa_samples: 1 | 2 | 4 | 8,
                 compute_shaders: true,
+                ray_queries: true,
             },
             Capabilities {
                 max_texture_size: 1024,
@@ -1591,6 +1656,7 @@ mod tests {
                 software: true,
                 msaa_samples: 1,
                 compute_shaders: false,
+                ray_queries: false,
             },
         ];
         let modes = AntiAliasing::ALL.map(Some).into_iter().chain([None]);
@@ -1622,6 +1688,7 @@ mod tests {
                         chromatic_aberration: post,
                         sharpen: post,
                         motion_blur: Some(MotionBlurQuality::Low),
+                        ray_tracing_distance: None,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);

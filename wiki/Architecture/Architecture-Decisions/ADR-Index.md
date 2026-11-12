@@ -38,6 +38,7 @@ Decisions with long-term consequences, so later work doesn't silently reverse th
 | [ADR-0022](ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md) | Persistent Collaborate projects: the session host is replaceable by a deterministic successor, ownership stays in the shared members list, optional Git remote for checkpoints | Accepted | 2026-11-12 |
 | [ADR-0023](ADR-0023-Scripts-Keep-State-Across-Hot-Reload.md) | Saved scripts keep their top-level locals across a reload in Play (s&box-style); engine hot-patching removed | Accepted | 2026-11-12 |
 | [ADR-0024](ADR-0024-Shared-Editor-Foundations-For-The-Cohesion-Pass.md) | The cohesion pass extends existing foundations (kit, two scripting IRs with one node catalogue, physics `api` module boundary, Collaborate trust layer, shared preview canvas) instead of building parallel ones | Accepted | 2026-11-12 |
+| [ADR-0025](ADR-0025-Optional-Ray-Tracing-Through-Ray-Queries.md) | Hardware ray tracing is an optional tier built on wgpu's ray queries: a BLAS per mesh and a TLAS only while an effect traces rays, each effect its own setting, off at every preset | Accepted | 2026-11-12 |
 
 ## Superseded and changed decisions found in the plans
 

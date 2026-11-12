@@ -5,8 +5,8 @@
 pub use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DecalLimits, DepthOfFieldQuality,
     EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, MotionBlurQuality, POINT_SHADOW_FACES,
-    PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
-    ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
+    PointShadowMapSize, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE, ReflectionQuality,
+    ShadowMapSize, ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// The formats of the scene's HDR color and its depth, which multisampling
@@ -33,6 +33,9 @@ pub fn read_capabilities(
         compute_shaders: limits.max_compute_workgroups_per_dimension > 0
             && limits.max_compute_invocations_per_workgroup >= 64
             && limits.max_storage_buffers_per_shader_stage > 0,
+        ray_queries: device
+            .features()
+            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY),
     }
 }
 

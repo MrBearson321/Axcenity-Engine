@@ -253,3 +253,11 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 ```
 
+#### FindService
+
+```luau
+DataModel:FindService(className: string): Instance?
+```
+
+Like GetService, but nil when there's no service with this name, instead of an error: `if game:FindService("QuestService") then ... end`.
+
