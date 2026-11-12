@@ -35,6 +35,7 @@ Decisions with long-term consequences, so later work doesn't silently reverse th
 | [ADR-0019](ADR-0019-Gameplay-Systems-Through-GameSystem.md) | Gameplay systems in their own crate behind `GameSystem`; Players stays in `script` | Accepted | 2026-11-11 |
 | [ADR-0020](ADR-0020-Team-Create-Session-Authority-And-Operations.md) | Team Create: one session authority ordering typed operations; device-key identities until accounts exist | Accepted; D3, TC8 and the name superseded by ADR-0021 | 2026-11-11 |
 | [ADR-0021](ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md) | Collaborate: Tailscale as the guided connection, Lua scripts as live `yrs` documents relayed by the host, an identity-provider seam instead of a hosted account service | Accepted | 2026-11-12 |
+| [ADR-0022](ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md) | Persistent Collaborate projects: the session host is replaceable by a deterministic successor, ownership stays in the shared members list, optional Git remote for checkpoints | Accepted | 2026-11-12 |
 
 ## Superseded and changed decisions found in the plans
 
