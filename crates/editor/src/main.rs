@@ -79,6 +79,7 @@ mod splines;
 mod start;
 mod surface;
 mod tags;
+mod team_board;
 mod terrain_studio;
 mod theme;
 mod thumbnail;

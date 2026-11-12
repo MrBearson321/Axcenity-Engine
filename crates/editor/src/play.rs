@@ -762,6 +762,12 @@ impl Session {
         self.sim.agents.paths()
     }
 
+    /// The simulation's contacts and moving bodies, for the Contacts and
+    /// Bodies overlays (roadmap G15). Reading them changes nothing.
+    pub fn physics_debug(&self) -> axcenity_physics::DebugView {
+        self.sim.physics.debug_view()
+    }
+
     /// Recent `workspace:Raycast` calls, for the editor overlay.
     pub fn debug_rays(&self) -> Vec<axcenity_script::DebugRay> {
         self.sim.scripts.debug_rays()

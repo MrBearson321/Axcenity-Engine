@@ -76,6 +76,12 @@ When the new host's copy came from the session, Axcenity connects it to the proj
 - **Rejoin**: if you were in a session of this project, the Project section offers **Rejoin** while someone hosts it. You don't need a new invite.
 - **From the repository**: clone the repository (or download it from GitHub) and open the folder in Axcenity. It's the same project, even with nobody left in a session. If you were in its sessions before and may host, your computer kept its members list, so starting a session from it lets everyone who was in back in without an invite. Otherwise the session starts with you as its host, and you invite people as usual.
 
+## Plan the work on the Team Board
+
+The **Team Board** (**Window > Team Board**, or **Open** on the Team Board line in the Collaborate panel) is the project's shared list of tasks. Type a task at the top and press Enter; click it to fill it in: who it's assigned to, its status, priority, due date, labels, a description, a checklist, links to objects or scripts, and comments. **Board** shows a column per status, and you can drag a card to another column. **Mine** shows only what's assigned to you.
+
+The board is saved in the project's `team` folder, so everyone in a session sees each change within a few seconds, and the project's repository keeps it with everything else. When someone assigns you a task, a message says so. Viewers can read the board but not change it. If two people change the same task at once, both changes are kept: comments and checklist steps from each, and the other fields from whoever changed it last.
+
 ## When the same file changed in two places
 
 If a file changed both on your computer and in the repository (for example two people worked on the same scene while apart), Axcenity overwrites neither. Syncing stops, and the repository's version is put beside yours with `.remote-` and a short code in its name, such as `world.remote-1a2b3c4.json`. Those copies are never uploaded.

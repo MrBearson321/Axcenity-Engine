@@ -1000,6 +1000,12 @@ impl EditorApp {
             Some(session) if self.overlays.agent_paths => session.agent_paths(),
             _ => Vec::new(),
         };
+        let physics_debug = match &self.play {
+            Some(play) if self.overlays.contacts || self.overlays.bodies => {
+                Some(play.physics_debug())
+            }
+            _ => None,
+        };
         let spline_editing = self.spline_editing();
         let others = self.team_selections();
         let mut output = egui::CentralPanel::default()
@@ -1061,6 +1067,7 @@ impl EditorApp {
                             debug_rays: &debug_rays,
                             nav_mesh: self.nav_mesh.as_ref().map(|cache| &cache.mesh),
                             agent_paths: &agent_paths,
+                            physics: physics_debug.as_ref(),
                             poses: sequence
                                 .map(crate::sequencer::Preview::poses)
                                 .or(self.play.as_ref().map(|play| play.poses())),
