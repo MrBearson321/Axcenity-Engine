@@ -82,6 +82,8 @@ The **Team Board** (**Window > Team Board**, or **Open** on the Team Board line 
 
 The board also tracks bugs. Choose **Bug** in the menu beside the add field, or right-click an object in the Explorer and choose **Report a Bug…**. When a script error is in the Output, **Report the last error** files it with the message and a link to the script line. A bug has a severity (Blocker to Trivial), steps to reproduce, what should happen and what happens, the version it was found in and what fixed it. **Bugs** shows only bugs; the board counts the open ones and the blockers.
 
+For bigger aims, add a **Goal** (a milestone such as "Alpha build") and give it a target date. Put tasks and bugs under it with the **Goal** row in their window, or type them into the goal's own window. **Goals** shows each goal with a progress bar: how many of its tasks and bugs are finished, and how many are overdue. **My work** lists what's assigned to you, overdue first, then this week, later and with no date.
+
 The board is saved in the project's `team` folder, so everyone in a session sees each change within a few seconds, and the project's repository keeps it with everything else. When someone assigns you a task, a message says so. Viewers can read the board but not change it. If two people change the same task at once, both changes are kept: comments and checklist steps from each, and the other fields from whoever changed it last.
 
 ## When the same file changed in two places

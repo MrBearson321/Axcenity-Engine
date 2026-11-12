@@ -14,7 +14,7 @@ pub mod time;
 #[cfg(test)]
 mod tests;
 
-pub use board::{Board, Copies, Filter, Loaded, Whose};
+pub use board::{Board, Copies, Filter, Loaded, Progress, Whose};
 pub use item::{
     BugInfo, Change, Check, Comment, Event, Item, Kind, Link, Priority, Severity, Status,
 };

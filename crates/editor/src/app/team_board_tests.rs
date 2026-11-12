@@ -261,3 +261,98 @@ fn bugs_are_reported_from_the_last_error_and_from_the_explorer() {
     app.team_board.panel.filter.kinds = vec![axcenity_teamwork::Kind::Bug];
     draw_board(&mut app, "team-board-bugs", egui::vec2(260.0, 360.0));
 }
+
+#[test]
+fn a_goal_counts_its_tasks_and_my_work_lists_mine_soonest_first() {
+    use axcenity_teamwork::Kind;
+    let project = copy_of_example("hello-part", "team-board-goals");
+    let mut app = EditorApp::new(Some(&project));
+    as_person(&mut app, "Sam");
+    let today = Date::of(axcenity_teamwork::time::now());
+
+    app.apply_board_actions(vec![BoardAction::Create {
+        kind: Kind::Goal,
+        title: "Alpha build".into(),
+    }]);
+    let mut alpha = task_named(&mut app, "Alpha build").expect("the goal");
+    assert_eq!(
+        app.team_board.panel.open.as_deref(),
+        Some(alpha.id.as_str())
+    );
+    alpha.set_due(Some(today.add_days(10)), "Sam", alpha.created_at + 1);
+    app.apply_board_actions(vec![BoardAction::Save(Box::new(alpha.clone()))]);
+
+    // Tasks added from the goal's window belong to it.
+    app.apply_board_actions(vec![
+        BoardAction::AddToGoal {
+            goal: alpha.id.clone(),
+            title: "Main menu".into(),
+        },
+        BoardAction::AddToGoal {
+            goal: alpha.id.clone(),
+            title: "Door opens".into(),
+        },
+    ]);
+    let mut menu = task_named(&mut app, "Main menu").unwrap();
+    assert_eq!(menu.goal.as_deref(), Some(alpha.id.as_str()));
+    assert_eq!(
+        app.team_board.panel.open.as_deref(),
+        Some(alpha.id.as_str())
+    );
+    menu.set_status(Status::Done, "Sam", menu.created_at + 1);
+    let mut door = task_named(&mut app, "Door opens").unwrap();
+    door.assign("Sam", "Sam", door.created_at + 1);
+    door.set_due(Some(today.add_days(-2)), "Sam", door.created_at + 2);
+    // A bug joins the goal from its own window's Goal row.
+    let mut crash = Item::bug_from_error("Crash on Play", "", "Paul", door.created_at);
+    crash.assign("Sam", "Paul", crash.created_at + 1);
+    crash.set_due(Some(today.add_days(3)), "Paul", crash.created_at + 2);
+    crash.set_goal(Some(&alpha), "Paul", crash.created_at + 3);
+    let mut polish = Item::new(Kind::Task, "Polish", "Sam", door.created_at);
+    polish.assign("Sam", "Sam", polish.created_at + 1);
+    app.apply_board_actions(vec![
+        BoardAction::Save(Box::new(menu)),
+        BoardAction::Save(Box::new(door.clone())),
+        BoardAction::Save(Box::new(crash)),
+        BoardAction::Save(Box::new(polish)),
+    ]);
+    let progress = board(&mut app).progress(&alpha.id, today);
+    assert_eq!((progress.done, progress.total, progress.overdue), (1, 3, 1));
+    let mine: Vec<String> = board(&mut app)
+        .my_work("Sam")
+        .iter()
+        .map(|i| i.title.clone())
+        .collect();
+    assert_eq!(mine, ["Door opens", "Crash on Play", "Polish"]);
+
+    app.team_board.panel.open_item(&alpha);
+    draw_board(&mut app, "team-board-goal", egui::vec2(560.0, 760.0));
+    app.team_board.panel.open = None;
+    app.team_board.panel.view = View::Goals;
+    draw_board(&mut app, "team-board-goals", egui::vec2(300.0, 360.0));
+    app.team_board.panel.view = View::MyWork;
+    draw_board(&mut app, "team-board-my-work", egui::vec2(300.0, 300.0));
+    // The list leaves goals to their view.
+    app.team_board.panel.view = View::List;
+    draw_board(
+        &mut app,
+        "team-board-list-without-goals",
+        egui::vec2(300.0, 300.0),
+    );
+
+    // Deleting the goal keeps its tasks, out of the goal.
+    app.apply_board_actions(vec![BoardAction::Delete(alpha.id.clone())]);
+    let left = board(&mut app);
+    assert!(left.get(&alpha.id).is_none());
+    assert_eq!(left.len(), 4);
+    assert!(left.items().all(|i| i.goal.is_none()));
+    assert_eq!(
+        left.get(&door.id)
+            .unwrap()
+            .events
+            .last()
+            .unwrap()
+            .describe(Kind::Task),
+        "Sam took it out of its goal"
+    );
+}
