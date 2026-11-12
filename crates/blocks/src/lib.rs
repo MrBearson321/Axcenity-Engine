@@ -7,11 +7,14 @@
 pub use axcenity_blocks_runtime::*;
 
 mod from_lua;
+pub mod hot_reload;
 mod lua;
 
 pub use from_lua::{FromLuaError, from_lua, refine};
 pub use lua::SyntaxError;
 
+#[cfg(test)]
+mod hot_reload_tests;
 #[cfg(test)]
 mod tests;
 

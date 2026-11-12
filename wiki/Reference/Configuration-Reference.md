@@ -51,7 +51,7 @@ Command-line flags, environment variables, Cargo features and settings files. Ga
 | Crate | Feature | Effect |
 |---|---|---|
 | hosts | `profile-tracy` | Send `profiling` spans to Tracy |
-| `editor` | `hot-patch` | Subsecond hot-patching (dev only) |
+| `editor` | `engine-dev` | Rebuild and relaunch from the source tree (dev only, Phase 89) |
 | `render` | `debug-views` | Editor debug views (only the editor turns it on) |
 | `script` | `csg` (default) | `UnionAsync` and friends via `mesh_edit` |
 

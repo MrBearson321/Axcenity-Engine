@@ -72,6 +72,7 @@ mod spline_content;
 mod splines;
 mod tags;
 pub(crate) mod team;
+mod team_audit;
 mod team_chat;
 mod team_history;
 mod team_panel;
@@ -115,7 +116,6 @@ use crate::dialogue_editor::DialogueStudio;
 use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
-use crate::hot_patch;
 use crate::import_dialog::ImportDialog;
 use crate::layout::{self, Layout, Pane};
 use crate::loading::{self, Loading};
@@ -983,7 +983,7 @@ impl EditorApp {
             adapter: None,
             benchmark: Default::default(),
             rebuilds: Rebuilds {
-                source: EngineSource::find(),
+                source: EngineSource::for_rebuilds(),
                 ..Rebuilds::default()
             },
             launching: None,
@@ -1128,9 +1128,7 @@ impl eframe::App for EditorApp {
     /// the whole window.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        // While dx serves the editor, through the newest code it patched in.
-        let patched = self.rebuilds.patched_frames();
-        hot_patch::call(patched, || self.frame(ui, frame.wgpu_render_state()));
+        self.frame(ui, frame.wgpu_render_state());
         self.pace_frame();
         // Relaunching into a rebuilt editor saves the settings first.
         self.launch(&ctx, frame);
@@ -1821,8 +1819,6 @@ mod graph_zoom_tests;
 mod graphics_benchmark_tests;
 #[cfg(test)]
 mod health_tests;
-#[cfg(test)]
-mod hot_patch_tests;
 #[cfg(test)]
 mod ik_tests;
 #[cfg(test)]

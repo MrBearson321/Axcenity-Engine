@@ -309,6 +309,12 @@ fn admin_commands_manage_members_and_invites() {
     );
     server.command(&format!("remove {bo_id}"));
     assert!(!server.command("members").text.contains("Bo"));
+    // The audit log says what happened, newest last.
+    let audit = server.command("audit");
+    assert!(audit.text.contains("Bo was taken out"), "{}", audit.text);
+    assert!(audit.text.contains("Revoked"), "{}", audit.text);
+    assert_eq!(server.command("audit 1").text.lines().count(), 1);
+    assert!(server.command("audit x").text.contains("isn't a number"));
     assert!(server.command("quit").quit);
     server.stop().unwrap();
 }

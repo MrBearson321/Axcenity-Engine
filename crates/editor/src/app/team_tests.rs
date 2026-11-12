@@ -539,6 +539,22 @@ fn the_panel_offers_share_and_join_then_shows_the_session() {
     settle_net(&mut a, &mut b, |_, b| {
         b.team().unwrap().client_role() == Some(Role::Viewer)
     });
+    // The Owner's panel asks the host for its audit log (C10); a member's
+    // never shows it.
+    draw_panel(&mut a, "collaborate-audit");
+    draw_panel(&mut b, "collaborate-audit-member");
+    let audit = |app: &EditorApp| app.team().unwrap().client().unwrap().audit_log().to_vec();
+    settle_net(&mut a, &mut b, |a, _| !audit(a).is_empty());
+    let texts: Vec<String> = audit(&a).into_iter().map(|e| e.text).collect();
+    assert!(
+        texts.iter().any(|t| t.contains("joined as Editor")),
+        "{texts:#?}"
+    );
+    assert!(
+        texts.iter().any(|t| t.contains("is now Viewer")),
+        "{texts:#?}"
+    );
+    assert!(audit(&b).is_empty());
     // A new invite replaces the link shown.
     let link = a.make_team_invite(Role::Editor).expect("hosting");
     assert_eq!(a.team().unwrap().invite(), Some(link.as_str()));

@@ -62,6 +62,9 @@ pub struct Modules {
     required_by: HashMap<InstanceId, BTreeSet<InstanceId>>,
     /// The modules that required each module while they loaded.
     dependents: HashMap<InstanceId, BTreeSet<InstanceId>>,
+    /// Hot reload: the table scripts hold for a module that's loading its
+    /// new code, which `finish` copies the new table into.
+    refresh: HashMap<InstanceId, Table>,
 }
 
 impl Modules {
@@ -132,6 +135,49 @@ pub fn replace(lua: &Lua, module: InstanceId, path: &str, source: &str) -> BTree
         stale.extend(modules.dependents.get(&next).into_iter().flatten());
     }
     scripts
+}
+
+/// Hot reload: the table `module` loaded as on this side, if it did.
+pub fn loaded_table(lua: &Lua, module: InstanceId) -> Option<Table> {
+    let modules = lua.app_data_ref::<Modules>()?;
+    match modules.states.get(&module) {
+        Some(State::Loaded(Value::Table(table))) => Some(table.clone()),
+        _ => None,
+    }
+}
+
+/// Hot reload: gives `module` new code that loads at once, into the table
+/// `old` that scripts already hold (see [`finish`]). The modules that
+/// required it hold that table too, so unlike [`replace`] they don't load
+/// again. Returns the scripts that required it.
+pub fn replace_keeping(
+    lua: &Lua,
+    module: InstanceId,
+    path: &str,
+    source: &str,
+    old: Table,
+) -> BTreeSet<InstanceId> {
+    add(lua, module, path, source);
+    let Some(mut modules) = lua.app_data_mut::<Modules>() else {
+        return BTreeSet::new();
+    };
+    modules.states.remove(&module);
+    modules.refresh.insert(module, old);
+    modules
+        .required_by
+        .get(&module)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Hot reload: `module` ran its own new code as its own `require`, which
+/// isn't a script requiring it.
+pub fn forget_self(lua: &Lua, module: InstanceId) {
+    if let Some(mut modules) = lua.app_data_mut::<Modules>()
+        && let Some(scripts) = modules.required_by.get_mut(&module)
+    {
+        scripts.remove(&module);
+    }
 }
 
 /// Creates the `require` function every script shares. `wait` is
@@ -214,7 +260,7 @@ fn begin(lua: &Lua, module: Value) -> mlua::Result<(&'static str, Value)> {
         }
     };
     // Compiled once per source, as for scripts (see `chunks`).
-    let code = crate::chunks::load(lua, &path, &source, sandbox::environment(lua, ids)?)?;
+    let code = crate::chunks::load_hot(lua, id, &path, &source, sandbox::environment(lua, ids)?)?;
     modules_mut(lua)?
         .states
         .insert(id, State::Loading(lua.current_thread()));
@@ -233,6 +279,21 @@ fn finish(lua: &Lua, (module, count, value): (Value, i64, Value)) -> mlua::Resul
             "`{path}` must return exactly one value (usually a table of functions), \
              but it returned {count}"
         )));
+    }
+    // Hot reload: scripts keep the table they hold, with the new contents.
+    if let Some(old) = modules.refresh.remove(&id) {
+        drop(modules);
+        let value = match &value {
+            Value::Table(new) => {
+                crate::hot_reload::merge_into(&old, new)?;
+                Value::Table(old)
+            }
+            _ => value,
+        };
+        modules_mut(lua)?
+            .states
+            .insert(id, State::Loaded(value.clone()));
+        return Ok(value);
     }
     modules.states.insert(id, State::Loaded(value.clone()));
     Ok(value)

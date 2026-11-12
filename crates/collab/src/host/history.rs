@@ -54,6 +54,7 @@ impl Host {
             return Vec::new();
         }
         if !m.role.can(Capability::SaveCheckpoint) {
+            self.denied(member, "a checkpoint", Instant::now());
             return self.history_notice(member, "Viewers can't save checkpoints");
         }
         if self.history.is_none() {
@@ -76,6 +77,7 @@ impl Host {
             return Vec::new();
         }
         if m.role != Role::Owner {
+            self.denied(member, "a restore", Instant::now());
             return self.history_notice(member, "Only the owner can restore a checkpoint");
         }
         let by = m.profile.name.clone();
@@ -119,7 +121,8 @@ impl Host {
             let current = match block {
                 Some(current) if next < crate::ids::BLOCK_SIZE => current,
                 _ => {
-                    let new = ids.block();
+                    // Out of IDs: the restore stops with an error below.
+                    let new = ids.block()?;
                     block = Some(new);
                     next = 0;
                     new
@@ -127,7 +130,7 @@ impl Host {
             };
             let crate::ids::IdBlock { start, .. } = current;
             next += 1;
-            InstanceId::from_bits(u64::from(start + next - 1))
+            Some(InstanceId::from_bits(u64::from(start + next - 1)))
         };
         let store = &self.store;
         // Read, not just looked up: a file found in the folder at the start
@@ -173,6 +176,11 @@ impl Host {
             out.extend(self.doc_follows_file(&path, member));
         }
         out.extend(self.checkpoints_to_everyone());
+        self.record(
+            crate::audit::AuditKind::Restored,
+            Some(member),
+            format!("{by} restored \u{201c}{label}\u{201d} for everyone"),
+        );
         if !restore.missing.is_empty() {
             out.extend(self.history_notice(
                 member,
@@ -237,7 +245,7 @@ impl Host {
             .unwrap_or_default()
     }
 
-    fn history_notice(&self, member: MemberId, text: &str) -> Vec<Outgoing> {
+    pub(super) fn history_notice(&self, member: MemberId, text: &str) -> Vec<Outgoing> {
         vec![Outgoing {
             to: member,
             message: ToClient::HistoryNotice(text.to_owned()),

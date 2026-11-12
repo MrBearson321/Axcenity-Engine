@@ -288,6 +288,8 @@ enum Link {
 pub(crate) struct Team {
     /// Made once the host has let this editor in.
     client: Option<Client>,
+    /// The host was asked for its audit log (the Owner's, C10).
+    audit_asked: bool,
     link: Link,
     /// The host refused this editor: the session is over for it.
     ended: bool,
@@ -339,6 +341,7 @@ impl Team {
             invite,
             tailscale: None,
             mirror: None,
+            audit_asked: false,
             mirror_synced: None,
             mirrors_home: None,
             open_mirror: false,
@@ -434,6 +437,21 @@ impl Team {
             Some(client) => client.save_checkpoint(label),
             None => Err("Not in the session yet".to_owned()),
         }
+    }
+
+    /// Asks the host for its audit log (the Owner); false if it can't.
+    pub(crate) fn ask_for_audit_log(&mut self) -> bool {
+        let asked = self
+            .client
+            .as_mut()
+            .is_some_and(|client| client.ask_for_audit_log());
+        self.audit_asked |= asked;
+        asked
+    }
+
+    /// Whether the host was asked for its audit log in this session.
+    pub(crate) fn audit_asked(&self) -> bool {
+        self.audit_asked
     }
 
     /// Asks the host to restore checkpoint `id` for everyone (the Owner).
