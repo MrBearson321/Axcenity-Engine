@@ -1933,12 +1933,26 @@ pub(super) const INSTANCE_EVENT_DOCS: &[(&str, &str)] = &[
 pub(super) const SIGNAL_DOC: &str =
     "An event, such as `part.Touched`. Connect a function to run it every time the event fires.";
 
-pub(super) const SIGNAL_METHODS: &[Function] = &[Function {
-    name: "Connect",
-    doc: "Runs `callback` every time the event fires, each time as its own task (so it may `task.wait`). Returns a Connection for stopping it.",
-    params: &[("callback", "(...any) -> ()")],
-    returns: "Connection",
-}];
+pub(super) const SIGNAL_METHODS: &[Function] = &[
+    Function {
+        name: "Connect",
+        doc: "Runs `callback` every time the event fires, each time as its own task (so it may `task.wait`). Returns a Connection for stopping it.",
+        params: &[("callback", "(...any) -> ()")],
+        returns: "Connection",
+    },
+    Function {
+        name: "Once",
+        doc: "Runs `callback` the next time the event fires, then disconnects it, as its own task. Returns a Connection, so it can be stopped before then.",
+        params: &[("callback", "(...any) -> ()")],
+        returns: "Connection",
+    },
+    Function {
+        name: "Wait",
+        doc: "Pauses the script until the event next fires, and returns the values the event gave its handlers: `local otherPart = part.Touched:Wait()`. A script that stops while waiting never carries on.",
+        params: &[],
+        returns: "...any",
+    },
+];
 
 pub(super) const CONNECTION_DOC: &str = "A function connected to an event, returned by `Connect`.";
 
@@ -2669,6 +2683,15 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"ReplayService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"ContentProvider\"`, `\"DataService\"`, `\"DialogueService\"`, `\"QuestService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Function {
+            name: "FindService",
+            doc: "Like GetService, but nil when there's no service with this name, instead of an error: `if game:FindService(\"QuestService\") then ... end`.",
+            params: &[("className", "string")],
+            returns: "Instance?",
         },
     ),
     (

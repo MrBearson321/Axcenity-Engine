@@ -18,6 +18,7 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | GPU | `wgpu` 30 (M12, PR #104) | render, editor (via eframe) | MIT/Apache | Moves with winit and eframe |
 | Window | `winit` 0.30 | player, editor | Apache | Left out of the workspace hack so the server builds no window crates |
 | Editor shell | `eframe` 0.36 (wgpu backend, persistence, accesskit, wayland, x11), `egui_dock` 0.21, `egui-phosphor` 0.14, `rfd` 0.17 | editor, editor-kit (eframe, egui-phosphor) | MIT/Apache | Upgrade together with wgpu |
+| macOS menu bar | `muda` 0.21, `objc2` 0.6, `objc2-app-kit` 0.3, `objc2-foundation` 0.3 (macOS only) | editor | MIT/Apache (muda Apache-2.0 OR MIT) | The system menu bar and the title bar's double-click setting; versions are the ones rfd and winit already pull in |
 | Text | `glyphon` 0.12 | render | MIT/Apache/Zlib | cosmic-text shaping |
 | Math | `glam` 0.34 | everywhere | MIT/Apache | rapier uses `glamx`; several glam versions in the lock |
 | Physics | `rapier3d` 0.36 (`parallel`), **patched** from `vendor/rapier3d` (`[patch.crates-io]`, PR #121) so pairs with a contact hook (Ice, Rubber) keep their contacts between steps; see `vendor/README.md` | physics | Apache | parry3d for shapes and decompositions |
@@ -26,6 +27,7 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | Models | `gltf` 1.4 (`KHR_texture_transform`, `extras`), `ufbx` 0.11, `meshopt` 0.7 | assets | MIT/Apache; ufbx MIT/Unlicense | ufbx and meshoptimizer are C/C++ built with `cc` |
 | Images | `image` 0.25 (bmp, exr, hdr, jpeg, png, tga), `png` 0.18 | assets, terrain, player icon, editor thumbnails | MIT/Apache | |
 | Texture cooking | `intel_tex_2` 0.5 | cook (editor only) | MIT/Apache | Prebuilt ISPC kernels; never linked by player/server/testing |
+| Cooked texture decoding | `texture2ddecoder` 0.1.2 | assets (player too) | MIT/Apache | Pure Rust, no unsafe; decodes BC7/BC5 top levels for CPU readers in cooked-only games (G12); pulls in `paste` (already in the tree) |
 | Networking | `renet` 2, `renet_netcode` 2, `postcard` 1.1 (`use-std`) | net | MIT/Apache | renet pair moves together |
 | Packing | `zstd` 0.13, `zip` 2 (deflate) | project, editor, collab (wire messages of 16 KiB or more, C11) | MIT/BSD; MIT | zstd builds C with `cc` |
 | UI layout | `taffy` 0.7 | ui | MIT | |

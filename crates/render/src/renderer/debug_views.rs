@@ -50,11 +50,15 @@ pub enum DebugView {
     /// Each item's level of detail: green for its own mesh, then yellow,
     /// orange and red for its simpler copies. Grey has none.
     LodLevels,
+    /// What the camera's rays hit in hardware ray tracing's scene: each
+    /// item a color of its own, dimmer the farther away, and only items
+    /// within the ray tracing distance. Needs a GPU with ray queries.
+    RayHits,
 }
 
 impl DebugView {
     /// Every view, in menu order.
-    pub const ALL: [DebugView; 9] = [
+    pub const ALL: [DebugView; 10] = [
         DebugView::Unlit,
         DebugView::Wireframe,
         DebugView::Normals,
@@ -64,6 +68,7 @@ impl DebugView {
         DebugView::AmbientOcclusion,
         DebugView::Overdraw,
         DebugView::LodLevels,
+        DebugView::RayHits,
     ];
 }
 
@@ -106,6 +111,8 @@ pub(super) struct DebugViews {
     capacity: usize,
     /// At the output's size.
     depth: Option<((u32, u32), wgpu::TextureView)>,
+    /// The Ray Hits view's pass, made when first shown.
+    ray_hits: Option<super::ray_tracing::RayHitsPass>,
 }
 
 impl ScenePipeline {
@@ -245,6 +252,7 @@ impl DebugViews {
             stride,
             capacity,
             depth: None,
+            ray_hits: None,
         }
     }
 
@@ -261,6 +269,10 @@ impl DebugViews {
     ) {
         let device = &scene.device;
         let size = scene.output_size;
+        if self.view == DebugView::RayHits {
+            self.draw_ray_hits(scene, encoder, target, view_proj);
+            return;
+        }
         if self.depth.as_ref().map(|(at, _)| *at) != Some(size) {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("debug view depth"),
@@ -409,6 +421,54 @@ impl DebugViews {
             pass.set_bind_group(3, group, &[(index as u64 * self.stride) as u32]);
             pass.draw(0..mesh.index_count, batch.instances.clone());
         }
+    }
+}
+
+impl DebugViews {
+    /// The Ray Hits view, or a plain dark picture on a GPU without ray
+    /// queries (the editor says why).
+    fn draw_ray_hits(
+        &mut self,
+        scene: &ScenePipeline,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        view_proj: Mat4,
+    ) {
+        let Some(rays) = &scene.ray_scene else {
+            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("ray hits unsupported"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.02,
+                            g: 0.02,
+                            b: 0.02,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            return;
+        };
+        let pass = self.ray_hits.get_or_insert_with(|| {
+            super::ray_tracing::RayHitsPass::new(&scene.device, scene.color_format)
+        });
+        pass.draw(
+            (&scene.device, &scene.queue),
+            encoder,
+            target,
+            (
+                rays,
+                view_proj,
+                scene.output_size,
+                scene.graphics.ray_tracing_distance,
+            ),
+        );
     }
 }
 

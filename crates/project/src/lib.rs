@@ -36,6 +36,7 @@ mod backup;
 pub mod branding;
 mod collaborate_file;
 mod compat;
+mod default_sky;
 mod levels;
 pub mod memory_budget;
 mod migrate;
@@ -63,6 +64,9 @@ mod ui_graphs;
 
 pub use collision_groups::{
     COLLISION_GROUPS_FILE, parse_collision_groups, save_collision_groups, write_collision_groups,
+};
+pub use default_sky::{
+    DEFAULT_SKY, DEFAULT_SKY_CLOCK_TIME, DEFAULT_SKY_LATITUDE, DEFAULT_SKY_PATH, add_default_sky,
 };
 pub use input_map::{INPUT_FILE, load_input_map, parse_input_map, save_input_map, write_input_map};
 pub use scripts::*;
@@ -110,7 +114,7 @@ pub use package::{
     package_contents, package_contents_with_scripts, package_scripts, plan_import, read_package,
     script_tables, without_scripts, write_package,
 };
-pub use packed::{PackError, pack_game, unpack_game};
+pub use packed::{PackError, PackOptions, pack_game, pack_game_with, unpack_game};
 pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};
 pub use starter_character::load_starter_character;
 pub use terrain_files::{

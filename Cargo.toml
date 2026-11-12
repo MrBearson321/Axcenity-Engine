@@ -103,6 +103,10 @@ image = { version = "0.25", default-features = false, features = ["bmp", "exr", 
 # OR Apache-2.0). Editor only, through `axcenity-cook`: the player reads
 # cooked files and never links it.
 intel_tex_2 = "0.5"
+# Decodes cooked BC7/BC5 textures on the CPU in games shipped without their
+# source images (G12). Pure Rust, no unsafe; its one dependency, `paste`, is
+# already in the tree. MIT OR Apache-2.0.
+texture2ddecoder = "0.1.2"
 kira = "0.12"
 log = "0.4"
 # Decodes the logo PNG for the player's window icon, and writes the editor's
@@ -122,6 +126,15 @@ luau0-src = "=0.22.0"
 # The process's memory use for the editor's profiler, on Windows, macOS and
 # Linux (MIT OR Apache-2.0).
 memory-stats = "1.2"
+# The editor's menus in the macOS menu bar (Apache-2.0 OR MIT; Tauri's menu
+# crate). macOS only: Windows and Linux keep the menus in the window.
+muda = { version = "0.21", default-features = false }
+# Asks AppKit whether a menu item was chosen by its keys (macOS only; MIT).
+# The versions muda and rfd already build on.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder"] }
+# Reads what a double-click on a title bar does (macOS only; MIT).
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
 # Math types Kira's spatial listener and emitters take (MIT OR Apache-2.0).
 mint = "0.5"
 pollster = "0.4"
@@ -239,8 +252,10 @@ wgpu = { version = "30", features = ["static-dxc"] }
 winit = "0.30"
 
 [workspace.lints.rust]
-# `deny`, not `forbid`, for one allowed block: the editor debugger reading a
-# paused script's locals (`crates/script/src/debugger.rs`, v2 Phase 4).
+# `deny`, not `forbid`, for a few allowed blocks: the editor debugger reading
+# a paused script's locals (`crates/script/src/debugger.rs`, v2 Phase 4) and
+# opting in to wgpu's experimental ray queries
+# (`crates/render/src/adapters.rs`, `with_ray_queries`).
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

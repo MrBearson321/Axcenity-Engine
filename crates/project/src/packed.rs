@@ -93,10 +93,33 @@ impl PackFile {
 /// doesn't parse or simplify them again. Block JSON is
 /// translated into Lua in the archive so an exported player only needs the
 /// normal script loader.
+///
+/// Every source file ships as it is; [`pack_game_with`] can leave texture
+/// sources out where their cooked copies stand in (what Build Game does).
 pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
+    pack_game_with(folder, PackOptions::default())
+}
+
+/// How [`pack_game_with`] packs a game.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PackOptions {
+    /// Leave out each texture's source when it has a current cooked copy
+    /// (roadmap G12, cooked-only games): the file ships empty and is listed
+    /// in `assets::COOKED_ONLY_FILE`, so the game uses the cooked copy and
+    /// decodes that on the CPU for anything that reads pixels. Terrain data
+    /// and the game's icon and banner always ship whole: they're read as
+    /// files, not as textures.
+    pub cooked_only: bool,
+}
+
+/// [`pack_game`], with `options`.
+pub fn pack_game_with(folder: &Path, options: PackOptions) -> Result<Vec<u8>, PackError> {
     let mut files = Vec::new();
     collect_runtime_files(folder, folder, &mut files)?;
     add_cooked_textures(folder, &mut files)?;
+    if options.cooked_only {
+        leave_out_cooked_sources(folder, &mut files);
+    }
     add_asset_index(folder, &mut files);
     files.sort_by(|a, b| a.name.cmp(&b.name));
     if files.len() > MAX_FILES {
@@ -399,6 +422,44 @@ fn add_cooked_textures(root: &Path, files: &mut Vec<PackFile>) -> Result<(), Pac
         }
     }
     Ok(())
+}
+
+/// Empties each texture source in `files` whose current cooked copy is in
+/// `files` too, and lists them in `assets::COOKED_ONLY_FILE` (G12). Terrain
+/// data (`terrain_files`) and the manifest's icon and banner are kept.
+fn leave_out_cooked_sources(root: &Path, files: &mut Vec<PackFile>) {
+    let packed: HashSet<String> = files.iter().map(|file| file.name.clone()).collect();
+    let branding = crate::read_manifest(root)
+        .map(|manifest| manifest.branding)
+        .unwrap_or_default();
+    let kept: Vec<&str> = [branding.icon.as_deref(), branding.banner.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect();
+    let terrain = format!("{}/", crate::terrain_files::TERRAIN_FOLDER);
+    let mut left_out = Vec::new();
+    for file in files.iter_mut() {
+        let name = &file.name;
+        if name.starts_with("assets/")
+            && is_texture_file(name)
+            && !name.starts_with(&terrain)
+            && !kept.contains(&name.as_str())
+            && !file.contents.is_empty()
+            && packed.contains(&axcenity_assets::cooked_relative_path(name))
+            && axcenity_assets::is_cooked(root, name)
+        {
+            file.contents = Vec::new();
+            left_out.push(name.clone());
+        }
+    }
+    if !left_out.is_empty() {
+        left_out.sort();
+        files.push(PackFile {
+            name: axcenity_assets::COOKED_ONLY_FILE.to_owned(),
+            contents: (left_out.join("\n") + "\n").into_bytes(),
+            modified: 0,
+        });
+    }
 }
 
 fn is_texture_file(name: &str) -> bool {
@@ -761,6 +822,77 @@ mod tests {
         assert!(!axcenity_assets::cooked_path(&unpacked, stale).exists());
         let _ = fs::remove_dir_all(project);
         let _ = fs::remove_dir_all(unpacked);
+    }
+
+    #[test]
+    fn a_cooked_only_game_leaves_out_sources_with_cooked_copies_and_still_reads_them() {
+        let project = temp_folder("cooked-only");
+        for folder in ["assets/textures", "assets/terrain/Hills", "assets/ui"] {
+            fs::create_dir_all(project.join(folder)).unwrap();
+        }
+        fs::write(
+            project.join(crate::MANIFEST_FILE),
+            r#"{"name": "Cooked", "format_version": 1, "branding": {"icon": "assets/ui/icon.png"}}"#,
+        )
+        .unwrap();
+        let wood = "assets/textures/wood.png";
+        let raw = "assets/textures/raw.png";
+        let heights = "assets/terrain/Hills/heights.png";
+        let icon = "assets/ui/icon.png";
+        for name in [wood, raw, heights, icon] {
+            fs::write(project.join(name), name.as_bytes()).unwrap();
+        }
+        // Mode 6 BC7 blocks of one opaque color (endpoints 0x7f both, so a
+        // mid grey): the decoder gives the same pixel everywhere.
+        let mut block = [0u8; 16];
+        block[0] = 0b0100_0000;
+        for byte in &mut block[1..8] {
+            *byte = 0xff;
+        }
+        let cooked = axcenity_assets::CookedTexture {
+            format: axcenity_assets::CookedFormat::Bc7,
+            width: 4,
+            height: 4,
+            levels: vec![block.to_vec(), block.to_vec(), block.to_vec()],
+            has_alpha: false,
+            average: [0; 4],
+        };
+        // Everything is cooked but `raw`.
+        for name in [wood, heights, icon] {
+            let stamp = axcenity_assets::SourceStamp::of(&project.join(name), name.as_bytes());
+            axcenity_assets::write_cooked(&project, name, stamp, &cooked).unwrap();
+        }
+
+        let options = PackOptions { cooked_only: true };
+        let game = pack_game_with(&project, options).unwrap();
+        let unpacked = temp_folder("cooked-only-unpacked");
+        let _ = fs::remove_dir_all(&unpacked);
+        unpack_game(&game, &unpacked).unwrap();
+        let size = |name: &str| fs::metadata(unpacked.join(name)).unwrap().len();
+        assert_eq!(size(wood), 0, "left out for its cooked copy");
+        for kept in [raw, heights, icon] {
+            assert_eq!(size(kept), kept.len() as u64, "{kept} ships whole");
+        }
+        let listed = fs::read_to_string(unpacked.join(axcenity_assets::COOKED_ONLY_FILE)).unwrap();
+        assert_eq!(listed, format!("{wood}\n"));
+
+        // The game reads the cooked copy, and its pixels from it.
+        let image = axcenity_assets::read_texture(&unpacked, wood).unwrap();
+        assert!(image.cooked().is_some());
+        let first = image.rgba()[..4].to_vec();
+        assert_eq!(first[3], 255, "opaque");
+        assert!(image.rgba().chunks(4).all(|pixel| pixel == first));
+        assert!(!axcenity_assets::is_cooked(&unpacked, raw), "never cooked");
+
+        // An emptied file that isn't listed doesn't count as current.
+        fs::remove_file(unpacked.join(axcenity_assets::COOKED_ONLY_FILE)).unwrap();
+        let other = temp_folder("cooked-only-unlisted");
+        let _ = fs::remove_dir_all(&other);
+        fs::rename(&unpacked, &other).unwrap();
+        assert!(axcenity_assets::read_cooked(&other, wood).is_none());
+        for folder in [project, other] {
+            let _ = fs::remove_dir_all(folder);
+        }
     }
 
     #[test]

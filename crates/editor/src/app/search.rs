@@ -499,6 +499,9 @@ fn command_description(command: &Command) -> String {
         Command::Play => {
             "Run the game in the editor. Changes made while playing are undone by Stop."
         }
+        Command::Run => {
+            "Run the game with no player: Scripts and physics, the fly camera, no character."
+        }
         Command::Stop => "Stop the game and go back to editing.",
         Command::Snap(_) => "Turn one of the Snapping group's switches on or off.",
         Command::CollisionGroups => "Which groups of parts collide with which.",

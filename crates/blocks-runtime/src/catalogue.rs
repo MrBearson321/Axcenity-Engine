@@ -159,6 +159,7 @@ pub fn field_help(name: &str) -> Option<&'static str> {
         "r" | "g" | "b" => "how much red, green or blue, 0 to 1",
         "value" => "the value to use",
         "property" => "the name of a property, such as Transparency",
+        "attribute" => "the attribute's name, such as Health (letters, digits and _)",
         "controller" => "the character controller, picked from the tree",
         "slot" => "the save slot's number or name",
         "checkpoint" => "the Checkpoint, picked from the tree",
@@ -336,6 +337,16 @@ fn block_words(kind: &BlockKind) -> Words {
             "Runs when a character sits on the Seat.",
             "Start a ride when someone sits down.",
         ),
+        B::WhenPropertyChanged { .. } => (
+            "When property changes",
+            "Runs each time one property of an object changes, whoever changed it: a script, physics or the editor.",
+            "Play a sound when a door's Transparency changes.",
+        ),
+        B::WhenAttributeChanged { .. } => (
+            "When attribute changes",
+            "Runs each time one of an object's attributes is set to a new value, added or removed.",
+            "Update a health bar when the player's Health attribute changes.",
+        ),
         B::WhenPromptTriggered { .. } => (
             "When prompt triggered",
             "Runs when the player uses the ProximityPrompt: presses its key, or holds it long enough.",
@@ -381,6 +392,11 @@ fn block_words(kind: &BlockKind) -> Words {
             "Wait",
             "Pauses these blocks for some seconds. The rest of the game keeps going.",
             "Wait 3 seconds between waves.",
+        ),
+        B::WaitForEvent { .. } => (
+            "Wait for event",
+            "Pauses these blocks until one of an object's events next fires, such as a part's Touched.",
+            "Wait until something touches the pressure plate.",
         ),
         B::WaitUntil { .. } => (
             "Wait until",
@@ -533,6 +549,11 @@ fn block_words(kind: &BlockKind) -> Words {
             "Set property",
             "Sets any property of an object by its name.",
             "Set a part's Transparency to 0.5.",
+        ),
+        B::SetAttribute { .. } => (
+            "Set attribute",
+            "Gives an object an attribute (your own named value: a number, text, true or false, a Vector3, a color...) or changes it. Setting nil removes it.",
+            "Give a coin a Value of 10.",
         ),
         // Characters and agents.
         B::SetDestination { .. } => (
@@ -977,6 +998,12 @@ fn expression_words(
             "A property of an object, such as a part's Position.",
             "The door's Position.",
             "the property's value",
+        ),
+        E::Attribute { .. } => (
+            "Attribute",
+            "One of an object's attributes, by name; nil when it has none by that name.",
+            "The coin's Value.",
+            "the attribute's value, or nil",
         ),
         E::Raycast { .. } => (
             "Raycast",

@@ -50,12 +50,14 @@ pub(crate) fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     );
     let required_features = adapter.features()
         & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_BC);
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let mut descriptor = wgpu::DeviceDescriptor {
         label: Some("benchmark device"),
         required_features,
         ..Default::default()
-    }))
-    .ok()
+    };
+    // As the player does, so ray traced effects can be measured too.
+    axcenity_render::adapters::with_ray_queries(&adapter, &mut descriptor);
+    pollster::block_on(adapter.request_device(&descriptor)).ok()
 }
 
 /// The CPU time of a frame's named steps.

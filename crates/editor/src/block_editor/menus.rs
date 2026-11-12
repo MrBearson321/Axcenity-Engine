@@ -104,6 +104,10 @@ pub(super) fn name_menu(
         ui.weak("Nothing is in there yet in the editor.");
     } else if suggestions.is_empty() && kind == NameKind::Bindable {
         ui.weak("ReplicatedStorage has no BindableEvent yet: insert one there.");
+    } else if suggestions.is_empty() && kind == NameKind::Attribute {
+        ui.weak("It has no attributes in the editor yet: add one in Properties, or type it.");
+    } else if suggestions.is_empty() && kind == NameKind::Signal {
+        ui.weak("Pick the object first to see its events.");
     } else if suggestions.is_empty() && matches!(kind, NameKind::DataTable | NameKind::Column) {
         ui.weak("The project has no data tables yet: make one in the Assets panel.");
     } else if suggestions.is_empty() {

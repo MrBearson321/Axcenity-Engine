@@ -132,6 +132,16 @@ pub(super) fn palette_parts(
                 sound: sound.clone(),
                 body: Vec::new(),
             }),
+            block(BlockKind::WhenPropertyChanged {
+                target: part.clone(),
+                property: "Transparency".to_owned(),
+                body: Vec::new(),
+            }),
+            block(BlockKind::WhenAttributeChanged {
+                target: part.clone(),
+                attribute: NameKind::Attribute.example().to_owned(),
+                body: Vec::new(),
+            }),
         ],
         Category::Control => vec![
             block(BlockKind::Wait {
@@ -178,6 +188,10 @@ pub(super) fn palette_parts(
             block(BlockKind::WaitForChild {
                 target: String::new(),
                 name: NameKind::Child.example().to_owned(),
+            }),
+            block(BlockKind::WaitForEvent {
+                target: part.clone(),
+                event: NameKind::Signal.example().to_owned(),
             }),
             block(BlockKind::DestroyAfter {
                 target: part.clone(),
@@ -316,6 +330,11 @@ pub(super) fn palette_parts(
                 property: "Size".to_owned(),
                 value: vector(4.0, 1.0, 2.0),
             }),
+            block(BlockKind::SetAttribute {
+                target: part.clone(),
+                attribute: NameKind::Attribute.example().to_owned(),
+                value: number(100.0),
+            }),
             block(BlockKind::SetLanguage {
                 language: text("English"),
             }),
@@ -442,6 +461,10 @@ pub(super) fn palette_parts(
             R(Expression::Property {
                 target: part.clone(),
                 property: "Position".to_owned(),
+            }),
+            R(Expression::Attribute {
+                target: part.clone(),
+                attribute: NameKind::Attribute.example().to_owned(),
             }),
             R(Expression::Raycast {
                 origin: Box::new(vector(0.0, 10.0, 0.0)),

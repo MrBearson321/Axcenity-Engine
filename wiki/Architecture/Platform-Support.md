@@ -19,6 +19,8 @@ tags: [architecture, platforms]
 | Android, iOS | **Deferred** (Milestone 20, Phases 82–88) | — |
 | Web | **Deferred**; Luau native code has no wasm path | — |
 
+Minimum and recommended hardware for users (processor, memory, GPU, network, storage, ray tracing) is the user page `documentation/reference/system-requirements.md`; update it when a platform, a GPU requirement or a port changes.
+
 Decision and revisit point: [ADR-0011](Architecture-Decisions/ADR-0011-Desktop-First-Local-Verification.md) and `docs/development-policy.md#platforms`.
 
 ## Where platform differences live
@@ -33,6 +35,7 @@ There is no platform abstraction layer of the engine's own. Each concern goes th
 | Game controllers | `gilrs` 0.11 | Windows.Gaming.Input, IOKit, evdev via libudev (`libudev-dev` to build on Linux) |
 | File watching | `notify` 8 | inotify, FSEvents, ReadDirectoryChangesW, with a polling fallback |
 | Dialogs | `rfd` 0.17 | Desktop portal on Linux |
+| Editor menus | egui in the header; `muda` 0.21 on macOS | macOS uses the system menu bar (`app/native_menu.rs`, `docs/editor/shell.md`); Windows and Linux draw the menus in the window's own title bar |
 | Audio | `kira` 0.12 over `cpal` | ALSA on Linux |
 | Game file access | `assets` only (`safe_path`) | Never `std::fs` in gameplay code, so other platforms stay possible |
 | Save files | `save::game_folder` | The player's data folder per OS; the one exception to "files through `assets`" |

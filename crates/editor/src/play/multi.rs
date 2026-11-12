@@ -43,6 +43,10 @@ pub struct PlaySettings {
     pub conditions: Conditions,
     /// A script error pauses Play at the failed line (roadmap G6).
     pub pause_on_error: bool,
+    /// Run instead of Play (roadmap G14): one device, with Scripts and
+    /// physics but no player, so no character, LocalScripts or input; the
+    /// view stays the fly camera.
+    pub run: bool,
 }
 
 impl Default for PlaySettings {
@@ -51,6 +55,7 @@ impl Default for PlaySettings {
             clients: 1,
             conditions: Conditions::default(),
             pause_on_error: false,
+            run: false,
         }
     }
 }
@@ -89,8 +94,13 @@ impl Play {
         levels: super::PlayLevels,
         settings: PlaySettings,
     ) -> Result<Play, Crash> {
-        let clients = settings.clients.clamp(1, MAX_CLIENTS);
-        let mut first = Session::start(
+        // Run has no player, so no clients either.
+        let clients = if settings.run {
+            1
+        } else {
+            settings.clients.clamp(1, MAX_CLIENTS)
+        };
+        let mut first = Session::begin(
             edit_world,
             scripts,
             breakpoints,
@@ -104,6 +114,7 @@ impl Play {
             graphics,
             capabilities,
             levels.clone(),
+            settings.run,
         )?;
         let mut devices = Vec::new();
         if clients > 1 {
@@ -159,10 +170,17 @@ impl Play {
         } else {
             devices.push(first);
         }
-        Ok(Play {
-            devices,
-            view: PlayView::Client(0),
-        })
+        let view = if settings.run {
+            PlayView::Server
+        } else {
+            PlayView::Client(0)
+        };
+        Ok(Play { devices, view })
+    }
+
+    /// Whether the game runs without a player (Run, roadmap G14).
+    pub fn running(&self) -> bool {
+        self.devices[0].run
     }
 
     /// How many clients play.
@@ -176,6 +194,10 @@ impl Play {
 
     /// Shows another device; one that isn't there shows the first client.
     pub fn set_view(&mut self, view: PlayView) {
+        if self.running() {
+            // Run has only the server to show.
+            return;
+        }
         self.view = match view {
             PlayView::Client(n) if n >= self.devices.len() => PlayView::Client(0),
             view => view,
@@ -186,6 +208,9 @@ impl Play {
     /// The views to choose from, each with its name: the server (with
     /// more than one client), then each client by its player's name.
     pub fn views(&self) -> Vec<(PlayView, String)> {
+        if self.running() {
+            return vec![(PlayView::Server, "Server".to_owned())];
+        }
         let mut views = Vec::new();
         if self.devices.len() > 1 {
             views.push((PlayView::Server, "Server".to_owned()));
