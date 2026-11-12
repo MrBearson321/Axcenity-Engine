@@ -71,6 +71,7 @@ mod parallel;
 mod post;
 mod probe_bake;
 mod probes;
+mod ray_ao;
 mod ray_shadows;
 mod ray_tracing;
 mod realtime_gi;

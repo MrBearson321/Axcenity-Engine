@@ -141,6 +141,7 @@ fn graphics_settings_survive_a_restart() {
         motion_blur: Some(MotionBlurQuality::Low),
         ray_tracing_distance: Some(300.0),
         ray_traced_shadows: Some(RayTracedShadows::Medium),
+        ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Low),
         ray_tracing: Some(true),
     };
     let mut storage = MemoryStorage::default();
@@ -377,4 +378,20 @@ fn the_ray_tracing_section_says_what_a_restart_will_do() {
     assert!(ray_tracing_status(false, true, true).contains("turns on when the editor restarts"));
     assert!(ray_tracing_status(true, true, false).contains("turns off"));
     assert!(ray_tracing_status(true, true, true).contains("is on"));
+}
+
+#[test]
+fn the_in_use_line_lists_each_ray_traced_effect() {
+    use super::graphics::ray_tracing_in_use;
+    use axcenity_render::{EffectiveGraphics, RayTracedAmbientOcclusion};
+    let mut effective = EffectiveGraphics::default();
+    assert!(ray_tracing_in_use(&effective).contains("off"));
+    effective.ray_queries = true;
+    effective.ray_tracing_distance = 400.0;
+    assert!(ray_tracing_in_use(&effective).contains("no ray traced effects"));
+    effective.ray_traced_shadows = RayTracedShadows::Low;
+    effective.ray_traced_ambient_occlusion = RayTracedAmbientOcclusion::High;
+    let line = ray_tracing_in_use(&effective);
+    assert!(line.contains("shadows Low"), "{line}");
+    assert!(line.contains("ambient occlusion High (8 rays"), "{line}");
 }

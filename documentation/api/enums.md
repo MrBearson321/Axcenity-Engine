@@ -264,3 +264,9 @@ The choices of `Enum.RayTracedShadows`.
 
 Items: `Off`, `Low`, `Medium`, `High`
 
+## Enum.RayTracedAmbientOcclusion
+
+The choices of `Enum.RayTracedAmbientOcclusion`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+

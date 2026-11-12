@@ -120,9 +120,10 @@ fn changes_has_a_row_for_every_setting() {
         motion_blur: _,
         ray_tracing_distance: _,
         ray_traced_shadows: _,
+        ray_traced_ambient_occlusion: _,
         ray_tracing: _,
     } = &high;
-    let edits: [fn(&mut GraphicsSettings); 24] = [
+    let edits: [fn(&mut GraphicsSettings); 25] = [
         |s| s.quality = Quality::Low,
         |s| s.automatic = !s.automatic,
         |s| s.shadow_quality = other(s.shadow_quality(), ShadowQuality::Low, ShadowQuality::Ultra),
@@ -180,6 +181,13 @@ fn changes_has_a_row_for_every_setting() {
                 s.ray_traced_shadows(),
                 RayTracedShadows::Off,
                 RayTracedShadows::High,
+            )
+        },
+        |s| {
+            s.ray_traced_ambient_occlusion = other(
+                s.ray_traced_ambient_occlusion(),
+                axcenity_render::RayTracedAmbientOcclusion::Off,
+                axcenity_render::RayTracedAmbientOcclusion::High,
             )
         },
         |s| s.ray_tracing = Some(!s.ray_tracing()),

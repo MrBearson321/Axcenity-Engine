@@ -1071,6 +1071,9 @@ pub(super) struct ScenePipeline {
     /// (renderer/ray_shadows.rs), and the 4-byte mask bound without them.
     pub(super) ray_shadows: Option<Box<super::ray_shadows::RayShadows>>,
     pub(super) no_ray_shadows: wgpu::Buffer,
+    /// Ray traced ambient occlusion's pass, while drawn
+    /// (renderer/ray_ao.rs).
+    pub(super) ray_ao: Option<Box<super::ray_ao::RayAmbientOcclusion>>,
     /// The editor's debug view, while one is shown (renderer/debug_views.rs).
     #[cfg(feature = "debug-views")]
     pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,

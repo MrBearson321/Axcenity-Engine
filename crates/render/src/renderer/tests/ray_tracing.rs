@@ -314,3 +314,196 @@ mod sun_shadows {
         assert!(renderer.scene.ray_shadows.is_none());
     }
 }
+
+/// Ray traced ambient occlusion (RT3, renderer/ray_ao.rs).
+mod ambient_occlusion {
+    use super::*;
+    use crate::{AmbientOcclusion, RayTracedAmbientOcclusion};
+
+    /// The floor just in front of the block's base (ambient_occlusion.rs's).
+    const CORNER: Vec3 = Vec3::new(0.0, 0.0, -7.85);
+    const OPEN_FLOOR: Vec3 = Vec3::new(-4.0, 0.0, -4.0);
+
+    fn traced(
+        rays: RayTracedAmbientOcclusion,
+        screen_space: AmbientOcclusion,
+    ) -> crate::GraphicsSettings {
+        crate::GraphicsSettings {
+            ambient_occlusion: Some(screen_space),
+            contact_shadows: Some(false),
+            ray_traced_ambient_occlusion: Some(rays),
+            ..crate::GraphicsSettings::default()
+        }
+    }
+
+    /// The colors `points` are drawn in, in a frame of `list` drawn by
+    /// `renderer`.
+    fn colors(renderer: &mut TextureRenderer, list: &DrawList, points: &[Vec3]) -> Vec<[u8; 3]> {
+        renderer.render(list).unwrap();
+        let pixels = renderer.read_pixels();
+        points
+            .iter()
+            .map(|point| {
+                let clip = view_projection(list, 1.0) * point.extend(1.0);
+                let ndc = clip.truncate() / clip.w;
+                assert!(
+                    ndc.x.abs() < 1.0 && ndc.y.abs() < 1.0,
+                    "{point} is on screen"
+                );
+                let x = ((ndc.x * 0.5 + 0.5) * PROBE_SIZE as f32) as usize;
+                let y = ((0.5 - ndc.y * 0.5) * PROBE_SIZE as f32) as usize;
+                let at = (y * PROBE_SIZE as usize + x) * 4;
+                [pixels[at], pixels[at + 1], pixels[at + 2]]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rays_darken_the_corner_and_leave_open_floor_alone() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let list = block_on_floor();
+        let points = [CORNER, OPEN_FLOOR];
+        let mut renderer = TextureRenderer::new(&device, &queue, PROBE_SIZE, PROBE_SIZE);
+        renderer.set_graphics(&traced(
+            RayTracedAmbientOcclusion::Off,
+            AmbientOcclusion::Off,
+        ));
+        let off = colors(&mut renderer, &list, &points);
+        for rays in [
+            RayTracedAmbientOcclusion::Low,
+            RayTracedAmbientOcclusion::High,
+        ] {
+            // With screen-space ambient occlusion off, the rays alone.
+            renderer.set_graphics(&traced(rays, AmbientOcclusion::Off));
+            let on = colors(&mut renderer, &list, &points);
+            assert!(renderer.scene.ray_ao.is_some());
+            assert!(renderer.stats().ray_tracing.instances >= 2);
+            assert!(
+                on[0][0] + 8 < off[0][0],
+                "{rays:?}: the corner darkens: {on:?} vs {off:?}"
+            );
+            assert!(
+                within(on[1], off[1], 2),
+                "{rays:?}: open floor is unchanged: {on:?} vs {off:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rays_see_what_is_off_screen_and_screen_space_does_not() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        // Looking straight down at the floor (which shows 7 studs each way),
+        // with a wall just past the left edge of the view and the floor
+        // beside it just inside. Seen from above, the wall's top is
+        // further off screen than its foot.
+        let mut list = block_on_floor();
+        list.items.truncate(1);
+        list.camera = Camera {
+            position: Vec3::new(0.0, 10.0, -10.0),
+            look_at: Vec3::new(0.0, 0.0, -10.01),
+            fov_y_degrees: 70.0,
+        };
+        let beside = Vec3::new(-6.8, 0.0, -10.0);
+        let mut renderer = TextureRenderer::new(&device, &queue, PROBE_SIZE, PROBE_SIZE);
+        renderer.set_graphics(&traced(
+            RayTracedAmbientOcclusion::Off,
+            AmbientOcclusion::Off,
+        ));
+        let open = colors(&mut renderer, &list, &[beside]);
+        let open_frame = renderer.read_pixels();
+        list.items.push(DrawItem {
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::new(2.0, 2.0, 8.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(-8.3, 1.0, -10.0),
+            ),
+            // Darker than the floor, so it shows if it's on screen.
+            material: Material {
+                base_color: [0.2; 3],
+                roughness: 1.0,
+                ..Material::default()
+            },
+            ..list.items[0].clone()
+        });
+        let walled = colors(&mut renderer, &list, &[beside]);
+        assert_eq!(
+            renderer.read_pixels(),
+            open_frame,
+            "the wall itself is off screen"
+        );
+        assert_eq!(walled, open);
+
+        // Each way of drawing ambient occlusion, without and with the wall.
+        let mut with_and_without = |rays, screen_space| {
+            renderer.set_graphics(&traced(rays, screen_space));
+            let walled = colors(&mut renderer, &list, &[beside])[0];
+            let wall = list.items.pop().unwrap();
+            let open = colors(&mut renderer, &list, &[beside])[0];
+            list.items.push(wall);
+            (walled, open)
+        };
+        let (walled, open) =
+            with_and_without(RayTracedAmbientOcclusion::Off, AmbientOcclusion::High);
+        assert!(
+            within(walled, open, 2),
+            "screen-space can't see the wall: {walled:?} vs {open:?}"
+        );
+        let (walled, open) =
+            with_and_without(RayTracedAmbientOcclusion::High, AmbientOcclusion::Off);
+        assert!(
+            walled[0] + 6 < open[0],
+            "the rays find it: {walled:?} vs {open:?}"
+        );
+    }
+
+    #[test]
+    fn past_the_ray_tracing_distance_the_rays_fade_out() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        // The block 80 studs away; the rays reach 50.
+        let mut list = block_on_floor();
+        list.camera.position = Vec3::new(0.0, 40.0, 60.0);
+        let reach = |rays| crate::GraphicsSettings {
+            ray_tracing_distance: Some(50.0),
+            ..traced(rays, AmbientOcclusion::Off)
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, PROBE_SIZE, PROBE_SIZE);
+        renderer.set_graphics(&reach(RayTracedAmbientOcclusion::Off));
+        renderer.render(&list).unwrap();
+        let off = renderer.read_pixels();
+        renderer.set_graphics(&reach(RayTracedAmbientOcclusion::High));
+        renderer.render(&list).unwrap();
+        assert!(renderer.scene.ray_ao.is_some());
+        assert_eq!(renderer.read_pixels(), off);
+    }
+
+    #[test]
+    fn turning_it_off_frees_it_and_draws_as_before() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let list = block_on_floor();
+        let mut renderer = TextureRenderer::new(&device, &queue, PROBE_SIZE, PROBE_SIZE);
+        renderer.render(&list).unwrap();
+        let before = renderer.read_pixels();
+        renderer.set_graphics(&traced(
+            RayTracedAmbientOcclusion::Medium,
+            AmbientOcclusion::Low,
+        ));
+        renderer.render(&list).unwrap();
+        assert_ne!(renderer.read_pixels(), before);
+        renderer.set_graphics(&crate::GraphicsSettings::default());
+        renderer.render(&list).unwrap();
+        assert!(renderer.scene.ray_ao.is_none());
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default()
+        );
+        assert_eq!(renderer.read_pixels(), before);
+    }
+}

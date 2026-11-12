@@ -373,6 +373,7 @@ impl ScenePipeline {
             ray_scene: None,
             ray_shadows: None,
             no_ray_shadows,
+            ray_ao: None,
             #[cfg(feature = "debug-views")]
             debug_views: None,
             texture_bytes,
@@ -767,6 +768,27 @@ impl ScenePipeline {
                 ))
             }
         };
+        // Ray traced ambient occlusion, while drawn (renderer/ray_ao.rs).
+        let ray_ao_uniform =
+            if ray_ao::traced(&self.graphics) && self.frame_targets.occlusion.is_some() {
+                if self.ray_ao.is_none() {
+                    self.ray_ao = Some(Box::new(ray_ao::RayAmbientOcclusion::new(
+                        &self.device,
+                        &self.occlusion,
+                    )));
+                }
+                let taa = self
+                    .frame_targets
+                    .temporal
+                    .as_ref()
+                    .is_some_and(|temporal| temporal.has_taa());
+                let turn = if taa { (self.frame % 64) as f32 } else { 0.0 };
+                let (view, _) = lighting::camera_matrices(&list.camera, aspect);
+                Some(ray_ao::ray_ao_uniform(list, &self.graphics, view, turn))
+            } else {
+                self.ray_ao = None;
+                None
+            };
         let cascade_drawn = self.schedule_cascades(list, &mut frame_uniform);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
@@ -796,7 +818,11 @@ impl ScenePipeline {
                 bytemuck::cast_slice(&planned_lights.tiles),
             );
         }
-        let ambient_occlusion = self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off;
+        // Ambient occlusion is drawn screen-space, ray traced or both (the
+        // rays over screen-space's, fading into it toward their reach).
+        let screen_space_occlusion =
+            self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off;
+        let ambient_occlusion = screen_space_occlusion || ray_ao_uniform.is_some();
         if ambient_occlusion && self.frame_targets.occlusion.is_some() {
             let uniform = occlusion_uniform(list, aspect, self.graphics.ambient_occlusion);
             self.queue
@@ -1121,7 +1147,8 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        let traces_rays = self.traces_rays(ray_shadow_uniform.is_some());
+        let traces_rays =
+            self.traces_rays(ray_shadow_uniform.is_some() || ray_ao_uniform.is_some());
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
             Some(timer) if self.time_gpu => timer.collect(&self.device),
@@ -1310,8 +1337,22 @@ impl ScenePipeline {
                 );
             }
             mark(&mut encoder, FramePass::AmbientOcclusion);
+            if screen_space_occlusion {
+                self.occlusion.draw_raw(&mut encoder, occlusion);
+            }
+            if let (Some(pass), Some(uniform), Some(rays)) =
+                (&self.ray_ao, &ray_ao_uniform, &self.ray_scene)
+            {
+                pass.draw(
+                    (&self.device, &self.queue),
+                    &mut encoder,
+                    (rays.tlas(), occlusion),
+                    uniform,
+                    screen_space_occlusion,
+                );
+            }
             if ambient_occlusion {
-                self.occlusion.draw(&mut encoder, occlusion);
+                self.occlusion.blur(&mut encoder, occlusion);
             }
         } else {
             mark(&mut encoder, FramePass::AmbientOcclusion);
@@ -1762,7 +1803,10 @@ impl ScenePipeline {
             .map_or(empty, |map| &map.array);
         let prepass = self.frame_targets.occlusion.as_ref();
         let occlusion = prepass
-            .filter(|_| self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off)
+            .filter(|_| {
+                self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off
+                    || ray_ao::traced(&self.graphics)
+            })
             .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
         let prepass_depth = prepass
             .filter(|_| self.graphics.contact_shadows || self.decals)
@@ -2885,6 +2929,7 @@ fn targets_used(
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
         graphics.ambient_occlusion != crate::AmbientOcclusion::Off
+            || ray_ao::traced(graphics)
             || graphics.contact_shadows
             || graphics.volumetric_fog
             || graphics.ray_traced_shadows != crate::RayTracedShadows::Off

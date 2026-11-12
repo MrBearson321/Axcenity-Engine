@@ -439,6 +439,51 @@ impl RayTracedShadows {
     }
 }
 
+/// Hardware ray traced ambient occlusion (`docs/rendering/ray-tracing.md`):
+/// short rays over the hemisphere above each solid pixel find what hides
+/// it, in place of the screen-space guess, so things off screen or behind
+/// others count too. Needs a GPU that can ray trace. Ordered from cheapest
+/// to dearest; it reaches as far as screen-space ambient occlusion does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum RayTracedAmbientOcclusion {
+    /// Screen-space ambient occlusion alone (as its own setting says).
+    Off,
+    /// Two rays per pixel, at half the scene's size, smoothed.
+    Low,
+    /// Four rays per pixel.
+    Medium,
+    /// Eight rays per pixel.
+    High,
+}
+
+impl RayTracedAmbientOcclusion {
+    pub const ALL: [RayTracedAmbientOcclusion; 4] = [
+        RayTracedAmbientOcclusion::Off,
+        RayTracedAmbientOcclusion::Low,
+        RayTracedAmbientOcclusion::Medium,
+        RayTracedAmbientOcclusion::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RayTracedAmbientOcclusion::Off => "Off",
+            RayTracedAmbientOcclusion::Low => "Low",
+            RayTracedAmbientOcclusion::Medium => "Medium",
+            RayTracedAmbientOcclusion::High => "High",
+        }
+    }
+
+    /// Rays per pixel: 0 when off.
+    pub fn rays(self) -> u32 {
+        match self {
+            RayTracedAmbientOcclusion::Off => 0,
+            RayTracedAmbientOcclusion::Low => 2,
+            RayTracedAmbientOcclusion::Medium => 4,
+            RayTracedAmbientOcclusion::High => 8,
+        }
+    }
+}
+
 /// How a `MotionBlurEffect` streaks what moves across the view. Ordered
 /// from cheapest to dearest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -599,6 +644,11 @@ pub struct GraphicsSettings {
     /// every preset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_traced_shadows: Option<RayTracedShadows>,
+    /// Hardware ray traced ambient occlusion, on a GPU that can ray trace.
+    /// Off at every preset. On, it draws ambient occlusion even while the
+    /// screen-space setting is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_traced_ambient_occlusion: Option<RayTracedAmbientOcclusion>,
     /// Whether the GPU is opened with hardware ray tracing at the next
     /// start: off unless turned on (at every preset), since opening it
     /// changes the device even while no ray traced effect is on. Read once,
@@ -829,6 +879,13 @@ impl GraphicsSettings {
         self.ray_traced_shadows.unwrap_or(RayTracedShadows::Off)
     }
 
+    /// Hardware ray traced ambient occlusion: the override, or Off (every
+    /// preset).
+    pub fn ray_traced_ambient_occlusion(&self) -> RayTracedAmbientOcclusion {
+        self.ray_traced_ambient_occlusion
+            .unwrap_or(RayTracedAmbientOcclusion::Off)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -919,6 +976,17 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
+        let ray_traced_ambient_occlusion = if capabilities.ray_queries {
+            self.ray_traced_ambient_occlusion()
+        } else {
+            RayTracedAmbientOcclusion::Off
+        };
+        if ray_traced_ambient_occlusion != self.ray_traced_ambient_occlusion() {
+            notes.push(
+                "Ray traced ambient occlusion is off: Hardware ray tracing is off or this GPU can't ray trace. Screen-space ambient occlusion is used as set."
+                    .to_owned(),
+            );
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -951,6 +1019,7 @@ impl GraphicsSettings {
             ray_queries: capabilities.ray_queries,
             ray_tracing_distance: self.ray_tracing_distance(),
             ray_traced_shadows,
+            ray_traced_ambient_occlusion,
             notes,
         }
     }
@@ -1045,6 +1114,8 @@ pub struct EffectiveGraphics {
     pub ray_tracing_distance: f32,
     /// Ray traced sun shadows (Off on a GPU without ray queries).
     pub ray_traced_shadows: RayTracedShadows,
+    /// Ray traced ambient occlusion (Off on a GPU without ray queries).
+    pub ray_traced_ambient_occlusion: RayTracedAmbientOcclusion,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1469,6 +1540,7 @@ mod tests {
             motion_blur: Some(MotionBlurQuality::Low),
             ray_tracing_distance: Some(600.0),
             ray_traced_shadows: Some(RayTracedShadows::Medium),
+            ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Low),
             ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -1760,6 +1832,46 @@ mod tests {
     }
 
     #[test]
+    fn ray_traced_ambient_occlusion_is_off_at_every_preset_and_without_ray_queries() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            assert_eq!(
+                preset.ray_traced_ambient_occlusion(),
+                RayTracedAmbientOcclusion::Off
+            );
+        }
+        let asked = GraphicsSettings {
+            ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::High),
+            ..GraphicsSettings::default()
+        };
+        let gpu = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        let effective = asked.effective(&gpu);
+        assert_eq!(
+            effective.ray_traced_ambient_occlusion,
+            RayTracedAmbientOcclusion::High
+        );
+        assert!(effective.notes.is_empty(), "{:?}", effective.notes);
+        let without = asked.effective(&Capabilities::default());
+        assert_eq!(
+            without.ray_traced_ambient_occlusion,
+            RayTracedAmbientOcclusion::Off
+        );
+        assert!(
+            without
+                .notes
+                .iter()
+                .any(|note| note.contains("ambient occlusion is off"))
+        );
+        assert_eq!(
+            RayTracedAmbientOcclusion::ALL.map(RayTracedAmbientOcclusion::rays),
+            [0, 2, 4, 8]
+        );
+    }
+
+    #[test]
     fn effective_never_raises_a_setting() {
         let capabilities = [
             Capabilities::default(),
@@ -1818,6 +1930,7 @@ mod tests {
                         motion_blur: Some(MotionBlurQuality::Low),
                         ray_tracing_distance: None,
                         ray_traced_shadows: Some(RayTracedShadows::High),
+                        ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Medium),
                         ray_tracing: post,
                     };
                     for capabilities in &capabilities {
@@ -1830,6 +1943,10 @@ mod tests {
                         assert_eq!(effective.texture_budget, 200 << 20);
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
                         assert!(effective.ray_traced_shadows <= settings.ray_traced_shadows());
+                        assert!(
+                            effective.ray_traced_ambient_occlusion
+                                <= settings.ray_traced_ambient_occlusion()
+                        );
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
@@ -1856,6 +1973,10 @@ mod tests {
                                 )
                                 + usize::from(
                                     effective.ray_traced_shadows != settings.ray_traced_shadows(),
+                                )
+                                + usize::from(
+                                    effective.ray_traced_ambient_occlusion
+                                        != settings.ray_traced_ambient_occlusion(),
                                 );
                         assert_eq!(effective.notes.len(), lowered);
                     }

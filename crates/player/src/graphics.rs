@@ -128,6 +128,7 @@ mod tests {
             motion_blur: Some(MotionBlurQuality::High),
             ray_tracing_distance: Some(1000.0),
             ray_traced_shadows: Some(RayTracedShadows::High),
+            ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Medium),
             ray_tracing: Some(true),
         };
         save(&folder, &settings).unwrap();

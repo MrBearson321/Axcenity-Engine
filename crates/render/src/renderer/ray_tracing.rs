@@ -271,14 +271,14 @@ impl RayScene {
 }
 
 impl ScenePipeline {
-    /// Whether anything this frame traces rays on a device that can: ray
-    /// traced sun shadows (`ray_shadows`, when drawn this frame) or the
-    /// editor's Ray Hits view.
-    pub(super) fn traces_rays(&self, ray_shadows: bool) -> bool {
+    /// Whether anything this frame traces rays on a device that can: a ray
+    /// traced effect drawn this frame (`effects`: sun shadows, ambient
+    /// occlusion) or the editor's Ray Hits view.
+    pub(super) fn traces_rays(&self, effects: bool) -> bool {
         if !self.graphics.ray_queries {
             return false;
         }
-        if ray_shadows {
+        if effects {
             return true;
         }
         #[cfg(feature = "debug-views")]

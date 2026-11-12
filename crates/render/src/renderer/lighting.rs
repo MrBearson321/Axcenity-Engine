@@ -56,10 +56,13 @@ pub(super) fn camera_view_projection(camera: &Camera, aspect: f32) -> Mat4 {
 }
 
 /// How strongly ambient occlusion darkens ambient light as drawn: the
-/// world's strength (0 to 2), or 0 while the graphics settings have it off.
+/// world's strength (0 to 2), or 0 while the graphics settings have it off
+/// (screen-space and ray traced alike).
 pub(super) fn occlusion_drawn(list: &DrawList, graphics: &EffectiveGraphics) -> f32 {
     let strength = list.ambient.occlusion;
-    if graphics.ambient_occlusion == AmbientOcclusion::Off || !strength.is_finite() {
+    let drawn =
+        graphics.ambient_occlusion != AmbientOcclusion::Off || super::ray_ao::traced(graphics);
+    if !drawn || !strength.is_finite() {
         return 0.0;
     }
     strength.clamp(0.0, 2.0)

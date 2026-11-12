@@ -15,8 +15,8 @@
 
 use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, RayTracedShadows,
-    ReflectionQuality, ShadowQuality, TextureQuality,
+    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, RayTracedAmbientOcclusion,
+    RayTracedShadows, ReflectionQuality, ShadowQuality, TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -85,6 +85,12 @@ pub(crate) fn motion_blur_quality_names() -> Vec<&'static str> {
 
 pub(crate) fn ray_traced_shadows_names() -> Vec<&'static str> {
     RayTracedShadows::ALL.map(RayTracedShadows::label).to_vec()
+}
+
+pub(crate) fn ray_traced_ambient_occlusion_names() -> Vec<&'static str> {
+    RayTracedAmbientOcclusion::ALL
+        .map(RayTracedAmbientOcclusion::label)
+        .to_vec()
 }
 
 /// `mode`'s item name in `Enum.AntiAliasing`. Its label ("MSAA 4×") isn't a
@@ -456,6 +462,25 @@ impl UserData for LuaUserGameSettings {
                 value,
             )?;
             change(lua, |settings, _| settings.ray_traced_shadows = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("RayTracedAmbientOcclusion", |lua, _| {
+            let name = settings(lua).ray_traced_ambient_occlusion().label();
+            Ok(item(EnumType::RayTracedAmbientOcclusion, name))
+        });
+        fields.add_field_method_set("RayTracedAmbientOcclusion", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "RayTracedAmbientOcclusion",
+                EnumType::RayTracedAmbientOcclusion,
+                &RayTracedAmbientOcclusion::ALL,
+                RayTracedAmbientOcclusion::label,
+                value,
+            )?;
+            change(lua, |settings, _| {
+                settings.ray_traced_ambient_occlusion = chosen
+            });
             Ok(())
         });
 

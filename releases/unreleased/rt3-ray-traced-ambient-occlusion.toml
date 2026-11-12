@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Ray traced ambient occlusion (optional)"
+details = "With Hardware ray tracing on, Settings > Graphics > Ray tracing > Ray traced ambient occlusion (Off, Low, Medium, High) darkens corners and creases with short rays (2, 4 or 8 a pixel) instead of guessing from the screen, so things off screen or behind others count too. It draws ambient occlusion even with the screen-space setting off, and fades into it past the ray tracing distance. Off at every preset. LocalScripts can set UserGameSettings.RayTracedAmbientOcclusion, and blocks have it under set graphics option."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"
