@@ -125,7 +125,10 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             if folder.join(&path).exists() {
                 return Err(
                     ToolError::new(Code::BadValue, format!("{path} is already there"))
-                        .with_fix("give it as path to change it, or pick another name"),
+                        .with_fix(format!(
+                            "to change it, call again with path {} instead of name, or pick another name",
+                            quoted(&path)
+                        )),
                 );
             }
             (path, None, text.unwrap_or_default().to_owned())
@@ -241,8 +244,10 @@ pub(super) fn warnings(path: &str, source: &str) -> Vec<String> {
         };
         lines.push(format!(
             "warning {path}:{}: script.Parent is {service} (scripts stay in their service); \
-             reach a part by its path, like workspace.Block",
-            line + 1
+             reach a part by its path, like workspace.Block\n\
+             fix: script_write {{\"path\":{},\"edits\":[{{\"find\":\"script.Parent\",\"replace\":\"workspace.Block\"}}]}} (with your part's name)",
+            line + 1,
+            quoted(path)
         ));
     }
     lines

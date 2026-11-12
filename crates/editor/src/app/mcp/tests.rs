@@ -2554,6 +2554,30 @@ fn errors_a_small_model_tripped_on_point_to_the_right_tool() {
         text.contains("script.Parent is ServerScriptService") && text.contains("workspace.Block"),
         "{text}"
     );
+    // Its fix is the exact call, and that call works.
+    assert!(
+        text.contains(r#"fix: script_write {"path":"scripts/TouchScript.server.lua","edits":[{"find":"script.Parent","replace":"workspace.Block"}]}"#),
+        "{text}"
+    );
+    let fixed = ok(
+        host,
+        "script_write",
+        json!({"path": "scripts/TouchScript.server.lua", "edits": [{"find": "script.Parent", "replace": "workspace.Block"}]}),
+    );
+    assert!(!fixed.contains("script.Parent is"), "{fixed}");
+    // Making it again by name says to give the path.
+    let error = call(
+        host,
+        "script_write",
+        json!({"name": "TouchScript", "side": "server", "text": "print(1)"}),
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains(r#"call again with path "scripts/TouchScript.server.lua" instead of name"#),
+        "{error}"
+    );
     // A script's file given as an object names the script's object.
     let error = call(
         host,
