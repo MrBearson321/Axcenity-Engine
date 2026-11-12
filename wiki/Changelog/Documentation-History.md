@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | System inventory, roadmap | Collaborate 2.0 P2: automatic checkpoints and sync (`crates/repo/src/sync.rs`, `checkpoint.rs`, editor `app/collab_repo.rs`) | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate 2.0 P1: `crates/repo` (git runner, GitHub device sign-in, credentials in Git's store, linking), `collaborate.json` | Claude |
 | 2026-11-12 | ADR-0022, ADR index, system inventory, roadmap | Collaborate 2.0 design (P0): host handoff by deterministic successor, members list replicated, persistent project ID, optional Git remote (`docs/research/collaborate-persistent.md`) | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C9: host checkpoints (`crates/collab/src/history.rs`, `.axcenity/teamcreate/history`, contents by hash) and the Owner's restore for everyone as one transaction | Claude |
