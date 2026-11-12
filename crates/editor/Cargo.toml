@@ -18,6 +18,7 @@ axcenity-core.workspace = true
 axcenity-editor-benchmark.workspace = true
 axcenity-editor-kit.workspace = true
 axcenity-editor-model-studio.workspace = true
+axcenity-editor-node-graph.workspace = true
 axcenity-editor-toolbox.workspace = true
 axcenity-editor-tools.workspace = true
 axcenity-gameplay.workspace = true

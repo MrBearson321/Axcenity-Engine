@@ -737,6 +737,7 @@ dependencies = [
  "axcenity-editor-benchmark",
  "axcenity-editor-kit",
  "axcenity-editor-model-studio",
+ "axcenity-editor-node-graph",
  "axcenity-editor-toolbox",
  "axcenity-editor-tools",
  "axcenity-gameplay",
@@ -833,6 +834,18 @@ dependencies = [
  "axcenity-workspace-hack",
  "eframe",
  "image",
+]
+
+[[package]]
+name = "axcenity-editor-node-graph"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-blocks",
+ "axcenity-editor-kit",
+ "axcenity-editor-tools",
+ "axcenity-workspace-hack",
+ "eframe",
+ "serde_json",
 ]
 
 [[package]]
