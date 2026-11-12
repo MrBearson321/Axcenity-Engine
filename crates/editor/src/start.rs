@@ -929,6 +929,14 @@ impl StartScreen {
         }
     }
 
+    /// Shows the API page (on the start screen, or in Help > Learn) with
+    /// the entry called `name` open, as Go to Definition does for an API
+    /// member.
+    pub fn look_up_reference(&mut self, name: &str) {
+        self.page = Page::Reference;
+        self.reference.look_up(name);
+    }
+
     /// Help > Learn: the Learn, Documentation and API Reference pages in a window over the
     /// open project, at the same place as on the start screen. `project` is
     /// the open project's folder. Returns a tutorial's sample to open.

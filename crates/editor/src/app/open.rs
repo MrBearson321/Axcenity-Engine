@@ -48,6 +48,29 @@ impl EditorApp {
     }
 }
 
+impl EditorApp {
+    /// Follows a code tab's Go to Definition (G4) out of the tab: an
+    /// Instance opens as a double-click on its Explorer row opens it (a
+    /// script in its tab, anything else selected and framed), and an API
+    /// member or global opens its entry in Help > Learn's API page.
+    pub(in crate::app) fn go_to_definition(
+        &mut self,
+        ctx: &egui::Context,
+        definition: crate::script_completion::Definition,
+    ) {
+        use crate::script_completion::Definition;
+        match definition {
+            Definition::Instance(id) => self.open_instance(ctx, id),
+            Definition::Api(name) => {
+                self.start.look_up_reference(&name);
+                self.learn_open = true;
+            }
+            // The tab moved its own cursor.
+            Definition::Here(_) => {}
+        }
+    }
+}
+
 /// How long the camera takes to swing round to a double-clicked object.
 const FRAME_SECONDS: f32 = 0.45;
 
