@@ -56,6 +56,7 @@ flowchart TB
 | `renderer/gpu.rs`, `uploads.rs`, `texture_budget.rs` | Uploads (CPU mips for RGBA), background uploads, budget |
 | `renderer/occlusion.rs`, `post.rs`, `temporal.rs`, `lens.rs`, `grading.rs` | Prepass and SSAO, post, TAA, depth of field, grading |
 | `renderer/gpu_timer.rs` | Per-pass GPU time (`FramePass`) |
+| `renderer/ray_shadows.rs`, `ray_shadows.wgsl` | Ray traced sun shadows (RT1): a compute pass from the prepass into a per-pixel mask (frame binding 17) that `sun_visibility` prefers to the cascades within reach |
 | `renderer/ray_tracing.rs`, `ray_hits.wgsl` | Hardware ray tracing: BLAS per mesh, TLAS of nearby items, Ray Hits view ([ADR-0025](../Architecture/Architecture-Decisions/ADR-0025-Optional-Ray-Tracing-Through-Ray-Queries.md)) |
 | `*.wgsl` (24 files) | `shader.wgsl` (items), `lighting.wgsl`, `sky.wgsl`, `terrain.wgsl`, `water.wgsl`, `post.wgsl`, … |
 | `crates/render-types/src/graphics.rs` | `GraphicsSettings`, `Capabilities`, `EffectiveGraphics`, `Camera` (no GPU code) |
@@ -89,7 +90,7 @@ Since rendering Phase 1 (PR #83): frame rate with 1% lows, CPU- or GPU-bound, pe
 
 ## Configuration
 
-`GraphicsSettings` (per machine: editor settings, player `graphics.json`; scripts via `UserGameSettings`): shadow quality and distance, post-processing, render scale (below 100% upscaled with an FSR 1-style EASU and RCAS pair, `upscale.wgsl`), texture quality and budget, anti-aliasing (Off, FXAA, MSAA 2×/4×, TAA), ambient occlusion, reflection quality, contact shadows, volumetric fog, real-time GI, decals, motion blur, the ray tracing distance. `docs/rendering/settings.md` has the preset table.
+`GraphicsSettings` (per machine: editor settings, player `graphics.json`; scripts via `UserGameSettings`): shadow quality and distance, post-processing, render scale (below 100% upscaled with an FSR 1-style EASU and RCAS pair, `upscale.wgsl`), texture quality and budget, anti-aliasing (Off, FXAA, MSAA 2×/4×, TAA), ambient occlusion, reflection quality, contact shadows, volumetric fog, real-time GI, decals, motion blur, the ray tracing distance, ray traced shadows. `docs/rendering/settings.md` has the preset table.
 
 ## Testing
 
@@ -102,7 +103,7 @@ Since rendering Phase 1 (PR #83): frame rate with 1% lows, CPU- or GPU-bound, pe
 - Overlapping see-through items can blend in the wrong order (sorted by center).
 - AMD/Vulkan/Windows: sky clear not sRGB-encoded through an sRGB view (`docs/rendering/pipeline.md`).
 - The item shader uses all 16 sampled textures and all 16 vertex attributes (wgpu defaults): a new frame texture must share or replace a binding; a new per-item value must pack into an existing attribute.
-- Hardware ray tracing is an optional tier (RT0–RT5, `docs/research/hardware-ray-tracing.md`, `docs/rendering/ray-tracing.md`, [ADR-0025](../Architecture/Architecture-Decisions/ADR-0025-Optional-Ray-Tracing-Through-Ray-Queries.md)). RT0 (the device feature, the BLAS/TLAS scene, the ray tracing distance and the Ray Hits view) is built; no ray traced effect yet. wgpu has no acceleration structure refit (every moved item rebuilds the TLAS), and skinned items aren't traced.
+- Hardware ray tracing is an optional tier (RT0–RT5, `docs/research/hardware-ray-tracing.md`, `docs/rendering/ray-tracing.md`, [ADR-0025](../Architecture/Architecture-Decisions/ADR-0025-Optional-Ray-Tracing-Through-Ray-Queries.md)). RT0 (the device feature, the BLAS/TLAS scene, the ray tracing distance and the Ray Hits view) and RT1 (ray traced sun shadows, falling back to the cascades for see-through surfaces and past the reach) are built. Cut-outs are traced as solid. wgpu has no acceleration structure refit (every moved item rebuilds the TLAS), and skinned items aren't traced.
 - No indirect drawing, no GPU-driven culling (L5, now unblocked by M12), no render graph (L8 deferred). Frames acquire through `CurrentSurfaceTexture` (Lost or Outdated reconfigures, Timeout or Occluded skips the frame) since M12.
 
 ## Development guidance
