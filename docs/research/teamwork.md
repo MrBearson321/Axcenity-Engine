@@ -47,9 +47,12 @@ An item (`item.rs`) has an ID (10 letters from 32, from the time and a per-proce
 - **Reporting:** the add field has a kind menu (Task or Bug). With Bug chosen and an error in the Output, **Report the last error** files it, linked to the script and line the message names. The Explorer's row menu has **Report a Bug…**, which links the Instance. Each opens the new bug's window.
 - **Tests:** `a_bug_reports_what_happened_and_sorts_by_severity` (crate), `bugs_are_reported_from_the_last_error_and_from_the_explorer` (editor; snapshots `team-board-bug`, `team-board-bugs`).
 
-## 5. T3: goals and milestones (planned)
+## 5. T3: goals and milestones
 
-A Goal kind with a target date. Tasks and bugs belong to a goal; its progress is how many of them are finished, with overdue ones counted. A Goals view on the board with progress bars, and "my work" (what's assigned to me, soonest first).
+- **Data:** `Kind::Goal`; its due date is the target. A task or bug names the goal it counts toward in `item.goal` (the goal's ID; absent otherwise, so other files are unchanged). `Item::set_goal` refuses a goal under a goal and anything under a non-goal, and logs "put it under “Alpha build”" / "took it out of its goal". Goal statuses read Planned, Under way, Wrapping up, Reached, Dropped. `merge` takes `goal` from the newer side like the other fields.
+- **Board:** `Board::goals` (unfinished first, by target), `in_goal`, `progress` (`Progress { done, total, overdue }`, `fraction`), and `my_work(person)`: their unfinished tasks and bugs, soonest due first, no date last. `open_for` counts the same items.
+- **Panel:** two more views. **Goals** shows each goal with a progress bar ("1 of 3 done · 1 overdue · Nov 22", amber when anything is late, green when all is done) and its open items under it, and how many open items are in no goal. **My work** groups this computer's person's items under Overdue, This week, Later and No date. List and Board leave goals out unless the Goals chip is on. A narrow panel shows the four views as icons. A task's or bug's window has a Goal row; a goal's window has Target for Due, its progress, its items (click to open) and **Add a task to this goal** (`BoardAction::AddToGoal`, which keeps the goal's window open). Deleting a goal takes its items out of it first.
+- **Tests:** `a_goals_progress_is_its_items_and_my_work_comes_soonest_first` (crate), `a_goal_counts_its_tasks_and_my_work_lists_mine_soonest_first` (editor; snapshots `team-board-goal`, `team-board-goals`, `team-board-my-work`, `team-board-list-without-goals`).
 
 ## 6. T4: each person's history (planned)
 

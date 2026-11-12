@@ -29,14 +29,22 @@ pub enum BoardAction {
     OpenFile { path: String, line: Option<u32> },
     /// Make a bug report of the Console's last error (and open it).
     ReportLastError,
+    /// Make a task under this goal (T3), leaving the goal's window open.
+    AddToGoal { goal: String, title: String },
 }
 
-/// List or columns.
+/// How the panel shows the board.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum View {
+    /// Tasks and bugs grouped by status.
     #[default]
     List,
+    /// A column per status.
     Columns,
+    /// Each goal with its progress and its items (T3).
+    Goals,
+    /// What's assigned to this computer's person, soonest due first.
+    MyWork,
 }
 
 /// What the app tells the panel about the editor around it.
@@ -77,6 +85,8 @@ struct Draft {
     actual: String,
     found_in: String,
     fixed_in: String,
+    /// A task typed into a goal's window.
+    goal_task: String,
     /// The Delete button was pressed once.
     deleting: bool,
 }
@@ -184,6 +194,7 @@ pub fn kind_icon(kind: Kind) -> &'static str {
     match kind {
         Kind::Task => icons::CHECK_SQUARE,
         Kind::Bug => icons::BUG,
+        Kind::Goal => icons::FLAG_CHECKERED,
     }
 }
 
@@ -201,6 +212,7 @@ fn kind_mark(item: &Item, palette: &theme::Palette) -> RichText {
     let color = match item.kind {
         Kind::Bug => severity_color(item.severity(), palette),
         Kind::Task => palette.text_muted,
+        Kind::Goal => palette.accent_text,
     };
     RichText::new(kind_icon(item.kind)).color(color)
 }
@@ -251,7 +263,11 @@ impl BoardPanel {
                 RichText::new(format!("{}  {problem}", icons::WARNING)).color(palette.warning),
             );
         }
-        let items = cx.board.filtered(&self.filter);
+        let mut items = cx.board.filtered(&self.filter);
+        // Goals have their own view, unless the Goals chip asks for them.
+        if self.filter.kinds != [Kind::Goal] {
+            items.retain(|i| i.kind != Kind::Goal);
+        }
         if cx.board.is_empty() {
             widgets::empty_state(
                 ui,
@@ -261,6 +277,17 @@ impl BoardPanel {
                 None,
             );
             return actions;
+        }
+        match self.view {
+            View::Goals => {
+                self.goals(ui, cx, &mut actions);
+                return actions;
+            }
+            View::MyWork => {
+                self.my_work(ui, cx, &mut actions);
+                return actions;
+            }
+            View::List | View::Columns => {}
         }
         if items.is_empty() {
             ui.add_space(theme::space::S);
@@ -294,7 +321,7 @@ impl BoardPanel {
                     },
                 )
                 .response
-                .on_hover_text("What to add: a task or a bug");
+                .on_hover_text("What to add: a task, a bug or a goal");
             });
             let width = (ui.available_width() - 34.0).max(60.0);
             let hint = format!("New {}…", self.new_kind.name().to_lowercase());
@@ -338,14 +365,20 @@ impl BoardPanel {
             }
         }
         crate::responsive::toolbar(ui, |ui| {
-            widgets::segmented(
-                ui,
-                &mut self.view,
-                &[
-                    (View::List, Some(icons::ROWS), "List"),
-                    (View::Columns, Some(icons::KANBAN), "Board"),
-                ],
-            );
+            let views = [
+                (View::List, icons::ROWS, "List"),
+                (View::Columns, icons::KANBAN, "Board"),
+                (View::Goals, icons::FLAG_CHECKERED, "Goals"),
+                (View::MyWork, icons::USER_FOCUS, "My work"),
+            ];
+            let names = views.map(|(_, _, name)| name);
+            // A narrow panel shows the views' icons alone.
+            let options = if ui.available_width() < 360.0 {
+                views.map(|(view, icon, _)| (view, None, icon))
+            } else {
+                views.map(|(view, icon, name)| (view, Some(icon), name))
+            };
+            widgets::segmented_tips(ui, &mut self.view, &options, &names);
             crate::responsive::room_for(ui, 150.0);
             widgets::search_field(ui, &mut self.filter.text, "Filter", 110.0);
         });
@@ -466,7 +499,12 @@ impl BoardPanel {
                     )
                     .on_hover_text(item.priority.name());
                 }
-                let (done, total) = item.checked();
+                let (done, total) = if item.kind == Kind::Goal {
+                    let progress = cx.board.progress(&item.id, today);
+                    (progress.done, progress.total)
+                } else {
+                    item.checked()
+                };
                 if total > 0 {
                     ui.label(widgets::micro(
                         &format!("{done}/{total}"),
@@ -475,9 +513,15 @@ impl BoardPanel {
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     self.status_button(ui, cx, item, actions);
-                    if item.kind == Kind::Bug {
-                        ui.label(kind_mark(item, &palette))
-                            .on_hover_text(format!("Bug, {}", item.severity().name()));
+                    match item.kind {
+                        Kind::Bug => {
+                            ui.label(kind_mark(item, &palette))
+                                .on_hover_text(format!("Bug, {}", item.severity().name()));
+                        }
+                        Kind::Goal => {
+                            ui.label(kind_mark(item, &palette)).on_hover_text("Goal");
+                        }
+                        Kind::Task => {}
                     }
                     let title = RichText::new(&item.title).color(if item.status.is_finished() {
                         palette.text_weak
@@ -660,7 +704,7 @@ impl BoardPanel {
                 ui.set_width(width);
                 ui.add(egui::Label::new(RichText::new(&item.title).color(palette.text)).wrap());
                 ui.horizontal(|ui| {
-                    if item.kind == Kind::Bug {
+                    if item.kind != Kind::Task {
                         ui.label(kind_mark(item, &palette));
                     }
                     if item.priority <= Priority::High {
@@ -777,6 +821,9 @@ impl BoardPanel {
                                 if kind == Kind::Bug {
                                     changed.bug_mut();
                                 }
+                                if kind == Kind::Goal {
+                                    changed.goal = None;
+                                }
                                 changed.touch(me, now);
                             }
                         }
@@ -889,7 +936,17 @@ impl BoardPanel {
                 });
                 ui.end_row();
 
-                ui.label("Due");
+                if item.kind != Kind::Goal {
+                    ui.label("Goal");
+                    goal_picker(ui, cx, item, &mut changed);
+                    ui.end_row();
+                }
+
+                ui.label(if item.kind == Kind::Goal {
+                    "Target"
+                } else {
+                    "Due"
+                });
                 ui.horizontal(|ui| {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.draft.due)
@@ -1010,6 +1067,10 @@ impl BoardPanel {
                         });
                     }
                 }
+            }
+
+            if item.kind == Kind::Goal {
+                self.goal_progress(ui, cx, item, actions);
             }
 
             ui.add_space(theme::space::S);
@@ -1249,6 +1310,252 @@ impl BoardPanel {
             actions.push(BoardAction::Save(Box::new(changed)));
         }
     }
+
+    /// The Goals view (T3): each goal, its target date and progress, and
+    /// its unfinished tasks and bugs (all of them with Done on).
+    fn goals(&mut self, ui: &mut egui::Ui, cx: &Context<'_>, actions: &mut Vec<BoardAction>) {
+        let palette = theme::palette(ui.ctx());
+        let today = Date::of(cx.now);
+        let goals = cx.board.goals();
+        let shown: Vec<&Item> = goals
+            .into_iter()
+            .filter(|g| self.filter.finished || !g.status.is_finished())
+            .collect();
+        if shown.is_empty() {
+            widgets::empty_state(
+                ui,
+                icons::FLAG_CHECKERED,
+                "No goals yet",
+                "Choose Goal in the menu beside the add field, give it a target date, then put tasks and bugs under it. Its progress is how many of them are finished.",
+                None,
+            );
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                for goal in shown {
+                    ui.add_space(theme::space::XS);
+                    self.row(ui, cx, goal, actions);
+                    let progress = cx.board.progress(&goal.id, today);
+                    progress_bar(ui, progress, goal, today, &palette);
+                    let items: Vec<&Item> = cx
+                        .board
+                        .in_goal(&goal.id)
+                        .into_iter()
+                        .filter(|i| self.filter.finished || !i.status.is_finished())
+                        .collect();
+                    ui.indent(("goal items", &goal.id), |ui| {
+                        for item in items {
+                            self.row(ui, cx, item, actions);
+                        }
+                    });
+                }
+                let loose = cx
+                    .board
+                    .items()
+                    .filter(|i| {
+                        i.kind != Kind::Goal
+                            && !i.status.is_finished()
+                            && i.goal.as_ref().is_none_or(|g| cx.board.get(g).is_none())
+                    })
+                    .count();
+                if loose > 0 {
+                    ui.add_space(theme::space::S);
+                    ui.label(widgets::micro(
+                        &format!("{loose} open, in no goal"),
+                        palette.text_muted,
+                    ));
+                }
+            });
+    }
+
+    /// What's assigned to this computer's person, soonest due first,
+    /// under Overdue, This week, Later and No date.
+    fn my_work(&mut self, ui: &mut egui::Ui, cx: &Context<'_>, actions: &mut Vec<BoardAction>) {
+        let palette = theme::palette(ui.ctx());
+        let today = Date::of(cx.now);
+        let mine = cx.board.my_work(cx.me);
+        if mine.is_empty() {
+            widgets::empty_state(
+                ui,
+                icons::USER_FOCUS,
+                "Nothing assigned to you",
+                &format!(
+                    "Tasks and bugs assigned to {} show here, soonest due first.",
+                    cx.me
+                ),
+                None,
+            );
+            return;
+        }
+        let bucket = |item: &Item| match item.due {
+            Some(due) if due.days() < today.days() => 0,
+            Some(due) if due.days() < today.days() + 7 => 1,
+            Some(_) => 2,
+            None => 3,
+        };
+        let names = ["Overdue", "This week", "Later", "No date"];
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                for (index, name) in names.iter().enumerate() {
+                    let group: Vec<&&Item> = mine.iter().filter(|i| bucket(i) == index).collect();
+                    if group.is_empty() {
+                        continue;
+                    }
+                    let color = if index == 0 {
+                        palette.error
+                    } else {
+                        palette.text_secondary
+                    };
+                    ui.add_space(theme::space::XS);
+                    ui.label(
+                        RichText::new(format!("{name}  ·  {}", group.len()))
+                            .color(color)
+                            .family(theme::medium_family()),
+                    );
+                    for item in group {
+                        self.row(ui, cx, item, actions);
+                    }
+                }
+            });
+    }
+
+    /// A goal's window: its progress, its items, and a field to add a task
+    /// to it.
+    fn goal_progress(
+        &mut self,
+        ui: &mut egui::Ui,
+        cx: &Context<'_>,
+        goal: &Item,
+        actions: &mut Vec<BoardAction>,
+    ) {
+        let palette = theme::palette(ui.ctx());
+        let today = Date::of(cx.now);
+        let progress = cx.board.progress(&goal.id, today);
+        ui.add_space(theme::space::S);
+        widgets::section_label(ui, "Progress");
+        progress_bar(ui, progress, goal, today, &palette);
+        for item in cx.board.in_goal(&goal.id) {
+            ui.horizontal(|ui| {
+                let (icon, color) = status_look(item.status, &palette);
+                ui.label(RichText::new(icon).color(color))
+                    .on_hover_text(item.status.name(item.kind));
+                if item.kind == Kind::Bug {
+                    ui.label(kind_mark(item, &palette));
+                }
+                let text = RichText::new(&item.title).color(if item.status.is_finished() {
+                    palette.text_weak
+                } else {
+                    palette.accent_text
+                });
+                if ui
+                    .add(
+                        egui::Label::new(text)
+                            .truncate()
+                            .sense(egui::Sense::click()),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    self.open_item(item);
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.draft.goal_task)
+                    .hint_text("Add a task to this goal")
+                    .desired_width(ui.available_width() - 30.0),
+            );
+            let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (widgets::icon_button(ui, icons::PLUS, "Add the task", false).clicked() || enter)
+                && !self.draft.goal_task.trim().is_empty()
+            {
+                actions.push(BoardAction::AddToGoal {
+                    goal: goal.id.clone(),
+                    title: std::mem::take(&mut self.draft.goal_task),
+                });
+                if enter {
+                    response.request_focus();
+                }
+            }
+        });
+    }
+}
+
+/// The Goal row of a task's or bug's window: none, or one of the goals.
+fn goal_picker(ui: &mut egui::Ui, cx: &Context<'_>, item: &Item, changed: &mut Item) {
+    let current = item.goal.as_deref().and_then(|id| cx.board.get(id));
+    let text = current.map_or_else(
+        || "None".to_owned(),
+        |goal| theme::with_icon(icons::FLAG_CHECKERED, &goal.title),
+    );
+    egui::ComboBox::from_id_salt("board goal")
+        .selected_text(text)
+        .truncate()
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), "None").clicked() {
+                changed.set_goal(None, cx.me, cx.now);
+            }
+            for goal in cx.board.goals() {
+                let here = current.is_some_and(|c| c.id == goal.id);
+                // Finished goals only while they're the one it's under.
+                if (goal.status.is_finished() && !here)
+                    || !ui.selectable_label(here, &goal.title).clicked()
+                {
+                    continue;
+                }
+                changed.set_goal(Some(goal), cx.me, cx.now);
+            }
+        });
+}
+
+/// A goal's progress bar: "2 of 5 done · 1 overdue · Dec 1".
+fn progress_bar(
+    ui: &mut egui::Ui,
+    progress: board::Progress,
+    goal: &Item,
+    today: Date,
+    palette: &theme::Palette,
+) {
+    let mut text = if progress.total == 0 {
+        "Nothing in it yet".to_owned()
+    } else {
+        format!("{} of {} done", progress.done, progress.total)
+    };
+    if progress.overdue > 0 {
+        text.push_str(&format!(" · {} overdue", progress.overdue));
+    }
+    if let Some(due) = goal.due {
+        text.push_str(&format!(" · {}", due.short(today.year)));
+    }
+    let late = progress.overdue > 0 || goal.is_overdue(today);
+    let fill = if late {
+        palette.warning
+    } else if progress.total > 0 && progress.done == progress.total {
+        palette.success
+    } else {
+        palette.accent
+    };
+    ui.add(
+        egui::ProgressBar::new(progress.fraction())
+            .fill(fill)
+            .desired_height(6.0)
+            .corner_radius(3.0)
+            .desired_width(ui.available_width().min(420.0)),
+    );
+    let color = if late {
+        palette.warning
+    } else {
+        palette.text_weak
+    };
+    ui.label(
+        RichText::new(text)
+            .color(color)
+            .size(theme::type_scale::SMALL),
+    );
 }
 
 /// Sets the bug field `field` picks to `text` (tidied), if it changed.

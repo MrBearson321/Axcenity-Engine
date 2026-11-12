@@ -309,3 +309,82 @@ fn a_bug_reports_what_happened_and_sorts_by_severity() {
     );
     std::fs::remove_dir_all(root).ok();
 }
+
+#[test]
+fn a_goals_progress_is_its_items_and_my_work_comes_soonest_first() {
+    let root = temp("goals");
+    let (mut board, _) = Board::load(&root, Copies::Merge);
+    let today = Date::parse("2026-11-12").unwrap();
+    let mut alpha = Item::new(Kind::Goal, "Alpha build", "Paul", 10);
+    alpha.set_due(Some(today.add_days(14)), "Paul", 11);
+    assert_eq!(Status::Done.name(Kind::Goal), "Reached");
+
+    let mut door = Item::new(Kind::Task, "Door opens", "Paul", 20);
+    door.set_goal(Some(&alpha), "Paul", 21);
+    assert_eq!(door.goal.as_deref(), Some(alpha.id.as_str()));
+    assert_eq!(
+        door.events[1].describe(Kind::Task),
+        "Paul put it under “Alpha build”"
+    );
+    door.set_goal(Some(&alpha), "Paul", 22);
+    assert_eq!(door.events.len(), 2, "no change, no event");
+    door.assign("Sam", "Paul", 23);
+    door.set_due(Some(today.add_days(3)), "Paul", 24);
+
+    let mut crash = Item::bug_from_error("Crash on Play", "", "Sam", 30);
+    crash.set_goal(Some(&alpha), "Sam", 31);
+    crash.assign("Sam", "Sam", 32);
+    crash.set_due(Some(today.add_days(-1)), "Sam", 33);
+    let mut menu = Item::new(Kind::Task, "Main menu", "Paul", 40);
+    menu.set_goal(Some(&alpha), "Paul", 41);
+    menu.set_status(Status::Done, "Paul", 42);
+    let mut later = Item::new(Kind::Task, "Polish", "Sam", 50);
+    later.assign("Sam", "Sam", 51);
+
+    // Goals don't nest, and only goals hold things.
+    let mut beta = Item::new(Kind::Goal, "Beta", "Paul", 60);
+    beta.set_goal(Some(&alpha), "Paul", 61);
+    assert_eq!(beta.goal, None);
+    let mut stray = Item::new(Kind::Task, "Stray", "Paul", 70);
+    stray.set_goal(Some(&door), "Paul", 71);
+    assert_eq!(stray.goal, None);
+
+    for item in [&alpha, &door, &crash, &menu, &later, &beta] {
+        board.save(&root, (*item).clone()).unwrap();
+    }
+    let (board, _) = Board::load(&root, Copies::Merge);
+    assert_eq!(board.get(&door.id), Some(&door));
+    let progress = board.progress(&alpha.id, today);
+    assert_eq!(
+        progress,
+        Progress {
+            done: 1,
+            total: 3,
+            overdue: 1
+        }
+    );
+    assert!((progress.fraction() - 1.0 / 3.0).abs() < 1e-6);
+    assert_eq!(board.progress(&beta.id, today).fraction(), 0.0);
+    let goals: Vec<&str> = board.goals().iter().map(|g| g.title.as_str()).collect();
+    assert_eq!(goals, ["Alpha build", "Beta"]);
+    let titles =
+        |items: Vec<&Item>| -> Vec<String> { items.iter().map(|i| i.title.clone()).collect() };
+    assert_eq!(
+        titles(board.in_goal(&alpha.id)),
+        ["Crash on Play", "Door opens", "Main menu"]
+    );
+    assert_eq!(
+        titles(board.my_work("sam")),
+        ["Crash on Play", "Door opens", "Polish"]
+    );
+    assert_eq!(board.open_for("Sam", today), (3, 1));
+
+    // Taken out of the goal, it no longer counts.
+    door.set_goal(None, "Sam", 80);
+    assert_eq!(
+        door.events.last().unwrap().describe(Kind::Task),
+        "Sam took it out of its goal"
+    );
+    let text = serde_json::to_string_pretty(&door).unwrap();
+    assert!(!text.contains("\"goal\": \""), "{text}");
+}
