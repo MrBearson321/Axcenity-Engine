@@ -7,6 +7,7 @@
 * [Getting started](learn/getting-started.md)
 * [Editor interface](learn/editor-interface.md)
 * [Projects](learn/projects.md)
+* [Collaborate: set up and work together](learn/collaborate.md)
 
 ## Learn: Building worlds
 

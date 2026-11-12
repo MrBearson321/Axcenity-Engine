@@ -307,6 +307,8 @@ pub(crate) struct Team {
     unsent_kept: Option<(usize, Option<u64>)>,
     /// The recovery file found on joining was taken in.
     unsent_loaded: bool,
+    /// The session's name, from the invite this editor joined with (C4).
+    pub(crate) session_name: Option<String>,
 }
 
 impl Team {
@@ -327,6 +329,7 @@ impl Team {
             seen_seq: None,
             unsent_kept: None,
             unsent_loaded: false,
+            session_name: None,
         }
     }
 
@@ -497,7 +500,18 @@ impl EditorApp {
     /// this computer's Tailscale name, so they work from anywhere (C3);
     /// otherwise its LAN address. Output says which.
     pub(crate) fn host_collaborate_session(&mut self) -> Result<Invite, String> {
-        let invite = self.host_session_on(None, DEFAULT_PORT, true)?;
+        self.host_named_session(None, DEFAULT_PORT, None)
+    }
+
+    /// [`EditorApp::host_collaborate_session`] on `port`, with invites
+    /// carrying the session's `name` (Start Session, C4).
+    pub(crate) fn host_named_session(
+        &mut self,
+        folder: Option<&Path>,
+        port: u16,
+        name: Option<String>,
+    ) -> Result<Invite, String> {
+        let invite = self.host_session_on(folder, port, true, name)?;
         let reach = self.team.as_ref().and_then(|team| team.tailscale.clone());
         match reach {
             Some(note) => self.output.info(format!("Collaborate: {note}")),
@@ -517,7 +531,7 @@ impl EditorApp {
         folder: Option<&Path>,
         port: u16,
     ) -> Result<Invite, String> {
-        self.host_session_on(folder, port, false)
+        self.host_session_on(folder, port, false, None)
     }
 
     fn host_session_on(
@@ -525,6 +539,7 @@ impl EditorApp {
         folder: Option<&Path>,
         port: u16,
         tailscale: bool,
+        name: Option<String>,
     ) -> Result<Invite, String> {
         let folder = folder
             .map(Path::to_owned)
@@ -575,6 +590,7 @@ impl EditorApp {
             None,
         )
         .map_err(|e| format!("couldn't listen on port {port}: {e}"))?;
+        session.set_name(name);
         let reach = if tailscale {
             match axcenity_collab::tailscale::advertise(&mut session) {
                 axcenity_collab::tailscale::State::Running(net) => Some(format!(
@@ -640,6 +656,7 @@ impl EditorApp {
             None,
         );
         team.mirrors_home = Some(folder.join("Projects"));
+        team.session_name = invite.name.clone();
         self.team = Some(team);
         Ok(())
     }
@@ -658,6 +675,12 @@ impl EditorApp {
         }
     }
 
+    /// An invite link the system handed over: the start screen's Join
+    /// dialog shows it, with whose session it is, until the user joins.
+    pub fn offer_join(&mut self, link: String) {
+        self.start.offer_join(link);
+    }
+
     /// Stops joining from the start screen, without a word in Output.
     pub(crate) fn cancel_team_join(&mut self) {
         self.team = None;
@@ -673,7 +696,10 @@ impl EditorApp {
             self.start.set_join_progress(None);
             return;
         };
-        let host = team.address().to_owned();
+        let host = match &team.session_name {
+            Some(name) => format!("“{name}” ({})", team.address()),
+            None => team.address().to_owned(),
+        };
         let progress = match team.status() {
             TeamStatus::HostLeft { .. } => {
                 self.cancel_team_join();
@@ -693,6 +719,16 @@ impl EditorApp {
             }
             TeamStatus::Joining => JoinProgress::Connecting { host },
             TeamStatus::Reconnecting { why, .. } if team.client.is_none() => {
+                // The usual reasons, in the user's words (C4).
+                let why = if axcenity_collab::tailscale::is_tailscale_host(team.address()) {
+                    format!(
+                        "{why}. This session is reached over Tailscale: check Tailscale is on \
+                         and signed in on this computer, and if you use your own Tailscale \
+                         account, that the host shared their computer with you"
+                    )
+                } else {
+                    why
+                };
                 JoinProgress::Retrying { host, why }
             }
             TeamStatus::Connected { .. } | TeamStatus::Reconnecting { .. } => {

@@ -113,11 +113,12 @@ cat > "$APPDIR/axcenity-editor.desktop" <<EOF
 Type=Application
 Name=Axcenity Editor
 Comment=Create 3D games with parts, Lua and blocks
-Exec=AppRun
+Exec=AppRun %U
 Icon=axcenity-editor
 Terminal=false
 Categories=Development;IDE;Graphics;
 StartupNotify=true
+MimeType=x-scheme-handler/axcenity;
 EOF
 cp "$APPDIR/axcenity-editor.desktop" "$APPDIR/usr/share/applications/axcenity-editor.desktop"
 cp "$STAGE/LICENSE" "$STAGE/NOTICE" "$STAGE/INSTALL.txt" "$APPDIR/usr/share/doc/axcenity-editor/"

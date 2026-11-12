@@ -131,6 +131,7 @@ pub(super) enum Command {
     VersionHistory,
     ShareTeamCreate,
     JoinTeamCreate,
+    SetUpCollaborate,
     SaveCheckpoint,
     BackUpProject,
     Input,
@@ -381,6 +382,14 @@ impl EditorApp {
                 editing && solo,
                 "Open a project, stop Play, and leave any session first.",
             ),
+        );
+        add(
+            Command::SetUpCollaborate,
+            "Set Up Collaborate…",
+            "File",
+            &["collaborate", "tailscale", "setup", "network"],
+            None,
+            Ok(()),
         );
         add(
             Command::SaveCheckpoint,
@@ -1070,6 +1079,7 @@ impl EditorApp {
             Command::VersionHistory => self.version_history.open = true,
             Command::ShareTeamCreate => self.share_with_team_create(),
             Command::JoinTeamCreate => self.join_team_create(),
+            Command::SetUpCollaborate => self.set_up_collaborate(),
             Command::SaveCheckpoint => self.version_history.open_for_checkpoint(),
             Command::BackUpProject => self.back_up_project(false),
             Command::Input => self.input_settings.open = true,

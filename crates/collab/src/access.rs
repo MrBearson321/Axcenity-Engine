@@ -39,7 +39,13 @@ pub struct Invite {
     /// The fingerprint of the host's TLS certificate.
     pub cert: Fingerprint,
     pub secret: [u8; 16],
+    /// The session's name as the host set it ("Castle Game"), shown to the
+    /// joiner before joining (C4). Only a label: nothing is checked by it.
+    pub name: Option<String>,
 }
+
+/// The longest session name a link carries.
+const NAME_MOST: usize = 80;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LinkError {
@@ -50,14 +56,19 @@ pub enum LinkError {
 }
 
 impl Invite {
-    /// `axcenity://collaborate/join?host=…&cert=…&invite=…`
+    /// `axcenity://collaborate/join?host=…&cert=…&invite=…[&name=…]`
     pub fn link(&self) -> String {
-        format!(
+        let mut link = format!(
             "{LINK_START}host={}&cert={}&invite={}",
             self.host,
             self.cert.to_hex(),
             identity::to_hex(&self.secret)
-        )
+        );
+        if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+            link.push_str("&name=");
+            link.push_str(&percent_encode(name));
+        }
+        link
     }
 
     pub fn parse(link: &str) -> Result<Invite, LinkError> {
@@ -81,12 +92,49 @@ impl Invite {
             .and_then(identity::from_hex)
             .and_then(|bytes| bytes.try_into().ok())
             .ok_or(LinkError::Missing("invite code"))?;
+        let name = field("name")
+            .and_then(percent_decode)
+            .map(|n| n.trim().chars().take(NAME_MOST).collect::<String>())
+            .filter(|n| !n.is_empty() && !n.chars().any(char::is_control));
         Ok(Invite {
             host: host.to_owned(),
             cert,
             secret,
+            name,
         })
     }
+}
+
+/// `text` with everything but unreserved URL characters as `%XX` bytes.
+fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Undoes [`percent_encode`] (and reads `+` as a space); `None` for bad
+/// escapes or text that isn't UTF-8.
+fn percent_decode(text: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut rest = text.bytes();
+    while let Some(byte) = rest.next() {
+        match byte {
+            b'%' => {
+                let high = (rest.next()? as char).to_digit(16)?;
+                let low = (rest.next()? as char).to_digit(16)?;
+                bytes.push((high * 16 + low) as u8);
+            }
+            b'+' => bytes.push(b' '),
+            other => bytes.push(other),
+        }
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// Why someone wasn't let in.
@@ -270,6 +318,7 @@ mod link_tests {
             host: "pauls-pc.example.ts.net:47810".to_owned(),
             cert: Fingerprint([7; 32]),
             secret: [9; 16],
+            name: None,
         };
         let link = invite.link();
         assert!(link.starts_with("axcenity://collaborate/join?"), "{link}");
@@ -283,5 +332,34 @@ mod link_tests {
             Invite::parse("axcenity://collaborate/other?host=x"),
             Err(LinkError::NotALink)
         );
+    }
+
+    #[test]
+    fn a_link_can_carry_the_session_name() {
+        let invite = Invite {
+            host: "100.101.102.103:47810".to_owned(),
+            cert: Fingerprint([1; 32]),
+            secret: [2; 16],
+            name: Some("Castle Game: Zoë's & Sam's".to_owned()),
+        };
+        let link = invite.link();
+        assert!(!link.contains(' '), "{link}");
+        assert!(
+            link.contains("&name=Castle%20Game%3A%20Zo%C3%AB%27s%20%26%20Sam%27s"),
+            "{link}"
+        );
+        assert_eq!(Invite::parse(&link), Ok(invite.clone()));
+        // Links without a name, and names that are bad or too long.
+        let plain = Invite {
+            name: None,
+            ..invite.clone()
+        };
+        assert_eq!(Invite::parse(&plain.link()), Ok(plain.clone()));
+        let bad = format!("{}&name=%E2%28", plain.link());
+        assert_eq!(Invite::parse(&bad).unwrap().name, None);
+        let control = format!("{}&name=a%0Ab", plain.link());
+        assert_eq!(Invite::parse(&control).unwrap().name, None);
+        let long = format!("{}&name={}", plain.link(), "x".repeat(500));
+        assert_eq!(Invite::parse(&long).unwrap().name.unwrap().len(), 80);
     }
 }

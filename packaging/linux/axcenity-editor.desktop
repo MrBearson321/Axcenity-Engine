@@ -2,9 +2,10 @@
 Type=Application
 Name=Axcenity Editor
 Comment=Create 3D games with parts, Lua and blocks
-Exec=axcenity-editor %F
+Exec=axcenity-editor %U
 Icon=axcenity-editor
 Terminal=false
 Categories=Development;IDE;Graphics;
 StartupNotify=true
+MimeType=x-scheme-handler/axcenity;
 Keywords=game;engine;lua;3d;editor;

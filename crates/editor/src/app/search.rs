@@ -433,6 +433,9 @@ fn command_description(command: &Command) -> String {
             "Host a Collaborate session for this project and make an invite link."
         }
         Command::JoinTeamCreate => "Join someone's Collaborate session with their invite link.",
+        Command::SetUpCollaborate => {
+            "Get Tailscale ready so people anywhere can join your Collaborate sessions."
+        }
         Command::SaveCheckpoint => "Keep a named copy of the project as it is now.",
         Command::BackUpProject => "Write a zip of the whole project.",
         Command::Input => {

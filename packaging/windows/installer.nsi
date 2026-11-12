@@ -119,6 +119,13 @@ Section "Axcenity Editor" SecEditor
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AxcenityEditor" "EstimatedSize" "$0"
 
+  ; Collaborate invite links (axcenity://collaborate/join?...) open in the
+  ; editor, which joins the session (C4 of docs/research/collaborate.md).
+  WriteRegStr HKCU "Software\Classes\axcenity" "" "URL:Axcenity invite link"
+  WriteRegStr HKCU "Software\Classes\axcenity" "URL Protocol" ""
+  WriteRegStr HKCU "Software\Classes\axcenity\DefaultIcon" "" "$INSTDIR\axcenity-editor.exe,0"
+  WriteRegStr HKCU "Software\Classes\axcenity\shell\open\command" "" '"$INSTDIR\axcenity-editor.exe" "%1"'
+
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
@@ -145,6 +152,7 @@ Section "un.Uninstall"
   ; The version an in-app update replaced, kept for Roll back (crates/updater).
   RMDir /r "$INSTDIR.previous"
 
+  DeleteRegKey HKCU "Software\Classes\axcenity"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AxcenityEditor"
   DeleteRegKey HKCU "Software\Axcenity\Editor"
 SectionEnd
