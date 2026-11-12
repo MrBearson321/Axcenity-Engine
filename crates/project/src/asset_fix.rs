@@ -105,7 +105,10 @@ impl Finding {
 
     /// Delete file can remove it: a file that fails on its own.
     pub fn can_delete(&self) -> bool {
-        matches!(self.site, Site::File { .. }) && safe_path(&self.path).is_some()
+        // A duplicate's own path is the copy to keep: Merge, not Delete.
+        self.kind != FindingKind::DuplicateFile
+            && matches!(self.site, Site::File { .. })
+            && safe_path(&self.path).is_some()
     }
 
     /// The kind of file Locate… and Replace… offer.

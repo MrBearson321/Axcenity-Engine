@@ -142,6 +142,7 @@ pub(super) enum Command {
     SetUpCollaborate,
     SaveCheckpoint,
     BackUpProject,
+    SaveAsTemplate,
     Input,
     CloseProject,
     Import,
@@ -414,6 +415,14 @@ impl EditorApp {
             "Back Up Project",
             "File",
             &["zip", "backup", "archive"],
+            None,
+            when(editing, not_editing),
+        );
+        add(
+            Command::SaveAsTemplate,
+            "Save as Template…",
+            "File",
+            &["template", "starter", "axtemplate", "new project"],
             None,
             when(editing, not_editing),
         );
@@ -1100,6 +1109,7 @@ impl EditorApp {
             Command::SetUpCollaborate => self.set_up_collaborate(),
             Command::SaveCheckpoint => self.version_history.open_for_checkpoint(),
             Command::BackUpProject => self.back_up_project(false),
+            Command::SaveAsTemplate => self.open_save_template(),
             Command::Input => self.input_settings.open = true,
             Command::CloseProject => self.request_and_go_ahead(ctx, Discard::CloseProject),
             Command::Import => self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER),
@@ -1211,7 +1221,9 @@ impl EditorApp {
             Command::Play => {
                 if self.paused() {
                     self.continue_play();
-                } else if !playing && self.project.is_some() {
+                } else if playing {
+                    self.pause_play();
+                } else if self.project.is_some() {
                     self.play();
                 }
             }

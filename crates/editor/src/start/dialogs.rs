@@ -56,9 +56,32 @@ pub(super) fn template_choice(
     picked: bool,
     picture: Option<&egui::TextureHandle>,
 ) -> egui::Response {
+    tile_choice(
+        ui,
+        palette,
+        (
+            template.name(),
+            template.description(),
+            template_icon(template),
+        ),
+        picked,
+        picture,
+    )
+}
+
+/// A template's tile in the New Project dialog, by its name, its line of
+/// description and the icon shown without a picture: a built-in template
+/// ([`template_choice`]) or one of the user's own.
+pub(super) fn tile_choice(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    (name, description, icon): (&str, &str, &'static str),
+    picked: bool,
+    picture: Option<&egui::TextureHandle>,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(TEMPLATE_TILE, Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, picked, template.name())
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, picked, name)
     });
     let hover = theme::ease(ui.ctx(), response.id.with("hover"), response.hovered());
     let fill = if picked {
@@ -91,7 +114,7 @@ pub(super) fn template_choice(
     template_picture(
         ui,
         palette,
-        template,
+        icon,
         image,
         picture,
         CornerRadius::same(5),
@@ -106,13 +129,13 @@ pub(super) fn template_choice(
     ui.painter().text(
         pos2(inner.left() + 2.0, image.bottom() + 12.0),
         egui::Align2::LEFT_CENTER,
-        template.name(),
+        name,
         FontId::new(type_scale::BODY, theme::medium_family()),
         color,
     );
     let line = widgets::elided(
         ui,
-        template.description(),
+        description,
         FontId::proportional(type_scale::CAPTION),
         palette.text_weak,
         inner.width() - 4.0,
@@ -123,8 +146,13 @@ pub(super) fn template_choice(
         line,
         palette.text_weak,
     );
+    let hint = if description.is_empty() {
+        name
+    } else {
+        description
+    };
     response
-        .on_hover_text(template.description())
+        .on_hover_text(hint)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -137,7 +165,7 @@ pub(super) fn template_choice(
 pub(super) fn template_picture(
     ui: &egui::Ui,
     palette: &Palette,
-    template: Template,
+    icon: &str,
     rect: Rect,
     picture: Option<&egui::TextureHandle>,
     radius: CornerRadius,
@@ -177,7 +205,7 @@ pub(super) fn template_picture(
             ui.painter().text(
                 rect.center() + float * 2.0,
                 egui::Align2::CENTER_CENTER,
-                template_icon(template),
+                icon,
                 FontId::proportional(rect.height() * (0.36 + 0.03 * hover)),
                 theme::mix(palette.text_secondary, palette.text_strong, hover),
             );
@@ -279,7 +307,7 @@ pub(super) fn game_template_card(
         template_picture(
             ui,
             &palette,
-            template,
+            template_icon(template),
             image,
             picture,
             CornerRadius::same(6),
@@ -322,7 +350,8 @@ impl StartScreen {
         projects: &mut Vec<ProjectLink>,
     ) -> Option<PathBuf> {
         // The pictures first: the dialog borrows `self.dialog` from here on.
-        let pictures: Vec<_> = if matches!(self.dialog, Some(Dialog::New { .. })) {
+        let new_open = matches!(self.dialog, Some(Dialog::New { .. }));
+        let pictures: Vec<_> = if new_open {
             Template::ALL
                 .into_iter()
                 .map(|template| self.picture(ctx, template))
@@ -330,6 +359,16 @@ impl StartScreen {
         } else {
             Vec::new()
         };
+        let user_pictures: Vec<_> = if new_open {
+            (0..self.user_templates.len())
+                .map(|index| self.user_picture(ctx, index))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let user_templates = self.user_templates.clone();
+        let templates_folder = self.templates_folder.clone();
+        let mut imported = false;
         let progress = self.join.clone();
         let dialog = self.dialog.as_mut()?;
         let palette = theme::palette(ctx);
@@ -345,6 +384,7 @@ impl StartScreen {
                     name,
                     parent,
                     template,
+                    user_template,
                     error,
                 } => {
                     let columns = 4.0;
@@ -354,16 +394,96 @@ impl StartScreen {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                         for (choice, picture) in Template::ALL.into_iter().zip(&pictures) {
-                            let picked = *template == choice;
+                            let picked = user_template.is_none() && *template == choice;
                             if template_choice(ui, &palette, choice, picked, picture.as_ref())
                                 .clicked()
                             {
                                 *template = choice;
+                                *user_template = None;
                             }
                         }
                     });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        field_label(ui, &palette, "Your templates");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if let Some(folder) = &templates_folder {
+                                if ui
+                                    .small_button(icons::FOLDER_OPEN)
+                                    .on_hover_text("Show your templates folder")
+                                    .clicked()
+                                {
+                                    let _ = std::fs::create_dir_all(folder);
+                                    let _ = reveal(folder);
+                                }
+                                if ui
+                                    .small_button(theme::with_icon(
+                                        icons::DOWNLOAD_SIMPLE,
+                                        "Import…",
+                                    ))
+                                    .on_hover_text(
+                                        "Add a template file (.axtemplate) someone gave you",
+                                    )
+                                    .clicked()
+                                    && let Some(file) = rfd::FileDialog::new()
+                                        .set_title("Choose a template")
+                                        .add_filter(
+                                            "Axcenity template",
+                                            &[axcenity_project::TEMPLATE_EXTENSION],
+                                        )
+                                        .pick_file()
+                                {
+                                    match import_template(folder, &file) {
+                                        Ok(path) => {
+                                            *user_template = Some(path);
+                                            imported = true;
+                                        }
+                                        Err(why) => *error = Some(why),
+                                    }
+                                }
+                            }
+                        });
+                    });
+                    if user_templates.is_empty() {
+                        ui.label(
+                            RichText::new(
+                                "None yet. In a project, File > Save as Template… keeps it as \
+                                 a starting point here.",
+                            )
+                            .size(type_scale::SMALL)
+                            .color(palette.text_weak),
+                        );
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                            for (choice, picture) in user_templates.iter().zip(&user_pictures) {
+                                let picked = user_template.as_ref() == Some(&choice.file);
+                                let label = (
+                                    choice.info.name.as_str(),
+                                    choice.info.description.as_str(),
+                                    icons::COPY_SIMPLE,
+                                );
+                                if tile_choice(ui, &palette, label, picked, picture.as_ref())
+                                    .clicked()
+                                {
+                                    *user_template = Some(choice.file.clone());
+                                }
+                            }
+                        });
+                    }
+                    let picked_user = user_template
+                        .as_ref()
+                        .and_then(|file| user_templates.iter().find(|t| t.file == *file));
+                    let description = match picked_user {
+                        Some(chosen) if chosen.info.description.is_empty() => {
+                            format!("Your template \"{}\".", chosen.info.name)
+                        }
+                        Some(chosen) => chosen.info.description.clone(),
+                        None => template.description().to_owned(),
+                    };
+                    ui.add_space(4.0);
                     ui.label(
-                        RichText::new(template.description())
+                        RichText::new(description)
                             .size(type_scale::SMALL)
                             .color(palette.text_weak),
                     );
@@ -424,20 +544,33 @@ impl StartScreen {
                         dialog::Enter::FromField,
                     );
                     if create && let Some(parent) = parent.as_deref() {
-                        match axcenity_project::create_project_from(parent, name, *template) {
+                        let made = match user_template {
+                            Some(file) => axcenity_project::create_project_from_template_file(
+                                parent, name, file,
+                            )
+                            .map_err(|err| {
+                                let exists = err.already_exists();
+                                (exists, format!("{:#}", anyhow::Error::new(err)))
+                            }),
+                            None => axcenity_project::create_project_from(parent, name, *template)
+                                .map_err(|err| {
+                                    (err.already_exists(), format!("{err}: {}", err.source))
+                                }),
+                        };
+                        match made {
                             Ok(folder) => {
                                 picked_parent = Some(parent.to_owned());
                                 created = Some(folder);
                                 close = true;
                             }
-                            Err(err) if err.already_exists() => {
+                            Err((true, _)) => {
                                 *error = Some(
                                     "A folder with that name is already there. Pick \
                                          another name or location."
                                         .into(),
                                 );
                             }
-                            Err(err) => *error = Some(format!("{err}: {}", err.source)),
+                            Err((false, why)) => *error = Some(why),
                         }
                     }
                     close |= cancel;
@@ -784,6 +917,9 @@ impl StartScreen {
                 }
             }
         });
+        if imported {
+            self.reload_user_templates();
+        }
         if let Some(parent) = picked_parent {
             self.last_parent = Some(parent);
         }
@@ -803,4 +939,29 @@ impl StartScreen {
         self.join_asked = join;
         created
     }
+}
+
+/// Copies the template file `file` into the user's templates `folder`
+/// (under a free name if one of that name is there), after checking it's a
+/// template. Returns the copy.
+pub(super) fn import_template(folder: &Path, file: &Path) -> Result<PathBuf, String> {
+    let template = axcenity_project::read_template(file)
+        .map_err(|err| format!("{:#}", anyhow::Error::new(err)))?;
+    if file.parent() == Some(folder) {
+        return Ok(file.to_owned());
+    }
+    std::fs::create_dir_all(folder).map_err(|err| err.to_string())?;
+    let name = axcenity_project::template_file_name(&template.info.name);
+    let mut copy = folder.join(&name);
+    let mut n = 2;
+    while copy.exists() {
+        let stem = name.trim_end_matches(&format!(".{}", axcenity_project::TEMPLATE_EXTENSION));
+        copy = folder.join(format!(
+            "{stem} {n}.{}",
+            axcenity_project::TEMPLATE_EXTENSION
+        ));
+        n += 1;
+    }
+    std::fs::copy(file, &copy).map_err(|err| err.to_string())?;
+    Ok(copy)
 }

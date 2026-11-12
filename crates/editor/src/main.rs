@@ -273,6 +273,7 @@ fn main() -> eframe::Result {
             app.set_window_icon(window_icon());
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
+            app.set_templates_folder(EditorApp::default_templates_folder());
             app.set_plugin_data(plugins::default_folder());
             app.cook_textures_in_background();
             // Read in the background, so the window shows at once.

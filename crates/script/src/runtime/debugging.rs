@@ -29,6 +29,27 @@ impl ScriptRuntime {
         self.client.set_breakpoints(breakpoints);
     }
 
+    /// Replaces every breakpoint's condition, hit count and log message
+    /// ([`BreakpointRule`]), by script path and line. A breakpoint with no
+    /// rule always pauses.
+    pub fn set_breakpoint_rules(&mut self, rules: &BreakpointRules) {
+        self.server.set_breakpoint_rules(rules);
+        self.client.set_breakpoint_rules(rules);
+    }
+
+    /// Pauses at the next script line either side runs where a script can
+    /// pause (the editor's Pause button), or stops asking with `false`.
+    /// Continuing from any pause stops asking too.
+    pub fn request_pause(&mut self, on: bool) {
+        self.server.request_pause(on);
+        self.client.request_pause(on);
+    }
+
+    /// Whether a pause was asked for and hasn't happened yet.
+    pub fn pause_requested(&self) -> bool {
+        self.server.pause_requested() || self.client.pause_requested()
+    }
+
     /// Where a script is paused at a breakpoint, if one is. While paused,
     /// the host should stop running frames: nothing in the game should move.
     /// Anything it fires anyway (a Console command, an event) waits, and
@@ -53,6 +74,7 @@ impl ScriptRuntime {
             return;
         };
         self.fire_changes(world);
+        self.request_pause(false);
         self.context(side).resume_from_pause(world, how);
         self.collect(side);
         self.fire_changes(world);

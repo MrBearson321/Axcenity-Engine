@@ -13,7 +13,7 @@ What a computer needs to run the Axcenity editor, and the games you build with i
 
 | | Minimum | Recommended | High end |
 |---|---|---|---|
-| **What you get** | Small and medium projects at the Low or Medium preset, 1080p | Most projects at the High preset, 1080p to 1440p | Big worlds and dense foliage at Ultra, 1440p and above; ray tracing when it lands |
+| **What you get** | Small and medium projects at the Low or Medium preset, 1080p | Most projects at the High preset, 1080p to 1440p | Big worlds and dense foliage at Ultra, 1440p and above; ray tracing as its effects arrive |
 | **Operating system** | Windows 10 64-bit (kept up to date), Ubuntu 22.04 (or another Linux with glibc 2.35), macOS 11 Big Sur | Windows 11, a current Linux distribution | Windows 11 or a current Linux distribution |
 | **Processor** | 64-bit, 4 cores, with AVX (Intel Core or AMD Ryzen from the last decade) | 6 to 8 cores (AMD Ryzen 5 5600 or Intel Core i5-12400 class) | 8 or more fast cores (AMD Ryzen 7 7800X3D or Intel Core i7-13700K class) |
 | **Memory** | 8 GB | 16 GB | 32 GB or more |
@@ -90,13 +90,15 @@ The engine checks what the GPU can do when it starts and lowers any setting the 
 
 ### Ray tracing (optional)
 
-> **Known limits:** ray tracing isn't in this release yet. It's planned as an **optional** setting, off at every preset, and without it Axcenity draws exactly as it does today, so it will never raise the minimum.
+> **Known limits:** only the groundwork for ray tracing is built so far: **Settings > Graphics > Ray tracing** sets how far from the camera objects are traced, and the editor's **Ray Hits** view shows what rays hit. No ray traced effect (shadows, lighting, reflections) exists yet. Each one will be an **optional** setting, off at every preset, and without them Axcenity draws exactly as it does on any other GPU, so ray tracing never raises the minimum.
 
-When it lands, it will need:
+The engine uses ray tracing on GPUs that have:
 
 - **Windows**: DirectX 12 Raytracing tier 1.1 and Shader Model 6.5: AMD Radeon RX 6000 series and newer, NVIDIA GeForce RTX 20 series and newer, Intel Arc.
 - **Linux**: a Vulkan driver with ray queries (`VK_KHR_ray_query`) on the same GPUs.
 - **macOS**: macOS 15 or later. Apple M3 and newer have ray tracing hardware.
+
+Setting the environment variable `AXCENITY_RAY_TRACING` to `0` opens the GPU without ray tracing, as on a GPU that lacks it.
 
 For a sense of cost, on the RX 9070 XT one shadow or ambient occlusion ray per pixel at 1440p, over 20 million triangles, took about 0.3 ms.
 

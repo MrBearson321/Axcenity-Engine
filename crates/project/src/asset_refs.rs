@@ -279,49 +279,7 @@ fn plan_move(
     let from_disk = safe_path(from).ok_or_else(|| format!("`{from}` isn't a project path"))?;
     // References by ID need no change: the sidecar moves with the file.
     let references = path_references(folder, world, open, from);
-    let mut findings = Vec::new();
-    let mut files: Vec<FileWrite> = Vec::new();
-    for reference in &references {
-        match &reference.place {
-            RefPlace::Site(site, kind) => findings.push(Finding {
-                kind: FindingKind::MissingFile,
-                owner: reference.owner.clone(),
-                path: reference.path.clone(),
-                message: String::new(),
-                site: site.clone(),
-                wants: Some(*kind),
-            }),
-            RefPlace::Foliage { .. } => {
-                return Err(format!(
-                    "{} paints it as foliage; repaint it after the rename instead",
-                    reference.owner
-                ));
-            }
-            RefPlace::PrefabLink => {}
-            RefPlace::Json { file }
-            | RefPlace::Script { file, .. }
-            | RefPlace::Blocks { file, .. } => {
-                if files.iter().any(|write| write.path == *file) {
-                    continue;
-                }
-                let before = fs::read(folder.join(safe_path(file).ok_or("bad path")?))
-                    .map_err(|err| format!("could not read `{file}`: {err}"))?;
-                let text = String::from_utf8_lossy(&before);
-                let after = match &reference.place {
-                    RefPlace::Script { .. } => replace_path(&text, from, to),
-                    RefPlace::Blocks { .. } => rewrite_blocks(&text, from, to)?,
-                    _ => rewrite_json(file, &text, from, to)?,
-                };
-                files.push(FileWrite {
-                    path: file.clone(),
-                    before: Some(before),
-                    after: Some(after.into_bytes()),
-                });
-            }
-        }
-    }
-    let finding_refs: Vec<&Finding> = findings.iter().collect();
-    let mut plan = plan_fix(folder, &finding_refs, &Fix::Use(to.to_owned()))?;
+    let (mut plan, mut files) = repoint(folder, &references, from, to, None, "rename")?;
 
     // The file itself moves, with any change made to it above.
     let mut bytes = fs::read(folder.join(&from_disk))
@@ -360,6 +318,179 @@ fn plan_move(
             path: axcenity_assets::import_path(to),
             before: None,
             after: Some(sidecar_bytes),
+        });
+    }
+    Ok(plan)
+}
+
+/// Points `references` (to the file `from`) at `to`: the property changes
+/// as a plan, and the text files (materials, scripts, block scripts) as
+/// writes, apart, so a move can take the ones to `from` itself. `also`
+/// replaces another string in those files too (a merged file's asset ID).
+/// `doing` names the action in errors.
+fn repoint(
+    folder: &Path,
+    references: &[Reference],
+    from: &str,
+    to: &str,
+    also: Option<(&str, &str)>,
+    doing: &str,
+) -> Result<(FixPlan, Vec<FileWrite>), String> {
+    let mut findings = Vec::new();
+    let mut files: Vec<FileWrite> = Vec::new();
+    for reference in references {
+        match &reference.place {
+            RefPlace::Site(site, kind) => findings.push(Finding {
+                kind: FindingKind::MissingFile,
+                owner: reference.owner.clone(),
+                path: reference.path.clone(),
+                message: String::new(),
+                site: site.clone(),
+                wants: Some(*kind),
+            }),
+            RefPlace::Foliage { .. } => {
+                return Err(format!(
+                    "{} paints it as foliage; repaint it after the {doing} instead",
+                    reference.owner
+                ));
+            }
+            RefPlace::PrefabLink => {}
+            RefPlace::Json { file }
+            | RefPlace::Script { file, .. }
+            | RefPlace::Blocks { file, .. } => {
+                if files.iter().any(|write| write.path == *file) {
+                    continue;
+                }
+                let before = fs::read(folder.join(safe_path(file).ok_or("bad path")?))
+                    .map_err(|err| format!("could not read `{file}`: {err}"))?;
+                let text = String::from_utf8_lossy(&before);
+                let mut after = match &reference.place {
+                    RefPlace::Script { .. } => replace_path(&text, from, to),
+                    RefPlace::Blocks { .. } => rewrite_blocks(&text, from, to)?,
+                    _ => rewrite_json(file, &text, from, to)?,
+                };
+                if let Some((old, new)) = also {
+                    after = after.replace(old, new);
+                }
+                files.push(FileWrite {
+                    path: file.clone(),
+                    before: Some(before),
+                    after: Some(after.into_bytes()),
+                });
+            }
+        }
+    }
+    // A model named with a `#pick` keeps it: one plan for each pick.
+    let mut picks: BTreeSet<&str> = BTreeSet::new();
+    for finding in &findings {
+        picks.insert(pick_of(finding));
+    }
+    let mut plan = FixPlan::default();
+    for pick in picks {
+        let group: Vec<&Finding> = findings
+            .iter()
+            .filter(|finding| pick_of(finding) == pick)
+            .collect();
+        let part = plan_fix(folder, &group, &Fix::Use(format!("{to}{pick}")))?;
+        if part
+            .files
+            .iter()
+            .any(|write| plan.files.iter().any(|other| other.path == write.path))
+        {
+            return Err(format!(
+                "a file names `{from}` with different object picks; change those by hand"
+            ));
+        }
+        plan.properties.extend(part.properties);
+        plan.files.extend(part.files);
+    }
+    Ok((plan, files))
+}
+
+/// A model reference's `#pick` (with its `#`), or nothing.
+fn pick_of(finding: &Finding) -> &str {
+    if finding.wants != Some(AssetKind::Model) {
+        return "";
+    }
+    finding.path.find('#').map_or("", |at| &finding.path[at..])
+}
+
+/// What merging the file `from` into `to`, a file with the same bytes
+/// (roadmap R12, Asset Check's duplicate files), changes: every reference
+/// to `from`, by path or by asset ID, is pointed at `to` (by `to`'s ID in
+/// text files when it has one), and `from` and its sidecar are deleted.
+/// Writes nothing.
+pub fn plan_merge(
+    folder: &Path,
+    world: &World,
+    open: Option<&str>,
+    from: &str,
+    to: &str,
+) -> Result<FixPlan, String> {
+    let from_disk = safe_path(from).ok_or_else(|| format!("`{from}` isn't a project path"))?;
+    let to_disk = safe_path(to).ok_or_else(|| format!("`{to}` isn't a project path"))?;
+    if from == to {
+        return Err("that's the same file".to_owned());
+    }
+    let bytes = fs::read(folder.join(&from_disk))
+        .map_err(|err| format!("could not read `{from}`: {err}"))?;
+    let kept =
+        fs::read(folder.join(&to_disk)).map_err(|err| format!("could not read `{to}`: {err}"))?;
+    if bytes != kept {
+        return Err(format!(
+            "`{from}` and `{to}` aren't the same any more; check again"
+        ));
+    }
+    // By ID too: the merged file's ID goes with it.
+    let references = find_references(folder, world, open, from);
+    let also = axcenity_assets::read_asset_id(folder, from).map(|id| {
+        let new = axcenity_assets::read_asset_id(folder, to)
+            .map_or_else(|| to.to_owned(), |id| id.to_string());
+        (id.to_string(), new)
+    });
+    let (mut plan, mut files) = repoint(
+        folder,
+        &references,
+        from,
+        to,
+        also.as_ref().map(|(old, new)| (old.as_str(), new.as_str())),
+        "merge",
+    )?;
+    // A script that names `from` only by its ID isn't a reference above
+    // (scripts are read for paths), so look for the ID itself.
+    if let Some((old, new)) = &also {
+        for file in script_files(folder) {
+            if files.iter().any(|write| write.path == file) {
+                continue;
+            }
+            let Ok(before) = fs::read(folder.join(&file)) else {
+                continue;
+            };
+            let text = String::from_utf8_lossy(&before);
+            if text.contains(old.as_str()) {
+                let after = text.replace(old.as_str(), new).into_bytes();
+                files.push(FileWrite {
+                    path: file,
+                    before: Some(before),
+                    after: Some(after),
+                });
+            }
+        }
+    }
+    // What changed in `from` itself goes with it.
+    plan.files
+        .extend(files.into_iter().filter(|write| write.path != from));
+    plan.files.push(FileWrite {
+        path: from.to_owned(),
+        before: Some(bytes),
+        after: None,
+    });
+    let sidecar = axcenity_assets::import_path(from);
+    if let Ok(sidecar_bytes) = fs::read(folder.join(&sidecar)) {
+        plan.files.push(FileWrite {
+            path: sidecar,
+            before: Some(sidecar_bytes),
+            after: None,
         });
     }
     Ok(plan)

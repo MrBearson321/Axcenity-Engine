@@ -376,7 +376,7 @@ Extend the prefab system to support reusable UI components.
 ## 5.4 Advanced asset management
 
 **Priority:** High
-**Status:** Partial (R12). Built: Asset Check (missing files, broken references and dependencies, with fixes), Find References, the Unused chip (never deletes), Rename or Move with references, `ax://` IDs, packages (`.axpkg`) and global assets for moving assets between projects. Missing: duplicate detection, import presets, texture compression and mesh optimization profiles.
+**Status:** Partial (R12). Built: Asset Check (missing files, broken references and dependencies, with fixes), Find References, the Unused chip (never deletes), Rename or Move with references, `ax://` IDs, packages (`.axpkg`) and global assets for moving assets between projects. Duplicate detection with Merge is in (Asset Check's Duplicate file rows). Missing: import presets, texture compression and mesh optimization profiles.
 
 Expand asset management beyond discovery and downloading.
 
@@ -1073,7 +1073,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Licence and attribution tracking | Implemented | Fab licences | Per asset | Platform | Asset Store EULA | `toolbox` `license.rs`, `provenance.rs`, CREDITS.txt | Critical | toolbox | Keep |
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
-| Duplicate detection | Missing | Audit tools | — | — | Third-party | R12 | Medium | project | Implement |
+| Duplicate detection | Done (Asset Check Merge) | Audit tools | — | — | Third-party | R12 | Medium | project | Implement |
 | Import presets and compression profiles | Missing | Texture groups, LOD settings | `.import` presets | Per asset | Presets, platform overrides | R12 | Medium | assets, cook | Implement |
 | Cooked textures and models | Implemented | Cooking | Import cache | Compiled assets | Import pipeline | L2, `crates/cook` | Critical | cook | Keep |
 | Cooked-only game packages | Implemented (#243) | Cooked pak | `.pck` | Compiled | Built player | G12 | High | cook, project | Keep |

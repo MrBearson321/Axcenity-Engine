@@ -261,6 +261,9 @@ enum Dialog {
         name: String,
         parent: Option<PathBuf>,
         template: Template,
+        /// One of the user's own templates (its file), picked in place of
+        /// `template`.
+        user_template: Option<PathBuf>,
         error: Option<String>,
     },
     Settings {
@@ -311,6 +314,12 @@ pub struct StartScreen {
     thumbnails: HashMap<PathBuf, Option<egui::TextureHandle>>,
     /// The genre templates' pictures, decoded the first time they're shown.
     pictures: HashMap<Template, egui::TextureHandle>,
+    /// Where the user's own templates are (Save as Template…), and those
+    /// found there when New Project last opened.
+    templates_folder: Option<PathBuf>,
+    user_templates: Vec<axcenity_project::UserTemplate>,
+    /// Their pictures, by file.
+    user_pictures: HashMap<PathBuf, egui::TextureHandle>,
     /// When each project's world was last saved, read once.
     edited: HashMap<PathBuf, Option<SystemTime>>,
     filter: String,
@@ -437,12 +446,54 @@ impl StartScreen {
 
     /// Opens the New Project dialog, starting from `template`.
     pub fn new_project(&mut self, template: Template) {
+        self.reload_user_templates();
         self.dialog = Some(Dialog::New {
             name: String::new(),
             parent: self.last_parent.clone(),
             template,
+            user_template: None,
             error: None,
         });
+    }
+
+    /// Where the user's own templates are saved and listed from.
+    pub fn set_templates_folder(&mut self, folder: Option<PathBuf>) {
+        self.templates_folder = folder;
+        self.reload_user_templates();
+    }
+
+    /// Lists the user's templates again (one was saved or imported).
+    pub fn reload_user_templates(&mut self) {
+        self.user_templates = match &self.templates_folder {
+            Some(folder) => {
+                let (templates, problems) = axcenity_project::list_templates(folder);
+                for problem in problems {
+                    log::warn!("Skipped a template: {problem}");
+                }
+                templates
+            }
+            None => Vec::new(),
+        };
+        self.user_pictures.clear();
+    }
+
+    /// The user's templates, as last listed (for tests).
+    #[cfg(test)]
+    pub fn user_templates(&self) -> &[axcenity_project::UserTemplate] {
+        &self.user_templates
+    }
+
+    /// The picture of the user's template at `index`, if it has one.
+    fn user_picture(&mut self, ctx: &egui::Context, index: usize) -> Option<egui::TextureHandle> {
+        let template = self.user_templates.get(index)?;
+        if let Some(texture) = self.user_pictures.get(&template.file) {
+            return Some(texture.clone());
+        }
+        let png = template.thumbnail.as_ref()?;
+        let texture = texture(ctx, &template.info.name, png);
+        self.user_pictures
+            .insert(template.file.clone(), texture.clone());
+        Some(texture)
     }
 
     /// Shows `message` under the Projects heading, in red.

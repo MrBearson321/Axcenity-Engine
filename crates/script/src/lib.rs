@@ -132,7 +132,10 @@ use crate::lent::with_world;
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
 pub use chat::ChatLine;
 pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
-pub use debugger::{Breakpoints, Local, Pause, PausedFrame, Resume};
+pub use debugger::{
+    BreakpointRule, BreakpointRules, Breakpoints, EXPANDED_ENTRIES, Local, Pause, PausedFrame,
+    Resume,
+};
 pub use definitions::{
     API_DOCS_PATH, ApiEntry, ApiKind, DEFINITIONS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_example,
     api_markdown, api_reference, api_summary, lua_definitions, property_description,

@@ -121,14 +121,16 @@ pub fn cook_from_command_line(folder: &Path) -> bool {
     let stop = AtomicBool::new(false);
     let report: Report = cook_project(folder, &stop, |path, outcome| match outcome {
         Outcome::Cooked => println!("cooked {path}"),
+        Outcome::Uncompressed => println!("left uncompressed by its import preset: {path}"),
         Outcome::NotBlockSized => println!("left as it is (not whole 4×4 blocks): {path}"),
         Outcome::Failed(reason) => eprintln!("couldn't cook {path}: {reason}"),
     });
     println!(
-        "{} cooked, {} already current, {} left as they are, {} failed, {} stale copies deleted, in {:.1} s",
+        "{} cooked, {} already current, {} left as they are, {} uncompressed by their preset, {} failed, {} stale copies deleted, in {:.1} s",
         report.cooked,
         report.current,
         report.skipped,
+        report.uncompressed,
         report.failed.len(),
         report.removed,
         start.elapsed().as_secs_f64()

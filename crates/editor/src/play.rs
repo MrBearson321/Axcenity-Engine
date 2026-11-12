@@ -25,8 +25,8 @@ use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_scene::{Particles, Streaming};
 use axcenity_script::{
-    Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest, OutputKind, Pause,
-    Resume,
+    BreakpointRules, Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest,
+    OutputKind, Pause, Resume,
 };
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 use axcenity_ui::LoadingGui;
@@ -117,7 +117,7 @@ impl Session {
     /// (Scripts, then LocalScripts, as the project lists them), the same way
     /// the player does. Script output and errors go to `output`. MeshParts
     /// collide as their models from `assets`. Unlike the player, scripts
-    /// stop at `breakpoints`; one in a script's first run pauses here, and
+    /// stop at `breakpoints` (as their `rules` say); one in a script's first run pauses here, and
     /// the scripts after it start on Continue. The project's own `loading`
     /// screen shows as in the built game; the Axcenity splash doesn't.
     /// `SaveService` writes its slots in `save_folder` (the player's data for
@@ -130,6 +130,7 @@ impl Session {
         edit_world: &World,
         scripts: &[ScriptFile],
         breakpoints: &Breakpoints,
+        rules: &BreakpointRules,
         pause_on_error: bool,
         output: &mut Output,
         assets: Assets,
@@ -145,6 +146,7 @@ impl Session {
             edit_world,
             scripts,
             breakpoints,
+            rules,
             pause_on_error,
             output,
             assets,
@@ -170,6 +172,7 @@ impl Session {
         edit_world: &World,
         scripts: &[ScriptFile],
         breakpoints: &Breakpoints,
+        rules: &BreakpointRules,
         pause_on_error: bool,
         output: &mut Output,
         assets: Assets,
@@ -263,6 +266,7 @@ impl Session {
         // `RunService:IsStudio()` is true in the editor's Play.
         session.sim.scripts.set_studio(true);
         session.sim.scripts.set_breakpoints(breakpoints);
+        session.sim.scripts.set_breakpoint_rules(rules);
         session.sim.scripts.set_pause_on_error(pause_on_error);
         guard(|| {
             // Animators start in their default states before any script
@@ -407,6 +411,10 @@ impl Session {
 
     pub fn set_breakpoints(&mut self, breakpoints: &Breakpoints) {
         self.sim.scripts.set_breakpoints(breakpoints);
+    }
+
+    pub fn set_breakpoint_rules(&mut self, rules: &BreakpointRules) {
+        self.sim.scripts.set_breakpoint_rules(rules);
     }
 
     /// Continues from the pause: the paused script runs on from its line,

@@ -107,3 +107,15 @@ docs = "docs/project/autorecover.md"
 version = "unreleased"
 evidence = "verified"
 source = "PR #255"
+
+[[feature]]
+id = "project.user-templates"
+name = "Your own templates"
+subsystem = "project"
+description = "Save a project as an .axtemplate file and start new projects from it."
+status = "active"
+docs = "docs/project/templates.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "PR #258"

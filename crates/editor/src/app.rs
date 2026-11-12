@@ -48,6 +48,7 @@ mod find_in_scripts;
 mod floating;
 mod game_tests;
 mod graphics_benchmark;
+pub(crate) mod import_presets;
 mod input_settings;
 mod layouts;
 mod levels;
@@ -64,6 +65,7 @@ mod plugins;
 mod prefabs;
 mod probes;
 mod project_upgrade;
+mod save_template;
 mod search;
 mod sequencer;
 mod session;
@@ -312,6 +314,9 @@ pub struct EditorApp {
     ui_warnings: Vec<String>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
+    /// Pause was pressed and Play hasn't paused since, so the pause it
+    /// makes says so in Output.
+    pause_pressed: bool,
     /// Turns keyboard events into key presses for LocalScripts during Play.
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
@@ -455,6 +460,11 @@ pub struct EditorApp {
     /// just the selected one's. Saved between runs.
     /// AutoRecover's setting and snapshots (`app/autorecover.rs`).
     autorecover: autorecover::AutoRecover,
+    /// Where Save as Template… writes and New Project lists the user's
+    /// templates (`app/save_template.rs`).
+    templates_folder: Option<PathBuf>,
+    /// Save as Template…, while it's open.
+    template_draft: Option<save_template::TemplateDraft>,
     light_cones: bool,
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
@@ -961,6 +971,7 @@ impl EditorApp {
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
+            pause_pressed: false,
             profiler: Profiler::default(),
             last_drawn: None,
             mixer: crate::mixer::Mixer::default(),
@@ -1025,6 +1036,8 @@ impl EditorApp {
             pending_layout: None,
             ribbon_tabs: RibbonTabs::default(),
             autorecover: Default::default(),
+            templates_folder: None,
+            template_draft: None,
             light_cones: false,
             view_cube: true,
             ai: Default::default(),
@@ -1822,6 +1835,7 @@ impl EditorApp {
         self.sky_prompt(ctx);
         self.autorecover_prompt(ctx);
         self.autorecover_frame();
+        self.save_template_dialog(ctx);
         self.import_dropped(ctx);
         self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);
@@ -1920,6 +1934,8 @@ mod graphics_benchmark_tests;
 mod health_tests;
 #[cfg(test)]
 mod ik_tests;
+#[cfg(test)]
+mod import_preset_tests;
 #[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]
