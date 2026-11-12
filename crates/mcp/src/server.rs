@@ -170,7 +170,7 @@ impl ServerHandler for Handler {
                 None,
             ));
         };
-        let args = Args::new(request.arguments.unwrap_or_default());
+        let mut args = Args::new(request.arguments.unwrap_or_default());
         if let Err(error) = args.check(tool) {
             return Ok(failed(&error).into());
         }
@@ -287,7 +287,7 @@ impl ServerHandler for Handler {
                 None,
             ));
         };
-        let args = Args::new(args);
+        let mut args = Args::new(args);
         if let Err(error) = args.check(tool) {
             return Err(ErrorData::invalid_params(error.to_string(), None));
         }

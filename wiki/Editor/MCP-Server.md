@@ -65,6 +65,7 @@ sequenceDiagram
 - Keep schemas flat (no `oneOf`/`$ref`), summaries one sentence, errors that say what to do next.
 - New tools go in `editor/src/app/mcp/` (one file each) and go through `EditorApp` paths so undo and history stay consistent.
 - `scripts/check-platform.sh` checks the player doesn't link it.
+- Small local models drive the `lite` profile (PRs #178, #181 and the follow-up on arguments sent as text; Qwen3 8B 21/21, gpt-oss-20b 19/21, Llama 3.1 8B 6/21 on 7 tasks × 3, `docs/mcp/README.md`). What moved them was error text naming the next call, so when a model gets stuck, fix the message first. Arguments are lenient where the meaning is plain: an empty filter is no filter, and a list or number sent as JSON text is parsed.
 
 ## Related documentation
 
