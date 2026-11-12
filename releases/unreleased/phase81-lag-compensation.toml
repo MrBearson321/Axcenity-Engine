@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Shots at moving targets count where the shooter saw them"
+details = "A server's workspace:Raycast with RaycastParams.CompensateFor = player, or in a RemoteEvent handler inside a Tool with LagCompensated on, tests moving parts where that player saw them: their round trip plus the 0.1 s smoothing delay, at most 1 second back."
+features = ["networking.lag-compensation"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = ["db1ffa77"]
+stability = "stable"
+public = true
+evidence = "verified"
