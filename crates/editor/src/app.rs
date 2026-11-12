@@ -82,6 +82,7 @@ mod splines;
 mod tags;
 pub(crate) mod team;
 mod team_audit;
+mod team_board;
 mod team_chat;
 mod team_history;
 mod team_panel;
@@ -332,6 +333,8 @@ pub struct EditorApp {
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
     tags: crate::tags::TagsPanel,
+    /// The Team Board: the project's tasks (`app/team_board.rs`).
+    team_board: team_board::TeamBoard,
     /// Each script's uses of APIs from the other side, for the warning badges.
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
@@ -571,6 +574,7 @@ impl DockViewer<'_> {
                 .version_explorer
                 .show(ui, &axcenity_release::BuildInfo::current()),
             Pane::TeamCreate => self.app.team_create_pane(ui),
+            Pane::TeamBoard => self.app.team_board_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -770,6 +774,8 @@ const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
 const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
+const OVERLAY_CONTACTS_KEY: &str = "overlay contacts";
+const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -961,6 +967,7 @@ impl EditorApp {
             cooker: None,
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
+            team_board: Default::default(),
             tabs: ScriptTabs::default(),
             luau: Default::default(),
             confirm_delete: None,
@@ -1112,6 +1119,9 @@ impl EditorApp {
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             self.overlays.constraints =
                 storage.get_string(OVERLAY_CONSTRAINTS_KEY).as_deref() == Some("on");
+            self.overlays.contacts =
+                storage.get_string(OVERLAY_CONTACTS_KEY).as_deref() == Some("on");
+            self.overlays.bodies = storage.get_string(OVERLAY_BODIES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
                 self.recent_tabs = welcome::RecentTabs::from_text(&text);
             }
@@ -1245,6 +1255,11 @@ impl eframe::App for EditorApp {
             OVERLAY_CONSTRAINTS_KEY,
             flag(self.overlays.constraints).to_owned(),
         );
+        storage.set_string(
+            OVERLAY_CONTACTS_KEY,
+            flag(self.overlays.contacts).to_owned(),
+        );
+        storage.set_string(OVERLAY_BODIES_KEY, flag(self.overlays.bodies).to_owned());
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
         storage.set_string(
@@ -1824,6 +1839,7 @@ impl EditorApp {
         self.join_requests_window(ctx);
         self.collab_setup_windows(ctx);
         self.repo_ui_frame(ctx);
+        self.team_board_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
@@ -1972,6 +1988,8 @@ mod solid_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod strings_tests;
+#[cfg(test)]
+mod team_board_tests;
 #[cfg(test)]
 mod team_tests;
 #[cfg(test)]

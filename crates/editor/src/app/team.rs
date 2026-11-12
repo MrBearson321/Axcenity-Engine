@@ -192,10 +192,11 @@ pub(super) fn save_own_identity(identity: &Identity) -> std::io::Result<()> {
 
 /// True for a file the editor takes in when it changes on disk (what its
 /// watcher reports): scripts, stylesheets, assets (data tables, materials,
-/// behavior trees and dialogues among them), UI Event Graphs, the string
-/// table and the input map.
+/// behavior trees and dialogues among them), UI Event Graphs, the Team
+/// Board's items, the string table and the input map.
 fn editor_reads(path: &str) -> bool {
     if axcenity_blocks::ui_graph::is_ui_graph(path)
+        || axcenity_teamwork::board::is_board_path(path)
         || path == project::STRINGS_FILE
         || path == project::INPUT_FILE
     {

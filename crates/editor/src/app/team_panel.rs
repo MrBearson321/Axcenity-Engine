@@ -317,6 +317,7 @@ impl EditorApp {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 self.project_section_ui(ui);
+                self.board_summary_ui(ui);
                 action = if self.team.is_some() {
                     self.team_session_ui(ui)
                 } else {
