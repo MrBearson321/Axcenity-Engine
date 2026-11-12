@@ -1,0 +1,189 @@
+# Collaborate 2.0: persistent projects, Git sync and automatic host handoff
+
+Paul's brief "Axcenity Collaborate 2.0 – Persistent Collaboration & Automatic Host Handoff" (2026-11-12) asks that a Collaborate project stop depending on the computer that started its session: anyone may leave, the session carries on under another host, and the project can be picked up later from a Git remote when nobody is online. This document is phase 0 of that brief: an audit of how host-dependent Collaborate is today, and the design and plan for phases 1–7 (here called **P1–P7**, so they don't clash with C1–C12 of [collaborate.md](collaborate.md)). The decisions are [ADR-0022](../../wiki/Architecture/Architecture-Decisions/ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md).
+
+- **Status:** P0 (this document) done. P1–P7 follow §6.
+- **Date:** 2026-11-12
+- **Engine:** `main` at `eac9e61` (PR #207)
+- **Relies on:** ADR-0020 (one session authority, host-ordered operations, epochs), ADR-0021 (live `yrs` scripts, Tailscale, identity seam), the [development policy](../development-policy.md) (no infrastructure before it's needed, local tests).
+
+## 1. Summary
+
+- **Live state is already replicated; authority is not.** Every member's editor holds the whole session World (as of the last transaction it got), its own unconfirmed edits, a `yrs` copy of every live script it has open, and a folder of the session's files. What only the host has: the *order* (sequence numbers and the journal), the members list, the session's checkpoints, and the network endpoint (its certificate and address are pinned in every invite).
+- **So host handoff is mostly a question of who may take the authority and how members find them,** not of copying the project. The plan: the host shares, while it's up, what a successor needs (the members list and each would-be host's address and certificate); when it leaves or vanishes, every member works out the same successor from the same ordered list; the successor starts a host *from its own copy* as a new epoch; the others reconnect to it with the certificate they already know. Everything TC6 built for a restarted host (new epoch → fresh snapshot, unconfirmed edits re-sent with remapped IDs, documents merged by state vector) carries over unchanged.
+- **The one gap in the replicated state** is the last few transactions a crashed host broadcast to some members but not to the successor. P4 closes it: each member keeps the transactions of the current epoch it has applied (a bounded tail), and a new host asks the members who are ahead for what it lacks before it opens for edits.
+- **Git is persistence, not live sync.** A project may be linked to a Git remote (GitHub first). Only the current session host commits and pushes during a session (its copy is authoritative); outside a session each person's editor syncs their own copy. Commits are automatic checkpoints, batched, never forced; a merge that git can't do cleanly stops and asks.
+- **Ownership is separate from hosting.** The Owner is a role in the members list, which every eligible member keeps a copy of. A handoff changes who hosts, never who owns.
+
+## 2. Audit: what depends on the host today
+
+| Responsibility | Where | Host-only today? | Survives the host leaving? |
+|---|---|---|---|
+| Authoritative World and the order of edits | `collab::Host` (`host.rs`), sequence numbers per epoch | Yes | Members keep their copies and keep editing offline; nothing is ordered until a host returns. A host that *ended* turns copies read-only (`ToClient::Ended`) |
+| Journal and crash recovery | `journal.rs` in the host's `.axcenity/teamcreate` | Yes | Only when the *same* host restarts |
+| Members, roles, invites | `access.rs`, members file in the host's data folder (`hosted::members_file`) | Yes (never sent to members) | No: another computer can't admit anyone |
+| Network endpoint | `socket::Listener` on port 47810 with the host's `HostCert`; invites pin its fingerprint (`access::Invite`) | Yes | No: members only know the one address and certificate |
+| Session identity | `hosted::session_id(cert, project path)`; names each member's mirror folder | Derived from the host's certificate and path | A new host would get another ID, so members would start a new folder |
+| Files | Host's `FolderStore`; each member's `Mirror` folder | Host holds the bytes of record; members hold copies of everything synced | Yes, the content: every member has the files |
+| Live scripts and stylesheets | `live.rs` on the host; each member's `yrs` copy (`client.rs`) | No: CRDT state is on every copy that opened it | Yes: a new host can merge the copies by state vector |
+| Presence, chat | `presence.rs`, host memory | Yes | Lost (by design: chat is memory only) |
+| Checkpoints and restores (C9) | `history.rs` in the host's `.axcenity/teamcreate/history` | Yes | Only on that computer |
+| Tailscale | `tailscale.rs` reads the local client; invites name the host's MagicDNS name | Per computer | Any member with Tailscale can be reached the same way |
+| Version History | `project/src/versions.rs`, per computer | Per computer | Yes, but local only |
+| Remote history | None | — | — |
+
+**Conclusion:** the project's *content* doesn't depend on the host (every member has it); its *authority* (order, members list, endpoint, journal, checkpoints) does. Nothing is rewritten: P3 makes identity and membership portable, P4 moves the authority, and Git (P1, P2) adds persistence for when nobody is online.
+
+**Live editing stays as it is.** The existing protocol is host-ordered operations plus `yrs` for scripts (ADR-0020, ADR-0021). The brief asked whether that already replicates enough for a host failure: for documents yes (CRDT), for the World almost (§4.3 adds the tail).
+
+## 3. Components
+
+The brief's suggested components, mapped onto the code so nothing is duplicated:
+
+| Brief's name | Where it lives | New or existing |
+|---|---|---|
+| `RepositoryManager` | `crates/repo` (`axcenity-repo`): `repository.rs` links a project folder to a remote, adopts a folder onto a branch, status | New crate (P1) |
+| `GitHubProvider` | `crates/repo/src/github.rs`: device sign-in, repository lookup and creation over the REST API, behind an `Http` trait | New (P1) |
+| Git operations | `crates/repo/src/git.rs`: the installed `git` (and `git lfs`) through a `Runner`, like `collab::tailscale` | New (P1). No Git library: the brief says use established Git, and the CLI is what every user's tools already trust |
+| Credentials | `crates/repo/src/credentials.rs`: the OS credential store (`keyring`: Windows Credential Manager, macOS Keychain, Secret Service on Linux), a memory-only fallback | New (P1) |
+| `ProjectSyncManager` | `crates/repo/src/sync.rs`: a state machine (dirty → checkpoint → fetch → integrate → push → confirm), driven by the editor, run on a worker thread | New (P2) |
+| `CheckpointManager` | `crates/repo/src/checkpoint.rs`: when to commit, messages and trailers, listing and restoring | New (P2). Version History (`project/src/versions.rs`) stays for local snapshots |
+| `SessionManager` / `CollaborationState` | `collab::project` (persistent project record, lifecycle states) and the existing `session.rs` | New module (P3) over existing sessions |
+| `HostElectionManager` | `collab::election`: ranking, heartbeats, failure timeouts. Pure, no I/O | New (P4) |
+| `SessionRecoveryManager` | `collab::handoff`: the successor's start from its copy, the transaction tail, members reconnecting | New (P4), reusing epochs and re-sends (TC6) |
+| `ConflictManager` | `crates/repo/src/conflict.rs`: classifying files, finding conflicts before integrating (`git merge-tree`), keeping both versions, resolution history | New (P5). Session-time file conflicts keep `files.rs`'s compare-and-swap and conflict copies |
+| Collaborate UI | `editor/src/app/team_panel.rs` gains a Project section; a new `app/collab_repo.rs` for the repository window and sync chip | Extended (P6) |
+
+`crates/repo` depends on nothing in the engine but `log`, `serde` and the HTTP and keyring crates; `collab` doesn't depend on it (the editor joins them), so the session protocol stays free of Git.
+
+## 4. Design
+
+### 4.1 Project identity and the project file (P3)
+
+- **Project ID.** The first session of a project writes `collaborate.json` at the project's root: `{ "project": "<16 hex>", "name": "…", "repository": { "provider": "github", "url": "https://github.com/o/r.git", "branch": "main" } | null }`. Nothing secret: no keys, members or tokens (the repo may be public). It syncs to members like any settings file and is committed with the project, so a fresh clone knows its project ID and remote.
+- The ID is the existing `session_id` of the first host (so mirror folders made before this change keep their names), and from then on it's read from the file: every later host, the first one or a successor, hosts under the same ID, and every member keeps one folder per project.
+- **Each computer's record** of the projects it collaborates on: `<data folder>/Collaborate/projects/<id>.json`: name, the folder, the members list as last received (§4.2), the would-be hosts last known (§4.4), the last epoch and transaction seen, and the session state. This is what "Rejoin" reads when no invite is at hand.
+
+### 4.2 Ownership and membership travel with the session (P3)
+
+- The host sends the members list (public keys, names, colours, roles; never invites' secrets) to every member allowed to host (`ToClient::Members`, on joining and whenever it changes). Keys are public; this is what lets a successor admit people by key with the existing handshake.
+- **Ownership** is the Owner role in that list. A successor hosts with the list it received, so the Owner stays Owner, roles stay as they were, and only the Owner can change them, wherever the session is hosted. Invites stay with the host that made them (their secrets aren't copied); a successor makes its own.
+- A member removed while offline but present in an older copy can't sneak back: every copy is stamped with the host's change counter, and a host replaces its list only with a newer one.
+
+### 4.3 What a host keeps so others can take over (P4)
+
+- **Host cards.** On joining, each member who may host sends its card: the address others should use (its Tailscale name if Tailscale is running, else its LAN address) and port, and the fingerprint of its own host certificate (made on first need, as today). The host checks the card is the member's own (signed with the member key as part of the message) and lists them.
+- **Successors.** The host keeps an ordered successor list and sends it with every roster change (`ToClient::Successors`). Order (the brief's priority): an explicitly named **backup host** (chosen by the Owner, or by the host when it's the Owner); then the longest-connected eligible member; then the lowest member ID. Eligible: role Editor or Owner, a card, "Let others host from my computer" on in Settings (on by default), and caught up (has applied the host's latest transaction within the last few seconds).
+- **Transaction tail.** Each member keeps the transactions of the current epoch it has applied, as they came (`ToClient::Accepted`), up to the last 2,000 or 32 MiB, cleared by a snapshot. That's what a new host needs to rebuild anything a crashed host sent to some members only.
+
+### 4.4 Handoff (P4)
+
+**Graceful** (the host leaves or quits with others connected):
+
+1. The host stops taking new edits (members' edits stay pending on their side, as during any reconnect), finishes writing its journal, and makes a final Git checkpoint and push if a repository is linked (§4.6), with a time limit (10 s) so leaving never hangs.
+2. It sends `ToClient::HandingOff { to, last_seq }` to everyone: the successor and the transaction number everyone must reach. Members that are behind still have the earlier `Accepted` in their socket, so they catch up before acting.
+3. The successor starts a host from its own copy: its World as of `last_seq`, its mirror folder as the file store, its live documents' `yrs` state, the members list, the project ID, a fresh epoch. It listens on its card's address.
+4. Everyone else reconnects to the successor's card with the certificate fingerprint they already have. The existing handshake admits them by key. Their `Hello` names the old epoch, so they get a snapshot and re-send their pending edits with IDs moved into new blocks (TC6), and their documents merge by state vector (C7).
+5. The panel says "Paul left. Sam is hosting now." The project's Owner doesn't change.
+
+**Unexpected** (crash, power cut, network or Tailscale down):
+
+1. **Detection.** The socket's silence timer (15 s today, `socket::SILENCE`) is the heartbeat; the client already counts a quiet connection as lost. The election adds a **grace period** (default 20 s, Settings): a reconnect to the old host is tried first, in case it was a short drop.
+2. When the grace period ends, each member takes the first reachable successor in the list it last received. Members never vote: they all hold the same list, so they all pick the same one. If the first successor doesn't answer within its own timeout (default 15 s), they move to the next.
+3. The successor starts as in step 3 above but in **Recovering** state: it accepts connections but not edits. Each joining member's `Hello` tells it the old epoch's newest transaction it applied. If any member is ahead of the successor, the host asks it for the missing transactions from its tail (`ToClient::SendTail { after }` → `ToHost::Tail(Vec<Accepted>)`), applies them in order (they were already accepted by the old host, so they're replayed, not re-checked against roles), then opens for edits. The wait is bounded (members who haven't reconnected within 10 s are left to catch up later by snapshot); whatever can't be recovered is listed, never guessed: "Transactions 812–815 from Paul's host couldn't be recovered: nobody online had them."
+4. **Split brain.** If the old host comes back while a successor is hosting, its own members list says it's no longer the host (it sees a newer epoch from the successor's card when it reconnects as a client). The old host's editor never starts hosting by itself after a crash: it joins the session as a member, and its unsent edits are re-sent like anyone's. Two hosts can still exist if the network splits in two; when they meet again, the project's Git history and the conflict tools (§4.7) are the backstop.
+5. **Nobody eligible is left:** members' copies stay editable offline, their edits are kept in the existing recovery file, and the session is **Offline** for them; anyone can start it again later (§4.5).
+
+### 4.5 Sessions without a fixed host (P3)
+
+States, shown in the panel, kept in the project record:
+
+| State | Meaning |
+|---|---|
+| Offline | No session is running for this project that this computer can see |
+| Starting | This computer is starting a session (as first host or successor) |
+| Active | Collaborating |
+| Handoff | The host is changing |
+| Recovering | A new host is rebuilding the latest state before opening for edits |
+| Sync Pending | Collaboration is over or paused and changes still have to reach the remote |
+
+- **Everyone leaves:** the last host saves the World into its folder, makes a "[Collaborate] Session ended" checkpoint and pushes (§4.6), and ends the session. Every member's record keeps the project ID, folder, members list and remote.
+- **Rejoin** (Collaborate panel or start screen, no invite needed): try the known hosts' cards in order; if one answers, join it (the handshake admits members by key). If none does, pull the remote (if linked) and offer **Start session** from this copy as host, with the members list it has. The original creator never has to approve.
+- **A new person** still needs an invite from whoever hosts.
+- **Expiry:** project records nobody opened in 90 days are listed as old in the panel; nothing is deleted automatically.
+
+### 4.6 Repository integration and automatic checkpoints (P1, P2)
+
+- **Git through the installed `git`.** Clone, fetch, pull (merge, never rebase of published commits), commit, push (never `--force`), branch and default-branch detection (`git ls-remote --symref`), log, `merge-tree --write-tree` for conflict checks (git 2.38+, checked at start with a plain message if older), `git lfs` when installed. Credentials are passed to each git command through a one-off credential helper reading an environment variable of the child process, so a token never appears on a command line, in `.git/config`, in the remote URL, or in a log line (`git::redact` scrubs output before it's logged).
+- **GitHub sign-in:** OAuth device flow (the user opens github.com/login/device and types a code; no web server or redirect). Scope `repo` (the narrowest OAuth scope that covers private repositories; a GitHub App with per-repository permissions is a later option). The OAuth App's client ID is set at build time (`AXCENITY_GITHUB_CLIENT_ID`) or in Settings; official builds carry Axcenity's. Without one, Axcenity uses a signed-in GitHub CLI (`gh auth token`) or a pasted fine-grained token. The token goes into the OS credential store under "Axcenity GitHub"; Disconnect removes it and links to GitHub's page to revoke the app.
+- **Linking:** connect an existing repository (owner/name or URL; the default branch is read from GitHub), or create one (private by default). An empty remote gets the project pushed; a non-empty one is fetched and, if its history and the folder differ, the folder is **adopted** onto the remote branch without touching the files (`git reset --mixed`), so the first checkpoint shows exactly what differs. Unlinking removes `collaborate.json`'s repository and the git remote, never the files or `.git`. A project inside another repository's work tree (the engine's `examples/`, say) can't be linked: the message says why.
+- **`.gitignore` and LFS:** linking writes a `.gitignore` if there's none (`.axcenity/`, `*.tmp`, thumbnails) and, with `git lfs` installed, `.gitattributes` tracking models, textures, audio and video (`*.glb`, `*.fbx`, `*.png`, `*.jpg`, `*.ktx2`, `*.wav`, `*.ogg`, `*.mp3`, …). Without LFS a one-line warning names the largest files.
+- **Who commits:** during a session, the host only (members' folders are copies); outside a session, each editor its own project.
+- **When:** dirty when the project changed on disk (`git status --porcelain`, checked after saves and every 30 s); a checkpoint at most every 10 minutes while dirty (Settings), and on: a member leaving (`User left session`), the host handing off (`Session handoff`), the session ending, the editor closing, and **Sync now** (`Manual checkpoint`). Messages are `[Collaborate] Automatic checkpoint` etc. with trailers `Axcenity-Checkpoint: auto|left|handoff|ended|manual` and `Axcenity-Participants: Paul, Sam` (from the host's attribution); the commit author is the person whose editor made it. Commits without the trailer are the user's own and are shown as such. Nothing is committed when nothing changed.
+- **Integration:** commit → fetch → if the remote moved: `merge-tree` to check; clean → merge (`--no-edit`, message `[Collaborate] Merge remote changes`); conflicts → stop, keep the local commit, state **Conflict** (§4.7) → push → confirm the remote branch is at our commit (`ls-remote`) → **Synced**. A push refused as non-fast-forward goes back to fetch, at most three times.
+- **Offline:** any network failure leaves the commits local, the state **Offline** ("Saved on this computer, not uploaded yet"), and retries with backoff (30 s up to 10 min) and at once when the network returns. The chip never says Synced unless the remote's SHA was confirmed.
+- **Restore:** a checkpoint restore checks out that commit's tree into the folder and commits it as `[Collaborate] Restore checkpoint "<subject>"` on top: history is never rewritten, and the restore itself can be undone by restoring the checkpoint before it. In a session, the host restores (Owner only), then the files go to everyone through the session as a C9 restore does.
+
+### 4.7 Conflicts and recovery (P5)
+
+| Files | During a session | Between Git copies |
+|---|---|---|
+| Lua scripts, stylesheets | Live `yrs` merge (C7) | Git's text merge; conflict → both kept |
+| World (`world.json`, `levels/`) | Host-ordered operations | `world.json` is one JSON document: merged by git only when the changes touch different lines, otherwise both kept and compared |
+| Block scripts, graphs, materials, data tables | Document locks | Git's text merge; conflict → both kept |
+| Models, textures, audio (LFS or binary) | Content-addressed, compare-and-swap | Never merged: both kept |
+| `project.json`, `input.json`, other settings | Owner-only, compare-and-swap | Git's merge; conflict → both kept |
+| `collaborate.json` | Host only | Ours kept for the ID; the remote's repository settings shown |
+
+- **Detect before touching anything:** `git merge-tree --write-tree --name-only` lists conflicting paths without changing the folder. The authors come from `git log -1` on each side.
+- **Keep both:** the remote's version of each conflicting file is written beside the local one as `<name>.remote-<short sha>.<ext>` (the `files.rs` conflict-copy naming), the merge isn't made, and sync is paused for those files only. Nothing is overwritten.
+- **Resolve** per file: keep mine, keep theirs, keep both (theirs renamed), with a side-by-side text compare for text files and sizes/dates for binary ones. Once every file is decided, the merge commit is made with those choices and sync resumes. Each resolution is appended to `<data folder>/Collaborate/projects/<id>.conflicts.jsonl`.
+- **Interrupted sync:** a crash mid-merge leaves `.git/MERGE_HEAD`; on open, sync sees it, aborts the half-made merge (`git merge --abort`, which keeps the local commit) and starts again. A crash mid-commit leaves the index; `git status` decides. Local uncommitted changes are always committed before any fetch, so there's nothing to lose.
+
+### 4.8 Interface (P6)
+
+The Collaborate panel gains a **Project** section above Collaborators: name, Owner, host ("Hosted by Sam" / "No one is hosting"), participants, and a repository line with the sync chip (Synced · Syncing · Pending · Offline · Conflict · Error), last sync time, branch and latest checkpoint; buttons **Sync now**, **History** (Git checkpoints beside C9's session checkpoints), **Manage repository…** (connect, create, disconnect, sign in/out), **Backup host** (Owner: pick a member), **Leave** and **Rejoin**. Words: "checkpoint", "upload", "history", "changes from others"; never "commit", "push", "rebase" outside a Details line. The title bar chip shows the sync state when it isn't Synced.
+
+## 5. What the brief's constraints mean here
+
+| Constraint | How |
+|---|---|
+| Preserve Collaborate; no rewrite | New modules and messages appended after C10's; host and client keep their state machines |
+| Git not a live-sync replacement | Git only checkpoints; live edits stay operations and `yrs` |
+| No custom Git | The installed `git` and `git lfs` |
+| GitHub optional | Every repository feature is off until linked; Tailscale, LAN, sessions and handoff work with no remote |
+| Tailscale primary, no dedicated server, no port forwarding | A successor listens like any host on its Tailscale name; `axcenity-collab` stays optional |
+| No credentials exposed | OS credential store; helper via environment; redaction; tests assert a fake token never appears in files, logs or arguments |
+| Django out of scope | Nothing touches accounts; the identity seam (C10) stays as it is |
+| Old projects and sessions | No `collaborate.json` → today's session ID; a member on an older build is refused at the handshake as today (protocol bump) |
+
+## 6. Phases
+
+One PR each, against `main`, each branch on top of the one before it (Paul merges them in order). RED/GREEN: each phase's tests are written first and fail, then the code.
+
+| Phase | Builds | Tests (RED first) | Done when |
+|---|---|---|---|
+| **P0** | This document, ADR-0022, wiki | `check-wiki.py` | Merged |
+| **P1** Repository integration | `crates/repo`: `git.rs`, `github.rs` (device flow, get/create repo), `credentials.rs`, `repository.rs` (link, adopt, unlink, status), `collaborate.json` read/write | Git against temp repos and a bare remote (init, link, adopt, clone, detect default branch, status, unlink keeps files); device flow and REST over a fake `Http` (pending, slow down, denied, expired); token never in files, logs, args or remote URL; a project inside another work tree refused | A project links to an existing or new remote; local-only projects unchanged |
+| **P2** Sync and checkpoints | `sync.rs` state machine and worker, `checkpoint.rs` (when, messages, trailers, list, restore), editor wiring outside sessions | Dirty detection; no empty commits; batching; trailers; push confirmed by SHA; offline → Pending/Offline → retried; non-fast-forward → fetch and merge; never `--force`; restore adds a commit | Changes checkpoint and upload by themselves; history listed and restorable |
+| **P3** Persistent projects | `collab::project` (ID, record, states), `ToClient::Members`, session ID from `collaborate.json`, Rejoin without an invite, start a session from any member's copy | Same ID across hosts; members list replicated, older lists never replace newer; a member admitted by key on another host; lifecycle transitions | A project outlives its first host; anyone eligible can resume it |
+| **P4** Election and handoff | `collab::election`, `collab::handoff`, host cards, successors, tail, graceful and unexpected handoff in the editor | Ranking (backup, longest-connected, ID); heartbeat timeout and grace; graceful handoff over real sockets with pending edits kept; host killed mid-session; successor missing transactions recovered from another member's tail; successor unreachable → next; split brain refused | Scenarios A and B pass in-process over real sockets |
+| **P5** Conflicts and recovery | `conflict.rs`, keep-both copies, resolution and history, interrupted-sync recovery | Scenario D: two copies change one scene → both kept, nothing overwritten; binary never merged; `MERGE_HEAD` left by a crash recovered | Conflicts are found and resolved by choice only |
+| **P6** Interface | Project section, sync chip, repository window, history, backup host, rejoin | Drawing tests with snapshots; each control's action | Every control in the brief's list exists |
+| **P7** Integration and stress | Scenarios A–E end to end, repeated handoffs, many members, large binary files, interrupted git, documentation (`documentation/learn/collaborate.md`) | As listed | Definition of done in the brief |
+
+**Testing limits:** the two-machine and real-GitHub checks (sign-in on github.com, a real private repository, Tailscale between Paul's PC and Mac, pulling a cable) can't run in the cloud container; each PR lists the hand checks for Paul.
+
+## 7. Risks
+
+- **Two hosts after a network split.** Election is deterministic but can't see across a split. Mitigated by the epoch check on rejoin and Git conflicts as the backstop; a quorum would need a third party, which the brief rules out.
+- **A successor behind a firewall.** On Windows the first listen prompts the firewall (as for any host). The card is only advertised after the member's editor has listened once successfully; until then it isn't eligible.
+- **GitHub OAuth App client ID.** Device flow needs a registered OAuth App with device flow enabled. Paul registers it once (Settings → Developer settings → OAuth Apps → "Enable Device Flow") and sets the ID; until then the `gh` and token routes work.
+- **Large worlds in Git.** `world.json` is text and diffs well; a 10,000-part world is a few MB. Binary assets go through LFS when installed.
+- **Commits by a successor who isn't signed in to GitHub.** Its checkpoints stay local (Sync Pending) and upload when that person signs in, or when a later host who is signed in takes over; the panel says so.
+
+## 8. Sources
+
+- GitHub Docs: [Authorizing OAuth apps — device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow), [Scopes for OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps), [REST: create a repository for the authenticated user](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user), [REST: get a repository](https://docs.github.com/en/rest/repos/repos#get-a-repository).
+- Git: [`git merge-tree --write-tree`](https://git-scm.com/docs/git-merge-tree) (2.38+), [gitcredentials](https://git-scm.com/docs/gitcredentials) (helpers starting with `!` run in the shell, also on Git for Windows), [Git LFS](https://git-lfs.com/).
+- `keyring` crate (MIT or Apache-2.0): Windows Credential Manager, macOS Keychain, Linux Secret Service.
