@@ -78,6 +78,8 @@ impl EditorApp {
             Command::Projects => self.projects_command(),
             Command::Rejoin(name) => self.rejoin_command(name),
             Command::Host => self.host_command(),
+            Command::Conflicts => self.conflicts_command(),
+            Command::Resolve(rest) => self.resolve_command(rest),
             Command::Lua(source) => self.run_lua(source),
         }
     }

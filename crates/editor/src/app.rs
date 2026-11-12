@@ -63,6 +63,7 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod collab_conflicts;
 mod collab_handoff;
 mod collab_project;
 mod collab_repo;

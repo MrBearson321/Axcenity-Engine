@@ -51,6 +51,8 @@ pub(crate) struct ProjectRepo {
     /// The last pass's outcome, for the panel.
     pub(crate) last: Option<Outcome>,
     author: Option<Author>,
+    /// Choices made so far for the files in conflict (`resolve`).
+    pub(crate) choices: Vec<(String, axcenity_repo::conflicts::Choice)>,
 }
 
 impl ProjectRepo {
@@ -197,7 +199,8 @@ impl EditorApp {
             ),
             State::Conflict(files) => self.output.warning(format!(
                 "Collaborate: {} changed both here and in the repository; nothing was \
-                 overwritten. Open the Collaborate panel to choose what to keep.",
+                 overwritten; the repository's version is beside each. Choose what to keep \
+                 with `resolve` in the Console (`conflicts` lists them).",
                 files.join(", ")
             )),
             State::Error(why) => self
@@ -239,7 +242,7 @@ impl EditorApp {
 
     /// The commit author: the Collaborate name, with the email from the
     /// person's own Git settings when there is one.
-    fn repo_author(&mut self, folder: &Path) -> Author {
+    pub(super) fn repo_author(&mut self, folder: &Path) -> Author {
         if let Some(author) = &self.repo.author {
             return author.clone();
         }

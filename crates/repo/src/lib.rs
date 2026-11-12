@@ -12,8 +12,11 @@
 //! - [`credentials`]: where the token is kept (Git's credential store).
 //! - [`repository`]: linking a folder to a remote, status, unlinking.
 //! - [`secret`]: tokens that never print.
+//! - [`checkpoint`], [`sync`]: automatic checkpoints and uploads;
+//!   [`conflicts`]: files changed on both sides, kept and resolved.
 
 pub mod checkpoint;
+pub mod conflicts;
 pub mod credentials;
 pub mod git;
 pub mod github;

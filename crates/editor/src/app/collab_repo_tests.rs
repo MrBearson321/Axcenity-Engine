@@ -165,3 +165,104 @@ fn closing_the_editor_uploads_what_was_saved() {
     assert_eq!(log[0].kind, Some(Kind::Closing), "{:?}", log[0]);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Runs `git` in `dir` as Sam.
+fn sam_git(dir: &std::path::Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args(["-c", "user.name=Sam", "-c", "user.email=sam@example.com"])
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+#[test]
+fn a_file_changed_on_both_sides_keeps_both_until_someone_chooses() {
+    let (folder, url) = linked_project("repo-conflict");
+    let mut app = EditorApp::new(Some(&folder));
+    app.repo.manager = Some(manager());
+    frames_until(&mut app, &State::Synced);
+    // Sam changes the script elsewhere and uploads first.
+    let sam = std::env::temp_dir().join(format!(
+        "axcenity-editor-sam-repo-conflict-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&sam);
+    Git::system().clone_repository(&url, &sam, None).unwrap();
+    std::fs::create_dir_all(sam.join("scripts")).unwrap();
+    std::fs::write(sam.join("scripts/Note.lua"), "return 'sam'\n").unwrap();
+    std::fs::write(sam.join("notes.txt"), "sam\n").unwrap();
+    sam_git(&sam, &["add", "--all"]);
+    sam_git(&sam, &["commit", "--quiet", "-m", "Sam's"]);
+    sam_git(&sam, &["push", "--quiet", "origin", "HEAD:main"]);
+    // Here, the same files differently.
+    std::fs::create_dir_all(folder.join("scripts")).unwrap();
+    std::fs::write(folder.join("scripts/Note.lua"), "return 'paul'\n").unwrap();
+    std::fs::write(folder.join("notes.txt"), "paul\n").unwrap();
+    app.run_console_command("checkpoint");
+    let start = Instant::now();
+    while !matches!(app.repo.state(), Some(State::Conflict(_))) {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{:?}",
+            app.repo.last
+        );
+        app.repo_frame();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Nothing overwritten; theirs is beside each.
+    let found = app.repo_conflicts().unwrap();
+    assert_eq!(found.len(), 2);
+    let note = found.iter().find(|c| c.path == "scripts/Note.lua").unwrap();
+    let copy = note.copy.clone().unwrap();
+    assert!(copy.starts_with("scripts/Note.remote-"), "{copy}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("scripts/Note.lua")).unwrap(),
+        "return 'paul'\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join(&copy)).unwrap(),
+        "return 'sam'\n"
+    );
+    app.run_console_command("conflicts");
+    assert!(
+        app.output
+            .lines()
+            .iter()
+            .any(|l| l.text.contains("2 files changed both here"))
+    );
+
+    // One choice at a time: the merge waits for the last.
+    app.run_console_command("resolve both scripts/Note.lua");
+    assert!(
+        app.output
+            .lines()
+            .iter()
+            .any(|l| l.text.contains("1 file still to choose"))
+    );
+    app.run_console_command("resolve theirs notes.txt");
+    frames_until(&mut app, &State::Synced);
+    assert_eq!(
+        std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
+        "sam\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("scripts/Note.lua")).unwrap(),
+        "return 'paul'\n"
+    );
+    let log = remote_log(&url, "repo-conflict");
+    assert_eq!(log[0].kind, Some(Kind::Merge), "{:?}", log[0]);
+    let check = std::env::temp_dir().join(format!(
+        "axcenity-editor-check-repo-conflict-{}",
+        std::process::id()
+    ));
+    assert_eq!(
+        std::fs::read_to_string(check.join(&copy)).unwrap(),
+        "return 'sam'\n"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+    let _ = std::fs::remove_dir_all(&sam);
+    let _ = std::fs::remove_dir_all(&check);
+}
