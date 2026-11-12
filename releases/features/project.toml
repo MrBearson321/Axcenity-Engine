@@ -106,4 +106,4 @@ docs = "docs/project/autorecover.md"
 [feature.introduced]
 version = "unreleased"
 evidence = "verified"
-source = "AutoRecover pull request"
+source = "PR #255"
