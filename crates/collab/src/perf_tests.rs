@@ -227,3 +227,93 @@ fn an_idle_mirror_sync_on_s10k() {
     }
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// A real join over the network (C11's goal: S10k under 10 s over
+/// Tailscale). Host a project on one computer, for example
+/// `axcenity-test --make-s10k target/s10k` then
+/// `cargo run --release -p axcenity-collab-server -- target/s10k`, and on
+/// another run, with the invite link it prints:
+/// `AXCENITY_JOIN_LINK='<link>' cargo test -p axcenity-collab --release --lib joining_over_the_network -- --ignored --nocapture`.
+/// It joins as a new member, waits for the World and every file, and
+/// prints how long each took.
+#[test]
+#[ignore = "a measurement, run by hand on two computers"]
+fn joining_over_the_network() {
+    use std::sync::Arc;
+
+    use crate::access::Invite;
+    use crate::client::Client;
+    use crate::identity::Identity;
+    use crate::mirror::Mirror;
+    use crate::session::{Remote, RemoteEvent};
+
+    let Ok(link) = std::env::var("AXCENITY_JOIN_LINK") else {
+        println!("set AXCENITY_JOIN_LINK to an invite link to measure a join");
+        return;
+    };
+    let invite = Invite::parse(link.trim()).expect("an invite link");
+    let folder = std::env::temp_dir().join(format!("axcenity-join-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    println!("joining {} ...", invite.host);
+
+    let identity = Arc::new(Identity::new("Join timing", [200, 120, 40]));
+    let mut remote = Remote::join_invite(&invite, identity);
+    let mut client: Option<Client> = None;
+    let mut world = axcenity_core::World::new();
+    let mut mirror: Option<Mirror> = None;
+    let started = Instant::now();
+    let (mut admitted, mut world_in, mut files_in) = (None, None, None);
+    while files_in.is_none() {
+        assert!(
+            started.elapsed() < Duration::from_secs(120),
+            "no join after 2 minutes (admitted {admitted:?}, World {world_in:?})"
+        );
+        for event in remote.poll() {
+            match event {
+                RemoteEvent::Admitted { member, role } => {
+                    admitted.get_or_insert(started.elapsed());
+                    println!("admitted as {role:?} after {:?}", started.elapsed());
+                    client.get_or_insert_with(|| Client::new(member)).connect();
+                }
+                RemoteEvent::Message(message) => {
+                    if let Some(client) = &mut client {
+                        client.receive(&mut world, message);
+                    }
+                }
+                RemoteEvent::Lost { why, .. } => println!("lost: {why}"),
+                RemoteEvent::Refused(reason) => panic!("refused: {reason}"),
+            }
+        }
+        if let Some(client) = &mut client
+            && client.is_joined()
+        {
+            if world_in.is_none() {
+                world_in = Some(started.elapsed());
+                println!(
+                    "World in after {:?}: {} Instances, {} files to fetch",
+                    started.elapsed(),
+                    world.descendants(world.root()).len(),
+                    client.files().len()
+                );
+            }
+            let mirror =
+                mirror.get_or_insert_with(|| Mirror::open(&folder, "join timing", "Join timing"));
+            mirror.sync(client, &mut world).expect("files written");
+            if !mirror.is_catching_up(client) {
+                files_in = Some(started.elapsed());
+            }
+        }
+        if let Some(client) = &mut client {
+            remote.send(client.take_outbox());
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    println!(
+        "joined over the network: admitted {:?}, World {:?}, all files {:?}",
+        admitted.unwrap(),
+        world_in.unwrap(),
+        files_in.unwrap()
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
