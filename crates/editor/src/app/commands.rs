@@ -74,6 +74,7 @@ impl EditorApp {
                 }
             }
             Command::Check => self.run_asset_check(),
+            Command::Checkpoint(label) => self.checkpoint_command(label),
             Command::Lua(source) => self.run_lua(source),
         }
     }

@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 9] = [
+pub const BUILT_INS: [(&str, &str); 10] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -40,6 +40,11 @@ pub const BUILT_INS: [(&str, &str); 9] = [
         "check — scan the project for missing files, invalid references, \
          import failures, and broken dependencies",
     ),
+    (
+        "checkpoint",
+        "checkpoint [label] — upload a checkpoint to the project's repository now \
+         (Collaborate; projects linked to one)",
+    ),
 ];
 
 /// The most commands the history keeps.
@@ -58,6 +63,8 @@ pub enum Command<'a> {
     Stop,
     Save,
     Check,
+    /// The label after `checkpoint`, if any.
+    Checkpoint(&'a str),
     /// Anything else.
     Lua(&'a str),
 }
@@ -86,6 +93,7 @@ pub fn parse(input: &str) -> Command<'_> {
         ("select", _) => Command::Select(rest),
         ("find", _) => Command::Find(rest),
         ("open", _) => Command::Open(rest),
+        ("checkpoint", _) => Command::Checkpoint(rest),
         _ => Command::Lua(line),
     }
 }
@@ -485,6 +493,11 @@ mod tests {
         assert_eq!(parse("open Spinner"), Command::Open("Spinner"));
         assert_eq!(parse("find"), Command::Find(""));
         assert_eq!(parse("check"), Command::Check);
+        assert_eq!(parse("checkpoint"), Command::Checkpoint(""));
+        assert_eq!(
+            parse("checkpoint before boss"),
+            Command::Checkpoint("before boss")
+        );
         for lua in [
             "clear = 5",
             "select(2, 'a', 'b')",

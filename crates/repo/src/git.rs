@@ -406,6 +406,16 @@ impl Git {
         out.success.then(|| out.stdout.trim().to_owned())
     }
 
+    /// A Git setting as `git` would use it in `dir` (the person's own
+    /// settings included), if set.
+    pub fn config_value(&self, dir: &Path, key: &str) -> Option<String> {
+        let out = self
+            .call(Some(dir), &["config", "--get", key], None, false)
+            .ok()?;
+        let value = out.stdout.trim().to_owned();
+        (out.success && !value.is_empty()).then_some(value)
+    }
+
     /// Points remote `name` at `url`, adding it if there's none.
     pub fn set_remote(&self, dir: &Path, name: &str, url: &str) -> Result<(), GitError> {
         if self.remote_url(dir, name).is_some() {

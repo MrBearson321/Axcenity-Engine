@@ -13,12 +13,14 @@
 //! - [`repository`]: linking a folder to a remote, status, unlinking.
 //! - [`secret`]: tokens that never print.
 
+pub mod checkpoint;
 pub mod credentials;
 pub mod git;
 pub mod github;
 pub mod manager;
 pub mod repository;
 pub mod secret;
+pub mod sync;
 
 #[cfg(test)]
 mod testing;

@@ -257,6 +257,7 @@ impl EditorApp {
                         "Saved, but could not record this Axcenity's version: {err}"
                     ));
                 }
+                self.repo_changed();
                 match project::record_version(&folder, "Save") {
                     Ok(_) => {}
                     Err(err) => self
@@ -362,6 +363,12 @@ impl EditorApp {
 
     /// Writes the world file, first keeping the old one if the editor never
     /// loaded it. Returns false, with the reason in Output, if it failed.
+    /// Writes the session's World before a checkpoint while hosting
+    /// (`app/collab_repo.rs`).
+    pub(super) fn save_world_for_checkpoint(&mut self) -> bool {
+        self.save_world_file()
+    }
+
     fn save_world_file(&mut self) -> bool {
         // Borrows only the `project` field, so the other fields can be used too.
         let Some(project) = &mut self.project else {
