@@ -382,11 +382,15 @@ pub(super) fn frames(
     last
 }
 
-/// A button whose text ends with `label`.
+/// A button whose text ends with `label` (a menu button's caret aside).
 pub(super) fn button<'a>(shown: &'a [(String, egui::Pos2)], label: &str) -> Option<&'a egui::Pos2> {
+    let caret = format!("  {}", crate::theme::icons::CARET_DOWN);
     shown
         .iter()
-        .find(|(text, _)| text == label || text.ends_with(&format!("  {label}")))
+        .find(|(text, _)| {
+            let text = text.strip_suffix(&caret).unwrap_or(text);
+            text == label || text.ends_with(&format!("  {label}"))
+        })
         .map(|(_, at)| at)
 }
 

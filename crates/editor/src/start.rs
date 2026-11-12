@@ -206,6 +206,26 @@ enum Page {
     Reference,
 }
 
+impl Page {
+    /// Whether the page is mostly prose (Learn, Documentation, the API
+    /// Reference), read off the reading glass rather than the moving scene.
+    fn reads(self) -> bool {
+        matches!(self, Page::Learn | Page::Docs | Page::Reference)
+    }
+
+    /// Where the reading glass sits for a content column starting at `left`,
+    /// `width` wide, on `page`; `None` on pages without one.
+    fn reading_glass(self, left: f32, width: f32, page: Rect) -> Option<Rect> {
+        self.reads().then(|| {
+            Rect::from_min_max(
+                pos2(left - GLASS_MARGIN, page.top() + GLASS_MARGIN),
+                pos2(left + width + GLASS_MARGIN, page.bottom() + 8.0),
+            )
+            .intersect(page.shrink2(vec2(8.0, 0.0)))
+        })
+    }
+}
+
 /// How tracked projects are shown.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum View {
@@ -464,28 +484,34 @@ impl StartScreen {
         if settings {
             action = Some(StartAction::Settings);
         }
-        // The page's text reads off hazy glass, not the moving scene: a
-        // panel behind the content column, the scene showing round it.
-        let glass = Rect::from_min_max(
-            pos2(room.left - GLASS_MARGIN, page.top() + GLASS_MARGIN),
-            pos2(room.left + room.width + GLASS_MARGIN, page.bottom() + 8.0),
-        )
-        .intersect(page.shrink2(vec2(8.0, 0.0)));
-        backdrop::reading_glass(&ui.painter_at(page), glass, &theme::palette(&ctx));
+        // A reading page's text reads off hazy glass, not the moving scene:
+        // a panel behind the content column, the scene showing round it. The
+        // page scrolls inside the glass's top edge, so scrolled text never
+        // slides up over the scene. The other pages (cards, not prose) keep
+        // the whole scene.
+        let scrolled = match self.page.reading_glass(room.left, room.width, page) {
+            Some(glass) => {
+                backdrop::reading_glass(&ui.painter_at(page), glass, &theme::palette(&ctx));
+                Rect::from_min_max(pos2(page.left(), glass.top()), page.max)
+            }
+            None => page,
+        };
         let now = ctx.input(|input| input.time);
         if self.arrived.is_none_or(|(shown, _)| shown != self.page) {
             self.arrived = Some((self.page, now));
         }
         let arrived_at = self.arrived.map_or(now, |(_, at)| at);
         let arrival = theme::arrival(&ctx, arrived_at, 0.0, PAGE_SECONDS, theme::curve::SETTLE);
-        let mut content = ui.new_child(egui::UiBuilder::new().max_rect(page));
-        content.set_clip_rect(page);
+        let mut content = ui.new_child(egui::UiBuilder::new().max_rect(scrolled));
+        content.set_clip_rect(scrolled);
         content.multiply_opacity(arrival);
+        // The content starts where it did before the glass moved the top.
+        let top = PAGE_MARGIN - 4.0 - (scrolled.top() - page.top());
         egui::ScrollArea::vertical()
             .id_salt("start page")
             .auto_shrink(false)
             .show(&mut content, |ui| {
-                ui.add_space(PAGE_MARGIN - 4.0 + (1.0 - arrival) * PAGE_RISE);
+                ui.add_space(top + (1.0 - arrival) * PAGE_RISE);
                 let width = room.width;
                 let margin = (room.left - ui.max_rect().left()).max(0.0);
                 ui.horizontal(|ui| {

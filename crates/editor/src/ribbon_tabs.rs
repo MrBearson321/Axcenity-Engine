@@ -59,6 +59,27 @@ pub enum RibbonGroup {
 }
 
 impl RibbonGroup {
+    /// The group's category colour, from the same hues as Block Coding's
+    /// categories (cohesion pass CW2.2): play and checks green, transform
+    /// tools blue, building warm, content cool, layout slate.
+    pub fn hue(self) -> crate::theme::Hue {
+        use crate::theme::Hue;
+        match self {
+            RibbonGroup::Game | RibbonGroup::Clients | RibbonGroup::Check => Hue::Green,
+            RibbonGroup::Tools | RibbonGroup::Snapping => Hue::Blue,
+            RibbonGroup::Build | RibbonGroup::Solid => Hue::Orange,
+            RibbonGroup::Parts | RibbonGroup::Import => Hue::Indigo,
+            RibbonGroup::Lights => Hue::Amber,
+            RibbonGroup::Effects => Hue::Purple,
+            RibbonGroup::Gameplay => Hue::Red,
+            RibbonGroup::Constraints => Hue::Cyan,
+            RibbonGroup::Ui => Hue::Magenta,
+            RibbonGroup::Scripts => Hue::Violet,
+            RibbonGroup::Terrain => Hue::Teal,
+            RibbonGroup::Panels | RibbonGroup::Overlays | RibbonGroup::Plugins => Hue::Slate,
+        }
+    }
+
     pub const ALL: [RibbonGroup; 19] = [
         RibbonGroup::Game,
         RibbonGroup::Clients,

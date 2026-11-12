@@ -1037,9 +1037,10 @@ fn paint_dragged_name(ui: &egui::Ui, world: &World, id: InstanceId) {
 /// The right-click menu of `name`'s row during Play. True when Keep
 /// changes was picked.
 fn play_row_menu(ui: &mut egui::Ui, name: &str) -> bool {
-    ui.button(theme::with_icon(
+    ui.button(theme::menu_item(
+        ui.ctx(),
         icons::PUSH_PIN,
-        &format!("Keep changes to {name}"),
+        format!("Keep changes to {name}"),
     ))
     .on_hover_text(
         "At Stop, copy this object's values as the game has them into the world you're \
@@ -1106,7 +1107,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         .is_some_and(|instance| instance.class().is_script());
     if is_script
         && ui
-            .button(theme::with_icon(icons::ARROW_SQUARE_OUT, "Open"))
+            .button(theme::menu_item(ui.ctx(), icons::ARROW_SQUARE_OUT, "Open"))
             .clicked()
     {
         chosen = Some(RowCommand::Open);
@@ -1116,7 +1117,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         .is_some_and(|instance| instance.source_file().is_some());
     if in_object
         && ui
-            .button(theme::with_icon(icons::COPY, "Make Unique"))
+            .button(theme::menu_item(ui.ctx(), icons::COPY, "Make Unique"))
             .on_hover_text(
                 "Copy its file next to the one its copies share, and use the copy, so changing \
                  it leaves the others alone",
@@ -1140,7 +1141,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             chosen = Some(RowCommand::Animate);
         }
     }
-    ui.menu_button(theme::with_icon(icons::PLUS, "Insert"), |ui| {
+    crate::widgets::menu_button(ui, Some(icons::PLUS), "Insert", |ui| {
         // Buttons for `items`, noting the one clicked in `chosen`.
         let items = |ui: &mut egui::Ui,
                      chosen: &mut Option<RowCommand>,
@@ -1167,7 +1168,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                 .chain(Insertable::CONSTRAINTS),
         );
         ui.separator();
-        ui.menu_button(theme::with_icon(icons::SUN, "Lighting & Sky"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::SUN), "Lighting & Sky", |ui| {
             items(
                 ui,
                 &mut chosen,
@@ -1181,7 +1182,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             ui.separator();
             items(ui, &mut chosen, &mut Insertable::VOLUMES.into_iter());
         });
-        ui.menu_button(theme::with_icon(icons::SPARKLE, "Effects"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::SPARKLE), "Effects", |ui| {
             items(
                 ui,
                 &mut chosen,
@@ -1191,13 +1192,13 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                     .chain(Insertable::ANIMATION),
             );
         });
-        ui.menu_button(theme::with_icon(icons::SPEAKER_HIGH, "Audio"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::SPEAKER_HIGH), "Audio", |ui| {
             items(ui, &mut chosen, &mut Insertable::AUDIO.into_iter());
-            ui.menu_button("Sound effect", |ui| {
+            crate::widgets::menu_button(ui, None, "Sound effect", |ui| {
                 items(ui, &mut chosen, &mut Insertable::SOUND_EFFECTS.into_iter());
             });
         });
-        ui.menu_button(theme::with_icon(icons::GAME_CONTROLLER, "Gameplay"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::GAME_CONTROLLER), "Gameplay", |ui| {
             items(
                 ui,
                 &mut chosen,
@@ -1222,10 +1223,10 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                     .chain(Insertable::CAMERAS),
             );
         });
-        ui.menu_button(theme::with_icon(icons::LAYOUT, "UI"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::LAYOUT), "UI", |ui| {
             items(ui, &mut chosen, &mut Insertable::UI.into_iter());
         });
-        ui.menu_button(theme::with_icon(icons::HASH, "Value"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::HASH), "Value", |ui| {
             items(ui, &mut chosen, &mut Insertable::VALUES.into_iter());
         });
         ui.separator();
@@ -1240,7 +1241,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                 chosen = Some(RowCommand::InsertScript(class));
             }
         }
-        ui.menu_button(theme::with_icon(icons::BROADCAST, "Events"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::BROADCAST), "Events", |ui| {
             let remote = Insertable::RemoteEvent;
             if ui
                 .button(insert_item(ui, remote))
@@ -1263,7 +1264,11 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     if ui
         .add_enabled(
             tree::can_be_prefab(world, id),
-            egui::Button::new(theme::with_icon(icons::PACKAGE, "Export Package…")),
+            egui::Button::new(theme::menu_item(
+                ui.ctx(),
+                icons::PACKAGE,
+                "Export Package…",
+            )),
         )
         .on_hover_text(
             "Save it as a prefab, with every model, texture, sound and clip it uses, in one \
@@ -1281,7 +1286,11 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         .is_some_and(|instance| instance.class().is_part());
     if is_part
         && ui
-            .button(theme::with_icon(icons::SPHERE, "Save as Material"))
+            .button(theme::menu_item(
+                ui.ctx(),
+                icons::SPHERE,
+                "Save as Material",
+            ))
             .on_hover_text(
                 "Save its color, material and SurfaceAppearance as a material file in \
                  assets/materials, to drag onto other parts.",
@@ -1296,7 +1305,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     ui.separator();
 
     let renamable = world.get(id).is_some_and(properties::can_rename);
-    let rename = egui::Button::new(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
+    let rename = egui::Button::new(theme::menu_item(ui.ctx(), icons::PENCIL_SIMPLE, "Rename"))
         .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
     if ui
         .add_enabled(renamable, rename)
@@ -1321,7 +1330,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             )
         };
         if ui
-            .button(theme::with_icon(icon, label))
+            .button(theme::menu_item(ui.ctx(), icon, label))
             .on_hover_text(hint)
             .clicked()
         {
@@ -1330,7 +1339,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     }
     let editable = tree::check_editable(world, id);
     let reason = editable.err().unwrap_or_default();
-    let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
+    let duplicate = egui::Button::new(theme::menu_item(ui.ctx(), icons::COPY, "Duplicate"))
         .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx()));
     if ui
         .add_enabled(editable.is_ok(), duplicate)
@@ -1340,7 +1349,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         chosen = Some(RowCommand::Duplicate);
     }
     let deletable = tree::check_delete(world, id);
-    let delete = egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
+    let delete = egui::Button::new(theme::menu_item(ui.ctx(), icons::TRASH, "Delete"))
         .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx()));
     if ui
         .add_enabled(deletable.is_ok(), delete)

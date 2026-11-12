@@ -27,7 +27,7 @@ use super::view::{self, Event, Extras};
 use super::{Falloff, Mode, ModelStudio, Pivot};
 use crate::screen::Screen;
 use crate::shortcuts::{self, Action};
-use crate::theme::{self, icons};
+use crate::theme::icons;
 use crate::widgets;
 
 /// What the tools are doing, if anything.
@@ -721,7 +721,7 @@ impl ModelStudio {
         let explain = |response: egui::Response, tip: &str| {
             response.on_hover_text(tip).on_disabled_hover_text(tip)
         };
-        ui.menu_button(theme::with_icon(icons::WRENCH, "Mesh"), |ui| {
+        axcenity_editor_kit::widgets::menu_button(ui, Some(icons::WRENCH), "Mesh", |ui| {
             if !edit {
                 ui.weak(EDIT_ONLY);
             }
@@ -854,7 +854,7 @@ impl ModelStudio {
                 );
                 ui.separator();
                 explain(
-                    ui.menu_button("Merge (M)", |ui| {
+                    axcenity_editor_kit::widgets::menu_button(ui, None, "Merge (M)", |ui| {
                         for (name, tip, at) in [
                             ("At Center", "Join the picked vertices into one, at their middle.", MergeAt::Center),
                             ("At Cursor", "Join the picked vertices into one, at the 3D cursor.", MergeAt::Cursor),
@@ -880,7 +880,7 @@ impl ModelStudio {
                     "Join picked vertices into one.",
                 );
                 explain(
-                    ui.menu_button("Delete (X)", |ui| {
+                    axcenity_editor_kit::widgets::menu_button(ui, None, "Delete (X)", |ui| {
                         for (name, tip, kind) in [
                             ("Vertices", "Remove the picked vertices and every edge and face using them.", DeleteKind::Vertices),
                             ("Edges", "Remove the picked edges and the faces beside them.", DeleteKind::Edges),
@@ -898,7 +898,7 @@ impl ModelStudio {
                     "Remove what's picked, leaving a hole.",
                 );
                 explain(
-                    ui.menu_button("Dissolve", |ui| {
+                    axcenity_editor_kit::widgets::menu_button(ui, None, "Dissolve", |ui| {
                         for (name, tip, kind) in [
                             (
                                 "Vertices",

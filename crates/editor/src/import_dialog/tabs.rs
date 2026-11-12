@@ -427,7 +427,7 @@ fn map_rows(
         .filter(|&slot| !has(maps, slot))
         .collect();
     if !missing.is_empty() {
-        ui.menu_button(format!("{} Add map", icons::PLUS), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::PLUS), "Add map", |ui| {
             for slot in missing {
                 if ui
                     .button(slot.label())

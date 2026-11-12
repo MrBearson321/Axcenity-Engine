@@ -121,7 +121,7 @@ impl PropertyDoc {
     /// and Constant, then each eased style and Bezier.
     pub(super) fn easing_menu(&mut self, ui: &mut egui::Ui) {
         let count = self.selected.len();
-        ui.menu_button(format!("{} Easing", icons::WAVE_SINE), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::WAVE_SINE), "Easing", |ui| {
             ui.weak(if count == 1 {
                 "For the selected key".to_owned()
             } else {
@@ -136,14 +136,22 @@ impl PropertyDoc {
             }
             ui.separator();
             for direction in EasingDirection::ALL {
-                ui.menu_button(format!("Ease {}", direction.as_str()), |ui| {
-                    for style in EasingStyle::ALL {
-                        if ui.button(style.as_str()).clicked() {
-                            self.ease_selected(Interp::Ease, Some(Easing::new(style, direction)));
-                            ui.close();
+                crate::widgets::menu_button(
+                    ui,
+                    None,
+                    &format!("Ease {}", direction.as_str()),
+                    |ui| {
+                        for style in EasingStyle::ALL {
+                            if ui.button(style.as_str()).clicked() {
+                                self.ease_selected(
+                                    Interp::Ease,
+                                    Some(Easing::new(style, direction)),
+                                );
+                                ui.close();
+                            }
                         }
-                    }
-                });
+                    },
+                );
             }
             if ui.button("Bezier").clicked() {
                 self.ease_selected(Interp::Bezier, None);

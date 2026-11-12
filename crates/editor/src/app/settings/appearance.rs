@@ -42,6 +42,21 @@ pub(super) fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .map(|(scale, icon, label)| (*scale, *icon, label.as_str()))
         .collect();
     widgets::segmented(ui, &mut appearance.ui_scale, &options);
+    ui.add_space(space::L);
+    section(ui, "Menu icons");
+    widgets::segmented(
+        ui,
+        &mut appearance.menu_icons,
+        &MenuIcons::ALL.map(|place| (place, None, place.label())),
+    );
+    let palette = theme::palette(ui.ctx());
+    ui.label(
+        egui::RichText::new(
+            "Where icons sit in their column in menus. Labels line up either way, with an icon \
+             or without.",
+        )
+        .color(palette.text_secondary),
+    );
 }
 
 pub(super) fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {

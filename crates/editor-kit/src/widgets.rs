@@ -51,6 +51,28 @@ pub fn button(
     .min_size(vec2(0.0, theme::size::BUTTON_HEIGHT))
 }
 
+/// A button that opens a menu, for toolbars: the same height, corners and
+/// look as [`button`]'s Secondary role, with a caret after the label, so a
+/// row of menus and buttons (Model Studio's New, Open and Save) lines up.
+/// Inside a menu it opens a submenu instead, as egui's `menu_button` does.
+pub fn menu_button<R>(
+    ui: &mut egui::Ui,
+    icon: Option<&str>,
+    label: &str,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    use egui::containers::menu;
+    let palette = theme::palette(ui.ctx());
+    let text = format!("{label}  {}", icons::CARET_DOWN);
+    let (response, inner) = if menu::is_in_menu(ui) {
+        menu::SubMenuButton::new(theme::menu_entry(ui.ctx(), icon, label)).ui(ui, add_contents)
+    } else {
+        menu::MenuButton::from_button(button(Role::Secondary, icon, &text, &palette))
+            .ui(ui, add_contents)
+    };
+    egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
+}
+
 /// The name of a row in an inspector (Properties, the Material tab), with
 /// an optional icon button after it, such as ↺. The name stays where every
 /// other row's name is. When `changed` (the value differs from its default

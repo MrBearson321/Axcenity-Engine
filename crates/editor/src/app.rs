@@ -92,6 +92,7 @@ mod ui_selection;
 mod update_install;
 mod updates;
 mod version_history;
+mod welcome;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -201,6 +202,9 @@ pub struct EditorApp {
     main_window_pixels: Option<egui::Rect>,
     /// A panel to put back in the main window, from a tab's menu.
     pending_main_dock: Option<Pane>,
+    /// The Scene's tab was closed while the dock was out being drawn; the
+    /// welcome page takes its place once it's back (`Layout::close_scene`).
+    pending_close_scene: bool,
     /// The editor's icon, for panel windows' title bars and taskbar buttons.
     window_icon: Option<std::sync::Arc<egui::IconData>>,
     /// The New Custom Material window's form, while it's open.
@@ -367,6 +371,8 @@ pub struct EditorApp {
     cover_shown: bool,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
+    /// The script tabs closed last in each project, for the welcome page.
+    recent_tabs: welcome::RecentTabs,
     /// The start screen's thumbnails, search and dialogs.
     start: StartScreen,
     /// The thumbnail being captured, if one was asked for.
@@ -517,6 +523,7 @@ impl DockViewer<'_> {
     fn draw_pane(&mut self, ui: &mut egui::Ui, pane: Pane) {
         match pane {
             Pane::Scene => *self.viewport = self.app.scene_pane(ui, self.render_state),
+            Pane::Welcome => self.app.welcome_pane(ui),
             Pane::Explorer => self.app.explorer_pane(ui),
             Pane::Properties => self.app.properties_pane(ui),
             Pane::Console => self.app.console_pane(ui),
@@ -627,8 +634,10 @@ impl egui_dock::TabViewer for DockViewer<'_> {
         in_panel_memory(ui, pane, |ui| self.draw_pane(ui, pane));
     }
 
+    /// Everything but the welcome page, which goes by itself once a
+    /// document opens.
     fn is_closeable(&self, pane: &Pane) -> bool {
-        *pane != Pane::Scene
+        *pane != Pane::Welcome
     }
 
     /// A tab's right-click menu: egui_dock's Float and Close, and a way home.
@@ -637,7 +646,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             self.app.pending_main_dock = Some(*pane);
             ui.close();
         }
-        if *pane != Pane::Scene {
+        if !matches!(pane, Pane::Scene | Pane::Welcome) {
             for (window, name) in self.app.layout.other_windows(self.floating) {
                 if ui.button(format!("Move to {name} Window")).clicked() {
                     self.app.pending_window_move = Some((*pane, window));
@@ -659,6 +668,12 @@ impl egui_dock::TabViewer for DockViewer<'_> {
         if let Pane::Plugin(id) = pane {
             self.app.close_plugin_pane(*id);
         }
+        // The welcome page takes the Scene's place (when nothing else is
+        // open), which needs the dock back first.
+        if *pane == Pane::Scene {
+            self.app.pending_close_scene = true;
+            return egui_dock::tab_viewer::OnCloseResponse::Ignore;
+        }
         egui_dock::tab_viewer::OnCloseResponse::Close
     }
 
@@ -674,9 +689,9 @@ impl egui_dock::TabViewer for DockViewer<'_> {
         }
     }
 
-    /// The Scene stays docked, so the main window is never left empty.
+    /// The Scene and the welcome page stay docked in the main window.
     fn allowed_in_windows(&self, pane: &mut Pane) -> bool {
-        *pane != Pane::Scene
+        !matches!(pane, Pane::Scene | Pane::Welcome)
     }
 
     /// Each panel scrolls its own contents.
@@ -749,7 +764,8 @@ const WINDOW_KEY: &str = "window";
 enum Discard {
     Quit,
     OpenAnother,
-    /// Opening a tutorial's sample from Help > Learn.
+    /// Opening a project folder in place: a tutorial's sample from Help >
+    /// Learn, or a recent project from the welcome page.
     OpenSample(PathBuf),
     /// Closing the tab of the script at this path.
     CloseTab(String),
@@ -868,6 +884,7 @@ impl EditorApp {
             collision_groups: Default::default(),
             main_window_pixels: None,
             pending_main_dock: None,
+            pending_close_scene: false,
             window_icon: None,
             custom_material: None,
             palette: Default::default(),
@@ -943,6 +960,7 @@ impl EditorApp {
             cover_until: None,
             cover_shown: false,
             recent: Vec::new(),
+            recent_tabs: welcome::RecentTabs::default(),
             start: StartScreen::default(),
             thumbnail: None,
             thumbnail_wanted: None,
@@ -1070,6 +1088,9 @@ impl EditorApp {
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             self.overlays.constraints =
                 storage.get_string(OVERLAY_CONSTRAINTS_KEY).as_deref() == Some("on");
+            if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
+                self.recent_tabs = welcome::RecentTabs::from_text(&text);
+            }
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
             }
@@ -1196,6 +1217,7 @@ impl eframe::App for EditorApp {
             flag(self.overlays.constraints).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
+        storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
         storage.set_string(
             command_palette::RECENT_COMMANDS_KEY,
             self.palette.recent_text(),
@@ -1565,6 +1587,7 @@ impl EditorApp {
                 self.tabs.take_focus(),
                 self.tabs.active_id(),
             );
+            self.layout.keep_a_document();
             self.layout.remember_homes();
             // Taken out while it's drawn, so the panels can borrow the app.
             let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
@@ -1590,6 +1613,9 @@ impl EditorApp {
                     },
                 );
             self.layout.dock = dock;
+            if std::mem::take(&mut self.pending_close_scene) {
+                self.layout.close_scene();
+            }
             self.after_main_dock(ctx);
             self.floating_windows(ctx, render_state, &palette);
             if let Some(command) = self.pending_command.take() {
@@ -1867,6 +1893,8 @@ mod template_tests;
 mod tool_window_tests;
 #[cfg(test)]
 mod tour_snapshots;
+#[cfg(test)]
+mod welcome_tests;
 
 #[cfg(test)]
 mod collab_handoff_tests;

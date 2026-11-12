@@ -53,6 +53,12 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "How big the whole editor is drawn, 90% to 150%.",
         ),
         setting(
+            Appearance,
+            "Menu icons",
+            &["Icon alignment", "Centered icons", "Left icons", "Menus"],
+            "Whether menu icons sit at the left of their column or in its middle.",
+        ),
+        setting(
             Typography,
             "Density",
             &["Compact", "Comfortable", "Spacing", "Row height"],

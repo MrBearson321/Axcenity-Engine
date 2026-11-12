@@ -569,7 +569,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
             instances: 412,
         }]);
 
-    for pane in Pane::CLOSABLE {
+    for pane in Pane::CLOSABLE.into_iter().chain([Pane::Welcome]) {
         for (size, shape) in [
             (egui::vec2(260.0, 900.0), "tall"),
             (egui::vec2(900.0, 260.0), "wide"),
@@ -614,6 +614,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                             .version_explorer
                             .show(ui, &axcenity_release::BuildInfo::current()),
                         Pane::TeamCreate => app.team_create_pane(ui),
+                        Pane::Welcome => app.welcome_pane(ui),
                         Pane::Scene | Pane::Script(_) | Pane::Plugin(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));

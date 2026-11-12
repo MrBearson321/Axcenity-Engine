@@ -796,7 +796,7 @@ impl DataTableStudio {
         scene: &TableScene,
         edits: &mut Vec<TableEdit>,
     ) {
-        ui.menu_button(theme::with_icon(icons::PLUS, "Column"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::PLUS), "Column", |ui| {
             let new = &mut self.new_column;
             ui.add(egui::TextEdit::singleline(&mut new.name).hint_text("Damage"));
             egui::ComboBox::from_id_salt("new column type")

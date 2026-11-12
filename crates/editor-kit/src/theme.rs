@@ -250,6 +250,113 @@ impl Density {
     }
 }
 
+/// The editor's category colours, first made for Block Coding's palette
+/// and shared so other tools group things the same way (cohesion pass
+/// CW2.2): one hue each, a step apart around the wheel, all deep enough for
+/// white labels at 3:1 (4.5:1 with Increase contrast, through
+/// [`Palette::under_white_text`]). Use them for a category's swatch,
+/// header or accent strip, not for whole panels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Hue {
+    Amber,
+    Orange,
+    Red,
+    Magenta,
+    Purple,
+    Violet,
+    Indigo,
+    Blue,
+    Cyan,
+    Teal,
+    Green,
+    Slate,
+}
+
+impl Hue {
+    pub const ALL: [Hue; 12] = [
+        Hue::Amber,
+        Hue::Orange,
+        Hue::Red,
+        Hue::Magenta,
+        Hue::Purple,
+        Hue::Violet,
+        Hue::Indigo,
+        Hue::Blue,
+        Hue::Cyan,
+        Hue::Teal,
+        Hue::Green,
+        Hue::Slate,
+    ];
+
+    /// The hue at full strength, before Increase contrast.
+    pub fn base(self) -> Color32 {
+        match self {
+            Hue::Amber => Color32::from_rgb(190, 128, 18),
+            Hue::Orange => Color32::from_rgb(212, 98, 40),
+            Hue::Red => Color32::from_rgb(206, 62, 62),
+            Hue::Magenta => Color32::from_rgb(200, 56, 128),
+            Hue::Purple => Color32::from_rgb(166, 70, 196),
+            Hue::Violet => Color32::from_rgb(118, 88, 224),
+            Hue::Indigo => Color32::from_rgb(72, 96, 214),
+            Hue::Blue => Color32::from_rgb(30, 116, 206),
+            Hue::Cyan => Color32::from_rgb(18, 130, 168),
+            Hue::Teal => Color32::from_rgb(22, 138, 112),
+            Hue::Green => Color32::from_rgb(64, 138, 58),
+            Hue::Slate => Color32::from_rgb(92, 100, 120),
+        }
+    }
+
+    /// A fill that white text reads on, darkened with Increase contrast.
+    pub fn fill(self, palette: &Palette) -> Color32 {
+        palette.under_white_text(self.base())
+    }
+
+    /// The darker shade under a filled shape (its edge and shadow).
+    pub fn edge(self, palette: &Palette) -> Color32 {
+        let darker = |value: u8| (f32::from(value) * 0.78).round() as u8;
+        let base = self.base();
+        palette.under_white_text(Color32::from_rgb(
+            darker(base.r()),
+            darker(base.g()),
+            darker(base.b()),
+        ))
+    }
+
+    /// The hue as text or a thin mark on the panel: mixed toward the
+    /// theme's text so it reads on light and dark panels alike.
+    pub fn ink(self, palette: &Palette) -> Color32 {
+        let toward = if palette.dark {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
+        mix(self.base(), toward, if palette.dark { 0.28 } else { 0.12 })
+    }
+}
+
+/// Where a menu item's icon sits in the column before the labels
+/// (Settings > Appearance > Menu icons). Either way every label in a menu
+/// starts at the same place, with an icon or without one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MenuIcons {
+    /// Against the left edge, as in Visual Studio and Unity.
+    #[default]
+    Left,
+    /// In the middle of the icon column, lined up like a toolbar's icons.
+    Centered,
+}
+
+impl MenuIcons {
+    pub const ALL: [MenuIcons; 2] = [MenuIcons::Left, MenuIcons::Centered];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MenuIcons::Left => "Left",
+            MenuIcons::Centered => "Centered",
+        }
+    }
+}
+
 /// Everything about the editor's look that people can change in Settings.
 /// Saved between runs as JSON; fields missing from an older save keep
 /// their defaults.
@@ -275,6 +382,8 @@ pub struct Appearance {
     /// this many a second, so a variable refresh rate display sees one
     /// rate, not every frame's own length. 0 is the display's own rate.
     pub steady_hz: u32,
+    /// Where icons sit in menus.
+    pub menu_icons: MenuIcons,
 }
 
 impl Default for Appearance {
@@ -289,6 +398,7 @@ impl Default for Appearance {
             ui_scale: 1.0,
             hold_refresh: false,
             steady_hz: 60,
+            menu_icons: MenuIcons::Left,
         }
     }
 }
@@ -642,6 +752,46 @@ fn density_id() -> egui::Id {
     egui::Id::new("axcenity density")
 }
 
+fn menu_icons_id() -> egui::Id {
+    egui::Id::new("axcenity menu icons")
+}
+
+/// Where icons sit in menus, as picked in Settings.
+pub fn menu_icons(ctx: &egui::Context) -> MenuIcons {
+    ctx.data(|data| data.get_temp::<MenuIcons>(menu_icons_id()))
+        .unwrap_or_default()
+}
+
+/// A menu item's icon and label as one button's contents: the icon in a
+/// column of its own (so labels line up whether or not an item has an
+/// icon), placed as Settings > Appearance > Menu icons says. Use it for
+/// every item in a menu: `ui.button(theme::menu_entry(ui.ctx(), Some(icon), "Save"))`.
+pub fn menu_entry(
+    ctx: &egui::Context,
+    icon: Option<&str>,
+    text: impl Into<String>,
+) -> egui::Atoms<'static> {
+    use egui::{AtomExt as _, IntoAtoms as _};
+    let align = match menu_icons(ctx) {
+        MenuIcons::Left => egui::Align2::LEFT_CENTER,
+        MenuIcons::Centered => egui::Align2::CENTER_CENTER,
+    };
+    let icon = egui::RichText::new(icon.unwrap_or("").to_owned())
+        .size(size::ICON_MEDIUM)
+        .atom_size(egui::vec2(MENU_ICON_COLUMN, size::ICON_MEDIUM))
+        .atom_align(align);
+    let label: String = text.into();
+    (icon, label).into_atoms()
+}
+
+/// [`menu_entry`] for an item that has an icon.
+pub fn menu_item(ctx: &egui::Context, icon: &str, text: impl Into<String>) -> egui::Atoms<'static> {
+    menu_entry(ctx, Some(icon), text)
+}
+
+/// How wide a menu's icon column is, in points.
+pub const MENU_ICON_COLUMN: f32 = 22.0;
+
 fn contrast_id() -> egui::Id {
     egui::Id::new("axcenity increase contrast")
 }
@@ -700,6 +850,7 @@ pub fn apply(ctx: &egui::Context, appearance: &Appearance) {
         data.insert_temp(accent_id(), appearance.accent);
         data.insert_temp(density_id(), appearance.density);
         data.insert_temp(contrast_id(), appearance.increase_contrast);
+        data.insert_temp(menu_icons_id(), appearance.menu_icons);
     });
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         let palette = Palette::new(theme == egui::Theme::Dark, appearance.accent)
@@ -1541,6 +1692,82 @@ mod tests {
     }
 
     #[test]
+    fn category_hues_read_in_both_themes_and_stay_apart() {
+        for dark in [true, false] {
+            for high in [false, true] {
+                let palette = Palette::new(dark, Accent::Blue).with_contrast(high);
+                for hue in Hue::ALL {
+                    let label = format!("{hue:?} dark {dark} high {high}");
+                    // As a caption tint or a thin mark on the panel.
+                    assert!(contrast(hue.ink(&palette), palette.panel) >= 3.0, "{label}");
+                    if high {
+                        assert!(
+                            contrast(Color32::WHITE, hue.fill(&palette)) >= 4.5,
+                            "{label}"
+                        );
+                        assert!(
+                            contrast(Color32::WHITE, hue.edge(&palette)) >= 4.5,
+                            "{label}"
+                        );
+                    }
+                }
+            }
+        }
+        for (index, a) in Hue::ALL.iter().enumerate() {
+            for b in &Hue::ALL[index + 1..] {
+                assert_ne!(a.base(), b.base(), "{a:?} and {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn menu_labels_start_at_the_same_place_with_or_without_an_icon() {
+        for place in MenuIcons::ALL {
+            let ctx = test_context();
+            let appearance = Appearance {
+                menu_icons: place,
+                ..Default::default()
+            };
+            let mut output = None;
+            for _ in 0..2 {
+                output = Some(run(&ctx, Default::default(), |ui| {
+                    apply(ui.ctx(), &appearance);
+                    assert_eq!(menu_icons(ui.ctx()), place);
+                    ui.vertical(|ui| {
+                        let _ = ui.button(menu_item(ui.ctx(), icons::FLOPPY_DISK, "Save"));
+                        let _ = ui.button(menu_entry(ui.ctx(), None, "Settings"));
+                        let _ = ui.button(menu_item(ui.ctx(), icons::GEAR_SIX, "Gear"));
+                    });
+                }));
+            }
+            let mut starts = std::collections::HashMap::new();
+            let mut icon_centres = Vec::new();
+            for clipped in &output.unwrap().shapes {
+                if let egui::Shape::Text(text) = &clipped.shape {
+                    let rect = text.visual_bounding_rect();
+                    match text.galley.text() {
+                        "Save" | "Settings" | "Gear" => {
+                            starts.insert(text.galley.text().to_owned(), rect.left());
+                        }
+                        text if !text.trim().is_empty() => icon_centres.push(rect.center().x),
+                        _ => {}
+                    }
+                }
+            }
+            assert_eq!(starts.len(), 3, "{place:?}: {starts:?}");
+            let save = starts["Save"];
+            for (label, left) in &starts {
+                // Glyphs' own side bearings differ by a point or so.
+                assert!(
+                    (left - save).abs() <= 1.5,
+                    "{place:?}: {label} at {left}, Save at {save}"
+                );
+            }
+            assert_eq!(icon_centres.len(), 2, "{place:?}");
+        }
+    }
+
+    #[test]
     fn appearance_survives_saving_and_bad_values_are_fixed() {
         let appearance = Appearance {
             theme: ThemeChoice::Light,
@@ -1552,6 +1779,7 @@ mod tests {
             ui_scale: 1.25,
             hold_refresh: true,
             steady_hz: 30,
+            menu_icons: MenuIcons::Centered,
         };
         assert_eq!(Appearance::from_text(&appearance.to_text()), appearance);
         assert_eq!(Appearance::from_text("not json"), Appearance::default());

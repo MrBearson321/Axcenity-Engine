@@ -70,7 +70,11 @@ fn a_folded_section_opens_on_its_header_stays_open_and_names_what_it_has() {
     let ppp = ctx.pixels_per_point();
     let output = designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
     // Everyday sections are open: Styles' Import and the anchor's Reset.
-    let import = header(icons::DOWNLOAD_SIMPLE, "Import");
+    // A menu button: its caret follows the name.
+    let import = header(
+        icons::DOWNLOAD_SIMPLE,
+        &format!("Import  {}", icons::CARET_DOWN),
+    );
     assert!(widget_named(&output, &import, ppp).is_some());
     assert!(widget_named(&output, "Reset", ppp).is_some());
     // The fine-tuning ones show only their headers.

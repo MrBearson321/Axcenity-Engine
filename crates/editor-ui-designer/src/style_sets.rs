@@ -647,7 +647,7 @@ pub(super) fn styles_section(
     if close {
         *imported = None;
     }
-    ui.menu_button(theme::with_icon(icons::DOWNLOAD_SIMPLE, "Import"), |ui| {
+    axcenity_editor_kit::widgets::menu_button(ui, Some(icons::DOWNLOAD_SIMPLE), "Import", |ui| {
         let sets = project_sets(scene.stylesheets);
         if sets.is_empty() {
             ui.weak("The project's stylesheets have no rules to import yet.");
