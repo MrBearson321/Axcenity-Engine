@@ -154,7 +154,9 @@ impl Host {
             return Vec::new();
         }
         let address = address.trim();
-        if address.is_empty() || address.len() > ADDRESS_MOST || address.contains(char::is_whitespace)
+        if address.is_empty()
+            || address.len() > ADDRESS_MOST
+            || address.contains(char::is_whitespace)
         {
             return Vec::new();
         }
@@ -180,7 +182,10 @@ impl Host {
         self.audit.record(
             AuditKind::Handoff,
             None,
-            format!("The host handed the session to {who} at transaction {}", self.seq),
+            format!(
+                "The host handed the session to {who} at transaction {}",
+                self.seq
+            ),
         );
         let out = self.to_everyone(ToClient::HandingOff {
             to: to.clone(),
@@ -202,7 +207,10 @@ impl Host {
     pub fn recover_from(mut self, old_epoch: u64, have: u64, wait: Duration) -> Host {
         // The old host may have handed out blocks since its last list:
         // the replayed transactions use IDs from them.
-        let reserve = self.ids.next_index().saturating_add(RESERVED_BLOCKS * crate::ids::BLOCK_SIZE);
+        let reserve = self
+            .ids
+            .next_index()
+            .saturating_add(RESERVED_BLOCKS * crate::ids::BLOCK_SIZE);
         self.ids.skip_to(reserve);
         self.handoff.recovery = Some(Recovery {
             old_epoch,
@@ -274,7 +282,11 @@ impl Host {
     /// `Tail`: the old host's transactions a member had and this host
     /// didn't, replayed in order as they were accepted. Only from a member
     /// that was asked.
-    pub(super) fn receive_tail(&mut self, member: MemberId, entries: Vec<TailEntry>) -> Vec<Outgoing> {
+    pub(super) fn receive_tail(
+        &mut self,
+        member: MemberId,
+        entries: Vec<TailEntry>,
+    ) -> Vec<Outgoing> {
         let Some(recovery) = &mut self.handoff.recovery else {
             return Vec::new();
         };

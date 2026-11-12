@@ -214,7 +214,8 @@ fn three() -> (Hosting, Member, Member, Member) {
     let sam_invite = invite(&hosting);
     let mut sam = Member::new("Sam", |id| Remote::join_invite(&sam_invite, id));
     until(&mut [&mut paul, &mut sam], "Sam", |m| {
-        m.iter().all(|m| m.client.as_ref().is_some_and(Client::is_joined))
+        m.iter()
+            .all(|m| m.client.as_ref().is_some_and(Client::is_joined))
     });
     let kim_invite = invite(&hosting);
     let mut kim = Member::new("Kim", |id| Remote::join_invite(&kim_invite, id));
@@ -240,7 +241,11 @@ fn everyone_hears_the_same_successors_backup_first_then_longest_connected() {
         m.iter().all(|m| m.client().successors().len() == 2)
     });
     let order = |m: &Member| -> Vec<_> {
-        m.client().successors().iter().map(|c| c.member.unwrap()).collect()
+        m.client()
+            .successors()
+            .iter()
+            .map(|c| c.member.unwrap())
+            .collect()
     };
     // Sam joined first; Paul hosts, so he's never on it.
     assert_eq!(order(&kim), [sam_id, kim_id]);
@@ -248,14 +253,18 @@ fn everyone_hears_the_same_successors_backup_first_then_longest_connected() {
     assert_eq!(kim.client().successors()[0].address, sam.address);
     // The Owner names Kim the backup host.
     hosting.lock().set_backup(Some(kim_id));
-    until(&mut [&mut paul, &mut sam, &mut kim], "the backup first", |m| {
-        m.iter().all(|m| order(m) == [kim_id, sam_id])
-    });
+    until(
+        &mut [&mut paul, &mut sam, &mut kim],
+        "the backup first",
+        |m| m.iter().all(|m| order(m) == [kim_id, sam_id]),
+    );
     // A Viewer is never a successor.
     hosting.lock().set_role(kim_id, Role::Viewer);
-    until(&mut [&mut paul, &mut sam, &mut kim], "Kim off the list", |m| {
-        m.iter().all(|m| order(m) == [sam_id])
-    });
+    until(
+        &mut [&mut paul, &mut sam, &mut kim],
+        "Kim off the list",
+        |m| m.iter().all(|m| order(m) == [sam_id]),
+    );
 }
 
 /// Scenario A: the host leaves while others work. Sam takes over; nobody's
@@ -277,9 +286,13 @@ fn the_host_leaves_and_the_successor_carries_on_with_everyones_edits() {
         m.iter().all(|m| m.client().handoff().is_some())
     });
     let last_seq = sam.client().handoff().unwrap().last_seq;
-    assert!(sam.client().seq() >= last_seq, "Sam has everything Paul accepted");
-    // Edits made meanwhile wait.
+    assert!(
+        sam.client().seq() >= last_seq,
+        "Sam has everything Paul accepted"
+    );
+    // Edits made meanwhile wait, the successor's own too.
     kim.edit("DuringHandoff");
+    sam.edit("SamDuringHandoff");
     let handoff = kim.client().handoff().unwrap().clone();
     assert_eq!(handoff.to.as_ref().unwrap().address, sam.address);
 
@@ -289,7 +302,13 @@ fn the_host_leaves_and_the_successor_carries_on_with_everyones_edits() {
     paul.move_to(&card);
     sam.edit("AfterSam");
     converge(&new_host, &mut [&mut paul, &mut sam, &mut kim]);
-    for name in ["BeforeSam", "BeforeKim", "DuringHandoff", "AfterSam"] {
+    for name in [
+        "BeforeSam",
+        "BeforeKim",
+        "DuringHandoff",
+        "SamDuringHandoff",
+        "AfterSam",
+    ] {
         assert!(has_part(&paul.world, name), "{name} reached everyone");
     }
     // Paul is still the Owner; roles came with the members list.
@@ -316,9 +335,11 @@ fn a_lost_host_is_replaced_and_what_the_successor_missed_comes_from_another_memb
     let sam_seq = sam.client().seq();
     sam.deaf = true;
     kim.edit("OnlyKimSawIt");
-    until(&mut [&mut paul, &mut sam, &mut kim], "Kim's edit confirmed", |m| {
-        m[2].client().pending() == 0 && m[0].client().seq() == sam_seq + 1
-    });
+    until(
+        &mut [&mut paul, &mut sam, &mut kim],
+        "Kim's edit confirmed",
+        |m| m[2].client().pending() == 0 && m[0].client().seq() == sam_seq + 1,
+    );
     let successors = kim.client().successors().to_vec();
 
     // The host vanishes.
@@ -332,10 +353,22 @@ fn a_lost_host_is_replaced_and_what_the_successor_missed_comes_from_another_memb
     let me = |m: &Member| m.client().member();
     let after = Duration::from_millis(60);
     let during = Duration::from_millis(10);
-    assert_eq!(election::after_loss(during, timing, &successors, me(&sam)), Choice::WaitForHost);
-    assert_eq!(election::after_loss(after, timing, &successors, me(&sam)), Choice::Host);
-    assert_eq!(election::after_loss(after, timing, &successors, me(&kim)), Choice::Join(0));
-    assert_eq!(election::after_loss(after, timing, &successors, me(&paul)), Choice::Join(0));
+    assert_eq!(
+        election::after_loss(during, timing, &successors, me(&sam)),
+        Choice::WaitForHost
+    );
+    assert_eq!(
+        election::after_loss(after, timing, &successors, me(&sam)),
+        Choice::Host
+    );
+    assert_eq!(
+        election::after_loss(after, timing, &successors, me(&kim)),
+        Choice::Join(0)
+    );
+    assert_eq!(
+        election::after_loss(after, timing, &successors, me(&paul)),
+        Choice::Join(0)
+    );
 
     // Sam hosts from its copy, recovering what it missed.
     let new_host = sam.host(Some(Duration::from_secs(10)));
@@ -347,8 +380,10 @@ fn a_lost_host_is_replaced_and_what_the_successor_missed_comes_from_another_memb
         !new_host.lock().host().is_recovering()
     });
     converge(&new_host, &mut [&mut paul, &mut sam, &mut kim]);
-    assert!(has_part(&sam.world, "OnlyKimSawIt"), "recovered from Kim's tail");
+    assert!(
+        has_part(&sam.world, "OnlyKimSawIt"),
+        "recovered from Kim's tail"
+    );
     assert!(has_part(&paul.world, "Early"));
     assert_eq!(new_host.lock().host().unrecovered(), None);
 }
-

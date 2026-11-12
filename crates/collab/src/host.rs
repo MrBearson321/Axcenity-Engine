@@ -795,7 +795,11 @@ impl Host {
                 lock.away_since = None;
             }
         }
-        self.note_join(member);
+        // "Connected longest" counts from this connection's first hello
+        // (a resync on the same connection doesn't start it again).
+        if !self.members[&member].connected {
+            self.note_join(member);
+        }
         let mut out = self.catch_up(member, have);
         out.extend(self.ask_for_tail(member, have));
         out.push(Outgoing {

@@ -163,7 +163,10 @@ mod tests {
         // The host (1) is never its own successor; a Viewer never hosts,
         // nor someone whose editor sent no card.
         assert_eq!(ids(&rank(&all, None, Some(MemberId(1)))), [3, 4, 2]);
-        assert_eq!(ids(&rank(&all, Some(MemberId(2)), Some(MemberId(1)))), [2, 3, 4]);
+        assert_eq!(
+            ids(&rank(&all, Some(MemberId(2)), Some(MemberId(1)))),
+            [2, 3, 4]
+        );
         // A dedicated server hosts: the Owner is a successor too.
         assert_eq!(ids(&rank(&all, None, None)), [1, 3, 4, 2]);
         let mut gone = all.clone();
@@ -183,20 +186,38 @@ mod tests {
         }
         let at = |secs| Duration::from_secs(secs);
         // The grace period: try the old host again.
-        assert_eq!(after_loss(at(5), timing, &list, MemberId(3)), Choice::WaitForHost);
+        assert_eq!(
+            after_loss(at(5), timing, &list, MemberId(3)),
+            Choice::WaitForHost
+        );
         // Then the first successor hosts, the others join it.
         assert_eq!(after_loss(at(21), timing, &list, MemberId(2)), Choice::Host);
-        assert_eq!(after_loss(at(21), timing, &list, MemberId(3)), Choice::Join(0));
-        assert_eq!(after_loss(at(21), timing, &list, MemberId(9)), Choice::Join(0));
+        assert_eq!(
+            after_loss(at(21), timing, &list, MemberId(3)),
+            Choice::Join(0)
+        );
+        assert_eq!(
+            after_loss(at(21), timing, &list, MemberId(9)),
+            Choice::Join(0)
+        );
         // It didn't come up: the next one hosts.
         assert_eq!(after_loss(at(36), timing, &list, MemberId(3)), Choice::Host);
-        assert_eq!(after_loss(at(36), timing, &list, MemberId(4)), Choice::Join(1));
-        assert_eq!(after_loss(at(36), timing, &list, MemberId(9)), Choice::Join(1));
+        assert_eq!(
+            after_loss(at(36), timing, &list, MemberId(4)),
+            Choice::Join(1)
+        );
+        assert_eq!(
+            after_loss(at(36), timing, &list, MemberId(9)),
+            Choice::Join(1)
+        );
         // A host stays a host.
         assert_eq!(after_loss(at(60), timing, &list, MemberId(2)), Choice::Host);
         assert_eq!(after_loss(at(60), timing, &list, MemberId(3)), Choice::Host);
         // Past the end of the list: alone.
-        assert_eq!(after_loss(at(80), timing, &list, MemberId(9)), Choice::Alone);
+        assert_eq!(
+            after_loss(at(80), timing, &list, MemberId(9)),
+            Choice::Alone
+        );
         assert_eq!(after_loss(at(80), timing, &[], MemberId(9)), Choice::Alone);
     }
 }

@@ -35,8 +35,8 @@ pub mod access;
 pub mod apply;
 pub mod audit;
 pub mod capture;
-pub mod election;
 pub mod client;
+pub mod election;
 pub mod files;
 pub mod handshake;
 pub mod history;
@@ -65,6 +65,8 @@ mod convergence_tests;
 #[cfg(test)]
 mod files_tests;
 #[cfg(test)]
+mod handoff_tests;
+#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod journal_tests;
@@ -74,8 +76,6 @@ mod live_session_tests;
 mod live_tests;
 #[cfg(test)]
 mod net_tests;
-#[cfg(test)]
-mod handoff_tests;
 #[cfg(test)]
 mod presence_tests;
 #[cfg(test)]

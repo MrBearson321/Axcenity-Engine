@@ -482,6 +482,11 @@ impl Client {
     /// where deleted Instances were, and the files, as of the host's last
     /// transaction here. The copy itself is left as it was.
     pub fn confirmed(&mut self, world: &mut World) -> Confirmed {
+        // Edits not captured yet are captured first, and taking the pending
+        // ones off and back on isn't an edit of its own.
+        if self.joined && world.has_edits() {
+            self.capture(world, "Edit");
+        }
         self.take_pending_off(world);
         let confirmed = Confirmed {
             world: world.clone(),
@@ -491,6 +496,7 @@ impl Client {
             seq: self.seq,
         };
         self.put_pending_on(world);
+        world.take_edits();
         confirmed
     }
 
