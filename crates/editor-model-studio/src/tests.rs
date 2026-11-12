@@ -421,10 +421,10 @@ fn the_toolbar_fits_the_mode_and_rig_steps_say_why_they_wait() {
         frames(&ctx, studio, Vec::new())
     };
     let shown = set(&mut studio, Mode::Object);
-    for label in ["Object", "Edit", "Paint", "Rig", "Mesh", "UV"] {
+    for label in ["Object", "Edit", "Paint", "Sculpt", "Rig", "Mesh", "UV"] {
         assert!(button(&shown, label).is_some(), "{label} in {shown:?}");
     }
-    for label in ["Sculpt", "Weights", "Pose", "Bones"] {
+    for label in ["Weights", "Pose", "Bones"] {
         assert!(button(&shown, label).is_none(), "{label} in Object mode");
     }
     let shown = set(&mut studio, Mode::Paint);
@@ -433,6 +433,8 @@ fn the_toolbar_fits_the_mode_and_rig_steps_say_why_they_wait() {
         button(&shown, "Mesh").is_none(),
         "no Mesh menu in Paint mode"
     );
+    let shown = set(&mut studio, Mode::Sculpt);
+    assert!(button(&shown, "UV").is_none() && button(&shown, "Mesh").is_none());
 
     // Rig: Bones, Weights and Pose; Weights waits for bones, and says so.
     let shown = set(&mut studio, Mode::Armature);
@@ -472,12 +474,12 @@ fn modes_that_need_a_mesh_or_bones_say_so() {
         doc.set_mode(mode);
         assert_eq!(doc.mode, Mode::Object, "{mode:?} needs bones");
     }
-    // A group has no mesh to edit or paint.
+    // A group has no mesh to edit, paint or sculpt.
     let mut group = doc.model.objects[0].clone();
     group.mesh = None;
     doc.model.objects.push(group);
     doc.active = 1;
-    for mode in [Mode::Edit, Mode::Paint] {
+    for mode in [Mode::Edit, Mode::Paint, Mode::Sculpt] {
         assert!(doc.refuses(mode).unwrap().contains("mesh"), "{mode:?}");
     }
     assert_eq!(doc.refuses(Mode::Object), None);
