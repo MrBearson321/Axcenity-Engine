@@ -20,7 +20,7 @@ tags: [system/animation]
 
 ```mermaid
 flowchart LR
-  F[FBX rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig]
+  F[FBX rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig<br/>by name, or by humanoid role: retarget.rs]
   SM[statemachine.json] --> M[Compiled machine + layers]
   subgraph AN["Animators::update (frame step: animators)"]
     R1[runner per animated thing] --> R2[state machine: transitions,<br/>blend tree / blend space, layers]
@@ -35,6 +35,7 @@ flowchart LR
 
 - Live state (`AnimatorState`, `AnimationTrackState`, `PropertyAnimationState`) is in the World, not saved properties.
 - Property tracks animate Parts, Model pivots and UI elements; reduced motion (a game UI setting) holds GUI animations.
+- A take for another humanoid skeleton (Mixamo on an Unreal mannequin, Blender, Biped …) is **retargeted** (G16, `retarget.rs`): bones are matched to 22 humanoid roles by name, the body's facing and up are measured in both rest poses, and each mapped bone's world turn from its rest is carried over; the hips' travel is scaled by leg length. Name binding still wins whenever any humanoid bone binds by name.
 - `Posed::primitive` skins on the CPU only on request (tests, tools, the Model Studio's pose test), per LOD level.
 
 ## Dependencies
@@ -47,13 +48,14 @@ flowchart LR
 
 ## Testing
 
-`crates/anim/src/tests.rs` (canonical example files round-trip), `layer_tests.rs`; player `skinning_tests.rs`, `ragdoll_tests.rs`, `cutscene_tests.rs`; editor animation tests (the Animation tab).
+`crates/anim/src/tests.rs` (canonical example files round-trip), `layer_tests.rs`, `retarget_tests.rs`; player `skinning_tests.rs`, `ragdoll_tests.rs`, `cutscene_tests.rs`; editor animation tests (the Animation tab).
 
 ## Limitations
 
 - Format 1 clip files still read (converted).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
+- Retargeting maps roles by bone name only: no hand-edited map or profiles yet, no fingers, and no correction for feet sliding when leg shapes differ (foot IK helps).
 
 ## Development guidance
 

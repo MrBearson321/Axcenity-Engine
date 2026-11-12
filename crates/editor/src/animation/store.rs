@@ -552,6 +552,7 @@ mod tests {
 
     fn take() -> Take {
         Take {
+            skeleton: Default::default(),
             name: "Moves".into(),
             duration: 2.0,
             frame_rate: 30.0,
