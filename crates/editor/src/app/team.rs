@@ -474,8 +474,10 @@ impl Team {
         self.invite.as_deref()
     }
 
-    pub(crate) fn client(&self) -> &Client {
-        self.client.as_ref().expect("joined")
+    /// The editor's own member of the session, once the host has let it
+    /// in. A hosting editor draws its panel for a few frames before that.
+    pub(crate) fn client(&self) -> Option<&Client> {
+        self.client.as_ref()
     }
 
     /// True once the host has let this editor in.
