@@ -760,18 +760,24 @@ impl<'a> BlockPainter<'a> {
             }
             Part::Name(name, kind, animator) => {
                 let (kind, objects) = (*kind, self.objects);
-                let suggestions: Vec<String> = objects
-                    .iter()
-                    .find(|object| object.path == *animator)
-                    .map(|object| {
-                        object
-                            .names
-                            .iter()
-                            .filter(|(of, _)| *of == kind)
-                            .map(|(_, name)| name.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let object = objects.iter().find(|object| object.path == *animator);
+                let suggestions: Vec<String> = match object {
+                    // Events come from the class, not the editor's world.
+                    Some(object) if kind == NameKind::Signal => object
+                        .class
+                        .events()
+                        .iter()
+                        .chain(axcenity_core::INSTANCE_EVENTS.iter())
+                        .map(|event| (*event).to_owned())
+                        .collect(),
+                    Some(object) => object
+                        .names
+                        .iter()
+                        .filter(|(of, _)| *of == kind)
+                        .map(|(_, name)| name.clone())
+                        .collect(),
+                    None => Vec::new(),
+                };
                 if let Some(response) = self.dropdown(ui, rect, part_id, name) {
                     egui::Popup::menu(&response)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)

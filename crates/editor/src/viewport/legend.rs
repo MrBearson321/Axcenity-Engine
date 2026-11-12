@@ -2,7 +2,7 @@
 //! stand for numbers: LOD Levels (which color is which level, how many
 //! items in view draw each, and the thresholds) and Overdraw (how many
 //! layers each shade is, and on request the frame's numbers,
-//! `OverdrawStats`). What they measure: `docs/rendering/performance.md`.
+//! `OverdrawStats`), and Ray Hits (what the ray traced scene holds). What they measure: `docs/rendering/performance.md`.
 
 use axcenity_render::{
     DebugView, LOD_LEVELS, LOD_SCREEN_SIZES, OVERDRAW_STEP, OverdrawStats, RenderStats,
@@ -105,6 +105,60 @@ pub fn overdraw_lines(stats: Option<&OverdrawStats>) -> Vec<(Option<Color32>, St
     lines
 }
 
+/// The legend's lines for the Ray Hits view: what the ray traced scene
+/// held this frame (`docs/rendering/ray-tracing.md`).
+pub fn ray_hits_lines(stats: &RenderStats) -> Vec<(Option<Color32>, String)> {
+    let rays = stats.ray_tracing;
+    if rays.meshes == 0 && rays.meshes_waiting == 0 {
+        return vec![(
+            None,
+            "Nothing traced: this GPU can't ray trace (Settings > Graphics says so), or \
+             nothing is within the ray tracing distance."
+                .to_owned(),
+        )];
+    }
+    let mut lines = vec![
+        (None, format!("{} items traced", rays.instances)),
+        (
+            None,
+            format!(
+                "{} meshes, {} triangles",
+                rays.meshes,
+                thousands(rays.triangles)
+            ),
+        ),
+    ];
+    if rays.meshes_waiting > 0 {
+        lines.push((
+            None,
+            format!(
+                "{} meshes still being built (a few each frame)",
+                rays.meshes_waiting
+            ),
+        ));
+    }
+    lines.push((
+        None,
+        "Each item its own color, dimmer farther away. Items past the ray tracing distance \
+         and animated characters aren't traced yet."
+            .to_owned(),
+    ));
+    lines
+}
+
+/// `value` with thin separators every three digits: 1,234,567.
+fn thousands(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 /// Draws the legend for `view_mode` at the top left of `rect`, if it
 /// has one. True when Measure was clicked (Overdraw only).
 pub fn paint(
@@ -117,6 +171,7 @@ pub fn paint(
     let (title, lines) = match view_mode {
         ViewMode::Debug(DebugView::LodLevels) => ("LOD Levels", lod_lines(stats)),
         ViewMode::Debug(DebugView::Overdraw) => ("Overdraw", overdraw_lines(overdraw)),
+        ViewMode::Debug(DebugView::RayHits) => ("Ray Hits", ray_hits_lines(stats)),
         _ => return false,
     };
     let mut measure = false;
@@ -189,7 +244,28 @@ mod tests {
     }
 
     #[test]
-    fn the_legend_draws_in_the_viewports_corner_for_its_two_views_only() {
+    fn the_ray_hits_legend_counts_the_scene_or_says_why_its_empty() {
+        let empty = ray_hits_lines(&RenderStats::default());
+        assert_eq!(empty.len(), 1);
+        assert!(empty[0].1.contains("can't ray trace"), "{empty:?}");
+        let stats = RenderStats {
+            ray_tracing: axcenity_render::RayTracingStats {
+                instances: 40,
+                meshes: 3,
+                triangles: 1_234_567,
+                meshes_waiting: 2,
+                rebuilt: false,
+            },
+            ..RenderStats::default()
+        };
+        let lines = ray_hits_lines(&stats);
+        assert_eq!(lines[0].1, "40 items traced");
+        assert_eq!(lines[1].1, "3 meshes, 1,234,567 triangles");
+        assert!(lines[2].1.starts_with("2 meshes still being built"));
+    }
+
+    #[test]
+    fn the_legend_draws_in_the_viewports_corner_for_its_views_only() {
         let stats = RenderStats {
             lod_items: [12, 5, 3],
             ..RenderStats::default()

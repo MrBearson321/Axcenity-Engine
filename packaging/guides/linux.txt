@@ -34,4 +34,8 @@ You need a working Vulkan driver. On Ubuntu/Debian: mesa-vulkan-drivers
 (and nvidia-driver packages if you use NVIDIA). On Fedora: mesa-vulkan-drivers.
 On Arch: vulkan-icd-loader plus vulkan-radeon, vulkan-intel or nvidia.
 
+On an X11 desktop the .tar.gz and AppImage also need libxkbcommon-x11
+(libxkbcommon-x11-0 on Ubuntu/Debian, libxkbcommon-x11 on Fedora and Arch).
+Desktop installs normally have it; the packages pull it in.
+
 Full guide: https://github.com/MrBearson321/Axcenity-Engine/blob/main/docs/project/install.md

@@ -19,7 +19,7 @@ Axcenity is a free, open-source 3D game engine and editor. You build worlds out 
 cargo run -p axcenity-editor
 ```
 
-Windows and Linux are the main platforms and are checked on every change. macOS works but is checked less often. Mobile and web are not supported.
+Windows and Linux are the main platforms and are checked on every change. macOS works but is checked less often. Mobile and web are not supported. [System requirements](../reference/system-requirements.md) lists the supported systems and the processor, memory, graphics card, network and storage the editor needs.
 
 ## The start screen
 

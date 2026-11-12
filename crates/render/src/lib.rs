@@ -36,16 +36,17 @@ pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DecalLimits, DepthOfFieldQuality,
     EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, MotionBlurQuality, POINT_SHADOW_FACES,
-    PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
-    ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality, read_capabilities,
+    PointShadowMapSize, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE, ReflectionQuality,
+    ShadowMapSize, ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
+    read_capabilities,
 };
 pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, layers_of};
 #[cfg(feature = "debug-views")]
 pub use renderer::DebugView;
 pub use renderer::{
     CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES,
-    MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RenderStats, Renderer, SHADOW_CASCADE_COUNT, ShaderError,
-    SurfaceShader, TextureRenderer,
+    MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RayTracingStats, RenderStats, Renderer,
+    SHADOW_CASCADE_COUNT, ShaderError, SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
 pub use water::{WATER_GRID, Water, water_surface};

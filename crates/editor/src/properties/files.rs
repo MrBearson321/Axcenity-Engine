@@ -143,9 +143,9 @@ pub(super) fn grading_control(
     edit
 }
 
-/// Lighting's sky image, with buttons to pick a file and to go back to the
-/// sky colors. A sky dragged from the Assets panel can be let go on it.
-/// Both ask before the sky changes.
+/// Lighting's sky image, with buttons to pick a file, to use the engine's
+/// default sky and to go back to the sky colors. A sky dragged from the
+/// Assets panel can be let go on it. All ask before the sky changes.
 pub(super) fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
     let row = ui.horizontal(|ui| {
@@ -158,6 +158,17 @@ pub(super) fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Opt
             .clicked()
         {
             edit = Some(Edit::PickSkyImage);
+        }
+        if path != axcenity_project::DEFAULT_SKY_PATH
+            && ui
+                .small_button(icons::SUN_HORIZON)
+                .on_hover_text(
+                    "Use the default sky: a partly cloudy midday HDR (CC0, Poly Haven), \
+                     with the sun moved to match it",
+                )
+                .clicked()
+        {
+            edit = Some(Edit::UseDefaultSky);
         }
         if path.is_empty() {
             ui.weak("Sky colors");
