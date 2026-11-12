@@ -198,6 +198,18 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Viewport,
+            "Show contacts",
+            &["Physics debug", "Collisions", "Contact points"],
+            "Where parts touch and how hard they push, during Play.",
+        ),
+        setting(
+            Viewport,
+            "Show bodies",
+            &["Physics debug", "Center of mass", "Sleeping"],
+            "Each moving body's center of mass, awake or asleep, during Play.",
+        ),
+        setting(
+            Viewport,
             "Show culling",
             &["Frustum", "Occlusion", "Culled objects"],
             "What's drawn and what's culled for the current view.",

@@ -28,11 +28,13 @@ pub(super) enum Overlay {
     NavMesh,
     AgentPaths,
     Constraints,
+    Contacts,
+    Bodies,
     Culling,
 }
 
 impl Overlay {
-    pub(super) const ALL: [Overlay; 8] = [
+    pub(super) const ALL: [Overlay; 10] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -40,6 +42,8 @@ impl Overlay {
         Overlay::NavMesh,
         Overlay::AgentPaths,
         Overlay::Constraints,
+        Overlay::Contacts,
+        Overlay::Bodies,
         Overlay::Culling,
     ];
 
@@ -52,6 +56,8 @@ impl Overlay {
             Overlay::NavMesh => "Nav Mesh",
             Overlay::AgentPaths => "Agent Paths",
             Overlay::Constraints => "Constraints",
+            Overlay::Contacts => "Contacts",
+            Overlay::Bodies => "Bodies",
             Overlay::Culling => "Culling",
         }
     }
@@ -65,6 +71,8 @@ impl Overlay {
             Overlay::NavMesh => &mut overlays.nav_mesh,
             Overlay::AgentPaths => &mut overlays.agent_paths,
             Overlay::Constraints => &mut overlays.constraints,
+            Overlay::Contacts => &mut overlays.contacts,
+            Overlay::Bodies => &mut overlays.bodies,
             Overlay::Culling => &mut overlays.culling,
         }
     }

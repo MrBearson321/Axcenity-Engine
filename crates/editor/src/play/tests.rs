@@ -1012,3 +1012,76 @@ fn bench_project_play() {
         );
     }
 }
+
+#[test]
+fn the_contacts_and_bodies_overlays_draw_what_the_simulation_is_doing() {
+    use axcenity_render::Camera;
+    use axcenity_render::glam::Vec3;
+
+    let mut world = World::new();
+    let floor = world.create(ClassName::Part).unwrap();
+    world.set_parent(floor, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("Position", Value::Vector3(Vector3::new(0.0, -0.5, 0.0))),
+        ("Size", Value::Vector3(Vector3::new(40.0, 1.0, 40.0))),
+        ("Anchored", Value::Bool(true)),
+    ] {
+        world.set_property(floor, name, value).unwrap();
+    }
+    let block = world.create(ClassName::Part).unwrap();
+    world.set_parent(block, Some(world.workspace())).unwrap();
+    world
+        .set_property(
+            block,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 3.0, 0.0)),
+        )
+        .unwrap();
+    let mut output = Output::default();
+    let mut game = play(&world, &[], 1, &mut output);
+    no_character(game.world_mut());
+    for _ in 0..60 {
+        game.frame(
+            1.0 / 60.0,
+            &[],
+            MoveInput::default(),
+            CameraState::default(),
+            &mut output,
+        )
+        .unwrap();
+    }
+    let view = game.physics_debug();
+    assert!(!view.contacts.is_empty(), "the block landed");
+    assert_eq!(view.bodies.len(), 1);
+    assert_eq!(view.bodies[0].part, block);
+
+    let ctx = crate::theme::test_context();
+    let camera = Camera {
+        position: Vec3::new(0.0, 10.0, 20.0),
+        look_at: Vec3::ZERO,
+        fov_y_degrees: 60.0,
+    };
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let screen = crate::screen::Screen::new(camera, rect);
+    let drawn = |overlays: crate::viewport::OverlayToggles| {
+        let output = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            let ctx = &ui.ctx().clone();
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            crate::viewport::paint_physics(&painter, &screen, &view, overlays);
+        });
+        output.shapes.len()
+    };
+    let contacts = drawn(crate::viewport::OverlayToggles {
+        contacts: true,
+        ..Default::default()
+    });
+    // A dot and a line for each contact point.
+    assert_eq!(contacts, view.contacts.len() * 2);
+    let bodies = drawn(crate::viewport::OverlayToggles {
+        bodies: true,
+        ..Default::default()
+    });
+    // Three axes and a ring, and a z if it's asleep.
+    assert!((4..=5).contains(&bodies), "{bodies}");
+    assert_eq!(drawn(crate::viewport::OverlayToggles::default()), 0);
+}

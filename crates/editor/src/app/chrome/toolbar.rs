@@ -794,7 +794,7 @@ impl EditorApp {
     /// bar's Viewport menu.
     pub(in crate::app) fn overlay_items(&mut self, ui: &mut egui::Ui) {
         let overlays = &mut self.overlays;
-        let items: [(&mut bool, &'static str, &'static str, &'static str); 8] = [
+        let items: [(&mut bool, &'static str, &'static str, &'static str); 10] = [
             (
                 &mut overlays.colliders,
                 icons::CUBE,
@@ -836,6 +836,18 @@ impl EditorApp {
                 icons::LINK_SIMPLE,
                 "Constraints",
                 "Draw each WeldConstraint as a line between its parts (grey when disabled) and every Attachment as a small gizmo.",
+            ),
+            (
+                &mut overlays.contacts,
+                icons::ARROWS_IN_LINE_VERTICAL,
+                "Contacts",
+                "During Play, mark where parts touch, with a line the way each contact pushes, longer the harder it pushes.",
+            ),
+            (
+                &mut overlays.bodies,
+                icons::CROSSHAIR,
+                "Bodies",
+                "During Play, mark each moving part's (or welded group's) center of mass: yellow while it's simulated, blue with a z once it's asleep.",
             ),
             (
                 &mut overlays.culling,
