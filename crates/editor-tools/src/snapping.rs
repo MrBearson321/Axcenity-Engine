@@ -11,7 +11,7 @@
 //! [`flush_faces`]).
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use axcenity_render::glam::Quat;
 use axcenity_render::glam::Vec3;
 
@@ -357,7 +357,7 @@ fn welded(world: &World, a: InstanceId, b: InstanceId) -> bool {
 }
 
 /// A box `size` studs big at `center`, turned `rotation`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn obb(center: Vec3, size: Vec3, rotation: Quat) -> Obb {
     Obb::of(Pose {
         position: center,
@@ -367,7 +367,7 @@ pub fn obb(center: Vec3, size: Vec3, rotation: Quat) -> Obb {
 }
 
 /// A visible, solid obstacle of `obb`, standing in for a part.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn wall(obb: Obb) -> Obstacle {
     Obstacle {
         // Any ID: the tests only look at the box.

@@ -42,13 +42,13 @@
 
 mod modal;
 mod modifiers;
-pub(crate) mod paint;
+pub mod paint;
 mod proportional;
-pub(crate) mod retopo;
-pub(crate) mod rig;
-pub(crate) mod sculpt;
+pub mod retopo;
+pub mod rig;
+pub mod sculpt;
 mod tools;
-pub(crate) mod uv_editor;
+pub mod uv_editor;
 mod view;
 
 pub use modal::{Modal, ModalKind};
@@ -70,11 +70,16 @@ use axcenity_render::glam::{Mat4, Vec3};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use crate::gizmo::{MoveAxes, Snap, Tool};
-use crate::responsive;
-use crate::shortcuts::{self, Action};
-use crate::theme::{self, icons};
-use crate::widgets::{self, Role};
+// The editor kit's and editor tools' modules under the names this code
+// used inside the editor, so `crate::theme`, `crate::gizmo` and so on work.
+#[cfg(any(test, feature = "test-support"))]
+use axcenity_editor_kit::snapshot;
+use axcenity_editor_kit::theme::{self, icons};
+use axcenity_editor_kit::widgets::{self, Role};
+use axcenity_editor_kit::{color_palette, responsive, screen, wheel};
+use axcenity_editor_tools::gizmo::{self, MoveAxes, Snap, Tool};
+use axcenity_editor_tools::preview;
+use axcenity_editor_tools::shortcuts::{self, Action};
 
 /// Object mode, Edit mode, Paint, Sculpt, Rig, Weights or Pose mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -175,7 +180,7 @@ pub struct StudioDoc {
     pub reference: Option<usize>,
     /// What Edit mode's moves and operations snap to, if anything: set by
     /// the Studio before each (`ModelStudio::refresh_snap`).
-    pub(crate) snap: Option<Arc<Reference>>,
+    pub snap: Option<Arc<Reference>>,
 }
 
 impl StudioDoc {
@@ -550,7 +555,7 @@ impl StudioDoc {
 
     /// Moves what's picked by `matrix` at once, as one undo step named
     /// `label`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn transform(&mut self, label: &str, matrix: Mat4) -> bool {
         let targets = self.targets();
         if targets.is_empty() {
@@ -815,7 +820,7 @@ impl ModelStudio {
     }
 
     /// As if the mouse were over the tab (or not), for tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_pointer(&mut self, over: bool) {
         self.hovered = over;
     }
@@ -1772,21 +1777,33 @@ fn save_name(doc: &StudioDoc) -> String {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod modifiers_tests;
-#[cfg(test)]
-pub(crate) mod paint_tests;
-#[cfg(test)]
-pub(crate) mod retopo_tests;
-#[cfg(test)]
-pub(crate) mod rig_tests;
-#[cfg(test)]
-pub(crate) mod sculpt_tests;
-#[cfg(test)]
-pub(crate) mod tests;
-#[cfg(test)]
-pub(crate) mod tools_tests;
+// The test modules' helpers (a cube, a chair, a rigged humanoid, a sculpted
+// face, strokes and screens) are shared with the editor's own tests, behind
+// the `test-support` feature. Outside `cargo test` their `#[test]`s drop out,
+// so helpers only those use look unused.
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod modifiers_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod paint_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod retopo_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod rig_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod sculpt_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod tools_tests;
 #[cfg(test)]
 mod usability_tests;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
 mod uv_tests;

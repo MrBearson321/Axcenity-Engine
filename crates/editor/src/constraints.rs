@@ -25,6 +25,9 @@ use axcenity_render::glam::{Quat, Vec3};
 use axcenity_scene::{orientation_from_rotation, rotation_from_orientation};
 use eframe::egui;
 
+use axcenity_editor_tools::attachments::part_frame;
+pub use axcenity_editor_tools::attachments::{on_one_of, world_pose};
+
 use crate::gizmo::{PartValues, Pose};
 use crate::screen::Screen;
 use crate::viewport::SurfacePick;
@@ -94,38 +97,6 @@ fn is_part(instance: &Instance) -> bool {
     instance.class().is_base_part()
 }
 
-/// The part an Attachment is on, if its parent is one.
-fn part_of(world: &World, attachment: &Instance) -> Option<InstanceId> {
-    let parent = attachment.parent()?;
-    world.get(parent).filter(|part| is_part(part))?;
-    Some(parent)
-}
-
-/// Where the part an Attachment is on is, and how it's turned: nowhere
-/// off when it isn't on a part.
-fn part_frame(world: &World, attachment: &Instance) -> (Vec3, Quat) {
-    part_of(world, attachment)
-        .and_then(|part| world.get(part))
-        .and_then(Pose::of)
-        .map_or((Vec3::ZERO, Quat::IDENTITY), |pose| {
-            (pose.position, pose.rotation)
-        })
-}
-
-/// Where the Attachment `id` is in the world, and how it's turned, or
-/// `None` if `id` isn't an Attachment.
-pub fn world_pose(world: &World, id: InstanceId) -> Option<(Vec3, Quat)> {
-    let attachment = world.get(id)?;
-    if attachment.class() != ClassName::Attachment {
-        return None;
-    }
-    let vector = |name| attachment.property(name).and_then(Value::as_vector3);
-    let offset = to_vec3(vector("Position")?);
-    let turn = rotation_from_orientation(vector("Orientation")?);
-    let (at, rotation) = part_frame(world, attachment);
-    Some((at + rotation * offset, rotation * turn))
-}
-
 /// The pose the transform tools give the Attachment `id`: where it is in
 /// the world, a little box around it. `None` if `id` isn't an Attachment.
 pub fn tool_pose(world: &World, id: InstanceId) -> Option<Pose> {
@@ -135,16 +106,6 @@ pub fn tool_pose(world: &World, id: InstanceId) -> Option<Pose> {
         rotation,
         size: Vec3::splat(ATTACHMENT_SIZE),
     })
-}
-
-/// True if `id` is an Attachment on one of `parts`: it follows its part,
-/// so the tools don't move it as well.
-pub fn on_one_of(world: &World, id: InstanceId, parts: &[InstanceId]) -> bool {
-    world
-        .get(id)
-        .filter(|instance| instance.class() == ClassName::Attachment)
-        .and_then(|attachment| part_of(world, attachment))
-        .is_some_and(|part| parts.contains(&part))
 }
 
 /// Turns the world `Position` and `Orientation` a drag sets on each

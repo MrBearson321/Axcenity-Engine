@@ -15,12 +15,12 @@ use super::*;
 use crate::screen::Screen;
 
 /// How tall the humanoid is, in studs.
-pub(crate) const HEIGHT: f32 = 5.0;
+pub const HEIGHT: f32 = 5.0;
 
 /// A model of one object, `Body`: a humanoid standing in a T-pose,
 /// facing +Z, its left at +X (modeled round where the template's bones
 /// go, as an artist would model to Mixamo's proportions).
-pub(crate) fn humanoid_doc() -> ModelDoc {
+pub fn humanoid_doc() -> ModelDoc {
     let guide = Armature::humanoid(Vec3::new(-2.6, 0.0, -0.5), Vec3::new(2.6, HEIGHT, 0.5));
     let body = guide.stand_in_body(HEIGHT / 90.0).unwrap();
     let mut model = ModelDoc::primitive(&PrimitiveSettings::default());
@@ -34,7 +34,7 @@ pub(crate) fn humanoid_doc() -> ModelDoc {
 
 /// The humanoid in the Studio, given the Humanoid rig and automatic
 /// weights in Rig mode, each an undo step.
-pub(crate) fn rigged(studio: &mut ModelStudio) {
+pub fn rigged(studio: &mut ModelStudio) {
     let doc = studio.doc.as_mut().unwrap();
     doc.set_mode(Mode::Armature);
     assert_eq!(doc.mode, Mode::Armature);
@@ -49,7 +49,7 @@ pub(crate) fn rigged(studio: &mut ModelStudio) {
     assert!(doc.model.objects[0].skin.is_some());
 }
 
-pub(crate) fn bone(studio: &ModelStudio, name: &str) -> usize {
+pub fn bone(studio: &ModelStudio, name: &str) -> usize {
     let armature = studio
         .doc
         .as_ref()
@@ -62,7 +62,7 @@ pub(crate) fn bone(studio: &ModelStudio, name: &str) -> usize {
 }
 
 /// The drawn model's corners in the file's space (undoing the fit).
-pub(crate) fn corners(model: &Model) -> Vec<Vec3> {
+pub fn corners(model: &Model) -> Vec<Vec3> {
     let size = Vec3::from(model.size);
     let scale = Vec3::select(size.cmpgt(Vec3::ZERO), size, Vec3::ONE);
     let center = Vec3::from(model.center);
@@ -202,7 +202,7 @@ fn a_modeled_humanoid_with_the_template_rig_and_automatic_weights_bends_cleanly_
 }
 
 /// Looking at the humanoid's front from 9 studs away, at chest height.
-pub(crate) fn front_view() -> Screen {
+pub fn front_view() -> Screen {
     let camera = Camera {
         position: Vec3::new(0.0, 3.6, 9.0),
         look_at: Vec3::new(0.0, 3.6, 0.0),

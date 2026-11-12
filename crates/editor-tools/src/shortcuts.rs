@@ -12,7 +12,7 @@
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 
 use crate::gizmo::Tool;
-use crate::terrain_studio::TerrainTool;
+use crate::terrain_tool::TerrainTool;
 
 const NONE: Modifiers = Modifiers::NONE;
 const SHIFT: Modifiers = Modifiers::SHIFT;
@@ -392,7 +392,7 @@ impl Action {
             FlySpeed,
         ]);
         all.extend(
-            crate::terrain_studio::TerrainTool::all()
+            crate::terrain_tool::TerrainTool::all()
                 .filter(|tool| !Action::TerrainTool(*tool).keys().is_empty())
                 .map(TerrainTool),
         );

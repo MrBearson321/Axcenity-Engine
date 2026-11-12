@@ -201,7 +201,7 @@ pub(super) const RETOPO_HEADER: &str = "Retopology and Bake";
 
 impl ModelStudio {
     /// The reference's surface, made again if its mesh changed.
-    pub(crate) fn reference_surface(&mut self) -> Option<Arc<Reference>> {
+    pub fn reference_surface(&mut self) -> Option<Arc<Reference>> {
         let doc = self.doc.as_ref()?;
         let index = doc.reference_object()?;
         let mesh = doc.model.objects[index].evaluated(Purpose::Viewport)?;
@@ -237,13 +237,7 @@ impl ModelStudio {
     /// A Poly Build click: at `point` on the reference, out from open edge
     /// `edge` if there's one, welding within `weld`, facing `facing` (the
     /// way to the camera). Every fourth free point makes a quad.
-    pub(crate) fn poly_build_click(
-        &mut self,
-        point: Vec3,
-        edge: Option<u32>,
-        weld: f32,
-        facing: Vec3,
-    ) {
+    pub fn poly_build_click(&mut self, point: Vec3, edge: Option<u32>, weld: f32, facing: Vec3) {
         self.refresh_snap();
         let Some(points) = &mut self.retopo.poly_build else {
             return;
@@ -377,7 +371,7 @@ impl ModelStudio {
     }
 
     /// Make Low Poly, with the uv settings' margin.
-    pub(crate) fn make_low_poly(&mut self) {
+    pub fn make_low_poly(&mut self) {
         let (angle, margin) = (LOW_POLY_ANGLE, self.uv.margin);
         let target = self.retopo.target;
         let Some(doc) = &mut self.doc else {
@@ -398,7 +392,7 @@ impl ModelStudio {
     }
 
     /// Keeps a bake's report to show under the button.
-    pub(crate) fn bake_done(&mut self, report: &BakeReport) {
+    pub fn bake_done(&mut self, report: &BakeReport) {
         let faces = report
             .overlaps
             .iter()

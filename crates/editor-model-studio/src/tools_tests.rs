@@ -401,7 +401,7 @@ fn edge_between(doc: &StudioDoc, a: Vec3, b: Vec3) -> [u32; 2] {
 /// out so the corners are thin), four legs extruded down from the corners
 /// underneath, a backrest extruded up from the back row, the seat inset
 /// into a cushion, and the backrest's top beveled round.
-pub(crate) fn model_chair(doc: &mut StudioDoc) {
+pub fn model_chair(doc: &mut StudioDoc) {
     let scale = |doc: &mut StudioDoc, keep: &dyn Fn(Vec3) -> bool, by: Vec3| {
         doc.set_select_mode(SelectMode::Vertex);
         doc.select(|selection, mesh| {

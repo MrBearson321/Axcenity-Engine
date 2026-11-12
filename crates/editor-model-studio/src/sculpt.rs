@@ -421,13 +421,8 @@ impl ModelStudio {
 
     /// A whole stroke through `points` in the 3D view, as dragging the
     /// mouse along them sculpts it.
-    #[cfg(test)]
-    pub(crate) fn sculpt_stroke(
-        &mut self,
-        screen: &Screen,
-        points: &[egui::Pos2],
-        invert: bool,
-    ) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn sculpt_stroke(&mut self, screen: &Screen, points: &[egui::Pos2], invert: bool) -> bool {
         if !self.begin_sculpt(invert, false) {
             return false;
         }
@@ -439,8 +434,8 @@ impl ModelStudio {
     }
 
     /// The active object's sculpt, for tests.
-    #[cfg(test)]
-    pub(crate) fn sculpt_of(&mut self) -> Option<&Sculpt> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn sculpt_of(&mut self) -> Option<&Sculpt> {
         let doc = self.doc.as_ref()?;
         Some(&sculpt_of(&mut self.sculpt.cache, doc)?.sculpt)
     }
@@ -507,7 +502,7 @@ impl ModelStudio {
 
     /// Voxel Remesh (`remesh`) or Subdivide on the active object, as one
     /// undo step.
-    pub(crate) fn sculpt_detail(&mut self, remesh: bool) {
+    pub fn sculpt_detail(&mut self, remesh: bool) {
         let Some(doc) = &mut self.doc else {
             return;
         };
@@ -530,7 +525,7 @@ impl ModelStudio {
     }
 
     /// A mask action (not an undo step): `change` on the sculpt.
-    pub(crate) fn change_mask(&mut self, change: impl FnOnce(&mut Sculpt)) {
+    pub fn change_mask(&mut self, change: impl FnOnce(&mut Sculpt)) {
         let Some(doc) = &self.doc else {
             return;
         };

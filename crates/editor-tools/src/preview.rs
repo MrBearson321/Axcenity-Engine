@@ -12,7 +12,7 @@ use axcenity_scene::Poses;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use super::posing::{BoneEvent, PoseSettings, Poser, Skeleton};
+use crate::posing::{BoneEvent, PoseSettings, Poser, Skeleton};
 use crate::screen::Screen;
 
 /// Floor tiles along each side.

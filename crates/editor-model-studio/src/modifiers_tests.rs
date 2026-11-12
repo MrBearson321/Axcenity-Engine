@@ -12,7 +12,7 @@ use super::*;
 
 /// A ball cut in half down the middle, its +X half, in Edit mode with
 /// nothing picked.
-pub(crate) fn half_head_doc() -> StudioDoc {
+pub fn half_head_doc() -> StudioDoc {
     let mut settings = PrimitiveSettings::of(PrimitiveShape::UvSphere);
     settings.segments = 16;
     settings.rings = 8;
@@ -29,7 +29,7 @@ pub(crate) fn half_head_doc() -> StudioDoc {
     doc
 }
 
-pub(crate) fn mirror(clip: bool) -> Modifier {
+pub fn mirror(clip: bool) -> Modifier {
     Modifier::new(ModifierKind::Mirror {
         axis: Axis::X,
         clip,
@@ -38,7 +38,7 @@ pub(crate) fn mirror(clip: bool) -> Modifier {
     })
 }
 
-pub(crate) fn subdivision() -> Modifier {
+pub fn subdivision() -> Modifier {
     Modifier::new(ModifierKind::Subdivision {
         viewport: 1,
         export: 2,
