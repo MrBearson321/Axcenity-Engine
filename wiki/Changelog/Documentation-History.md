@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | ADR-0024, ADR index, roadmap | Cohesion pass CP1: audit of the design system, scripting IRs, physics, Collaborate, previews, saving and branding (`docs/research/cohesion-pass.md`), and the decision to extend existing foundations | Claude |
 | 2026-11-12 | ADR-0021, inventory, roadmap | Collaborate C12: the future Django account integration as a document (`docs/research/collaborate-accounts.md`): providers, token checks, linking members, ownership, the website's API, threat model | Claude |
 | 2026-11-12 | Optimization log, benchmark history, performance overview, known bottlenecks, project and serialization, known limitations, ADR-0016, inventory, roadmap | Collaborate C11: zstd for big messages, S10k session measurements, and the quadratic `world.json` load fixed (S10k 5.66 → 0.19 s) | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C10: `IdentityProvider` seam, per-member budgets for each message kind and handshake limits (`crates/collab/src/limits.rs`), the host's audit log (`audit.rs`), security review in `docs/research/collaborate.md` §6.1 | Claude |

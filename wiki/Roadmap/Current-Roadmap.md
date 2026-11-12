@@ -102,6 +102,22 @@ Graphics plan: Phases 1–38 built.
 | Design system V1–V26 in six phases | Phases 1–5 **done** (#66 tokens; #71 feedback: errors stay until seen, one way to open and close windows; #73 scale: Explorer and Console draw only what's visible; #74 editing: Properties edits every selected item, Explorer arrow keys; #79 shortcut table, layout presets, Increase contrast); Phase 6 (optional polish) **planned** |
 | Universal search (Ctrl+K) with indexed providers | **Done** (#76) |
 
+## Cohesion pass (brief of 2026-11-12)
+
+Audit and plan: `docs/research/cohesion-pass.md` (findings CF1–CF22, phases CP1–CP9), [ADR-0024](../Architecture/Architecture-Decisions/ADR-0024-Shared-Editor-Foundations-For-The-Cohesion-Pass.md).
+
+| Phase | Status |
+|---|---|
+| CP1 audit and plan | **Done** |
+| CP2 shared UI foundation, start-screen pages, welcome page | Planned |
+| CP3 documents and saving, open action, script views | Planned |
+| CP4 node catalogue and tooltips | Planned |
+| CP5 Object Viewer | Planned |
+| CP6 physics module split and properties | Planned |
+| CP7 Team Projects, trust, firewall | Planned |
+| CP8 game branding | Planned |
+| CP9 final validation | Planned |
+
 ## Tooling for AI clients and releases
 
 | Work | Status |

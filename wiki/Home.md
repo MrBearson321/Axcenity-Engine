@@ -88,11 +88,10 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
+| 2026-11-12 | ADR-0024, roadmap | Cohesion pass audit and plan (CP1–CP9) |
 | 2026-11-12 | ADR-0021, roadmap | Collaborate C12: how a future account website would plug in (document only) |
 | 2026-11-12 | Optimization log, benchmark history | Collaborate C11 measurements; S10k's `world.json` loads in 0.19 s instead of 5.7 |
 | 2026-11-12 | ADR-0023, roadmap | Phase 89: scripts keep their state when saved in Play; engine hot-patching removed |
 | 2026-11-12 | ADR-0022, roadmap | Collaborate 2.0 design: persistent projects, Git sync, host handoff |
-| 2026-11-12 | System inventory | Collaborate C3 and C4: Tailscale, setup wizard, Start Session |
-| 2026-11-12 | ADR-0021, ADR-0020, roadmap | Collaborate audit: live shared scripts, Tailscale setup, identity seam |
 
 Keep the five newest rows here; the full list is [Documentation history](Changelog/Documentation-History.md).
