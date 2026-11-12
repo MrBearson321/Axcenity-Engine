@@ -400,3 +400,116 @@ fn value_changed_fires_with_the_new_value_from_scripts_and_the_pointer() {
         ]
     );
 }
+
+#[test]
+fn once_runs_its_handler_the_next_time_only() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/once.server.lua",
+        r#"
+        local block = workspace.Block
+        local connection = block.Changed:Once(function(property)
+            print("once", property)
+            block.Name = "Again" -- fires Changed again, from inside
+        end)
+        print(connection.Connected)
+        block.Name = "Pad"
+        local stopped = block:GetPropertyChangedSignal("Size"):Once(function()
+            print("never")
+        end)
+        stopped:Disconnect()
+        block.Size = Vector3.new(2, 2, 2)
+        print(pcall(block.Changed.Once, block.Changed, 5))
+        "#,
+    );
+    runtime.step(&mut world, 1.0 / 60.0);
+    let output = lines(&mut runtime);
+    assert_eq!(output[0], "true");
+    assert!(
+        output[1].starts_with("false\t")
+            && output[1].ends_with("Once takes a function, not a number"),
+        "{output:?}"
+    );
+    assert_eq!(output[2], "once\tName");
+    assert_eq!(output.len(), 3, "{output:?}");
+}
+
+#[test]
+fn wait_pauses_until_the_event_fires_and_returns_its_values() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/wait.server.lua",
+        r#"
+        local block = workspace.Block
+        task.spawn(function()
+            local property = block.Changed:Wait()
+            print("changed", property, block.Name)
+            local dt = game:GetService("RunService").Heartbeat:Wait()
+            print("heartbeat", dt)
+        end)
+        print("waiting")
+        block.Name = "Pad"
+        "#,
+    );
+    runtime.step(&mut world, 1.0 / 60.0);
+    runtime.heartbeat(&mut world, 0.25);
+    runtime.heartbeat(&mut world, 0.5);
+    assert_eq!(
+        lines(&mut runtime),
+        ["waiting", "changed\tName\tPad", "heartbeat\t0.25"]
+    );
+}
+
+#[test]
+fn a_wait_ends_with_its_script() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    let script = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(script, Some(world.server_script_service()))
+        .unwrap();
+    runtime.start_script(
+        &mut world,
+        script,
+        "scripts/wait.server.lua",
+        r#"
+        workspace.Block.Changed:Wait()
+        print("never")
+        "#,
+    );
+    world.destroy(script).unwrap();
+    runtime.step(&mut world, 1.0 / 60.0);
+    let block = world.find_first_child(world.workspace(), "Block").unwrap();
+    world.set_name(block, "Pad").unwrap();
+    runtime.step(&mut world, 1.0 / 60.0);
+    assert!(lines(&mut runtime).is_empty());
+}
+
+#[test]
+fn find_service_gives_nil_for_a_name_that_is_not_a_service() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/find.server.lua",
+        r#"
+        print(game:FindService("Workspace") == workspace)
+        print(game:FindService("RunService") ~= nil)
+        print(game:FindService("Nope"))
+        print(pcall(game.GetService, game, "Nope"))
+        "#,
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[..3], ["true", "true", "nil"]);
+    assert!(
+        output[3].contains("there is no service named \"Nope\"; choose from Workspace"),
+        "{output:?}"
+    );
+}

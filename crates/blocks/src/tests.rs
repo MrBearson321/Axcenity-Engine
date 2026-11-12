@@ -68,6 +68,8 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
         | BlockKind::WhenSeatOccupied { .. }
+        | BlockKind::WhenPropertyChanged { .. }
+        | BlockKind::WhenAttributeChanged { .. }
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
         | BlockKind::WhenCommandRun { .. }
@@ -178,9 +180,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::Break => 100,
         BlockKind::Continue => 101,
         BlockKind::Return { .. } => 102,
+        BlockKind::SetAttribute { .. } => 103,
+        BlockKind::WaitForEvent { .. } => 104,
     })
 }
-const STATEMENT_COUNT: usize = 103;
+const STATEMENT_COUNT: usize = 105;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -949,6 +953,21 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             },
             "return x, ...",
         ),
+        (
+            BlockKind::SetAttribute {
+                target: pad(),
+                attribute: "Points".to_owned(),
+                value: number(10.0),
+            },
+            "workspace.Pad:SetAttribute(\"Points\", 10)",
+        ),
+        (
+            BlockKind::WaitForEvent {
+                target: pad(),
+                event: "Touched".to_owned(),
+            },
+            "workspace.Pad.Touched:Wait()",
+        ),
     ]
 }
 
@@ -1114,6 +1133,22 @@ fn translation_covers_every_event_block() {
         ),
         block(92, BlockKind::WhenConnectionFails { body: quiet(93) }),
         block(
+            98,
+            BlockKind::WhenPropertyChanged {
+                target: "Door".to_owned(),
+                property: "Transparency".to_owned(),
+                body: quiet(99),
+            },
+        ),
+        block(
+            100,
+            BlockKind::WhenAttributeChanged {
+                target: "Player1".to_owned(),
+                attribute: "Health".to_owned(),
+                body: quiet(101),
+            },
+        ),
+        block(
             96,
             BlockKind::WhenSplineReached {
                 follower: "Lift.SplineFollower".to_owned(),
@@ -1156,11 +1191,13 @@ fn translation_covers_every_event_block() {
         "NetworkService.ConnectionFailed:Connect(function(reason)",
         "workspace.Lift.SplineFollower.Reached:Connect(function(which)",
         "    if which == \"End\" then",
+        "workspace.Door:GetPropertyChangedSignal(\"Transparency\"):Connect(function()",
+        "workspace.Player1:GetAttributeChangedSignal(\"Health\"):Connect(function()",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 21, "{source}");
+    assert_eq!(source.matches("do return end").count(), 23, "{source}");
 }
 
 #[test]
@@ -2076,6 +2113,22 @@ fn every_block_script() -> BlockScript {
                 body: body(),
             },
         ),
+        block(
+            22,
+            BlockKind::WhenPropertyChanged {
+                target: "Door".to_owned(),
+                property: "Transparency".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            23,
+            BlockKind::WhenAttributeChanged {
+                target: "Coin".to_owned(),
+                attribute: "Value".to_owned(),
+                body: body(),
+            },
+        ),
     ];
     // New IDs all the way down, as the statements are copies.
     script(stacks.iter().map(Block::duplicate).collect())
@@ -2181,6 +2234,10 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
         Expression::AnimatorLayerWeight {
             animator: animator(),
             layer: "UpperBody".to_owned(),
+        },
+        Expression::Attribute {
+            target: "Coin".to_owned(),
+            attribute: "Value".to_owned(),
         },
         Expression::Property {
             target: animator(),

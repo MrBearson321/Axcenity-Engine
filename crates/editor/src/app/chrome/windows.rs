@@ -249,7 +249,7 @@ pub(super) fn block_objects(
         .into_iter()
         .filter_map(|id| {
             let instance = world.get(id)?;
-            let controller_names = match instance.class() {
+            let mut controller_names = match instance.class() {
                 ClassName::Animator => instance
                     .property("StateMachine")
                     .and_then(Value::as_str)
@@ -258,6 +258,13 @@ pub(super) fn block_objects(
                     .unwrap_or_default(),
                 _ => Vec::new(),
             };
+            // Its attributes, for the attribute blocks' menus.
+            controller_names.extend(
+                instance
+                    .attributes()
+                    .keys()
+                    .map(|name| (block_editor::NameKind::Attribute, name.clone())),
+            );
             let mut names = vec![instance.name().to_owned()];
             let mut parent = instance.parent();
             while let Some(above) = parent.filter(|&above| above != workspace) {

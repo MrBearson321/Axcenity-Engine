@@ -91,6 +91,10 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::WhenAgentSenses { .. } => ("When Agent Senses Player", &["Agent", "Sense"]),
         BlockKind::WhenSplineReached { .. } => ("When Spline End Reached", &["Follower", "End"]),
         BlockKind::WhenSeatOccupied { .. } => ("When Someone Sits", &["Seat"]),
+        BlockKind::WhenPropertyChanged { .. } => ("When Property Changes", &["Property", "Object"]),
+        BlockKind::WhenAttributeChanged { .. } => {
+            ("When Attribute Changes", &["Attribute", "Object"])
+        }
         BlockKind::WhenPromptTriggered { .. } => ("When Prompt Triggered", &["Prompt"]),
         BlockKind::WhenPartClicked { .. } => ("When Part Clicked", &["Click Detector"]),
         BlockKind::WhenCommandRun { .. } => ("When Command Run", &["Command", "Help"]),
@@ -109,6 +113,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         }
         BlockKind::ForEachPartTouching { .. } => ("For Each Part Touching", &["Variable", "Part"]),
         BlockKind::WaitForChild { .. } => ("Wait For Child", &["Name", "Object"]),
+        BlockKind::WaitForEvent { .. } => ("Wait For Event", &["Object", "Event"]),
         BlockKind::CloneInto { .. } => ("Clone", &["Object", "Into"]),
         BlockKind::MoveTo { .. } => ("Move To", &["Part", "Position"]),
         BlockKind::MoveBy { .. } => ("Move By", &["Part", "Offset"]),
@@ -138,6 +143,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::ScrollTo { .. } => ("Scroll To", &["Frame", "X", "Y"]),
         BlockKind::SetValue { .. } => ("Set Value", &["Widget", "Value"]),
         BlockKind::SetProperty { .. } => ("Set Property", &["Property", "Object", "Value"]),
+        BlockKind::SetAttribute { .. } => ("Set Attribute", &["Attribute", "Object", "Value"]),
         BlockKind::PlaySound { .. } => ("Play Sound", &["Sound"]),
         BlockKind::StopSound { .. } => ("Stop Sound", &["Sound"]),
         BlockKind::PauseSound { .. } => ("Pause Sound", &["Sound"]),
@@ -293,6 +299,7 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::Logic { .. } => ("And / Or", &["A", "Operator", "B"]),
         Expression::Not { .. } => ("Not", &["Value"]),
         Expression::Property { .. } => ("Get Property", &["Property", "Object"]),
+        Expression::Attribute { .. } => ("Get Attribute", &["Attribute", "Object"]),
         Expression::Raycast { .. } => ("Raycast", &["Origin", "Direction"]),
         Expression::RaycastIgnoring { .. } => {
             ("Raycast Ignoring", &["Origin", "Direction", "Ignore"])
