@@ -6,6 +6,8 @@ Each editor package includes the player for that OS beside the editor, and playe
 
 This is an alpha: expect bugs and breaking changes. Builds are not code-signed.
 
+What a computer needs (supported systems, processor, memory, graphics, network and storage): [System requirements](../../documentation/reference/system-requirements.md).
+
 ## Windows (`.exe`)
 
 1. Download `AxcenityEditor-*-windows-x86_64.exe`.
