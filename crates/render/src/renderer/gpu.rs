@@ -729,12 +729,15 @@ pub(super) fn upload_buffers(
         label: Some(name),
         contents: bytemuck::cast_slice(corners),
         // COPY_DST so a posed mesh's corners can be rewritten in place.
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | MESH_READ,
+        usage: wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | MESH_READ
+            | super::ray_tracing::blas_input(device),
     });
     let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
         contents: indices,
-        usage: wgpu::BufferUsages::INDEX | MESH_READ,
+        usage: wgpu::BufferUsages::INDEX | MESH_READ | super::ray_tracing::blas_input(device),
     });
     GpuMesh {
         bounds: vertex_bounds(corners),

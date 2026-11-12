@@ -17,6 +17,9 @@ use std::time::Duration;
 /// The parts of a frame the GPU is timed on, in the order they're drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FramePass {
+    /// Hardware ray tracing's acceleration structures built, while
+    /// something traces rays.
+    AccelerationStructures,
     /// The sun's cascades and the spot lights' shadow maps.
     Shadows,
     /// Solid items' depth and normals, while ambient occlusion is on.
@@ -37,8 +40,9 @@ pub enum FramePass {
 }
 
 impl FramePass {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
     pub const ALL: [FramePass; Self::COUNT] = [
+        FramePass::AccelerationStructures,
         FramePass::Shadows,
         FramePass::Prepass,
         FramePass::AmbientOcclusion,
@@ -51,6 +55,7 @@ impl FramePass {
 
     pub fn label(self) -> &'static str {
         match self {
+            FramePass::AccelerationStructures => "Acceleration structures",
             FramePass::Shadows => "Shadows",
             FramePass::Prepass => "Depth prepass",
             FramePass::AmbientOcclusion => "Ambient occlusion",

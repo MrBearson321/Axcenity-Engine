@@ -134,6 +134,9 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
         // Cooked textures go up as BC7 where the GPU reads it.
         descriptor.required_features |= adapter.features()
             & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_BC);
+        // Hardware ray tracing where the GPU has it, for the optional ray
+        // traced effects (`axcenity_render::adapters::with_ray_queries`).
+        axcenity_render::adapters::with_ray_queries(adapter, &mut descriptor);
         descriptor
     });
     eframe::egui_wgpu::WgpuConfiguration {
