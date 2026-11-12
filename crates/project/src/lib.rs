@@ -33,6 +33,7 @@
 mod asset_fix;
 mod asset_refs;
 mod backup;
+mod collaborate_file;
 mod compat;
 mod levels;
 mod migrate;
@@ -84,6 +85,9 @@ pub use asset_refs::{
 };
 pub use backup::{
     BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,
+};
+pub use collaborate_file::{
+    COLLABORATE_FILE, CollaborateFile, RepositoryLink, load_collaborate_file, save_collaborate_file,
 };
 pub use compat::{Compatibility, compatibility};
 pub use levels::{

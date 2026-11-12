@@ -1,0 +1,18 @@
+[package]
+name = "axcenity-repo"
+description = "Collaborate 2.0: a project's optional Git remote (GitHub first) through the installed git, automatic checkpoints, sync and conflict handling. No engine, UI or network-session code."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true
