@@ -47,6 +47,38 @@ These were decided in the developer's interview of 2026-10-27.
 - **Blocks parity** still holds: every new creator-facing Lua API gets matching blocks and API reference entries.
 - **Not in this plan**: web, Android and iOS export, Steam integration, relay servers and matchmaking, runtime IK (feet on slopes, look-at), and graphics features.
 
+## Audit of 2026-11-12
+
+> **From**: the developer's request of 2026-11-12 to finish the unticked items and fit them to the code as it is now (main at `aa666a3`). Since this plan was last edited (2026-11-10), the modernization roadmap (I, M and L items), the gap analysis (G items), the editor crate split, Team Create and Collaborate, the MCP toolkit, the Toolbox and the release system have all landed. Each unticked criterion was compared with main. Where a criterion moved, it says so beside it.
+
+**What's left, in order.** One PR per step, each opened after the previous one merges.
+
+| Step | Work | Status on main | Fit to today's code |
+| --- | --- | --- | --- |
+| 1 | Phase 89: engine hot-patching out, game files hot reload like s&box (**Changed** 2026-11-12) | Not started. Script reload (Phase 24, `ScriptRuntime::reload_script`) reruns a script from scratch. `hot_patch.rs`, `hot_patch/` and the `hot-patch` feature (`subsecond`, `dioxus-*`) are still in `crates/editor`. | `rebuild.rs`, `relaunch.rs` and `app/engine.rs` stayed in `crates/editor` through the crate split. `blocks` already has a full Luau reader with source spans (`blocks/src/lua.rs`), which wraps scripts' top-level locals. |
+| 2 | Phase 90: a narrower Model Studio | Not started. | Model Studio moved to `crates/editor-model-studio` (G11, #189): delete `sculpt*` and `retopo*` there, not in `editor/src/model_studio/`. The usability audit (MS4) already folded Retopology and Bake away, which agrees with removing them. Rigging still needs `sculpt::remesh::field_mesh` (`rig/template.rs`), `retopo::Reference` (`rig/weights.rs`) and `sculpt::subdivide` (`rig_tests.rs`). Terrain sculpting is a different tool and stays. |
+| 3 | Phase 91: one graph canvas | Not started (also proposed as V24 by the usability refactor audit). | `node_graph` is now the `editor-node-graph` crate (#193). `block_editor/graph.rs` is 1,436 lines and `animation/graph.rs` 930. The material graph's own view is `editor/src/material_editor/graph.rs`. |
+| 4 | Phase 92: legacy paths, old templates and dead weight | Partly superseded. The genre templates (Phase 69) landed, so the Starter template can go. | `project::FORMAT_VERSION` is already 5 (the release system's engine record, #98 era), so this phase bumps it to **6**, not 5. There are four alpha releases now (`releases/history`: 0.1.0-alpha.1 to .3 and 0.2.0-alpha.1). |
+| 5 | Phase 93: a multithreaded frame | About half done by the roadmap. Physics runs on rapier's parallel feature in its own pool of at most 12 threads with the same results at any thread count (M3 #25, `physics/src/threads.rs`). Frame planning and culling run on the renderer's pool (`render/src/renderer/parallel.rs`). The nav mesh builds on a worker (M13 #32). The retained draw list (M4 #23) removed most of the draw-list build. | Left: animator posing across threads, mesh decoding on a shared pool, per-thread time in the Profiler, the 200-character and 2,000-body benchmark, and test runs with 1 and 8 threads. The modernization report (§ `rayon` usage) asks for the same: posing, audio diff and nav fingerprint over `&World`, applied in index order. "Limited on mobile" is deferred with Milestone 20. |
+| 6 | Phase 80's open criterion: the 4 × 4 km benchmark | No benchmark scene exists for it. | Build a generated 50,000-part, 4 × 4 km scene as an ignored bench test. Measuring it needs the reference machine (the developer's PC). |
+| 7 | Phase 81: lag compensation and replays | Not started. | Builds on `net` replication (Phases 63 to 66), not on Collaborate, which is a separate editor-sync system with its own thread. Replays record the replication stream, so they don't need cross-machine determinism, which the development policy rules out. |
+
+**Hand checks.** These need a person, the developer's PC or Mac, or two computers. They stay unticked until checked, and the PC and Mac are booked through the project's coordinator.
+
+- Open checks, Animation window: the old panel's features in the one Animation tab.
+- Phase 25: an editor label change rebuilds and relaunches (re-checked with `--features engine-dev` in Phase 89).
+- Phase 30: `MouseBehavior = LockCenter` with `GetMouseDelta` in a real window (the Lua side is covered by `script` `input_tests.rs`).
+- Phase 53: `axcenity-test examples/hello-character` on Windows and macOS (Linux checked in the cloud).
+- Phase 55: a Blender model opened and saved unchanged in Model Studio reopens in Blender the same.
+- Phase 63: `FindLanGames` across two computers (the developer's PC and Mac).
+
+**Checked in this audit.**
+
+- Phase 63, headless server: `the_server_runs_headless_and_a_player_joins_it` passes in the cloud container, which is Linux with no display.
+- Phase 72, backup on another computer: `a_backup_zip_opens_as_the_project_somewhere_else` unzips a backup into another folder and opens it. `back_up_project` writes every entry with `/` between folders whatever the OS, so a zip made on Windows unpacks the same on macOS and Linux.
+
+**Not done, on purpose.** Milestone 20 (mobile) is **Deferred** by the development policy, and its criteria are marked so. Phase 26's two criteria stay **Removed** (Phase 89).
+
 ---
 
 # Open checks (built, not yet ticked)
@@ -954,10 +986,10 @@ The new process reads the handoff and deletes it. It opens the project with thos
 
 ### Acceptance criteria
 
-- [ ] **Removed** (Phase 89 removes hot-patching): During Play, changing the body of a physics or character step function changes behaviour at the next frame, with no relaunch, and the game keeps running.
+- [ ] **Removed** (Phase 89 removes engine hot-patching): During Play, changing the body of a physics or character step function changes behaviour at the next frame, with no relaunch, and the game keeps running.
 - [x] Changing a struct's fields falls back to rebuild and relaunch, and Output says so.
 - [x] Without the `hot-patch` feature the editor builds without `subsecond`, and the player never depends on it.
-- [ ] **Removed** (Phase 89 removes hot-patching): The workspace still builds on Windows, macOS and Linux. On a platform where patching isn't supported, the fallback is used.
+- [ ] **Removed** (Phase 89 removes engine hot-patching): The workspace still builds on Windows, macOS and Linux. On a platform where patching isn't supported, the fallback is used.
 
 ---
 
@@ -1972,7 +2004,7 @@ Results are written as role-named PNGs.
 - [x] Two players on one machine connect over UDP through `--host` and `--join`, and both appear in each other's `Players` (worlds aren't shared yet).
 - [ ] A game on the LAN shows in `FindLanGames` on another computer. Test: `a_search_from_the_network_lists_the_game_at_its_network_address_and_joins_it`. Two computers: the ignored `a_game_hosted_on_another_computer_shows_in_a_lan_search` (docs/development.md).
 - [x] A version mismatch is refused with a clear reason on both sides.
-- [ ] `axcenity-server` runs on Linux with no display. Test: `the_server_runs_headless_and_a_player_joins_it`; run `scripts/check-platform.sh` on Linux with no desktop session.
+- [x] `axcenity-server` runs on Linux with no display. Test: `the_server_runs_headless_and_a_player_joins_it`, passed 2026-11-12 in a Linux container with no display (Audit of 2026-11-12).
 
 ---
 
@@ -2200,7 +2232,7 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 - [x] Three pinned checkpoints survive 50 later saves, and restoring the first keeps a snapshot of what was replaced.
 - [x] The change view names a moved Part and an edited script correctly.
-- [ ] A backup `.zip` opens as a project on another computer.
+- [x] A backup `.zip` opens as a project on another computer. Test: `a_backup_zip_opens_as_the_project_somewhere_else`; entries always use `/` (Audit of 2026-11-12).
 
 ---
 
@@ -2492,9 +2524,9 @@ Replays work in single-player too, because it runs over the same replication.
 
 ### Acceptance criteria
 
-- [ ] In the Phone portrait preview, a `DeviceSafeInsets` ScreenGui stays clear of the notch and home bar, as on the UI Designer artboard.
-- [ ] A LocalScript that checks `TouchEnabled` sees true in the phone preview and false on Desktop.
-- [ ] `TouchStarted`, `TouchMoved` and `TouchEnded` fire from the mouse in the preview, and the second finger gives a pinch.
+- [ ] **Deferred** (Milestone 20, development policy): In the Phone portrait preview, a `DeviceSafeInsets` ScreenGui stays clear of the notch and home bar, as on the UI Designer artboard.
+- [ ] **Deferred** (Milestone 20, development policy): A LocalScript that checks `TouchEnabled` sees true in the phone preview and false on Desktop.
+- [ ] **Deferred** (Milestone 20, development policy): `TouchStarted`, `TouchMoved` and `TouchEnded` fire from the mouse in the preview, and the second finger gives a pinch.
 
 ---
 
@@ -2521,10 +2553,10 @@ Replays work in single-player too, because it runs over the same replication.
 
 ### Acceptance criteria
 
-- [ ] In the phone preview, with no script, the Third Person template's character walks with the thumbstick, turns the camera by dragging, jumps with the button, and opens a door with the prompt's button.
-- [ ] An action bound with `createTouchButton` true shows a button that fires the handler with Begin and End, and `SetPosition` moves it.
-- [ ] Turning `TouchControlsEnabled` off hides every default control.
-- [ ] Desktop Play with a mouse shows no touch controls.
+- [ ] **Deferred** (Milestone 20, development policy): In the phone preview, with no script, the Third Person template's character walks with the thumbstick, turns the camera by dragging, jumps with the button, and opens a door with the prompt's button.
+- [ ] **Deferred** (Milestone 20, development policy): An action bound with `createTouchButton` true shows a button that fires the handler with Begin and End, and `SetPosition` moves it.
+- [ ] **Deferred** (Milestone 20, development policy): Turning `TouchControlsEnabled` off hides every default control.
+- [ ] **Deferred** (Milestone 20, development policy): Desktop Play with a mouse shows no touch controls.
 
 ---
 
@@ -2552,11 +2584,11 @@ Replays work in single-player too, because it runs over the same replication.
 
 ### Acceptance criteria
 
-- [ ] `examples/hello-part` and `examples/hello-character` run on the Android emulator and the iOS simulator, with touch controls.
-- [ ] Sending the game to the background and back keeps its state, sound and picture, on a real Android phone and a real iPhone.
-- [ ] A TextBox shows the soft keyboard, and typed text arrives in Lua.
-- [ ] A save slot written on the phone is still there after the app is closed and opened again.
-- [ ] `cargo build --workspace` on Windows, macOS and Linux is unchanged, and CI builds all four mobile targets.
+- [ ] **Deferred** (Milestone 20, development policy): `examples/hello-part` and `examples/hello-character` run on the Android emulator and the iOS simulator, with touch controls.
+- [ ] **Deferred** (Milestone 20, development policy): Sending the game to the background and back keeps its state, sound and picture, on a real Android phone and a real iPhone.
+- [ ] **Deferred** (Milestone 20, development policy): A TextBox shows the soft keyboard, and typed text arrives in Lua.
+- [ ] **Deferred** (Milestone 20, development policy): A save slot written on the phone is still there after the app is closed and opened again.
+- [ ] **Deferred** (Milestone 20, development policy): `cargo build --workspace` on Windows, macOS and Linux is unchanged, and CI builds all four mobile targets.
 
 ---
 
@@ -2589,10 +2621,10 @@ Features that a phone's GPU can't run fall back quietly, and the Graphics profil
 
 ### Acceptance criteria
 
-- [ ] The graphics reference scene holds 30 FPS on both reference devices with the Mobile preset, and the Third Person template holds 60.
-- [ ] A mobile build of the graphics reference scene uses at most a third of the texture memory of the uncompressed build.
-- [ ] Forcing a thermal warning lowers the render scale, and the game keeps running.
-- [ ] Every graphics feature either runs or falls back on both reference devices, with no crash or blank screen.
+- [ ] **Deferred** (Milestone 20, development policy): The graphics reference scene holds 30 FPS on both reference devices with the Mobile preset, and the Third Person template holds 60.
+- [ ] **Deferred** (Milestone 20, development policy): A mobile build of the graphics reference scene uses at most a third of the texture memory of the uncompressed build.
+- [ ] **Deferred** (Milestone 20, development policy): Forcing a thermal warning lowers the render scale, and the game keeps running.
+- [ ] **Deferred** (Milestone 20, development policy): Every graphics feature either runs or falls back on both reference devices, with no crash or blank screen.
 
 ---
 
@@ -2619,10 +2651,10 @@ Features that a phone's GPU can't run fall back quietly, and the Graphics profil
 
 ### Acceptance criteria
 
-- [ ] On a computer with no Android tools, Build Game > Android makes an `.apk` that installs and runs the Third Person template on the reference Android phone.
-- [ ] The installed app shows the chosen name, icon and orientation.
-- [ ] Building a new version over an installed one keeps its save slots.
-- [ ] Build and Run with `adb` shows the game's `print` output in the editor.
+- [ ] **Deferred** (Milestone 20, development policy): On a computer with no Android tools, Build Game > Android makes an `.apk` that installs and runs the Third Person template on the reference Android phone.
+- [ ] **Deferred** (Milestone 20, development policy): The installed app shows the chosen name, icon and orientation.
+- [ ] **Deferred** (Milestone 20, development policy): Building a new version over an installed one keeps its save slots.
+- [ ] **Deferred** (Milestone 20, development policy): Build and Run with `adb` shows the game's `print` output in the editor.
 
 ---
 
@@ -2651,10 +2683,10 @@ The settings are the same as Android's: bundle ID, name, version, build number, 
 
 ### Acceptance criteria
 
-- [ ] On a Mac with Xcode, Build Game > iOS and then Build and Run runs the Third Person template in the iOS simulator.
-- [ ] With a Team ID, the same project runs on the reference iPhone with no changes made by hand in Xcode.
-- [ ] The installed app shows the chosen name, icon, launch screen and orientation.
-- [ ] Exporting again keeps a capability added by hand in Xcode.
+- [ ] **Deferred** (Milestone 20, development policy): On a Mac with Xcode, Build Game > iOS and then Build and Run runs the Third Person template in the iOS simulator.
+- [ ] **Deferred** (Milestone 20, development policy): With a Team ID, the same project runs on the reference iPhone with no changes made by hand in Xcode.
+- [ ] **Deferred** (Milestone 20, development policy): The installed app shows the chosen name, icon, launch screen and orientation.
+- [ ] **Deferred** (Milestone 20, development policy): Exporting again keeps a capability added by hand in Xcode.
 
 ---
 
@@ -2683,9 +2715,9 @@ The settings are the same as Android's: bundle ID, name, version, build number, 
 
 ### Acceptance criteria
 
-- [ ] An `.aab` built from the Third Person template uploads to a Google Play internal testing track with no errors.
-- [ ] An archive of the same template uploads to TestFlight and installs on the reference iPhone.
-- [ ] The Store check catches each problem in its list when it's set up on purpose.
+- [ ] **Deferred** (Milestone 20, development policy): An `.aab` built from the Third Person template uploads to a Google Play internal testing track with no errors.
+- [ ] **Deferred** (Milestone 20, development policy): An archive of the same template uploads to TestFlight and installs on the reference iPhone.
+- [ ] **Deferred** (Milestone 20, development policy): The Store check catches each problem in its list when it's set up on purpose.
 
 ---
 
@@ -2695,9 +2727,10 @@ The settings are the same as Android's: bundle ID, name, version, build number, 
 
 ## Decisions for Milestone 21
 
-- **Engine-developer tools leave creators' editors.**
-  - Hot-patching (Phase 26) is removed, with its `subsecond` and `dioxus-*` dependencies.
+- **Engine-developer tools leave creators' editors; game files hot reload like s&box.**
+  - Hot-patching engine code (Phase 26) is removed, with its `subsecond` and `dioxus-*` dependencies.
   - Rebuild and relaunch (Phase 25) stays, behind a new `engine-dev` cargo feature. It's off in release builds, and on for whoever works on the engine.
+  - **Changed** (2026-11-12): scripts keep their state when they reload during Play, as s&box's hotload does (Phase 89).
 - **Model Studio is a low-poly modeling, UV, texture-painting and rigging tool.** **Changed** from Milestone 13: sculpting (Phase 60), retopology and baking (Phase 61) are removed. Creators who need them use Blender. They import the result as `.glb` or FBX, which already works, with normal maps through materials.
 - **Old projects still open.** Alpha releases are public (`v0.1.0-alpha.3`), so every format migration stays. Legacy *runtime* paths go: files are upgraded on load, so each reader has only one shape.
 - **Removing never loses work.** A removed feature's saved data is ignored when loaded, with a one-time note in Output. Saving doesn't touch files it doesn't understand, except as the migration says.
@@ -2705,24 +2738,36 @@ The settings are the same as Android's: bundle ID, name, version, build number, 
 
 ---
 
-## Phase 89: Engine-developer tools out of the editor
+## Phase 89: Game files hot reload like s&box, engine hot-patching out
 
-**From**: the developer's request of 2026-10-30.
+**From**: the developer's request of 2026-10-30, **Changed** by the requests of 2026-11-12: "keep hot reloading but make it more similar to that of s&box", and "hotpatch game files, not engine files". In s&box, saving a code file recompiles it and swaps it into the running game within milliseconds, and the game keeps its state: objects' field values are copied into the new code, and runtime values win over changed defaults ([hotloading](https://sbox.game/dev/doc/code/advanced-topics/hotloading.md), [wiki](https://wiki.facepunch.com/sbox/Hotload)). Axcenity's game code is Luau, so scripts get the same behaviour. Assets already reload in place (Phase 23). The engine's own Rust is not hot-patched any more.
 
 ### What to build
 
-**Remove hot-patching.** Delete `editor/src/hot_patch.rs`, `editor/src/hot_patch/`, `app/hot_patch_tests.rs` and their calls in `app.rs`, `main.rs`, `app/session.rs` and `app/engine.rs`. Remove the `hot-patch` feature and its dependencies (`subsecond`, `dioxus-devtools`, `dioxus-cli-config`) from the editor and the workspace. Then run `cargo hakari generate`. Remove `dx serve --hot-patch` from the README.
+**Remove engine hot-patching.** Delete `editor/src/hot_patch.rs`, `editor/src/hot_patch/`, `app/hot_patch_tests.rs` and their calls in `app.rs`, `main.rs`, `app/session.rs` and `app/engine.rs`. Remove the `hot-patch` feature and its dependencies (`subsecond`, `dioxus-devtools`, `dioxus-cli-config`) from the editor and the workspace, then run `cargo hakari generate`. Remove `dx serve --hot-patch` from the README.
 
 **Rebuild and relaunch behind `engine-dev`.** `rebuild.rs`, `app/engine.rs`, and the menu items and file watching for engine sources compile only with the `engine-dev` feature. Without it, the editor never watches `crates/` and shows no engine menu items. The README's engine-development section says to run the editor with `--features engine-dev`.
 
-**Docs.** Update `docs/editor/scripts.md`, the editor's `CLAUDE.md`, `docs/development.md`, and Phase 26 in this plan (marked **Removed**).
+**Scripts keep their state.** Saving a Script, LocalScript or ModuleScript during Play swaps the new code in and keeps what the game has built up, instead of Phase 24's rerun from scratch.
+- The new code runs as Phase 24 does: the old code's connections are disconnected and its threads dropped, and the new code's top level runs, so it connects its handlers again.
+- **State carries over by name**, as s&box copies fields. Each top-level `local` that the new code also declares keeps its old value, and its initializer doesn't run, so `local part = Instance.new("Part")` doesn't make a second part. Values that are code are never kept: functions, threads and connections take the new initializer.
+- **Edited values win.** A local whose initializer text changed takes the new value, so changing `local speed = 10` to `20` takes effect. This differs from s&box on purpose: there, changed defaults wait for a restart. `-- @reset` at the end of a local's line always takes the new initializer.
+- **Modules keep their identity.** A ModuleScript runs again at once with its state kept. When it returns a table, scripts that already required it keep that same table, which now holds the new functions, so they aren't rerun. A module that returns something else reruns the scripts that required it, as before.
+- **How.** In the editor's Play only, each script's top-level locals are wrapped as it loads (the Luau reader in `blocks`, through a hook the editor gives `ScriptRuntime`, so `script` and the player gain nothing). Lines stay where they were, so errors and breakpoints point at the same lines. A script the reader can't read loads as it is and reloads as in Phase 24.
+- **Saying what happened.** Output says "Hot reloaded Door.server.lua in 2 ms, kept count, part" (the kept names, up to a few). A syntax error keeps the old code running, as now. Block and graph scripts hot reload the same way, because their Lua is generated.
+
+**Docs and wiki.** `docs/editor/scripts.md` (Live scripts; Hot-patching removed), the editor's `CLAUDE.md`, `docs/development.md`, the README, the wiki's live-reload pages and dependency list, and an ADR for keeping script state across reloads.
 
 ### Acceptance criteria
 
 - [ ] `cargo build -p axcenity-editor` doesn't compile `subsecond` or any `dioxus` crate, and `Cargo.lock` no longer lists them.
 - [ ] A release editor shows no Rebuild or Relaunch items, and editing a file under `crates/` does nothing.
 - [ ] `cargo run -p axcenity-editor --features engine-dev` still rebuilds and relaunches after a Rust change, keeping project, camera, selection and unsaved edits.
-- [ ] Live script and asset reload (Phases 23 and 24) work as before in both builds.
+- [ ] During Play, changing the text a `Touched` handler prints keeps the script's counter: the next touch prints the new text with the old count, and no second part is made.
+- [ ] Changing a local's initializer takes the new value; `-- @reset` takes it too.
+- [ ] A script that required a ModuleScript uses the module's new function after a save, without rerunning, and the module's data is kept.
+- [ ] A syntax error keeps the old code running, and Phase 24's tests still pass. Live asset reload (Phase 23) works as before.
+- [ ] Exported games and the player run scripts exactly as before: nothing is wrapped.
 
 ---
 
