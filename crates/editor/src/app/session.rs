@@ -195,6 +195,7 @@ impl EditorApp {
         let show_splash = project.manifest.show_splash;
         let developer_console = project.manifest.developer_console;
         let loading_screen = project.manifest.loading_screen.clone();
+        let branding = project.manifest.branding.clone();
         self.output.info(format!(
             "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
              to run it.",
@@ -254,6 +255,8 @@ impl EditorApp {
         self.pending_ui_events.clear();
         self.focused_text = None;
         self.pending_focus_lost = None;
+        // `branding://icon` and `branding://banner` in ImageLabels.
+        assets.set_branding(branding.icon.as_deref(), branding.banner.as_deref());
         self.assets = assets;
         self.asset_browser.open(Some(&project.folder));
         self.tabs.close_all();
@@ -317,6 +320,7 @@ impl EditorApp {
             show_splash,
             developer_console,
             loading_screen,
+            branding,
             input_map: project.input_map,
             watcher: Watcher::start(project.folder.clone()),
             after_play: Vec::new(),

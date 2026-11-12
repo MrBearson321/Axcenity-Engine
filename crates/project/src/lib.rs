@@ -33,6 +33,7 @@
 mod asset_fix;
 mod asset_refs;
 mod backup;
+pub mod branding;
 mod collaborate_file;
 mod compat;
 mod levels;
@@ -202,6 +203,9 @@ pub struct Manifest {
     /// The engine that made and last saved it (format 5; `None` before).
     #[serde(default)]
     pub engine: Option<EngineRecord>,
+    /// The game's icon and banner (cohesion pass CW8.1, `branding.rs`).
+    #[serde(default, skip_serializing_if = "branding::Branding::is_empty")]
+    pub branding: branding::Branding,
 }
 
 fn default_show_splash() -> bool {
@@ -532,6 +536,7 @@ pub(crate) fn load_project(
                 version: default_game_version(),
                 developer_console: false,
                 engine: None,
+                branding: Default::default(),
             }
         }
     };

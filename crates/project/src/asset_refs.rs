@@ -159,6 +159,11 @@ pub fn unused_assets(
             }
         },
     );
+    // The game's icon and banner are used by the manifest.
+    if let Some(manifest) = crate::read_manifest(folder) {
+        named.extend(manifest.branding.icon);
+        named.extend(manifest.branding.banner);
+    }
     for file in script_files(folder) {
         if let Ok(text) = fs::read_to_string(folder.join(&file)) {
             texts.push(text);
