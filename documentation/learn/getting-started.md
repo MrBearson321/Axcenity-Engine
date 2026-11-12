@@ -25,7 +25,7 @@ Windows and Linux are the main platforms and are checked on every change. macOS 
 
 With no project open, the editor shows the start screen. Its sidebar has:
 
-- **Projects**: templates to start from, your **Recent** projects, then **All projects** (search, sort, or switch to a list), **New Project**, **Open Project** and **Join…** for a Team Create session.
+- **Projects**: templates to start from, your **Recent** projects, then **All projects** (search, sort, or switch to a list), **New Project**, **Open Project** and **Join…** for a Collaborate session.
 - **Global Assets**: models, textures and sounds you keep for every project.
 - **Learn**: this learning path, and short step-by-step tutorials.
 - **Documentation**: the technical reference, with search.

@@ -1,4 +1,4 @@
-//! Team Create in the editor (TC2 to TC5 of `docs/research/team-create.md`).
+//! Collaborate in the editor (TC2 to TC5 of `docs/research/team-create.md`).
 //!
 //! While in a session, the edit World keeps an edit journal, and each frame
 //! [`EditorApp::team_frame`] sends what changed since the last frame as one
@@ -16,7 +16,7 @@
 //! files in step with `collab::Mirror`, every half second and right after
 //! an import (whose files and placed Instances then go as one step). The
 //! host's folder is its project; a joining editor fetches the files into a
-//! folder of its own (under the Team Create data folder, one per session)
+//! folder of its own (under the Collaborate data folder, one per session)
 //! and opens it as the project once they're in, keeping the session's
 //! World and pointing the project's scripts at the session's Instances
 //! ([`EditorApp::open_team_mirror`]); the start screen's Join… does this
@@ -86,10 +86,14 @@ const MIRROR_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 /// at most 10 a second).
 const PRESENCE_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// `axcenity-editor <project> --team-host`: host a session for the project.
-pub const HOST_FLAG: &str = "--team-host";
-/// `axcenity-editor <project> --team-join <link>`: join a session.
-pub const JOIN_FLAG: &str = "--team-join";
+/// `axcenity-editor <project> --collab-host`: host a session for the project.
+pub const HOST_FLAG: &str = "--collab-host";
+/// `axcenity-editor <project> --collab-join <link>`: join a session.
+pub const JOIN_FLAG: &str = "--collab-join";
+/// The flags from before Collaborate was renamed from Team Create; they
+/// still work.
+pub const OLD_HOST_FLAG: &str = "--team-host";
+pub const OLD_JOIN_FLAG: &str = "--team-join";
 
 /// A session to start once the project has opened (from the command line).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,9 +108,13 @@ impl TeamStart {
         let mut start = None;
         let mut args = args.iter();
         while let Some(arg) = args.next() {
-            if arg == HOST_FLAG {
+            if arg == HOST_FLAG || arg == OLD_HOST_FLAG {
                 start = Some(TeamStart::Host);
-            } else if arg == JOIN_FLAG {
+            } else if axcenity_collab::access::is_link(arg) {
+                // A bare invite link, as the OS passes one it opens.
+                let invite = Invite::parse(arg).map_err(|e| e.to_string())?;
+                start = Some(TeamStart::Join(invite));
+            } else if arg == JOIN_FLAG || arg == OLD_JOIN_FLAG {
                 let link = args
                     .next()
                     .ok_or_else(|| format!("{JOIN_FLAG} needs an invite link"))?;
@@ -118,11 +126,12 @@ impl TeamStart {
     }
 }
 
-/// Where Team Create keeps this computer's identity, the host's
+/// Where Collaborate keeps this computer's identity, the host's
 /// certificate and each hosted project's members: the editor's data
 /// folder, never the project folder (which may be pushed somewhere public).
 fn data_folder() -> Option<PathBuf> {
-    eframe::storage_dir(crate::APP_ID).map(|data| data.join("Team Create"))
+    eframe::storage_dir(crate::APP_ID)
+        .map(|data| axcenity_collab::hosted::renamed_folder(&data, "Collaborate", "Team Create"))
 }
 
 /// This computer's identity, made the first time.
@@ -145,13 +154,13 @@ fn load_identity(folder: &Path) -> std::io::Result<Identity> {
     }
 }
 
-/// This computer's identity, for Settings > Team Create (made on first use,
+/// This computer's identity, for Settings > Collaborate (made on first use,
 /// as sharing or joining would).
 pub(super) fn load_own_identity() -> Result<Identity, String> {
     if cfg!(test) {
         return Ok(Identity::new("Tester", [90, 160, 230]));
     }
-    let folder = data_folder().ok_or("there's no folder for Team Create's files")?;
+    let folder = data_folder().ok_or("there's no folder for Collaborate's files")?;
     load_identity(&folder).map_err(|e| format!("Couldn't read your identity: {e}"))
 }
 
@@ -466,22 +475,22 @@ impl EditorApp {
             TeamStart::Host => self.host_network_session(None, DEFAULT_PORT).map(|invite| {
                 let link = invite.link();
                 // On stdout too, to copy from the terminal.
-                println!("Team Create invite (works once, for 7 days): {link}");
+                println!("Collaborate invite (works once, for 7 days): {link}");
                 self.output.info(format!(
-                    "Team Create: hosting on {}. Invite: {link}",
+                    "Collaborate: hosting on {}. Invite: {link}",
                     invite.host
                 ));
             }),
             TeamStart::Join(invite) => self.join_network_session(&invite, None),
         };
         if let Err(error) = result {
-            self.output.error(format!("Team Create: {error}"));
+            self.output.error(format!("Collaborate: {error}"));
         }
     }
 
     /// Hosts a session for the open project on `port` (0 picks one), with
     /// this editor joined as its owner; returns an Editor invite.
-    /// `folder` is where Team Create's files go (the editor's data folder
+    /// `folder` is where Collaborate's files go (the editor's data folder
     /// when `None`).
     pub(crate) fn host_network_session(
         &mut self,
@@ -491,7 +500,7 @@ impl EditorApp {
         let folder = folder
             .map(Path::to_owned)
             .or_else(data_folder)
-            .ok_or("there's no folder to keep Team Create's files in")?;
+            .ok_or("there's no folder to keep Collaborate's files in")?;
         let project = self
             .project
             .as_ref()
@@ -524,7 +533,7 @@ impl EditorApp {
         // crash loses nothing (TC6).
         if let Err(error) = host.start_journal(&project) {
             self.output.warning(format!(
-                "Team Create: couldn't start the session's journal ({error}); save often, \
+                "Collaborate: couldn't start the session's journal ({error}); save often, \
                  as a crash would lose the changes since the last save"
             ));
         }
@@ -572,10 +581,10 @@ impl EditorApp {
         let folder = folder
             .map(Path::to_owned)
             .or_else(data_folder)
-            .ok_or("there's no folder to keep Team Create's files in")?;
+            .ok_or("there's no folder to keep Collaborate's files in")?;
         let identity = load_identity(&folder).map_err(|e| format!("your identity: {e}"))?;
         self.output.info(format!(
-            "Team Create: joining {} as {} ({})",
+            "Collaborate: joining {} as {} ({})",
             invite.host,
             identity.name,
             identity.public_key().fingerprint().short()
@@ -671,7 +680,7 @@ impl EditorApp {
                 team.invite = None;
             }
             self.output
-                .info("Team Create: invites not used yet no longer work");
+                .info("Collaborate: invites not used yet no longer work");
         }
     }
 
@@ -706,7 +715,7 @@ impl EditorApp {
             && client.pending() > 0
             && let Err(error) = journal::save_unsent(mirror.root(), &client.unsent())
         {
-            log::warn!("Team Create: couldn't keep the unsent edits: {error}");
+            log::warn!("Collaborate: couldn't keep the unsent edits: {error}");
         }
         if let Some(hosting) = team.hosting()
             && !unsaved
@@ -718,12 +727,12 @@ impl EditorApp {
         self.world.stop_recording_edits();
         self.history.set_shared(false);
         self.output.info(match (hosted, unsaved) {
-            (true, false) => "Team Create: you ended the session",
+            (true, false) => "Collaborate: you ended the session",
             (true, true) => {
-                "Team Create: you ended the session. Save to keep its changes (they're kept \
+                "Collaborate: you ended the session. Save to keep its changes (they're kept \
                  for you until you do, even if the editor stops)"
             }
-            _ => "Team Create: you left the session; your copy stays open here",
+            _ => "Collaborate: you left the session; your copy stays open here",
         });
     }
 
@@ -752,7 +761,7 @@ impl EditorApp {
             && journal::has_recovery(&project.folder)
             && let Err(error) = journal::discard(&project.folder)
         {
-            log::warn!("Team Create: couldn't remove the old session's journal: {error}");
+            log::warn!("Collaborate: couldn't remove the old session's journal: {error}");
         }
     }
 
@@ -772,7 +781,7 @@ impl EditorApp {
             Ok(None) => return,
             Err(error) => {
                 self.output.warning(format!(
-                    "Team Create: the last session hosted from this project stopped without \
+                    "Collaborate: the last session hosted from this project stopped without \
                      ending, and its changes couldn't be read back ({error}). Its files are \
                      kept in `{}`.",
                     journal::FOLDER
@@ -789,15 +798,15 @@ impl EditorApp {
         self.relink_to_session(&loaded);
         self.history.mark_unsaved();
         if let Err(error) = journal::discard(&folder) {
-            log::warn!("Team Create: couldn't remove the recovered journal: {error}");
+            log::warn!("Collaborate: couldn't remove the recovered journal: {error}");
         }
         self.output.warning(format!(
-            "Team Create: the last session hosted from this project stopped without ending. \
+            "Collaborate: the last session hosted from this project stopped without ending. \
              Its World is back as it was ({} change(s) after its last snapshot): save to keep it.",
             recovered.replayed
         ));
         self.toasts
-            .warning("Recovered the last Team Create session's changes. Save to keep them.");
+            .warning("Recovered the last Collaborate session's changes. Save to keep them.");
     }
 
     /// What the other members have selected, with their names and
@@ -864,7 +873,7 @@ impl EditorApp {
                     client.connect();
                     team.problem = None;
                     self.output
-                        .info(format!("Team Create: joined the session as {role:?}"));
+                        .info(format!("Collaborate: joined the session as {role:?}"));
                 }
                 RemoteEvent::Message(message) => inbox.push(message),
                 RemoteEvent::Lost { why, retry } => {
@@ -873,14 +882,14 @@ impl EditorApp {
                     }
                     team.problem = Some(why.clone());
                     self.output.warning(format!(
-                        "Team Create: {why}; trying again in {} s (your edits are kept)",
+                        "Collaborate: {why}; trying again in {} s (your edits are kept)",
                         retry.as_secs()
                     ));
                 }
                 RemoteEvent::Refused(reason) => {
                     team.ended = true;
                     team.problem = Some(reason.clone());
-                    self.output.error(format!("Team Create: {reason}"));
+                    self.output.error(format!("Collaborate: {reason}"));
                 }
             }
         }
@@ -999,7 +1008,7 @@ impl EditorApp {
             if team.unsent_kept.take().is_some()
                 && let Err(error) = journal::discard_unsent(&root)
             {
-                log::warn!("Team Create: couldn't remove the recovery file: {error}");
+                log::warn!("Collaborate: couldn't remove the recovery file: {error}");
             }
             return;
         }
@@ -1011,7 +1020,7 @@ impl EditorApp {
         match journal::save_unsent(&root, &client.unsent()) {
             Ok(()) => team.unsent_kept = Some(now),
             Err(error) => {
-                log::warn!("Team Create: couldn't write the recovery file: {error}")
+                log::warn!("Collaborate: couldn't write the recovery file: {error}")
             }
         }
     }
@@ -1032,7 +1041,7 @@ impl EditorApp {
         let unsent = match journal::load_unsent(mirror.root()) {
             Ok(unsent) => unsent,
             Err(error) => {
-                log::warn!("Team Create: couldn't read the recovery file: {error}");
+                log::warn!("Collaborate: couldn't read the recovery file: {error}");
                 return;
             }
         };
@@ -1045,7 +1054,7 @@ impl EditorApp {
         team.unsent_kept = Some((usize::MAX, None));
         if count > 0 {
             self.output.info(format!(
-                "Team Create: sent {count} change(s) this editor made in the session before it \
+                "Collaborate: sent {count} change(s) this editor made in the session before it \
                  stopped"
             ));
         }
@@ -1095,7 +1104,7 @@ impl EditorApp {
     /// again, as if another program changed them.
     fn team_file_changes(&mut self, changes: Vec<Change>, problem: Option<String>) {
         if let Some(problem) = problem {
-            log::warn!("Team Create: the session's files: {problem}");
+            log::warn!("Collaborate: the session's files: {problem}");
         }
         let in_project = match (&self.team, &self.project) {
             (Some(team), Some(project)) => team.files_folder() == Some(project.folder.as_path()),
@@ -1110,11 +1119,11 @@ impl EditorApp {
                     }
                 }
                 Change::Conflict { path, copy } => self.output.warning(format!(
-                    "Team Create: someone else saved `{path}` first. Yours is kept as `{copy}`."
+                    "Collaborate: someone else saved `{path}` first. Yours is kept as `{copy}`."
                 )),
                 Change::Failed { path, reason } => self
                     .output
-                    .warning(format!("Team Create: `{path}` wasn't shared: {reason}")),
+                    .warning(format!("Collaborate: `{path}` wasn't shared: {reason}")),
                 Change::Published { .. } => {}
             }
         }
@@ -1151,7 +1160,7 @@ impl EditorApp {
         let world_file = root.join(project::WORLD_FILE);
         if let Err(error) = std::fs::write(&world_file, project::write_world(&self.world)) {
             self.output.error(format!(
-                "Team Create: couldn't write `{}`: {error}",
+                "Collaborate: couldn't write `{}`: {error}",
                 world_file.display()
             ));
             return;
@@ -1161,7 +1170,7 @@ impl EditorApp {
         if self.project.as_ref().is_none_or(|p| p.folder != root) {
             self.world = session;
             self.output
-                .error("Team Create: couldn't open the session's files as a project");
+                .error("Collaborate: couldn't open the session's files as a project");
             return;
         }
         let loaded = std::mem::replace(&mut self.world, World::new());
@@ -1170,7 +1179,7 @@ impl EditorApp {
         self.generators = Default::default();
         self.relink_to_session(&loaded);
         self.output.info(format!(
-            "Team Create: opened the session's files (kept in `{}`)",
+            "Collaborate: opened the session's files (kept in `{}`)",
             root.display()
         ));
     }
@@ -1369,7 +1378,7 @@ impl EditorApp {
                         notes.len()
                     );
                     self.output.warning(format!(
-                        "Team Create: \"{label}\" didn't apply in full: {what}"
+                        "Collaborate: \"{label}\" didn't apply in full: {what}"
                     ));
                     if recovered {
                         self.team_panel
@@ -1387,7 +1396,7 @@ impl EditorApp {
                     ..
                 } => {
                     self.output
-                        .warning(format!("Team Create: \"{label}\" was refused: {reason}"));
+                        .warning(format!("Collaborate: \"{label}\" was refused: {reason}"));
                     // From a while ago: listed where they can't be missed.
                     if recovered {
                         self.team_panel
@@ -1408,21 +1417,21 @@ impl EditorApp {
                     }
                     self.team_panel.following = None;
                     self.output.warning(
-                        "Team Create: the host ended the session. Your copy stays open, \
+                        "Collaborate: the host ended the session. Your copy stays open, \
                          read-only; changes not sent yet are kept and go to the host the next \
                          time you join. Leave the session to work on your copy alone.",
                     );
                     self.toasts
-                        .warning("The host ended the Team Create session: read-only now.");
+                        .warning("The host ended the Collaborate session: read-only now.");
                 }
                 Notice::Arrived { name, .. } => self
                     .output
-                    .info(format!("Team Create: {name} joined the session")),
+                    .info(format!("Collaborate: {name} joined the session")),
                 Notice::Left { name, .. } => self
                     .output
-                    .info(format!("Team Create: {name} left the session")),
+                    .info(format!("Collaborate: {name} left the session")),
                 Notice::Resynced => self.output.warning(
-                    "Team Create: this copy disagreed with the session and was reloaded \
+                    "Collaborate: this copy disagreed with the session and was reloaded \
                      (your unsent edits were kept)",
                 ),
             }
@@ -1430,7 +1439,7 @@ impl EditorApp {
     }
 
     /// A joining editor's folder for the session's files: one per session,
-    /// under the Team Create data folder, kept for next time.
+    /// under the Collaborate data folder, kept for next time.
     fn start_team_mirror(&mut self) {
         let Some(team) = self.team.as_mut() else {
             return;
@@ -1454,23 +1463,23 @@ impl EditorApp {
         let root = home.join(&session);
         if let Err(error) = std::fs::create_dir_all(&root) {
             self.output.error(format!(
-                "Team Create: couldn't make a folder for the session's files: {error}"
+                "Collaborate: couldn't make a folder for the session's files: {error}"
             ));
             return;
         }
         team.mirror = Some(Mirror::open(&root, &session, &name));
         team.open_mirror = self.project.as_ref().is_none_or(|p| p.folder != root);
         self.output.info(format!(
-            "Team Create: fetching the session's files into `{}`",
+            "Collaborate: fetching the session's files into `{}`",
             root.display()
         ));
     }
 
-    /// The newest step changed something Team Create doesn't share yet.
+    /// The newest step changed something Collaborate doesn't share yet.
     fn warn_unshared_step(&mut self) {
         if let Some(what) = self.history.top_unshared() {
             self.output.warning(format!(
-                "Team Create doesn't share {what} yet: others won't see this part of \"{}\"",
+                "Collaborate doesn't share {what} yet: others won't see this part of \"{}\"",
                 self.history.undo_label().unwrap_or("Edit")
             ));
         }
@@ -1493,7 +1502,7 @@ impl EditorApp {
             return false;
         }
         self.output.warning(
-            "Team Create: this step changed the whole world (a Console command or a prefab \
+            "Collaborate: this step changed the whole world (a Console command or a prefab \
              Apply) and can't be undone or redone during a session yet",
         );
         true

@@ -19,7 +19,17 @@ use crate::role::Role;
 /// How long an invite works unless the owner says otherwise.
 pub const INVITE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60;
 
-const LINK_START: &str = "axcenity://teamcreate/join?";
+const LINK_START: &str = "axcenity://collaborate/join?";
+
+/// Links made before Collaborate was renamed from Team Create still work.
+const OLD_LINK_START: &str = "axcenity://teamcreate/join?";
+
+/// Whether `text` looks like an invite link (new or old), as the OS hands
+/// one to the editor when someone opens it.
+pub fn is_link(text: &str) -> bool {
+    let text = text.trim();
+    text.starts_with(LINK_START) || text.starts_with(OLD_LINK_START)
+}
 
 /// An invite as the joiner gets it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,14 +43,14 @@ pub struct Invite {
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LinkError {
-    #[error("that isn't a Team Create invite link (they start with {LINK_START})")]
+    #[error("that isn't a Collaborate invite link (they start with {LINK_START})")]
     NotALink,
     #[error("the invite link is missing its {0}; copy the whole link")]
     Missing(&'static str),
 }
 
 impl Invite {
-    /// `axcenity://teamcreate/join?host=…&cert=…&invite=…`
+    /// `axcenity://collaborate/join?host=…&cert=…&invite=…`
     pub fn link(&self) -> String {
         format!(
             "{LINK_START}host={}&cert={}&invite={}",
@@ -51,9 +61,10 @@ impl Invite {
     }
 
     pub fn parse(link: &str) -> Result<Invite, LinkError> {
+        let link = link.trim();
         let query = link
-            .trim()
             .strip_prefix(LINK_START)
+            .or_else(|| link.strip_prefix(OLD_LINK_START))
             .ok_or(LinkError::NotALink)?;
         let field = |name: &str| {
             query
@@ -247,4 +258,30 @@ pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn links_use_the_collaborate_name_and_old_links_still_work() {
+        let invite = Invite {
+            host: "pauls-pc.example.ts.net:47810".to_owned(),
+            cert: Fingerprint([7; 32]),
+            secret: [9; 16],
+        };
+        let link = invite.link();
+        assert!(link.starts_with("axcenity://collaborate/join?"), "{link}");
+        assert!(is_link(&link));
+        assert_eq!(Invite::parse(&link), Ok(invite.clone()));
+        let old = link.replace("collaborate", "teamcreate");
+        assert!(is_link(&old));
+        assert_eq!(Invite::parse(&format!("  {old}\n")), Ok(invite));
+        assert!(!is_link("https://example.com"));
+        assert_eq!(
+            Invite::parse("axcenity://collaborate/other?host=x"),
+            Err(LinkError::NotALink)
+        );
+    }
 }

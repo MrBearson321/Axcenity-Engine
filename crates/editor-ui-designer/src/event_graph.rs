@@ -41,7 +41,7 @@ pub struct GraphPane<'a> {
     pub graph: &'a mut NodeGraph,
     /// Its file's project path, which the Lua's errors name.
     pub path: &'a str,
-    /// Team Create: who else is editing it (it's read-only here).
+    /// Collaborate: who else is editing it (it's read-only here).
     pub locked_by: Option<&'a str>,
 }
 

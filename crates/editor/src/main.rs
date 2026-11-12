@@ -197,16 +197,21 @@ fn main() -> eframe::Result {
         let built = build_game::build_from_command_line(args);
         std::process::exit(if built { 0 } else { 1 });
     }
-    // `--team-host` or `--team-join <link>` after the project folder: a
-    // Team Create session to start once it opens (`app/team.rs`). Without a
-    // folder, `--team-join <link>` joins from the start screen.
+    // `--collab-host` or `--collab-join <link>` after the project folder
+    // (the old `--team-*` flags too): a Collaborate session to start once it
+    // opens (`app/team.rs`). Without a folder, `--collab-join <link>` or a
+    // bare invite link (as the OS passes one) joins from the start screen.
     let mut rest: Vec<String> = Vec::new();
     let (folder, handoff) = match first {
         Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {
             (None, args.next().map(PathBuf::from))
         }
-        Some(flag) if flag == app::team::JOIN_FLAG => {
+        Some(flag) if flag == app::team::JOIN_FLAG || flag == app::team::OLD_JOIN_FLAG => {
             rest.push(app::team::JOIN_FLAG.to_owned());
+            (None, None)
+        }
+        Some(link) if axcenity_collab::access::is_link(&link.to_string_lossy()) => {
+            rest.push(link.to_string_lossy().into_owned());
             (None, None)
         }
         other => (other.map(PathBuf::from), None),

@@ -37,7 +37,7 @@ pub struct Arena<T> {
     /// A replica takes its original's values at their own IDs
     /// ([`Arena::insert_at`]), and puts its own above `LOCAL_BASE`.
     replica: bool,
-    /// Index ranges this writer may fill (Team Create ID blocks), as
+    /// Index ranges this writer may fill (Collaborate ID blocks), as
     /// `(next, end)`: [`insert`](Self::insert) takes from these first in a
     /// replica.
     blocks: Vec<(u32, u32)>,
@@ -85,7 +85,7 @@ impl<T> Arena<T> {
 
     /// The first index no value has had yet: every index from here up is
     /// free and has never been used, so an ID there with generation 0 can't
-    /// match a stale one. Team Create hands out blocks of IDs from here.
+    /// match a stale one. Collaborate hands out blocks of IDs from here.
     pub fn next_unused_index(&self) -> u32 {
         u32::try_from(self.slots.len()).expect("slots stay below LOCAL_BASE")
     }

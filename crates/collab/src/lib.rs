@@ -1,4 +1,4 @@
-//! Team Create's sync core: how several editors keep one project's World in
+//! Collaborate's sync core: how several editors keep one project's World in
 //! step (phase TC1 of `docs/research/team-create.md`, ADR-0020).
 //!
 //! One **host** holds the authoritative World and decides the order of every

@@ -87,7 +87,7 @@ impl EditorApp {
     }
 
     /// The paths the graphs with changes will be saved at (their
-    /// ScreenGui's name), for Team Create's locks.
+    /// ScreenGui's name), for Collaborate's locks.
     pub(super) fn unsaved_ui_graphs(&self) -> Vec<String> {
         let Some(project) = &self.project else {
             return Vec::new();

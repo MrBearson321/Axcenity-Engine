@@ -22,7 +22,7 @@ pub const PROTOCOL: u32 = 5;
 /// This engine's version, as the handshake compares it.
 pub const ENGINE: &str = env!("CARGO_PKG_VERSION");
 
-/// What a signature covers, so a key's Team Create signature can't be
+/// What a signature covers, so a key's Collaborate signature can't be
 /// taken for anything else.
 const SIGNED: &[u8] = b"axcenity team create sign-in v1";
 
@@ -225,7 +225,7 @@ impl Gate {
                     Err(why) => refuse(format!("{why}")),
                 }
             }
-            _ => refuse("That isn't how joining a Team Create session starts."),
+            _ => refuse("That isn't how joining a Collaborate session starts."),
         }
     }
 }

@@ -47,7 +47,7 @@ fn paint_box(
         .min_by(|a, b| a.y.total_cmp(&b.y))
 }
 
-/// What another Team Create member has selected: outlined in their colour,
+/// What another Collaborate member has selected: outlined in their colour,
 /// with their name over the first one.
 pub(super) fn paint_member_selection(
     ui: &egui::Ui,

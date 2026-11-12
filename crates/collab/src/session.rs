@@ -1,4 +1,4 @@
-//! A Team Create session over the network (TC3): the host's side
+//! A Collaborate session over the network (TC3): the host's side
 //! ([`HostSession`]) and a member's ([`Remote`]). Each connection first
 //! goes through the [`handshake`](crate::handshake); after that its
 //! messages are [`wire`] bytes for the [`Host`] or the
@@ -233,7 +233,7 @@ impl HostSession {
                         session.lock().expect("host session").tick();
                     }
                 })
-                .expect("starting the Team Create host thread")
+                .expect("starting the Collaborate host thread")
         };
         Hosting {
             session,
@@ -251,7 +251,7 @@ impl HostSession {
             }
             NetEvent::Message(conn, bytes) => {
                 if !self.within_rate(conn) {
-                    log::warn!("Team Create: a connection sent too many messages; it's closed");
+                    log::warn!("Collaborate: a connection sent too many messages; it's closed");
                     self.listener.close(conn);
                     return;
                 }
@@ -262,7 +262,7 @@ impl HostSession {
                             self.route(out);
                         }
                         Err(error) => {
-                            log::warn!("Team Create: member {} sent {error}", member.0);
+                            log::warn!("Collaborate: member {} sent {error}", member.0);
                             self.listener.close(conn);
                         }
                     }
@@ -275,7 +275,7 @@ impl HostSession {
                             self.admit(conn, member);
                         }
                         GateStep::Refuse { reason, reply } => {
-                            log::info!("Team Create: refused a joiner: {reason}");
+                            log::info!("Collaborate: refused a joiner: {reason}");
                             self.gates.remove(&conn);
                             self.listener.send(conn, reply);
                             self.listener.close(conn);
@@ -300,7 +300,7 @@ impl HostSession {
                         .iter()
                         .find(|m| m.id == member)
                         .map_or_else(|| format!("member {}", member.0), |m| m.name.clone());
-                    log::info!("Team Create: {name} left (or their connection dropped)");
+                    log::info!("Collaborate: {name} left (or their connection dropped)");
                 }
             }
         }
@@ -362,7 +362,7 @@ impl HostSession {
         self.members.insert(conn, member.id);
         self.save_access();
         log::info!(
-            "Team Create: {} ({}) joined as {:?}",
+            "Collaborate: {} ({}) joined as {:?}",
             member.name,
             member.key.fingerprint().short(),
             member.role
@@ -381,7 +381,7 @@ impl HostSession {
         if let Some(path) = &self.access_path
             && let Err(error) = self.access.save(path)
         {
-            log::warn!("Team Create: couldn't save the members list: {error}");
+            log::warn!("Collaborate: couldn't save the members list: {error}");
         }
     }
 }

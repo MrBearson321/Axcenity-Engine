@@ -1,4 +1,4 @@
-//! Who someone is in Team Create (TC3; design §5): a key pair made on their
+//! Who someone is in Collaborate (TC3; design §5): a key pair made on their
 //! computer. The private key never leaves it; the host knows members by
 //! their public key, and a member proves who they are by signing the host's
 //! challenge. No account or service is needed. Axcenity accounts can come
@@ -68,7 +68,7 @@ impl fmt::Debug for Fingerprint {
     }
 }
 
-/// This computer's Team Create identity: a display name, a colour for
+/// This computer's Collaborate identity: a display name, a colour for
 /// presence, and the key pair.
 pub struct Identity {
     pub name: String,
@@ -136,7 +136,7 @@ impl Identity {
     pub fn load(path: &Path) -> std::io::Result<Identity> {
         let text = std::fs::read_to_string(path)?;
         let saved: Saved = serde_json::from_str(&text).map_err(std::io::Error::other)?;
-        let bad = || std::io::Error::other("the Team Create identity file is damaged");
+        let bad = || std::io::Error::other("the Collaborate identity file is damaged");
         let pkcs8 = from_hex(&saved.key).ok_or_else(bad)?;
         Identity::from_pkcs8(saved.name, saved.color, pkcs8).ok_or_else(bad)
     }

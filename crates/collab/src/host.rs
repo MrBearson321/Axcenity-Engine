@@ -68,7 +68,7 @@ struct Member {
     uploads: HashMap<FileHash, Assembly>,
 }
 
-/// The authority of one Team Create session.
+/// The authority of one Collaborate session.
 pub struct Host {
     doc: Doc,
     seq: u64,
@@ -152,7 +152,7 @@ impl Host {
             return;
         }
         if let Err(error) = journal.snapshot(&self.doc.world, &self.doc.graveyard, self.seq) {
-            log::error!("Team Create: couldn't write the session's snapshot: {error}");
+            log::error!("Collaborate: couldn't write the session's snapshot: {error}");
         }
     }
 
@@ -162,7 +162,7 @@ impl Host {
         if let Some(journal) = self.journal.take()
             && let Err(error) = journal.end()
         {
-            log::warn!("Team Create: couldn't remove the session's journal: {error}");
+            log::warn!("Collaborate: couldn't remove the session's journal: {error}");
         }
     }
 
@@ -398,7 +398,7 @@ impl Host {
                         if let Some(journal) = &mut self.journal
                             && let Err(error) = journal.append(&logged)
                         {
-                            log::error!("Team Create: couldn't write the journal: {error}");
+                            log::error!("Collaborate: couldn't write the journal: {error}");
                         }
                         self.log.push_back(logged);
                         while self.log.len() > self.log_kept {
@@ -445,7 +445,7 @@ impl Host {
                     Ok(Some(file)) => self.store.keep(hash, file),
                     Ok(None) => {}
                     Err(()) => log::warn!(
-                        "Team Create: member {} sent a file that doesn't fit together",
+                        "Collaborate: member {} sent a file that doesn't fit together",
                         member.0
                     ),
                 }

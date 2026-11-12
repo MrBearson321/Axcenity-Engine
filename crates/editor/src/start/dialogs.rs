@@ -553,7 +553,7 @@ impl StartScreen {
                         ui,
                         icons::SIGN_IN,
                         dialog::Tone::Question,
-                        "Join a Team Create session",
+                        "Join a Collaborate session",
                         Some(
                             "Paste the invite link someone sent you. The session's files are \
                              kept in a folder of their own on this computer.",

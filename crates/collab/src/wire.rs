@@ -1,4 +1,4 @@
-//! Team Create's messages as bytes (TC3): a format byte, then postcard, as
+//! Collaborate's messages as bytes (TC3): a format byte, then postcard, as
 //! the game's wire does. Values use `net`'s [`WireValue`] and Instances
 //! their network IDs (`InstanceId::to_bits`), so a World travels with every
 //! ID it has.
@@ -30,7 +30,7 @@ pub const FORMAT: u8 = 3;
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
 pub enum WireError {
-    #[error("a Team Create message from a different version (format {0}, this one reads {FORMAT})")]
+    #[error("a Collaborate message from a different version (format {0}, this one reads {FORMAT})")]
     Format(u8),
     #[error("an empty message")]
     Empty,

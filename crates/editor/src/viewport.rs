@@ -393,11 +393,11 @@ pub struct ViewportScene<'a> {
     pub play_camera: Option<PlayCamera>,
     /// This computer's graphics settings (Settings > Graphics).
     pub graphics: &'a axcenity_render::GraphicsSettings,
-    /// What other Team Create members have selected.
+    /// What other Collaborate members have selected.
     pub others: &'a [MemberSelection],
 }
 
-/// Another Team Create member's selection, as the viewport and Explorer
+/// Another Collaborate member's selection, as the viewport and Explorer
 /// show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MemberSelection {

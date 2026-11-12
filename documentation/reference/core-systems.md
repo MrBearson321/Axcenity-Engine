@@ -30,7 +30,7 @@ Every major system, what it covers and how finished it is. "Partly built" means 
 | Build Game | Windows, macOS and Linux builds | Stable; macOS builds aren't notarized | [Publishing your game](../learn/publishing.md) |
 | Game tests | Automated tests in Lua, run in the editor or a terminal | Stable | [Debugging and profiling](debugging.md) |
 | Editor plugins | Lua plugins that add panels and ribbon buttons to the editor | Experimental | [Engine architecture](architecture.md) |
-| Team Create | Several people editing one project at once: invites, roles, live edits, document locks, reconnecting, a self-hosted server | Experimental | [Projects](../learn/projects.md#team-create-editing-together) |
+| Collaborate | Several people editing one project at once: invites, roles, live edits, document locks, reconnecting, a self-hosted server | Experimental | [Projects](../learn/projects.md#collaborate-editing-together) |
 | AI assistant (MCP) | Lets an AI assistant read and edit a project through the editor (`axcenity-editor --mcp`) | Experimental | [Debugging and profiling](debugging.md) |
 
 ## Not built

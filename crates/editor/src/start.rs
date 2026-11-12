@@ -163,13 +163,13 @@ pub enum StartAction {
     OpenSample(PathBuf),
     /// The Settings window, from the sidebar.
     Settings,
-    /// Join a Team Create session with this invite (the Join dialog).
+    /// Join a Collaborate session with this invite (the Join dialog).
     Join(axcenity_collab::access::Invite),
     /// Stop joining: Cancel while the Join dialog waits.
     CancelJoin,
 }
 
-/// How joining a Team Create session from the start screen is going, for
+/// How joining a Collaborate session from the start screen is going, for
 /// the Join dialog. The app sets it each frame while it joins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JoinProgress {
@@ -252,7 +252,7 @@ enum Dialog {
         /// The version Restore was clicked on, waiting to be confirmed.
         confirm: Option<String>,
     },
-    /// Join a Team Create session: the invite link, then how joining goes.
+    /// Join a Collaborate session: the invite link, then how joining goes.
     Join {
         link: String,
         error: Option<String>,
@@ -302,7 +302,7 @@ pub struct StartScreen {
     nav: StartNav,
     /// How many projects past the first page All projects shows.
     more: usize,
-    /// How joining a Team Create session goes, while it does.
+    /// How joining a Collaborate session goes, while it does.
     join: Option<JoinProgress>,
     /// What the Join dialog asked for this frame.
     join_asked: Option<StartAction>,

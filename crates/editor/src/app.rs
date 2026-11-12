@@ -208,12 +208,12 @@ pub struct EditorApp {
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
-    /// The Team Create session this editor is in, if any (`app/team.rs`).
+    /// The Collaborate session this editor is in, if any (`app/team.rs`).
     team: Option<team::Team>,
     /// A session to start once the project opens (`--team-host`,
     /// `--team-join`).
     team_start: Option<team::TeamStart>,
-    /// The Team Create panel's own state (`app/team_panel.rs`).
+    /// The Collaborate panel's own state (`app/team_panel.rs`).
     team_panel: team_panel::TeamPanel,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
@@ -1381,7 +1381,7 @@ impl EditorApp {
             self.settings.open = !self.settings.open;
         }
         self.terrain_frame(ctx);
-        // Team Create: send what this frame's tools did, then catch up.
+        // Collaborate: send what this frame's tools did, then catch up.
         self.team_frame();
         if let Some(every) = self.team_wants_frames() {
             ctx.request_repaint_after(every);

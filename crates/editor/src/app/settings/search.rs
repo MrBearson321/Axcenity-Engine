@@ -412,18 +412,18 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             TeamCreate,
             "Your name and colour",
             &[
-                "Team Create name",
+                "Your name in Collaborate",
                 "Collaborator colour",
                 "Identity",
                 "Device key",
             ],
-            "How others see you in a Team Create session.",
+            "How others see you in a Collaborate session.",
         ),
         setting(
             TeamCreate,
             "New invites",
             &["Invite link", "Invite expiry", "Default invite role"],
-            "The role new Team Create invites give, and how long they work.",
+            "The role new Collaborate invites give, and how long they work.",
         ),
     ]
 };

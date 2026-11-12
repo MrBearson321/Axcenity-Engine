@@ -1,4 +1,4 @@
-//! Team Create in the editor (TC2): two headless editors in one session
+//! Collaborate in the editor (TC2): two headless editors in one session
 //! stay identical through ordinary editing, undo, and edits made at the
 //! same time.
 
@@ -287,7 +287,7 @@ fn many_edits_from_both_editors_stay_identical() {
     );
 }
 
-/// A folder for one test's Team Create files (identity, certificate,
+/// A folder for one test's Collaborate files (identity, certificate,
 /// members), so each editor is its own computer.
 fn team_folder(name: &str) -> std::path::PathBuf {
     // A counter, not the time: names must be valid on Windows too.
@@ -395,6 +395,22 @@ fn the_command_line_asks_for_a_session() {
     assert_eq!(invite.host, "192.168.1.20:47810");
     assert!(TeamStart::from_args(&args(&["--team-join"])).is_err());
     assert!(TeamStart::from_args(&args(&["--team-join", "https://example.com"])).is_err());
+    // The new names, and a bare link as the OS passes one it opens.
+    assert_eq!(
+        TeamStart::from_args(&args(&["--collab-host"])),
+        Ok(Some(TeamStart::Host))
+    );
+    let new_link = link.replace("teamcreate", "collaborate");
+    for given in [
+        args(&["--collab-join", &new_link]),
+        args(&[&new_link]),
+        args(&[link]),
+    ] {
+        let Ok(Some(TeamStart::Join(found))) = TeamStart::from_args(&given) else {
+            panic!("a join from {given:?}")
+        };
+        assert_eq!(found, invite);
+    }
 }
 
 #[test]
@@ -430,7 +446,7 @@ fn what_one_editor_selects_shows_in_the_others_session() {
     assert_eq!(b.explorer.others.get(&part).map(Vec::len), Some(1));
 }
 
-/// Draws the Team Create panel 260 points wide (the narrowest column), and
+/// Draws the Collaborate panel 260 points wide (the narrowest column), and
 /// saves it as `name` when `AXCENITY_SNAPSHOTS` names a folder.
 fn draw_panel(app: &mut EditorApp, name: &str) {
     let mut draw = |ui: &mut egui::Ui| app.team_create_pane(ui);

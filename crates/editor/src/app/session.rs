@@ -173,7 +173,7 @@ impl EditorApp {
         assets: Assets,
         level: Option<String>,
     ) {
-        // Another project ends this editor's part in a Team Create session:
+        // Another project ends this editor's part in a Collaborate session:
         // the session's World and files belong to the folder it shares.
         if self
             .team

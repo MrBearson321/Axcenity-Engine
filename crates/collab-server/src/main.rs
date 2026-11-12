@@ -1,5 +1,5 @@
 //! `axcenity-collab <project-folder> [--port <port>] [--data <folder>] [--address <host:port>]`:
-//! Team Create's self-hosted server (TC7). It hosts the project for
+//! Collaborate's self-hosted server (TC7). It hosts the project for
 //! editors to join with invite links, saves it every 30 seconds with
 //! changes, and takes admin commands typed into its terminal (`help`
 //! lists them). Stop it with `quit` (Ctrl+C works too: the next start

@@ -1,4 +1,4 @@
-//! Team Create's self-hosted server (TC7, design §4): a project folder
+//! Collaborate's self-hosted server (TC7, design §4): a project folder
 //! hosted for editors to join, with no editor of its own, so a team's
 //! project is there whenever someone wants to work on it.
 //!
@@ -71,7 +71,11 @@ pub fn default_data_folder() -> Option<PathBuf> {
     } else {
         home("XDG_DATA_HOME").or_else(|| home("HOME").map(|h| h.join(".local").join("share")))
     }?;
-    Some(base.join("Axcenity").join("Team Create Server"))
+    Some(axcenity_collab::hosted::renamed_folder(
+        &base.join("Axcenity"),
+        "Collaborate Server",
+        "Team Create Server",
+    ))
 }
 
 /// What a command said, and whether the server should stop.

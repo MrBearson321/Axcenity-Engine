@@ -26,7 +26,7 @@ When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 
 - Player: `cargo run -p axcenity-player -- examples/hello-part`
 - Editor: `cargo run -p axcenity-editor -- examples/hello-touched`
 - Game tests: `cargo run -p axcenity-testing -- examples/hello-character`
-- Host and join: `cargo run -p axcenity-player -- --host examples/hello-part`, then `-- --join 127.0.0.1:47800 examples/hello-part`. Dedicated server: `cargo run -p axcenity-server -- examples/hello-part`. Team Create server: `cargo run -p axcenity-collab-server -- examples/hello-part`
+- Host and join: `cargo run -p axcenity-player -- --host examples/hello-part`, then `-- --join 127.0.0.1:47800 examples/hello-part`. Dedicated server: `cargo run -p axcenity-server -- examples/hello-part`. Collaborate server: `cargo run -p axcenity-collab-server -- examples/hello-part`
 - Build: `cargo build --workspace`
 - Test: `cargo nextest run --workspace` (one crate: `-p axcenity-x`). Doc tests: `cargo test --workspace --doc`
 - After changing dependencies: `cargo hakari generate` ([docs/development.md](docs/development.md))

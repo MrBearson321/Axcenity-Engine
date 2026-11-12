@@ -102,8 +102,8 @@ pub enum Pane {
     /// issues and what changed between two versions (`version_explorer.rs`).
     /// Starts closed; Help > Version Explorer opens it.
     VersionExplorer,
-    /// Team Create: sharing, joining, who's here, invites and roles
-    /// (`app/team_panel.rs`). Starts closed; File > Share with Team Create
+    /// Collaborate: sharing, joining, who's here, invites and roles
+    /// (`app/team_panel.rs`). Starts closed; File > Share with Collaborate
     /// and the title bar chip open it.
     TeamCreate,
     /// An open script, stylesheet or block script, by its tab's id
@@ -171,7 +171,7 @@ impl Pane {
             Pane::Toolbox => "Toolbox",
             Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
-            Pane::TeamCreate => "Team Create",
+            Pane::TeamCreate => "Collaborate",
             Pane::Script(_) => "Script",
             Pane::Plugin(_) => "Plugin",
         }

@@ -175,13 +175,13 @@ impl EditorApp {
                     }
 
                     ui.separator();
-                    widgets::section_label(ui, "Team Create");
+                    widgets::section_label(ui, "Collaborate");
                     if ui
                         .add_enabled(
                             editing && self.team.is_none(),
                             egui::Button::new(theme::with_icon(
                                 icons::SHARE_NETWORK,
-                                "Share with Team Create…",
+                                "Start Collaborate Session…",
                             )),
                         )
                         .on_hover_text("Host a session others can join with an invite link.")
@@ -194,7 +194,7 @@ impl EditorApp {
                             editing && self.team.is_none(),
                             egui::Button::new(theme::with_icon(
                                 icons::SIGN_IN,
-                                "Join Team Create…",
+                                "Join Collaborate Session…",
                             )),
                         )
                         .on_hover_text("Join someone's session with their invite link.")

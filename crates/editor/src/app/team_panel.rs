@@ -1,4 +1,4 @@
-//! The Team Create panel and the title bar chip (TC4; design §11): share
+//! The Collaborate panel and the title bar chip (TC4; design §11): share
 //! the open project or join a session, see who's in it and how the
 //! connection is, follow someone's camera, invite people and set their
 //! roles, and leave. Also the Recovered Changes window and Settings > Team
@@ -31,7 +31,7 @@ pub(crate) struct TeamPanel {
     /// Where following last put the camera: if it's elsewhere now, the
     /// user moved it, and following stops.
     pub(crate) followed_to: Option<[f32; 3]>,
-    /// This computer's identity, for Settings > Team Create (read when the
+    /// This computer's identity, for Settings > Collaborate (read when the
     /// page first shows).
     identity: Option<Result<Identity, String>>,
 }
@@ -45,7 +45,7 @@ pub(crate) struct RecoveredChange {
     pub(crate) reason: String,
 }
 
-/// How long a new invite link works (Settings > Team Create).
+/// How long a new invite link works (Settings > Collaborate).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum InviteLifetime {
     Day,
@@ -203,7 +203,7 @@ pub(crate) fn status_text(status: &TeamStatus) -> String {
 
 impl EditorApp {
     /// The title bar's chip while in a session: up to four collaborators
-    /// who are here and a sync dot. Opens the Team Create panel.
+    /// who are here and a sync dot. Opens the Collaborate panel.
     pub(super) fn team_chip(&mut self, ui: &mut egui::Ui) {
         let Some(team) = &self.team else {
             return;
@@ -231,7 +231,7 @@ impl EditorApp {
             .interact(egui::Sense::click());
         let names: Vec<&str> = here.iter().map(|c| c.profile.name.as_str()).collect();
         let hover = format!(
-            "Team Create: {}. Here: {}.",
+            "Collaborate: {}. Here: {}.",
             status_text(&status),
             if names.is_empty() {
                 "nobody yet".to_owned()
@@ -244,7 +244,7 @@ impl EditorApp {
         }
     }
 
-    /// The Team Create panel.
+    /// The Collaborate panel.
     pub(in crate::app) fn team_create_pane(&mut self, ui: &mut egui::Ui) {
         let mut action = None;
         egui::ScrollArea::vertical()
@@ -269,7 +269,7 @@ impl EditorApp {
         if widgets::empty_state(
             ui,
             icons::USERS_THREE,
-            "Team Create",
+            "Collaborate",
             "Edit this project with others at the same time. Share it from this editor, \
              or join someone's session with their invite link.",
             None,
@@ -292,7 +292,7 @@ impl EditorApp {
             let share = widgets::button(
                 widgets::Role::Primary,
                 Some(icons::SHARE_NETWORK),
-                "Share with Team Create",
+                "Start Collaborate Session",
                 &palette,
             );
             if ui
@@ -606,7 +606,7 @@ impl EditorApp {
                 self.team_panel.problem = None;
                 match self.host_network_session(None, axcenity_collab::socket::DEFAULT_PORT) {
                     Ok(invite) => self.output.info(format!(
-                        "Team Create: hosting on {}. Invite: {}",
+                        "Collaborate: hosting on {}. Invite: {}",
                         invite.host,
                         invite.link()
                     )),
@@ -746,13 +746,13 @@ impl EditorApp {
         }
     }
 
-    /// Settings > Team Create: who this computer is to others, and what
+    /// Settings > Collaborate: who this computer is to others, and what
     /// new invites give.
     pub(super) fn team_settings_page(&mut self, ui: &mut egui::Ui) {
         use super::settings;
         settings::page_title(
             ui,
-            "Team Create",
+            "Collaborate",
             "How others see you in a session, and the invites you make.",
         );
         let palette = theme::palette(ui.ctx());
@@ -787,7 +787,7 @@ impl EditorApp {
                     identity.color = color;
                     if let Err(error) = super::team::save_own_identity(identity) {
                         self.toasts
-                            .warning(format!("Couldn't save your Team Create name: {error}"));
+                            .warning(format!("Couldn't save your Collaborate name: {error}"));
                     }
                 }
                 weak(
@@ -830,11 +830,11 @@ impl EditorApp {
         });
         weak(
             ui,
-            "Each link works once. Revoke unused ones from the Team Create panel.",
+            "Each link works once. Revoke unused ones from the Collaborate panel.",
         );
     }
 
-    /// File > Share with Team Create…: opens the panel and hosts.
+    /// File > Share with Collaborate…: opens the panel and hosts.
     pub(in crate::app) fn share_with_team_create(&mut self) {
         self.layout.open(Pane::TeamCreate);
         if self.team.is_none() {
@@ -850,7 +850,7 @@ impl EditorApp {
         });
     }
 
-    /// File > Join Team Create…: opens the panel, where the link goes.
+    /// File > Join Collaborate…: opens the panel, where the link goes.
     pub(in crate::app) fn join_team_create(&mut self) {
         self.layout.open(Pane::TeamCreate);
     }

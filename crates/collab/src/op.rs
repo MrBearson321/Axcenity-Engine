@@ -1,4 +1,4 @@
-//! The operations a Team Create transaction is made of.
+//! The operations a Collaborate transaction is made of.
 
 use axcenity_core::{ClassName, InstanceId, Value};
 

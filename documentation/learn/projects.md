@@ -1,5 +1,5 @@
 ---
-description: Make, open, organize and safeguard projects: templates, the project folder, levels, version history, backups and Team Create.
+description: Make, open, organize and safeguard projects: templates, the project folder, levels, version history, backups and Collaborate (editing together).
 icon: folder
 samples: [hello-levels]
 ---
@@ -46,14 +46,14 @@ A game can have several levels. `world.json` is the start level; every other lev
 - **File > Save Checkpoint…** saves with a message and pins that version, so it's kept however many saves follow.
 - **File > Back Up Project** writes a dated `.zip` of the whole project to a backup folder you choose the first time.
 
-## Team Create: editing together
+## Collaborate: editing together
 
-> **Experimental.** Team Create works on one network, but it's new and hasn't had much use across real machines yet. Keep backups of a shared project.
+> **Experimental.** Collaborate (called Team Create before) works on one network, but it's new and hasn't had much use across real machines yet. Keep backups of a shared project.
 
-Team Create lets several people edit one project at the same time, each in their own editor.
+Collaborate lets several people edit one project at the same time, each in their own editor.
 
-- **Share:** open the project and choose **File > Share with Team Create…**. Your editor hosts the session, and the **Team Create** panel opens. **Create invite link** makes a link for an **Editor** (can change things) or a **Viewer** (can look, but still receives the whole project). Each link works once; revoke unused ones from the panel.
-- **Join:** paste the link into **File > Join Team Create…**, or **Join…** on the start screen with no project open. Your editor fetches the project into its own folder and opens it.
+- **Share:** open the project and choose **File > Start Collaborate Session…**. Your editor hosts the session, and the **Collaborate** panel opens. **Create invite link** makes a link for an **Editor** (can change things) or a **Viewer** (can look, but still receives the whole project). Each link works once; revoke unused ones from the panel. Links made before the rename (`axcenity://teamcreate/…`) still work.
+- **Join:** paste the link into **File > Join Collaborate Session…**, or **Join…** on the start screen with no project open. Your editor fetches the project into its own folder and opens it.
 - **Working together:** edits, undo, imports and saved files reach everyone. Others' selections are outlined in their colour with a name tag, their rows in the Explorer get a colour bar, and **Follow their camera** shows what someone is looking at. A script or other document someone else is editing is read-only for you, with a line saying who has it.
 - **Connection:** the panel shows Connected, Syncing, Reconnecting or Offline. Offline, your changes wait and are sent when the connection comes back. If the host's editor stops without ending the session, opening the project again brings the session's work back as unsaved changes.
 - **Leave session** (members) or **End session** (the host) stops it. The owner sets roles and removes members in the panel.

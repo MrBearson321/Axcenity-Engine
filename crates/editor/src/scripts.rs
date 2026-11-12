@@ -83,7 +83,7 @@ pub struct ScriptTab {
     /// What luau-lsp last found in the code (`luau_check.rs`), underlined.
     /// Kept while the code changes, until the next check comes back.
     pub problems: Vec<Diagnostic>,
-    /// In a Team Create session, who else is editing this file: the tab is
+    /// In a Collaborate session, who else is editing this file: the tab is
     /// read-only until they save or close it. The app sets it each frame.
     pub editing_elsewhere: Option<String>,
 }

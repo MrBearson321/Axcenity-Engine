@@ -1,4 +1,4 @@
-//! Carrying Team Create's messages between computers (TC3; design §4.3 and
+//! Carrying Collaborate's messages between computers (TC3; design §4.3 and
 //! §9): WebSocket over TLS 1.3 on one TCP port.
 //!
 //! The host has a self-signed certificate it keeps from session to
@@ -191,7 +191,7 @@ impl Listener {
                                 std::thread::sleep(Duration::from_millis(20));
                             }
                             Err(error) => {
-                                log::warn!("Team Create: accepting a connection failed: {error}");
+                                log::warn!("Collaborate: accepting a connection failed: {error}");
                                 std::thread::sleep(Duration::from_millis(200));
                             }
                         }
@@ -272,7 +272,7 @@ fn serve(
     let ws = match opened {
         Ok(ws) => ws,
         Err(error) => {
-            log::info!("Team Create: a connection failed to open: {error}");
+            log::info!("Collaborate: a connection failed to open: {error}");
             return;
         }
     };
@@ -426,7 +426,7 @@ impl Link {
                 let _ = events_in.send(LinkEvent::Closed(LinkClosed::Lost));
             });
         if let Err(error) = spawned {
-            log::warn!("Team Create: couldn't start a connection thread: {error}");
+            log::warn!("Collaborate: couldn't start a connection thread: {error}");
         }
         Link {
             events,

@@ -1094,7 +1094,7 @@ impl ToolWindow {
     }
 }
 
-/// Team Create: `who` is editing the document shown, so it's read-only
+/// Collaborate: `who` is editing the document shown, so it's read-only
 /// here. Every document tab says it the same way.
 pub fn locked_banner(ui: &mut egui::Ui, who: &str) {
     let warning = ui.visuals().warn_fg_color;
