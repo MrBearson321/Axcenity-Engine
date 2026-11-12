@@ -439,6 +439,7 @@ impl ScenePipeline {
         self.bind_frame();
         let samples = self.graphics.anti_aliasing.samples();
         if samples != old_samples {
+            let building = std::time::Instant::now();
             (
                 self.sky_pipeline,
                 self.item_pipelines,
@@ -470,6 +471,10 @@ impl ScenePipeline {
             self.decal_pass.set_samples(&self.device, samples);
             self.grid_pass.set_samples(&self.device, samples);
             self.surface_shaders.clear_pipelines();
+            log::info!(
+                "graphics pipelines rebuilt for {samples} samples per pixel in {} ms",
+                building.elapsed().as_millis()
+            );
         }
         self.fit_targets();
         if self.graphics.texture_quality != old_quality {
@@ -2582,27 +2587,53 @@ fn scene_pipelines(
     } else {
         "fs_depth_only"
     };
-    (
-        create_sky_pipeline(device, frame_layout, samples),
-        ItemPipelines {
-            opaque: pipeline(false, false),
-            transparent: pipeline(true, false),
-            double_sided: pipeline(false, true),
-            double_sided_transparent: pipeline(true, true),
+    // Built at once on threads of their own: each compiles its shaders for
+    // the GPU (on DirectX 12 through DXC, which takes a while for this
+    // big shader), and wgpu lets pipelines be made from any thread.
+    let [
+        sky,
+        opaque,
+        transparent,
+        double_sided,
+        double_sided_transparent,
+        outline,
+        depth,
+        depth_double,
+        lit,
+        lit_double,
+    ] = gpu::in_parallel([
+        &|| create_sky_pipeline(device, frame_layout, samples),
+        &|| pipeline(false, false),
+        &|| pipeline(true, false),
+        &|| pipeline(false, true),
+        &|| pipeline(true, true),
+        &|| {
+            create_pipeline(
+                device,
+                &shader,
+                ("vs_outline", "fs_outline"),
+                &layouts,
+                (HDR_FORMAT, samples),
+                (false, true),
+            )
         },
-        create_pipeline(
-            device,
-            &shader,
-            ("vs_outline", "fs_outline"),
-            &layouts,
-            (HDR_FORMAT, samples),
-            (false, true),
-        ),
+        &|| prefill(depth_fill, false, DepthUse::Fill),
+        &|| prefill(depth_fill, true, DepthUse::Fill),
+        &|| prefill("fs_prefilled", false, DepthUse::Filled),
+        &|| prefill("fs_prefilled", true, DepthUse::Filled),
+    ]);
+    (
+        sky,
+        ItemPipelines {
+            opaque,
+            transparent,
+            double_sided,
+            double_sided_transparent,
+        },
+        outline,
         PrefillPipelines {
-            depth: [false, true]
-                .map(|double_sided| prefill(depth_fill, double_sided, DepthUse::Fill)),
-            lit: [false, true]
-                .map(|double_sided| prefill("fs_prefilled", double_sided, DepthUse::Filled)),
+            depth: [depth, depth_double],
+            lit: [lit, lit_double],
         },
     )
 }

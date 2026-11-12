@@ -250,14 +250,23 @@ impl Renderer {
     ) -> Result<Self> {
         // DirectX 12 on Windows, Metal on macOS, Vulkan on Linux
         // (`adapters`).
+        let starting = std::time::Instant::now();
         let instance = crate::adapters::instance();
+        log::debug!(
+            "graphics instance made in {} ms",
+            starting.elapsed().as_millis()
+        );
         let surface = instance
             .create_surface(target)
             .context("could not create a drawing surface for the window")?;
         let adapter = crate::adapters::adapter(&instance, Some(&surface))
             .await
             .context("no compatible graphics card found")?;
-        log::info!("using graphics adapter: {:?}", adapter.get_info());
+        log::info!(
+            "using graphics adapter: {:?} ({} ms since the instance)",
+            adapter.get_info(),
+            starting.elapsed().as_millis()
+        );
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -273,6 +282,10 @@ impl Renderer {
             })
             .await
             .context("could not open the graphics device")?;
+        log::debug!(
+            "graphics device open {} ms since the instance",
+            starting.elapsed().as_millis()
+        );
 
         let (width, height) = drawable_size(width, height).unwrap_or((1, 1));
         let mut config = surface
@@ -293,9 +306,14 @@ impl Renderer {
         }
         surface.configure(&device, &config);
         let capabilities = read_capabilities(&device, Some(&adapter.get_info()));
+        let building = std::time::Instant::now();
         let mut scene =
             ScenePipeline::new(device, queue, config.format, width, height, capabilities);
         scene.time_gpu = false;
+        log::info!(
+            "graphics pipelines ready in {} ms",
+            building.elapsed().as_millis()
+        );
 
         Ok(Self {
             surface,

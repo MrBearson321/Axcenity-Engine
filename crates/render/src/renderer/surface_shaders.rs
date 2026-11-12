@@ -301,7 +301,13 @@ impl ScenePipeline {
                 cached.get().gpu.is_some()
             }
             Entry::Vacant(slot) => {
+                let compiling = std::time::Instant::now();
                 let pipelines = compile(&self.device, shader, layouts, samples);
+                log::debug!(
+                    "surface shader of {:?} compiled in {} ms",
+                    shader.material(),
+                    compiling.elapsed().as_millis()
+                );
                 let compiled = pipelines.is_ok();
                 if let Err(error) = &pipelines {
                     log::warn!("{error}");

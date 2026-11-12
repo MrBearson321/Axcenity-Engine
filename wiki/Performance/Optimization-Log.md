@@ -22,6 +22,7 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 
 | Item | PR | Area | Headline (Measured) | Machine |
 |---|---|---|---|---|
+| DirectX 12 shader compiler and parallel pipelines | #172, #182 | Startup | Wet Patch assets loaded 11.4 → 2.25 s on DirectX 12 (Vulkan 0.98 s) | Desktop |
 | Render planning pool | #88 | Render | Unpinned Render step 6–18% less CPU (S10k 2.60 → 2.14 ms) | Desktop |
 | Physics own pool | #86, #93 | Physics | Unpinned S10k Physics 2.71 → 2.19 ms, frame 3.37 → 2.81 | Desktop |
 | Physics step part 1 | #84 | Physics, events | S10k Physics 6.12 → 4.73 ms, Heartbeat 1.10 → 0.54 (−24% frame) | Container |
@@ -54,6 +55,22 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 | Culling, LOD | graphics Ph. 12–13 | Render | Edge views draw only what's seen; foliage cull distances | Desktop |
 
 ## Entries
+
+### DirectX 12 startup (2026-11-11)
+
+| | |
+|---|---|
+| **Roadmap item / PR** | M12 follow-ups, PR #172 (static DXC) and #182 (parallel scene pipelines) |
+| **Evidence** | Measured |
+| **Problem** | After #104 made DirectX 12 the default on Windows, projects took about 8.5 s longer to load than on Vulkan |
+| **Root cause** | Without DXC, wgpu compiled every shader with the old FXC. With DXC, building pipelines still costs about 0.9 s at every launch, because DirectX 12 has no cache between launches (Vulkan's driver keeps one: 76 ms) |
+| **Solution** | Link DXC in (wgpu `static-dxc`, needs Visual Studio's ATL); make the scene's ten pipelines on threads of their own (`gpu::in_parallel`) |
+| **Affected components** | `Cargo.toml`, `crates/render/src/renderer/scene.rs`, `gpu.rs` |
+| **Before → after** | Temperate Wet Patch launch to assets loaded 11.4 s (FXC) → 2.41 s (DXC) → 2.25 s (parallel); pipelines ready 1,123 → 886 ms. Farmhouse 10.1 → 2.60 → 2.36 s. Vulkan 0.98 s |
+| **Method** | Release player, `--bench 300`, one warm-up then medians of 3 |
+| **Hardware** | Desktop |
+| **Trade-offs** | About 21.5 MB more per Windows executable; Windows builds need the ATL component. DirectX 12 also takes about 0.75 s longer than Vulkan to reach `using graphics adapter` (instance, surface and adapter setup; listing Vulkan and GL adapters too costs at most 50 ms). The `debug` lines in `Renderer::new` split it up |
+| **Detail** | `docs/rendering/pipeline.md`, "Graphics API" |
 
 ### Physics step and thread pools (2026-11-11)
 
