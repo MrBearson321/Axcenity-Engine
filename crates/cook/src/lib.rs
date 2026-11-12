@@ -9,19 +9,24 @@
 //! decode, CPU mipmaps and a full RGBA upload, and a quarter of the GPU
 //! memory.
 //!
+//! A texture's import preset (R12, `axcenity_assets::ImportPresets`) can
+//! pick its compression whatever its name, keep it uncompressed (no cooked
+//! copy: decoded as before, every pixel exact) or limit the cooked copy's
+//! size ([`plan_for`]).
+//!
 //! [`cook_project`] cooks every image under `assets/` that has no current
-//! cooked copy. The editor runs it on a thread when a project opens, and
+//! cooked copy as its preset wants. The editor runs it on a thread when a project opens, and
 //! `axcenity-editor --cook <folder>` runs it from the command line.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axcenity_assets::{
-    CookedFormat, CookedTexture, MapSlot, ModelFormat, SourceStamp, TEXTURE_EXTENSIONS,
-    TEXTURES_FOLDER, content_hash, cooked_format, decode_texture, embedded_cooked_done,
-    embedded_cooked_format, embedded_files, has_alpha, mark_embedded_cooked,
-    remove_orphaned_copies, safe_path, sampled_average, texture_roles, write_cooked,
-    write_embedded_cooked,
+    Compression, CookedFormat, CookedTexture, ImportPresets, MapSlot, ModelFormat, SourceStamp,
+    TEXTURE_EXTENSIONS, TEXTURES_FOLDER, content_hash, cooked_header, decode_texture,
+    embedded_cooked_done, embedded_cooked_format, embedded_files, has_alpha, mark_embedded_cooked,
+    remove_cooked, remove_orphaned_copies, safe_path, sampled_average, texture_file_size,
+    texture_roles, write_cooked, write_embedded_cooked,
 };
 use intel_tex_2::{RgSurface, RgbaSurface, bc5, bc7};
 use rayon::prelude::*;
@@ -33,14 +38,14 @@ const BLOCK_ROWS_PER_JOB: u32 = 16;
 /// or `None` if the size isn't whole 4×4 blocks (a BC7 texture must start
 /// with whole blocks; such textures stay RGBA). Uses rayon's threads.
 pub fn cook_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> {
-    cook_as(CookedFormat::Bc7, width, height, rgba)
+    cook_as(CookedFormat::Bc7, width, height, rgba, None)
 }
 
 /// Cooks the normal map `rgba` into BC5 mip levels of its red and green
 /// (blue is worked out from them when drawn), or `None` if the size isn't
 /// whole 4×4 blocks, like [`cook_rgba`].
 pub fn cook_normal_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> {
-    cook_as(CookedFormat::Bc5, width, height, rgba)
+    cook_as(CookedFormat::Bc5, width, height, rgba, None)
 }
 
 /// The format the texture file `relative` is cooked into: BC5 for a file
@@ -57,7 +62,56 @@ pub fn format_for(relative: &str) -> CookedFormat {
     }
 }
 
-fn cook_as(format: CookedFormat, width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> {
+/// How the project file `relative` is cooked by its import preset
+/// (`presets`): the format and the largest size its top level may be, or
+/// `None` when the preset keeps it uncompressed (no cooked copy).
+pub fn plan_for(
+    project: &Path,
+    presets: &ImportPresets,
+    relative: &str,
+) -> Option<(CookedFormat, Option<u32>)> {
+    let settings = presets.texture_settings(project, relative);
+    let format = match settings.compression {
+        Compression::Auto => format_for(relative),
+        Compression::Color => CookedFormat::Bc7,
+        Compression::NormalMap => CookedFormat::Bc5,
+        Compression::None => return None,
+    };
+    Some((format, settings.max_size.filter(|size| *size > 0)))
+}
+
+/// `width`×`height` halved (each at least 1) until neither is over `max`.
+pub fn fitted_size(width: u32, height: u32, max: Option<u32>) -> (u32, u32) {
+    let (mut width, mut height) = (width, height);
+    if let Some(max) = max {
+        while width.max(height) > max.max(1) {
+            (width, height) = ((width / 2).max(1), (height / 2).max(1));
+        }
+    }
+    (width, height)
+}
+
+fn cook_as(
+    format: CookedFormat,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    max_size: Option<u32>,
+) -> Option<CookedTexture> {
+    if rgba.len() != width as usize * height as usize * 4 {
+        return None;
+    }
+    // Over the preset's size: its smaller levels, made as the full mip
+    // chain would make them, become the whole texture.
+    let average = sampled_average(rgba);
+    let alpha = has_alpha(rgba);
+    let (fit_width, fit_height) = fitted_size(width, height, max_size);
+    let mut top = (width, height, std::borrow::Cow::Borrowed(rgba));
+    while (top.0, top.1) != (fit_width, fit_height) {
+        let (w, h, pixels) = half_size(top.0, top.1, &top.2);
+        top = (w, h, std::borrow::Cow::Owned(pixels));
+    }
+    let (width, height, rgba) = (top.0, top.1, &*top.2);
     let whole = width > 0
         && height > 0
         && width.is_multiple_of(4)
@@ -66,9 +120,8 @@ fn cook_as(format: CookedFormat, width: u32, height: u32, rgba: &[u8]) -> Option
     if !whole {
         return None;
     }
-    // Kept for BC5 too, though its blocks hold no alpha: it's what the
-    // source has, and loading reads it without decoding (parity).
-    let alpha = has_alpha(rgba);
+    // `alpha` is kept for BC5 too, though its blocks hold no alpha: it's
+    // what the source has, and loading reads it without decoding (parity).
     let encoder = match format {
         CookedFormat::Bc7 if alpha => Encoder::Bc7(bc7::alpha_very_fast_settings()),
         CookedFormat::Bc7 => Encoder::Bc7(bc7::opaque_very_fast_settings()),
@@ -90,7 +143,7 @@ fn cook_as(format: CookedFormat, width: u32, height: u32, rgba: &[u8]) -> Option
         height,
         levels,
         has_alpha: alpha,
-        average: sampled_average(rgba),
+        average,
     })
 }
 
@@ -195,14 +248,34 @@ fn half_size(width: u32, height: u32, rgba: &[u8]) -> (u32, u32, Vec<u8>) {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Cooked,
+    /// Its import preset keeps it uncompressed: any cooked copy was
+    /// deleted, and it's decoded as it is.
+    Uncompressed,
     /// Its size isn't whole 4×4 blocks, so it stays RGBA.
     NotBlockSized,
     Failed(String),
 }
 
 /// Cooks the project file `relative` (such as `assets/textures/wood.png`)
-/// and writes its cooked copy.
+/// as its import preset wants, and writes its cooked copy (or deletes it,
+/// for a preset that keeps it uncompressed).
 pub fn cook_file(project: &Path, relative: &str) -> Outcome {
+    cook_planned(
+        project,
+        relative,
+        plan_for(project, &ImportPresets::read_or_default(project), relative),
+    )
+}
+
+fn cook_planned(
+    project: &Path,
+    relative: &str,
+    plan: Option<(CookedFormat, Option<u32>)>,
+) -> Outcome {
+    let Some((format, max_size)) = plan else {
+        remove_cooked(project, relative);
+        return Outcome::Uncompressed;
+    };
     let Some(path) = safe_path(relative).map(|path| project.join(path)) else {
         return Outcome::Failed("it isn't inside the project folder".to_owned());
     };
@@ -215,18 +288,52 @@ pub fn cook_file(project: &Path, relative: &str) -> Outcome {
         Ok(image) => image,
         Err(reason) => return Outcome::Failed(reason),
     };
-    let Some(cooked) = cook_as(
-        format_for(relative),
-        image.width,
-        image.height,
-        image.rgba(),
-    ) else {
+    let Some(cooked) = cook_as(format, image.width, image.height, image.rgba(), max_size) else {
+        // A stale copy (another size or format) mustn't stand in for it.
+        remove_cooked(project, relative);
         return Outcome::NotBlockSized;
     };
     match write_cooked(project, relative, stamp, &cooked) {
         Ok(()) => Outcome::Cooked,
         Err(err) => Outcome::Failed(err.to_string()),
     }
+}
+
+/// Whether `relative`'s cooked copy is current and what `plan` makes: its
+/// format, and its size the file's fitted to the plan's (the file's size
+/// read from its header; when that can't be read, any size within it).
+fn is_as_planned(
+    project: &Path,
+    relative: &str,
+    plan: Option<(CookedFormat, Option<u32>)>,
+) -> bool {
+    let header = cooked_header(project, relative);
+    let Some((format, max_size)) = plan else {
+        return header.is_none();
+    };
+    let Some((cooked, width, height)) = header else {
+        return false;
+    };
+    if cooked != format {
+        return false;
+    }
+    match texture_file_size(project, relative) {
+        Some((source_width, source_height)) => {
+            fitted_size(source_width, source_height, max_size) == (width, height)
+        }
+        None => max_size.is_none_or(|max| width.max(height) <= max),
+    }
+}
+
+/// Brings `relative`'s cooked copy in line with its import preset now: for
+/// the editor, after a preset is picked (or the pick undone). `None` when
+/// it already was.
+pub fn refresh_texture(project: &Path, relative: &str) -> Option<Outcome> {
+    let plan = plan_for(project, &ImportPresets::read_or_default(project), relative);
+    if is_as_planned(project, relative, plan) {
+        return None;
+    }
+    Some(cook_planned(project, relative, plan))
 }
 
 /// Every image file under the project's `assets/` folder, as project paths
@@ -285,6 +392,8 @@ pub struct Report {
     pub current: usize,
     /// Textures left as they are: not whole 4×4 blocks.
     pub skipped: usize,
+    /// Textures their import preset keeps uncompressed.
+    pub uncompressed: usize,
     /// Textures that couldn't be cooked, and why.
     pub failed: Vec<(String, String)>,
     /// Cached copies deleted because their source file is gone (or, for
@@ -303,17 +412,23 @@ pub fn cook_project(
     mut progress: impl FnMut(&str, &Outcome),
 ) -> Report {
     let mut report = Report::default();
+    let presets = ImportPresets::read_or_default(project);
     for relative in texture_files(project) {
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        // Current, and in the format it's cooked into now (normal maps
-        // cooked as BC7 before BC5 are cooked again).
-        if cooked_format(project, &relative) == Some(format_for(&relative)) {
-            report.current += 1;
+        // Current, and as its preset wants it now (normal maps cooked as
+        // BC7 before BC5, or a preset picked since, are cooked again).
+        let plan = plan_for(project, &presets, &relative);
+        if is_as_planned(project, &relative, plan) {
+            if plan.is_none() {
+                report.uncompressed += 1;
+            } else {
+                report.current += 1;
+            }
             continue;
         }
-        let outcome = cook_file(project, &relative);
+        let outcome = cook_planned(project, &relative, plan);
         progress(&relative, &outcome);
         report.add(relative, outcome);
     }
@@ -332,6 +447,7 @@ impl Report {
     fn add(&mut self, path: String, outcome: Outcome) {
         match outcome {
             Outcome::Cooked => self.cooked += 1,
+            Outcome::Uncompressed => self.uncompressed += 1,
             Outcome::NotBlockSized => self.skipped += 1,
             Outcome::Failed(reason) => self.failed.push((path, reason)),
         }
@@ -395,7 +511,7 @@ pub fn cook_embedded(
         }
         let outcome = match decode_texture(content, name) {
             Err(reason) => Outcome::Failed(reason),
-            Ok(image) => match cook_as(wanted, image.width, image.height, image.rgba()) {
+            Ok(image) => match cook_as(wanted, image.width, image.height, image.rgba(), None) {
                 None => Outcome::NotBlockSized,
                 Some(cooked) => match write_embedded_cooked(project, content, &cooked) {
                     Ok(()) => {

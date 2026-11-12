@@ -426,6 +426,173 @@ fn the_part_tools_tab_slider_and_button_work_and_restyle_through_css() {
     );
 }
 
+/// Roadmap G10: the example's Align to Grid draws where the selected parts
+/// would snap to, the Scene View gets those drawings while editing, and
+/// they go when the parts are aligned or the plugin is turned off.
+#[test]
+fn align_to_grid_draws_where_the_selection_would_snap_until_aligned() {
+    let mut app = opened("plugin-drawings");
+    let index = plugin_index(&app, "project/align-to-grid");
+    assert!(app.plugins.entries[index].drawings.is_empty());
+    let crate_part = part(&app, "Crate");
+    app.select_many(vec![crate_part]);
+    app.plugins_frame(1.0 / 60.0);
+    // A box where the Crate would go, and a line from it to there.
+    let drawings = &app.plugins.entries[index].drawings;
+    assert_eq!(drawings.len(), 2, "{drawings:?}");
+    assert!(matches!(
+        &drawings[0].shape,
+        axcenity_plugins::Shape::Box { cframe, .. } if cframe.position == Vector3::new(2.0, 2.0, -4.0)
+    ));
+    assert!(matches!(
+        drawings[1].shape,
+        axcenity_plugins::Shape::Line { .. }
+    ));
+    assert_eq!(app.history.undo_label(), None, "drawing isn't an edit");
+
+    let (_, button) = first_button(&app, "project/align-to-grid");
+    app.click_plugin_button(index, button);
+    assert!(app.plugins.entries[index].drawings.is_empty());
+
+    app.undo();
+    app.select_many(Vec::new());
+    app.plugins_frame(1.0 / 60.0);
+    assert!(app.plugins.entries[index].drawings.is_empty());
+    app.select_many(vec![crate_part]);
+    app.plugins_frame(1.0 / 60.0);
+    assert_eq!(app.plugins.entries[index].drawings.len(), 2);
+    app.plugins.set_enabled("project/align-to-grid", false);
+    app.reload_plugin(index);
+    assert!(app.plugins.entries[index].drawings.is_empty());
+}
+
+/// Roadmap G10: Part Tools puts a height handle on the selected part;
+/// dragging it resizes the part, the whole drag is one undo step, and the
+/// handle follows the part.
+#[test]
+fn dragging_part_tools_height_handle_resizes_the_part_as_one_undo_step() {
+    let mut app = opened("plugin-handles");
+    let index = plugin_index(&app, "project/part-tools");
+    assert!(app.plugins.entries[index].handles.is_empty());
+    let crate_part = part(&app, "Crate");
+    app.select_many(vec![crate_part]);
+    app.plugins_frame(1.0 / 60.0);
+    let handles = app.plugins.entries[index].handles.clone();
+    assert_eq!(handles.len(), 1, "{handles:?}");
+    assert_eq!(handles[0].position, Vector3::new(2.3, 2.6, -3.7));
+    assert_eq!(handles[0].axis, Some(Vector3::new(0.0, 1.0, 0.0)));
+
+    let size = |app: &EditorApp| match app.world.get(crate_part).unwrap().property("Size") {
+        Some(Value::Vector3(v)) => *v,
+        other => panic!("{other:?}"),
+    };
+    let moved = |y: f32, ended: bool| crate::viewport::HandleMove {
+        plugin: index,
+        id: handles[0].id,
+        position: Vector3::new(2.3, y, -3.7),
+        ended,
+    };
+    app.drag_plugin_handle(moved(3.6, false));
+    app.drag_plugin_handle(moved(4.6, false));
+    app.drag_plugin_handle(moved(4.6, true));
+    assert_eq!(size(&app), Vector3::new(2.0, 4.0, 2.0));
+    assert!((position(&app, crate_part).y - 2.6).abs() < 1e-5);
+    assert_eq!(app.history.undo_label(), Some("Resize Height"));
+    // The handle went to the part's new top.
+    let handles = &app.plugins.entries[index].handles;
+    assert_eq!(handles.len(), 1);
+    assert!((handles[0].position.y - 4.6).abs() < 1e-5);
+
+    app.undo();
+    assert_eq!(size(&app), Vector3::new(2.0, 2.0, 2.0));
+    assert_eq!(position(&app, crate_part), Vector3::new(2.3, 1.6, -3.7));
+    assert_eq!(
+        app.history.undo_label(),
+        None,
+        "the whole drag was one step"
+    );
+
+    // Nothing selected, no handle.
+    app.select_many(Vec::new());
+    app.plugins_frame(1.0 / 60.0);
+    assert!(app.plugins.entries[index].handles.is_empty());
+}
+
+/// Roadmap G10: a plugin's attribute row sets the attribute as an undo
+/// step and tells the plugin; Align to Grid's Snap to Grid button row snaps
+/// the part it's clicked for.
+#[test]
+fn plugin_properties_rows_set_attributes_and_buttons_call_the_plugin() {
+    let folder = copy_of_example("hello-plugins", "plugin-rows");
+    let speed = folder.join("plugins").join("speed");
+    std::fs::create_dir_all(&speed).unwrap();
+    std::fs::write(
+        speed.join("plugin.json"),
+        r#"{ "name": "Speed", "version": "1.0.0" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        speed.join("init.lua"),
+        "local row = plugin:AddPropertyRow({ Attribute = 'Speed', Default = 16, Class = 'BasePart', Min = 0, Max = 50 })\n\
+         row.Changed:Connect(function(part, value) print('speed', part.Name, value) end)\n",
+    )
+    .unwrap();
+    let mut app = EditorApp::new(None);
+    app.open(&folder);
+    let crate_part = part(&app, "Crate");
+    app.select_many(vec![crate_part]);
+    let speed = plugin_index(&app, "project/speed");
+    let row = app.plugins.entries[speed].rows[0].id;
+    let names: Vec<_> = app
+        .plugins
+        .property_rows()
+        .iter()
+        .map(|rows| rows.name.to_owned())
+        .collect();
+    assert_eq!(names, ["Align to Grid", "Speed"]);
+
+    app.plugin_row_action(
+        crate_part,
+        crate::properties::RowAction::Set {
+            plugin: speed,
+            row,
+            name: "Speed".into(),
+            value: Value::Number(20.0),
+        },
+    );
+    let attribute = |app: &EditorApp| {
+        app.world
+            .get(crate_part)
+            .unwrap()
+            .attribute("Speed")
+            .cloned()
+    };
+    assert_eq!(attribute(&app), Some(Value::Number(20.0)));
+    assert_eq!(
+        app.history.undo_label(),
+        Some("Set attribute Speed of Crate")
+    );
+    assert!(
+        console(&app).contains(&"speed\tCrate\t20".to_owned()),
+        "{:?}",
+        console(&app)
+    );
+    app.undo();
+    assert_eq!(attribute(&app), None);
+
+    let align = plugin_index(&app, "project/align-to-grid");
+    let snap_row = app.plugins.entries[align].rows[0].id;
+    app.plugin_row_action(
+        crate_part,
+        crate::properties::RowAction::Click {
+            plugin: align,
+            row: snap_row,
+        },
+    );
+    assert_eq!(position(&app, crate_part), Vector3::new(2.0, 2.0, -4.0));
+    assert_eq!(app.history.undo_label(), Some("Snap to Grid"));
+}
+
 #[test]
 fn turning_a_plugin_off_takes_its_tab_and_buttons_away() {
     let mut app = opened("plugin-off");

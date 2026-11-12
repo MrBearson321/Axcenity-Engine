@@ -18,7 +18,7 @@ use axcenity_core::input::InputEvent;
 use axcenity_core::{ClassName, World};
 use axcenity_net::{Conditions, GameInfo, PeerStats, ScriptCode};
 use axcenity_project::ScriptFile;
-use axcenity_script::{Breakpoints, CameraState, Resume};
+use axcenity_script::{BreakpointRules, Breakpoints, CameraState, Resume};
 
 use super::{Crash, Session, play_user_id};
 use crate::output::Output;
@@ -83,6 +83,7 @@ impl Play {
         edit_world: &World,
         scripts: &[ScriptFile],
         breakpoints: &Breakpoints,
+        rules: &BreakpointRules,
         output: &mut Output,
         assets: axcenity_assets::Assets,
         camera: CameraState,
@@ -104,6 +105,7 @@ impl Play {
             edit_world,
             scripts,
             breakpoints,
+            rules,
             settings.pause_on_error,
             output,
             assets.clone(),
@@ -142,6 +144,7 @@ impl Play {
                     edit_world,
                     &[],
                     breakpoints,
+                    rules,
                     settings.pause_on_error,
                     output,
                     assets.clone(),
@@ -292,6 +295,27 @@ impl Play {
         for device in &mut self.devices {
             device.set_breakpoints(breakpoints);
         }
+    }
+
+    pub fn set_breakpoint_rules(&mut self, rules: &BreakpointRules) {
+        for device in &mut self.devices {
+            device.set_breakpoint_rules(rules);
+        }
+    }
+
+    /// Pauses at the next script line any device runs (the Pause button),
+    /// or stops asking.
+    pub fn request_pause(&mut self, on: bool) {
+        for device in &mut self.devices {
+            device.sim.scripts.request_pause(on);
+        }
+    }
+
+    /// Whether Pause was pressed and no script has run a line since.
+    pub fn pause_requested(&self) -> bool {
+        self.devices
+            .iter()
+            .any(|device| device.sim.scripts.pause_requested())
     }
 
     /// Where a script is paused at a breakpoint on any device.

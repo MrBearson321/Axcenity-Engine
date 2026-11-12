@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "project"
+title = "Save a project as a template and start new projects from it"
+details = "File > Save as Template… turns the open project into an .axtemplate file (its world, scripts, assets and settings, with a name, description and picture) in the editor's templates folder. New Project lists them under Your templates, and Import… adds a template file someone else made. Projects made from one get their own name and history; a Collaborate project's repository and project ID aren't copied."
+features = ["project.user-templates"]
+fixes = []
+introduces_issues = []
+prs = [258]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

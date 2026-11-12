@@ -36,6 +36,7 @@ use crate::surface::{self, MapFile};
 use crate::theme::icons;
 use crate::tree::{self, Insertable};
 
+mod attach_script;
 mod export;
 mod import;
 mod packages;
@@ -43,7 +44,7 @@ mod pickers;
 mod script_files;
 mod watch;
 
-pub(super) use export::ExportTarget;
+pub(super) use export::{ExportTarget, picked_profile};
 pub(super) use import::is_package;
 pub(in crate::app) use import::{asset_files, files_made_since};
 
@@ -274,7 +275,8 @@ impl EditorApp {
                 }
                 self.repo_changed();
                 match project::record_version(&folder, "Save") {
-                    Ok(_) => {}
+                    Ok(true) => self.record_save_history(&folder),
+                    Ok(false) => {}
                     Err(err) => self
                         .output
                         .warning(format!("Saved, but could not keep a version: {err}")),
@@ -282,6 +284,8 @@ impl EditorApp {
             }
             self.tests_saved();
         }
+        // Everything is on disk: AutoRecover's copy isn't needed.
+        self.autorecover_done();
         // The project list shows the picture taken at the last save.
         self.thumbnail_wanted.get_or_insert(false);
         true

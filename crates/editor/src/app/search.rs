@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 20] = [
+const TOOL_PANES: [Pane; 21] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -350,6 +350,7 @@ const TOOL_PANES: [Pane; 20] = [
     Pane::Inventory,
     Pane::VersionExplorer,
     Pane::TeamCreate,
+    Pane::TeamBoard,
 ];
 
 /// Other words people search for a command by, matched like its name.
@@ -439,6 +440,9 @@ fn command_description(command: &Command) -> String {
         }
         Command::SaveCheckpoint => "Keep a named copy of the project as it is now.",
         Command::BackUpProject => "Write a zip of the whole project.",
+        Command::SaveAsTemplate => {
+            "Keep this project as a template that New Project offers for new ones."
+        }
         Command::Input => {
             "The project's input map: actions and the keys, buttons and sticks that do them."
         }
@@ -446,6 +450,9 @@ fn command_description(command: &Command) -> String {
         Command::Import => "Bring models, images, sounds or prefabs into the project's assets.",
         Command::BuildGame(_) => {
             "Package the game so it runs without the editor, for the chosen computer."
+        }
+        Command::BuildProfile(_) => {
+            "Which build profile Build Game uses: cooking, compression and the Developer Console."
         }
         Command::LoadingScreen(_) | Command::WaitForScript => {
             "What a built game shows while it loads."

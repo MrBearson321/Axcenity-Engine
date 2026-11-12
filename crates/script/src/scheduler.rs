@@ -335,28 +335,38 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
     let Ok(args) = args.into_lua_multi(lua) else {
         return;
     };
-    let Some(args) = debugger::hold_while_paused(lua, thread, args) else {
+    let Some(mut args) = debugger::hold_while_paused(lua, thread, args) else {
         return;
     };
-    // The watchdog times the thread from here until it pauses or ends.
+    // The watchdog times the thread from here until it pauses or ends. A
+    // breakpoint that doesn't pause (see below) doesn't restart the clock, so
+    // a logpoint can't keep an endless loop from being stopped.
     watchdog::enter(lua, thread);
-    debugger::enter(lua, thread);
-    // `()` because whatever the thread returns or yields isn't needed here.
-    match thread.resume::<()>(args) {
-        // Paused or finished. The watchdog may have paused it for good.
-        Ok(()) => {
-            if let Some(message) = watchdog::paused_by_watchdog(lua, thread) {
-                push_output(lua, OutputKind::Error, message);
+    loop {
+        debugger::enter(lua, thread);
+        // `()` because whatever the thread returns or yields isn't needed here.
+        match thread.resume::<()>(args) {
+            // Paused or finished. The watchdog may have paused it for good.
+            Ok(()) => {
+                if let Some(message) = watchdog::paused_by_watchdog(lua, thread) {
+                    push_output(lua, OutputKind::Error, message);
+                }
+            }
+            Err(err) => {
+                let message = error_message(&err);
+                if watchdog::should_report(lua, &message) {
+                    push_error(lua, &err);
+                }
+                debugger::failed(lua, thread, &message);
             }
         }
-        Err(err) => {
-            let message = error_message(&err);
-            if watchdog::should_report(lua, &message) {
-                push_error(lua, &err);
-            }
-            debugger::failed(lua, thread, &message);
+        debugger::leave(lua, thread);
+        // A breakpoint whose condition isn't true, or a logpoint, runs on
+        // here rather than from inside `settle`, so they never nest.
+        if !debugger::settle(lua, thread) {
+            break;
         }
+        args = MultiValue::new();
     }
-    debugger::leave(lua, thread);
     watchdog::leave(lua);
 }

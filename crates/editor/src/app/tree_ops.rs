@@ -57,6 +57,9 @@ impl EditorApp {
                 self.delete_selected();
             }
             Action::Delete(id) => self.delete(id),
+            // A script that is a file in its service is attached instead:
+            // its file moves into `objects/`, which is asked about first.
+            Action::MoveInto { id, parent } if is_script(id) => self.ask_attach(id, parent),
             Action::MoveInto { id, parent } => {
                 self.move_into(id, parent);
             }
@@ -67,6 +70,7 @@ impl EditorApp {
             Action::Prefab(action) => self.prefab_action(action),
             Action::KeepPlayChanges(_) => {}
             Action::SetLocked(id, on) => self.set_locked(id, on),
+            Action::ReportBug(id) => self.report_bug_about(id),
         }
     }
     /// Turns `Locked` on or off for `id`, and for the rest of the selection

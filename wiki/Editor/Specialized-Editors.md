@@ -30,7 +30,7 @@ The editor's tabs beyond the Scene, Explorer and Properties. Each is a module (o
 
 ## Model Studio
 
-Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws through `View::use_model`. The Pose test skins exactly as `assets::Posed` does. Phase 90 ("A narrower Model Studio") removed Sculpt mode, retopology and Bake (about 5,600 lines): creators sculpt and bake in Blender and import the `.glb`.
+Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws through `View::use_model`. The Pose test skins exactly as `assets::Posed` does. Phase 90 ("A narrower Model Studio") removed Sculpt mode, retopology and Bake (about 5,600 lines); R15 brought Sculpt mode and Bake (with Make Low Poly) back at Paul's choice, and retopology by hand stays Blender's.
 
 ## Animation tab and sequencer
 

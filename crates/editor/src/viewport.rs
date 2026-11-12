@@ -67,10 +67,13 @@ mod input;
 mod legend;
 mod move_overlay;
 mod overlays;
+mod plugin_drawings;
+mod plugin_handles;
+pub use plugin_handles::HandleMove;
 mod view_cube;
 mod view_mode;
-pub(crate) use overlays::paint_agent_paths;
 use overlays::*;
+pub(crate) use overlays::{paint_agent_paths, paint_physics};
 pub use view_mode::ViewMode;
 
 /// Where the camera starts, looking at the origin (the same as the player).
@@ -121,6 +124,12 @@ const FROZEN_VIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 80);
 const FROZEN_VIEW_LENGTH: f32 = 60.0;
 /// The Agent Paths overlay: what's left of each agent's path.
 const AGENT_PATH_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 40);
+/// Contact points and their push (roadmap G15).
+const CONTACT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 200);
+/// A moving body's center of mass while it's simulated.
+const AWAKE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 200, 60);
+/// A body rapier has put to sleep.
+const ASLEEP_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 160, 255);
 
 /// A left click in the viewport, with the UI element or part under the
 /// mouse (`None` for empty space, which clears the selection). Starting to
@@ -203,6 +212,8 @@ pub struct ViewportOutput {
     /// The mouse over the Scene View for the editor's plugins
     /// (`plugin:GetMouse()`), while any run and the game doesn't.
     pub plugin_mouse: Option<axcenity_plugins::MouseInput>,
+    /// A plugin handle the user dragged (`plugin:CreateHandle`).
+    pub plugin_handle: Option<HandleMove>,
     /// What drawing the scene took, for the Profiler.
     pub render: Option<RenderCost>,
     /// Materials whose surface shaders didn't compile, each once, for the
@@ -370,6 +381,9 @@ pub struct ViewportScene<'a> {
     /// The path each NavigationAgent is walking during Play, from its feet,
     /// for the Agent Paths overlay.
     pub agent_paths: &'a [(InstanceId, Vec<axcenity_core::Vector3>)],
+    /// The simulation's contacts and bodies during Play, for the Contacts
+    /// and Bodies overlays; `None` outside Play or with both off.
+    pub physics: Option<&'a axcenity_physics::DebugView>,
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// Moving parts drawn between physics steps during Play (roadmap G3);
@@ -387,6 +401,12 @@ pub struct ViewportScene<'a> {
     /// While plugins run (outside Play): whether one has the left button
     /// (`plugin:Activate(true)`), which then neither selects nor drags.
     pub plugin_mouse: Option<bool>,
+    /// What running plugins draw over the Scene View (`plugin:DrawLine`
+    /// and the rest; roadmap G10). Empty during Play.
+    pub plugin_drawings: Vec<&'a axcenity_plugins::Drawing>,
+    /// Running plugins' handles, each with its plugin's index in the
+    /// editor's list. Empty during Play.
+    pub plugin_handles: Vec<(usize, &'a axcenity_plugins::Handle)>,
     /// The camera during Play (`Session::shown_camera`, with whether the
     /// game holds the view). A controller's or a script's camera doesn't
     /// move the fly camera, so Stop shows it where it was.
@@ -419,6 +439,11 @@ pub struct OverlayToggles {
     pub agent_paths: bool,
     /// Welds and Attachments (selected Attachments always show).
     pub constraints: bool,
+    /// During Play: where bodies touch, and how hard (roadmap G15).
+    pub contacts: bool,
+    /// During Play: each moving body's center of mass, coloured by
+    /// whether it's awake or asleep (roadmap G15).
+    pub bodies: bool,
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
@@ -433,6 +458,8 @@ impl OverlayToggles {
             || self.nav_mesh
             || self.agent_paths
             || self.constraints
+            || self.contacts
+            || self.bodies
             || self.culling
     }
 }
@@ -703,6 +730,8 @@ pub struct Viewport {
     /// The left button went down on a Spline's curve and is held, so it
     /// neither selects nor drags anything else.
     spline_press: bool,
+    /// A plugin's handle being dragged.
+    handle_drag: Option<plugin_handles::HandleDrag>,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -747,6 +776,7 @@ impl Viewport {
             drag: None,
             spline_drag: None,
             spline_press: false,
+            handle_drag: None,
             particles: Particles::new(),
             terrain_stroke: false,
             plugin_press: false,
@@ -1022,6 +1052,7 @@ impl Viewport {
             debug_rays,
             nav_mesh,
             agent_paths,
+            physics,
             poses,
             blends,
             playing: game_playing,
@@ -1029,6 +1060,8 @@ impl Viewport {
             constraint_pick,
             spline_editing,
             plugin_mouse,
+            plugin_drawings,
+            plugin_handles,
             play_camera,
             graphics,
             others,
@@ -1240,16 +1273,29 @@ impl Viewport {
         if cube_hit.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        // Plugin handles take a press on them while editing, before anything else.
+        let (plugin_handle, handle_taken) =
+            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+                let step = snap.move_on.then_some(snap.move_step);
+                self.plugin_handle_input(ui, &response, &screen, &plugin_handles, step)
+            } else {
+                self.handle_drag = None;
+                (None, false)
+            };
         // Splines take a press on their curve or points while editing.
         let (spline, spline_taken, spline_released) =
-            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+            if editing && brush.is_none() && picking.is_none() && !plugin_button && !handle_taken {
                 self.spline_input(ui, &response, &screen, world, spline_editing)
             } else {
                 self.spline_drag = None;
                 self.spline_press = false;
                 (None, false, false)
             };
-        let drag_tool = if spline_taken { None } else { drag_tool };
+        let drag_tool = if spline_taken || handle_taken {
+            None
+        } else {
+            drag_tool
+        };
         let drag = self.drag_input(
             ui,
             &response,
@@ -1279,6 +1325,7 @@ impl Viewport {
                 || picking.is_some()
                 || plugin_button
                 || spline_taken
+                || handle_taken
                 || cube_hit.is_some() =>
             {
                 None
@@ -1508,6 +1555,20 @@ impl Viewport {
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
         }
+        if !plugin_drawings.is_empty() {
+            plugin_drawings::paint(&ui.painter_at(rect), &screen, &plugin_drawings);
+        }
+        if !plugin_handles.is_empty() {
+            plugin_handles::paint_handles(
+                &ui.painter_at(rect),
+                &screen,
+                &plugin_handles,
+                self.handle_drag,
+            );
+        }
+        if let Some(physics) = physics {
+            paint_physics(&ui.painter_at(rect), &screen, physics, overlays);
+        }
         if game_playing && let Some(settings) = self.terrain.streaming.settings() {
             paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
         }
@@ -1649,6 +1710,7 @@ impl Viewport {
             surface,
             spline,
             plugin_mouse,
+            plugin_handle,
             render: Some(render),
             shader_errors,
         }

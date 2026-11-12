@@ -367,8 +367,15 @@ pub fn is_cooked(project: &Path, relative: &str) -> bool {
 /// The format of `relative`'s current cooked copy, if it has one. Only the
 /// cooked file's start is read.
 pub fn cooked_format(project: &Path, relative: &str) -> Option<CookedFormat> {
+    cooked_header(project, relative).map(|(format, _, _)| format)
+}
+
+/// The format, width and height of `relative`'s current cooked copy, if it
+/// has one: its top level may be smaller than the file when its import
+/// preset limits the size (R12). Only the cooked file's start is read.
+pub fn cooked_header(project: &Path, relative: &str) -> Option<(CookedFormat, u32, u32)> {
     use std::io::Read;
-    let mut start = [0u8; MAGIC.len() + 24 + 4];
+    let mut start = [0u8; MAGIC.len() + 24 + 12];
     let read = fs::File::open(cooked_path(project, relative))
         .and_then(|mut file| file.read_exact(&mut start));
     if read.is_err() || &start[..MAGIC.len()] != MAGIC {
@@ -383,11 +390,25 @@ pub fn cooked_format(project: &Path, relative: &str) -> Option<CookedFormat> {
         modified: word(1),
         hash: word(2),
     };
-    let at = MAGIC.len() + 24;
-    let format = CookedFormat::from_code(u32::from_le_bytes(
-        start[at..at + 4].try_into().expect("4 bytes"),
-    ))?;
-    is_current(project, relative, stamp).then_some(format)
+    let int = |at: usize| {
+        let at = MAGIC.len() + 24 + at * 4;
+        u32::from_le_bytes(start[at..at + 4].try_into().expect("4 bytes"))
+    };
+    let format = CookedFormat::from_code(int(0))?;
+    is_current(project, relative, stamp).then_some((format, int(1), int(2)))
+}
+
+/// The width and height of the texture file `relative`, read from its
+/// header without decoding it.
+pub fn texture_file_size(project: &Path, relative: &str) -> Option<(u32, u32)> {
+    let path = project.join(safe_path(relative)?);
+    image::ImageReader::open(path).ok()?.into_dimensions().ok()
+}
+
+/// Deletes `relative`'s cooked copy, if it has one: for a texture whose
+/// import preset keeps it uncompressed (R12). True if one was there.
+pub fn remove_cooked(project: &Path, relative: &str) -> bool {
+    fs::remove_file(cooked_path(project, relative)).is_ok()
 }
 
 /// Whether the project file `relative` is still what `stamp` was made from:

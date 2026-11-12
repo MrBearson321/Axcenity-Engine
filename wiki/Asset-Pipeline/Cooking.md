@@ -23,7 +23,7 @@ tags: [asset-pipeline, cooking, perf]
 | Cooked texture | `.axcenity/imported/textures/<file>-<path hash>.axtex` | `cook::cook_file` (editor thread or `--cook`) | `AXTEX`, version, source length + mtime + 64-bit hash, format (BC7/BC5), size, alpha flag, average color of ~4,096 samples, level lengths, levels largest first |
 | LOD cache | `.axcenity/imported/meshes/<file>-<path hash>-<key>.axlod` | Any host that loads a project model (`model/lod_cache.rs`) | Each simplified primitive's copies; key hashes simplifier settings and fitted geometry |
 | Cooked model | `.axcenity/imported/models/<file>-<path hash>-<pick hash>.axmodel` | Any host after a warning-free load (`model/cooked_model.rs`) | Fitted triangles, LODs, materials, skeleton; textures by origin (`ImageOrigin`) |
-| Asset ID | `<asset file>.import.json` next to the file (committed) | `asset_id::give_asset_ids` | `{"format_version": 1, "uid": "ax://…"}` (26 base-32 digits); paths remembered in `.axcenity/asset-ids.json` |
+| Asset ID | `<asset file>.import.json` next to the file (committed) | `asset_id::give_asset_ids` | `{"format_version": 1, "uid": "ax://…"}` (and `"preset"` when one is picked, R12) (26 base-32 digits); paths remembered in `.axcenity/asset-ids.json` |
 
 ## When it runs
 
@@ -34,6 +34,10 @@ tags: [asset-pipeline, cooking, perf]
 ## Images inside a model (PR #65)
 
 A `.glb`, a `.gltf` with `data:` images, or an `.fbx` dropped into `assets/` by hand keeps its maps inside it. After the texture files, each pass cooks those **in place** (`axcenity_cook::cook_embedded`) to `.axcenity/imported/textures/embedded-<hash of the image's bytes>.axtex`, **one copy per distinct image per project** (Abandoned Farmhouse: 144 embedded maps, 21 distinct). Each model gets a `<cache_stem>-embedded.done` note listing the copies it uses; `remove_orphaned_copies` deletes copies no note lists and now runs *after* cooking. Loading falls back to the in-place copy (`cooked_in_model`); cooked models record it as `ImageOrigin::InModel`; while an image is in use every model shares one `Image` (`shared_cooked`). Built games pack each shared copy once plus the notes. Sharing is per project only (a cooked image reads its pixels back from its own project).
+
+## Import presets (R12)
+
+A texture's import preset picks its compression (by name, BC7, BC5 or none) and the largest size its cooked copy keeps: four built in, more in the project's committed `import-presets.json`, with per-folder presets there and a file's own pick in its sidecar (`"preset"`). `cook::plan_for` turns the preset into a format and size; each pass recooks a copy whose format or size no longer matches and deletes the copy of an uncompressed one. The Assets panel's Import preset ▸ picks one as an undo step that recooks at once. Details: `docs/rendering/textures.md`.
 
 ## What isn't cooked
 

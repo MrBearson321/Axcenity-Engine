@@ -81,6 +81,9 @@ impl EditorApp {
                 errors: Vec::new(),
                 stylesheets: Vec::new(),
                 widgets: Vec::new(),
+                drawings: Vec::new(),
+                handles: Vec::new(),
+                rows: Vec::new(),
             });
         }
         let roots = [
@@ -149,6 +152,9 @@ impl EditorApp {
             return;
         };
         entry.widgets.clear();
+        entry.drawings.clear();
+        entry.handles.clear();
+        entry.rows.clear();
         if let Some(plugin) = entry.running.take() {
             plugin.stop(&mut self.world);
         }
@@ -272,6 +278,15 @@ impl EditorApp {
         };
         let lines = plugin.take_output();
         let settings = plugin.take_settings();
+        if let Some(drawings) = plugin.take_drawings() {
+            entry.drawings = drawings;
+        }
+        if let Some(handles) = plugin.take_handles() {
+            entry.handles = handles;
+        }
+        if let Some(rows) = plugin.take_rows() {
+            entry.rows = rows;
+        }
         for line in lines {
             match line.kind {
                 axcenity_script::OutputKind::Print => self.output.info(line.text),
@@ -435,6 +450,41 @@ impl EditorApp {
     }
 
     /// Whether a plugin has the Scene View's left button (`plugin:Activate(true)`).
+    /// The user dragged a plugin's handle: it moves there, and the plugin
+    /// hears of it (`Dragged`, or `DragEnded` when let go).
+    pub(in crate::app) fn drag_plugin_handle(&mut self, moved: crate::viewport::HandleMove) {
+        self.call_plugin(moved.plugin, |plugin, world| {
+            plugin.drag_handle(world, moved.id, moved.position, moved.ended);
+        });
+    }
+
+    /// A plugin's Properties row was used on `id`: an attribute row's value
+    /// is set as its own undo step, then the plugin hears of it
+    /// (`Changed`); a button row fires `Activated`.
+    pub(in crate::app) fn plugin_row_action(
+        &mut self,
+        id: InstanceId,
+        action: crate::properties::RowAction,
+    ) {
+        match action {
+            crate::properties::RowAction::Set {
+                plugin,
+                row,
+                name,
+                value,
+            } => {
+                self.apply(
+                    id,
+                    crate::properties::Edit::Attribute(name, Some(value.clone())),
+                );
+                self.call_plugin(plugin, |p, world| p.row_changed(world, row, id, &value));
+            }
+            crate::properties::RowAction::Click { plugin, row } => {
+                self.call_plugin(plugin, |p, world| p.activate_row(world, row, id));
+            }
+        }
+    }
+
     pub(in crate::app) fn plugin_has_mouse(&self) -> bool {
         self.plugins
             .entries

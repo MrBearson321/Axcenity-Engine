@@ -161,6 +161,19 @@ impl EditorApp {
             }
             if ui
                 .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::COPY_SIMPLE, "Save as Template…")),
+                )
+                .on_hover_text(
+                    "Keep this project as a starting point that New Project offers under \
+                     Your templates.",
+                )
+                .clicked()
+            {
+                self.open_save_template();
+            }
+            if ui
+                .add_enabled(
                     self.project.is_some(),
                     egui::Button::new(item(ui, icons::GAME_CONTROLLER, "Input…")),
                 )
@@ -576,6 +589,8 @@ impl EditorApp {
                 });
             }
             ui.separator();
+            self.build_profile_menu(ui);
+            ui.separator();
             self.loading_screen_menu(ui);
             ui.separator();
             if let Some(project) = &self.project {
@@ -592,6 +607,45 @@ impl EditorApp {
                 }
             }
         });
+    }
+
+    /// The Build Game menu's build profiles (R13): Release, Development and
+    /// the project's own (`build-profiles.json`), the picked one ticked.
+    fn build_profile_menu(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let folder = project.folder.clone();
+        ui.label("Build profile");
+        let profiles = match axcenity_project::BuildProfiles::read(&folder) {
+            Ok(profiles) => profiles,
+            Err(err) => {
+                ui.weak(format!(
+                    "{} can't be read: {err}",
+                    axcenity_project::BUILD_PROFILES_FILE
+                ));
+                axcenity_project::BuildProfiles::default()
+            }
+        };
+        let picked = files::picked_profile(&folder);
+        let mut chosen = None;
+        for name in profiles.names() {
+            let tip = profiles
+                .get(&name)
+                .map(|profile| profile.describe())
+                .unwrap_or_default();
+            if ui
+                .radio(name == picked, name.as_str())
+                .on_hover_text(tip)
+                .clicked()
+                && name != picked
+            {
+                chosen = Some(name);
+            }
+        }
+        if let Some(name) = chosen {
+            self.pick_build_profile(&name);
+        }
     }
 
     /// The Build Game menu's loading screen: the Axcenity splash, none, or

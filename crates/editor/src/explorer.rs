@@ -220,6 +220,8 @@ pub enum Action {
     KeepPlayChanges(InstanceId),
     /// Apply, revert or unpack a placed prefab copy (Phase 49).
     Prefab(crate::prefab_menu::PrefabAction),
+    /// Report a bug about `id` on the Team Board (teamwork T2).
+    ReportBug(InstanceId),
 }
 
 /// What happened in the Explorer this frame.
@@ -733,7 +735,11 @@ impl Explorer {
                         });
                         return;
                     }
-                    if tree::check_editable(world, row.id).is_ok() {
+                    // A script that is a file in its service can be dragged
+                    // onto an object, to attach it there.
+                    if tree::check_editable(world, row.id).is_ok()
+                        || world.get(row.id).is_some_and(tree::can_attach)
+                    {
                         label.dnd_set_drag_payload(DraggedRow(row.id));
                     }
                     if let Some(action) = drop_onto(ui, &label, world, dragged, row.id) {
@@ -1004,7 +1010,7 @@ fn drop_onto(
     if dragged == target || label.dnd_hover_payload::<DraggedRow>().is_none() {
         return None;
     }
-    let allowed = tree::check_move(world, dragged, target);
+    let allowed = tree::check_attach(world, dragged, target);
     match allowed {
         Ok(()) => {
             let stroke = egui::Stroke::new(1.5_f32, DROP_COLOR);
@@ -1076,6 +1082,8 @@ enum RowCommand {
     SaveMaterial,
     /// From the Prefab ▸ submenu of a placed copy.
     Prefab(crate::prefab_menu::PrefabAction),
+    /// Report a bug about it on the Team Board.
+    ReportBug,
     Rename,
     Duplicate,
     Delete,
@@ -1098,6 +1106,7 @@ impl RowCommand {
             RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
             RowCommand::SaveMaterial => Some(Action::SaveMaterial(id)),
+            RowCommand::ReportBug => Some(Action::ReportBug(id)),
             RowCommand::MakeUnique => Some(Action::MakeUnique(id)),
             RowCommand::Prefab(action) => Some(Action::Prefab(action)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
@@ -1401,6 +1410,14 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     }
     if let Some(action) = crate::prefab_menu::row_menu(ui, world, id) {
         chosen = Some(RowCommand::Prefab(action));
+    }
+    if id != world.root()
+        && ui
+            .button(theme::menu_item(ui.ctx(), icons::BUG, "Report a Bug…"))
+            .on_hover_text("Add a bug about it to the Team Board, linked to it")
+            .clicked()
+    {
+        chosen = Some(RowCommand::ReportBug);
     }
     ui.separator();
 

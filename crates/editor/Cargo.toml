@@ -31,6 +31,7 @@ axcenity-plugins.workspace = true
 axcenity-procedural.workspace = true
 axcenity-project.workspace = true
 axcenity-repo.workspace = true
+axcenity-teamwork.workspace = true
 axcenity-release.workspace = true
 # Its debug views (View > View Mode) are the editor's only; the player leaves them out.
 axcenity-render = { workspace = true, features = ["debug-views"] }
