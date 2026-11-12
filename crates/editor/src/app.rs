@@ -47,6 +47,7 @@ mod find_in_scripts;
 mod floating;
 mod game_tests;
 mod graphics_benchmark;
+pub(crate) mod import_presets;
 mod input_settings;
 mod layouts;
 mod levels;
@@ -1907,6 +1908,8 @@ mod graphics_benchmark_tests;
 mod health_tests;
 #[cfg(test)]
 mod ik_tests;
+#[cfg(test)]
+mod import_preset_tests;
 #[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]
