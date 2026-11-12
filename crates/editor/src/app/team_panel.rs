@@ -45,6 +45,12 @@ pub(crate) struct TeamPanel {
     pub(crate) chat_unread: usize,
     /// Why the last chat message didn't go.
     pub(crate) chat_problem: Option<String>,
+    /// The name being typed for a new checkpoint (C9).
+    pub(crate) checkpoint_label: String,
+    /// The checkpoint the Owner pressed Restore on, asking once more.
+    pub(crate) confirm_restore: Option<u64>,
+    /// What the host said about the last checkpoint or restore asked for.
+    pub(crate) history_problem: Option<String>,
     /// This computer's identity, for Settings > Collaborate (read when the
     /// page first shows).
     identity: Option<Result<Identity, String>>,
@@ -153,6 +159,8 @@ enum Action {
     Follow(Option<MemberId>),
     /// Something in the Chat section (C8).
     Chat(super::team_chat::ChatAction),
+    /// Something in the History section (C9).
+    History(super::team_history::HistoryAction),
 }
 
 /// The panel buttons tests press.
@@ -555,6 +563,12 @@ impl EditorApp {
             action = Some(Action::Chat(chat));
         }
 
+        // History (C9).
+        if let Some(history) = super::team_history::history_section(ui, &mut self.team_panel, team)
+        {
+            action = Some(Action::History(history));
+        }
+
         // Invitations.
         if hosting {
             let invite = team.invite().map(str::to_owned);
@@ -688,6 +702,7 @@ impl EditorApp {
             Action::Chat(super::team_chat::ChatAction::Select(id)) => {
                 self.select_from_viewport(Some(id));
             }
+            Action::History(history) => self.team_history_action(history),
         }
     }
 

@@ -72,6 +72,7 @@ mod splines;
 mod tags;
 pub(crate) mod team;
 mod team_chat;
+mod team_history;
 mod team_panel;
 mod terrain;
 mod texture_set;

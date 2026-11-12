@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | System inventory, roadmap | Collaborate C9: host checkpoints (`crates/collab/src/history.rs`, `.axcenity/teamcreate/history`, contents by hash) and the Owner's restore for everyone as one transaction | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C8: session chat (host keeps the last 200 lines in memory, Instance paths as links, unread count on the chip) and others' cursors in live script tabs (`crates/editor/src/app/team_chat.rs`, `crates/editor/src/scripts/others.rs`) | Claude |
 | 2026-11-12 | System inventory | Collaborate C4: the setup wizard and Start Session dialog (`app/collab_setup.rs`) | Claude |
 | 2026-11-12 | System inventory | Collaborate C3: `collab::tailscale` (status, sign-in, invite address, reachability); the system's new name | Claude |
