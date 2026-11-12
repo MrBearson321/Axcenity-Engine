@@ -741,7 +741,8 @@ fn sample_box(
                 None => (
                     "Open sample",
                     Some(
-                        "The examples folder wasn't found near the editor. Press Open                          Project and pick the sample's folder instead.",
+                        "The examples folder wasn't found near the editor. Press Open \
+                         Project and pick the sample's folder instead.",
                     ),
                 ),
             };

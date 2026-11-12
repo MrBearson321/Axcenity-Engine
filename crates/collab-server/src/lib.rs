@@ -122,7 +122,7 @@ impl Server {
         let project =
             std::path::absolute(&options.project).unwrap_or_else(|_| options.project.clone());
         let data = std::path::absolute(&options.data).unwrap_or_else(|_| options.data.clone());
-        if data.starts_with(&project) {
+        if is_inside(&data, &project) {
             bail!(
                 "the data folder `{}` is inside the project: members and keys must never go \
                  in the project folder (it may be pushed somewhere public)",
@@ -272,6 +272,8 @@ impl Server {
 
     /// Runs one admin command (see [`HELP`]).
     pub fn command(&mut self, line: &str) -> Reply {
+        // Windows PowerShell starts what it pipes in with a byte-order mark.
+        let line = line.trim_start_matches('\u{feff}');
         let words: Vec<&str> = line.split_whitespace().collect();
         match words.as_slice() {
             [] => Reply::say(""),
@@ -418,3 +420,60 @@ pub fn is_project(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `folder` is `project` or inside it, however either is written:
+/// another letter case, a Windows short (8.3) name such as `PAULJA~1`, a
+/// link, `..`. Comparing the paths as text missed those, and a data folder
+/// given that way put the host's private key in the project.
+fn is_inside(folder: &Path, project: &Path) -> bool {
+    let Ok(project) = std::fs::canonicalize(project) else {
+        return folder.starts_with(project);
+    };
+    // The nearest folder that exists, made canonical (on Windows that gives
+    // the long name in the case on disk), then the rest added back.
+    let mut existing = folder;
+    let mut rest = Vec::new();
+    let mut resolved = loop {
+        if let Ok(path) = std::fs::canonicalize(existing) {
+            break path;
+        }
+        match (existing.parent(), existing.components().next_back()) {
+            (Some(parent), Some(last)) => {
+                rest.push(last);
+                existing = parent;
+            }
+            _ => return folder.starts_with(&project),
+        }
+    };
+    for part in rest.into_iter().rev() {
+        match part {
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            std::path::Component::CurDir => {}
+            part => resolved.push(part),
+        }
+    }
+    resolved.starts_with(&project)
+        || resolved
+            .ancestors()
+            .any(|folder| same_folder(folder, &project))
+}
+
+/// Whether `a` and `b` are the same folder on disk. On macOS a folder can
+/// be named in any letter case and canonicalizing keeps the case given, so
+/// this compares the folders themselves.
+#[cfg(unix)]
+fn same_folder(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+/// On Windows canonicalizing already gives one spelling per folder.
+#[cfg(not(unix))]
+fn same_folder(_: &Path, _: &Path) -> bool {
+    false
+}

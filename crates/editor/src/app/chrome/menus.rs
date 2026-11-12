@@ -610,7 +610,8 @@ impl EditorApp {
                 if ui
                     .checkbox(&mut on, "Developer Console (F9)")
                     .on_hover_text(
-                        "Built games open the Developer Console with F9: the log, stats and                          commands. Play in the editor and --dev have it anyway.",
+                        "Built games open the Developer Console with F9: the log, stats and \
+                         commands. Play in the editor and --dev have it anyway.",
                     )
                     .changed()
                 {

@@ -320,3 +320,42 @@ fn the_data_folder_may_not_be_inside_the_project() {
     let error = Server::start(&options).err().expect("refused");
     assert!(error.to_string().contains("inside the project"), "{error}");
 }
+
+/// The project written another way: in other letters' case (one folder on
+/// Windows and macOS), through a link, or with `..`.
+#[test]
+fn the_data_folder_is_refused_inside_the_project_however_it_is_written() {
+    let place = Place::new();
+    let refused = |data: PathBuf| {
+        let mut options = place.options();
+        options.data = data;
+        Server::start(&options).err().map(|error| error.to_string())
+    };
+    let inside = |error: Option<String>| error.is_some_and(|e| e.contains("inside the project"));
+
+    let shouted = place.0.join("PROJECT");
+    if shouted.exists() {
+        // A file system that ignores case: it's the project.
+        assert!(inside(refused(shouted.join("team"))));
+        assert!(inside(refused(shouted.join("new").join("team"))));
+    }
+    assert!(inside(refused(
+        place.0.join("data").join("..").join("project").join("team")
+    )));
+    #[cfg(unix)]
+    {
+        let link = place.0.join("link");
+        std::os::unix::fs::symlink(place.project(), &link).unwrap();
+        assert!(inside(refused(link.join("team"))));
+    }
+    // Beside the project is fine.
+    assert!(!inside(refused(place.0.join("project-data"))));
+}
+
+#[test]
+fn a_byte_order_mark_before_a_command_is_ignored() {
+    let place = Place::new();
+    let (mut server, _) = Server::start(&place.options()).unwrap();
+    let reply = server.command("\u{feff}help");
+    assert_eq!(reply.text, HELP);
+}
