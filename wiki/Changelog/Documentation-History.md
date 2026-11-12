@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | Project and serialization, roadmap | Cohesion pass CP8: the game's icon and banner (`branding.rs`), used by the player, Build Game and `branding://` paths | Claude |
 | 2026-11-12 | System inventory, roadmap | Cohesion pass CP7: Team Projects start page, Who gets in (the host asked about joiners), hosts listening on loopback and their network only, firewall checks | Claude |
 | 2026-11-12 | Physics, roadmap | Cohesion pass CP6: physics layers (`physics::api`), drag and rolling friction, script forces; `step_cost` at 1k/5k/10k bodies | Claude |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP5: Object Viewer (`editor-tools/src/object_viewer.rs`), opened by View in Explorer and Assets | Claude |

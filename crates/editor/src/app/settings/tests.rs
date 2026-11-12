@@ -1,4 +1,5 @@
 use super::*;
+use axcenity_project::branding::Picture;
 
 #[test]
 fn every_settings_page_draws_and_changes_apply_to_the_look() {
@@ -294,4 +295,73 @@ fn a_local_scripts_graphics_change_lasts_until_stop() {
         "{:?}",
         app.output.lines()
     );
+}
+
+#[test]
+fn branding_is_kept_in_the_manifest_used_by_branding_paths_and_previewed() {
+    let folder = crate::app::tests::copy_of_example("hello-part", "branding-settings");
+    let mut app = EditorApp::new(Some(&folder));
+    std::fs::create_dir_all(folder.join("assets/branding")).unwrap();
+    image::RgbaImage::from_pixel(256, 256, image::Rgba([30, 90, 200, 255]))
+        .save(folder.join("assets/branding/icon.png"))
+        .unwrap();
+    // Square, so the banner is the wrong shape and says so.
+    image::RgbaImage::from_pixel(400, 400, image::Rgba([200, 90, 30, 255]))
+        .save(folder.join("assets/branding/banner.png"))
+        .unwrap();
+    let branding = axcenity_project::branding::Branding {
+        icon: Some("assets/branding/icon.png".into()),
+        banner: Some("assets/branding/banner.png".into()),
+    };
+    app.set_branding(branding.clone());
+    assert_eq!(
+        axcenity_project::read_manifest(&folder).unwrap().branding,
+        branding
+    );
+    assert_eq!(
+        &*app.assets.resolve("branding://icon"),
+        "assets/branding/icon.png"
+    );
+    assert!(app.assets.texture_blocking("branding://icon").is_some());
+
+    app.settings.open = true;
+    app.settings.page = SettingsPage::Project;
+    let ctx = theme::test_context();
+    let mut draw = |ui: &mut egui::Ui| {
+        let ctx = &ui.ctx().clone();
+        egui::CentralPanel::default().show(ui, |_| {});
+        app.settings_window(ctx);
+    };
+    for _ in 0..2 {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
+    }
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        crate::snapshot::snapshot(
+            &PathBuf::from(folder).join("settings-branding.png"),
+            egui::vec2(900.0, 1100.0),
+            // Scrolled down to Branding.
+            std::iter::once(Vec::new())
+                .chain((0..8).map(|_| {
+                    vec![
+                        egui::Event::PointerMoved(egui::pos2(500.0, 600.0)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -400.0),
+                            modifiers: Default::default(),
+                            phase: egui::TouchPhase::Move,
+                        },
+                    ]
+                }))
+                .chain([Vec::new(), Vec::new()])
+                .collect(),
+            &mut draw,
+        );
+    }
+    let banner = &app.branding_previews;
+    assert!(
+        banner
+            .problem(Picture::Banner)
+            .is_some_and(|p| p.contains("400×400"))
+    );
+    assert_eq!(banner.problem(Picture::Icon), None);
 }

@@ -110,8 +110,8 @@ pub use probe::{
     read_probe, write_probe,
 };
 pub use references::{
-    ASSET_INDEX_FILE, AssetPath, encode_asset_index, is_asset_reference, read_asset_index,
-    split_reference,
+    ASSET_INDEX_FILE, AssetPath, BRANDING_SCHEME, encode_asset_index, is_asset_reference,
+    read_asset_index, split_reference,
 };
 pub use reload::Reload;
 pub use sky_image::{

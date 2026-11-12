@@ -88,10 +88,10 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
+| 2026-11-12 | Project and serialization, roadmap | Cohesion pass CP8: your game's own icon and banner, in the player and every build |
 | 2026-11-12 | System inventory, roadmap | Cohesion pass CP7: a Team Projects start page, the host asked before someone joins, narrower listening, firewall checks |
 | 2026-11-12 | Physics, roadmap | Cohesion pass CP6: physics layers (`physics::api`), drag and rolling friction, script forces |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP5: an Object Viewer tab for looking at one object, model, prefab or material from every side |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP4: every block and node explains itself in one tooltip card |
-| 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP3: Explorer double-click opens the right editor; scripts inside objects switch Code ↔ Blocks |
 
 Keep the five newest rows here; the full list is [Documentation history](Changelog/Documentation-History.md).

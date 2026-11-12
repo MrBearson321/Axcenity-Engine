@@ -152,6 +152,8 @@ One PR per phase (bigger phases may split), each from `main`, each with RED/GREE
 - **CW8.1** Manifest `branding` (banner, icon, icon pack folder), validated (PNG/JPEG, sizes 16–1024 square for icons, banner aspect and minimum size); Project > Branding page with previews.
 - **CW8.2** Build Game copies them; the player uses the game's icon (falls back to Axcenity's); Windows `.ico` and Linux `.desktop` icon written with the build; `branding://banner` content path for ImageLabels.
 
+- *Status (CP8 PR):* CW8.1 done: `branding.icon` and `branding.banner` in the manifest, checked for format, size and shape, edited in Settings > This project > Branding with previews (the "Project > Branding page" is that section, beside the project's other settings). An "icon pack folder" was left out: every size is made from the one icon at build time, so a pack would only add files to keep in step. CW8.2 done: the player's window uses the game's icon (Axcenity's when unset or bad), Build Game writes `.ico`, `.icns` and a PNG with the game's name in the macOS app and Linux launcher, and `branding://banner` (and `branding://icon`) resolve in `Assets`. Not done, with reasons: the Windows `.exe`'s own file icon (a PE resource; changing it means rewriting the player's resources) and an `Icon=` in the Linux desktop entry (only absolute paths or theme names work there). Details: `docs/project/export.md`.
+
 ### CP9. Final validation
 
 - UI review with snapshots in light/dark/compact at 1280 and 260-pt panels; performance check (editor idle frame, physics bench); full test run; final report.

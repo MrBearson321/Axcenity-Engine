@@ -12,7 +12,7 @@ A project is a folder of readable text files plus your assets, so it works well 
 
 | Path | Holds |
 |---|---|
-| `axcenity.json` | The manifest: name, description, format version, the engine version it was made and saved with, the start level, loading screen and splash settings. |
+| `axcenity.json` | The manifest: name, description, format version, the engine version it was made and saved with, the start level, loading screen and splash settings, and the game's icon and banner (`branding`). |
 | `world.json` | The world: every Instance in the Workspace and the saved services, with only the properties that differ from their defaults. |
 | `levels/<name>.world.json` | Other levels, for games with several. |
 | `scripts/` | Scripts: `.server.lua`, `.client.lua`, `.module.lua`, and block scripts `.server.blocks.json` and `.client.blocks.json`. |

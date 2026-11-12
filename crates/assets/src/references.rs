@@ -105,13 +105,40 @@ pub(crate) struct IdCache {
     /// Each reference already turned into a path, so drawing a part every
     /// frame doesn't make the string again.
     resolved: HashMap<Box<str>, Arc<str>>,
+    /// The game's branding pictures by name (`icon`, `banner`), for
+    /// `branding://icon` and `branding://banner` (see [`Assets::set_branding`]).
+    branding: HashMap<&'static str, Arc<str>>,
 }
 
+/// The prefix of a content path that names one of the game's branding
+/// pictures (the manifest's `branding`).
+pub const BRANDING_SCHEME: &str = "branding://";
+
 impl Assets {
+    /// The game's icon and banner files (project paths), which
+    /// `branding://icon` and `branding://banner` name. The editor and the
+    /// player set them from the manifest when a project opens.
+    pub fn set_branding(&self, icon: Option<&str>, banner: Option<&str>) {
+        let branding = &mut self.lock().ids.branding;
+        branding.clear();
+        for (name, path) in [("icon", icon), ("banner", banner)] {
+            if let Some(path) = path.filter(|path| !path.is_empty()) {
+                branding.insert(name, path.into());
+            }
+        }
+    }
+
     /// The path `reference` names: itself if it's a path, or the path of
     /// the file with its ID (and its `#pick`). An ID no file has is handed
     /// back as it is, so reading it fails as a missing file does.
     pub fn resolve<'a>(&self, reference: &'a str) -> AssetPath<'a> {
+        if let Some(name) = reference.strip_prefix(BRANDING_SCHEME) {
+            // An unset picture is handed back as it is, so it reads as missing.
+            return match self.lock().ids.branding.get(name) {
+                Some(path) => AssetPath::Named(path.clone()),
+                None => AssetPath::Given(reference),
+            };
+        }
         if !is_asset_reference(reference) {
             return AssetPath::Given(reference);
         }
@@ -170,7 +197,13 @@ impl Assets {
     /// Forgets which file each ID names, so the next ID asked for reads
     /// them again: for when sidecars were written, moved or deleted.
     pub fn forget_asset_ids(&self) {
-        self.lock().ids = IdCache::default();
+        let ids = &mut self.lock().ids;
+        // The branding isn't an ID: it stays until it's set again.
+        let branding = std::mem::take(&mut ids.branding);
+        *ids = IdCache {
+            branding,
+            ..IdCache::default()
+        };
     }
 
     /// Each ID's path, read (outside the lock) the first time it's needed.
@@ -231,6 +264,13 @@ mod tests {
         assert_eq!(&*assets.resolve(old), old, "a path is used as it is");
         let unknown = AssetId::new().to_string();
         assert_eq!(&*assets.resolve(&unknown), unknown);
+
+        // The game's branding pictures, by name; an unset one stays as it is.
+        assets.set_branding(Some(old), None);
+        assert_eq!(&*assets.resolve("branding://icon"), old);
+        assert_eq!(&*assets.resolve("branding://banner"), "branding://banner");
+        assets.forget_asset_ids();
+        assert_eq!(&*assets.resolve("branding://icon"), old);
         assert_eq!(assets.asset_path(&unknown), None);
         // A file with no sidecar is referred to by its path.
         assert_eq!(

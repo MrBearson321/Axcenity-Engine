@@ -532,6 +532,8 @@ impl EditorApp {
             self.select_from_viewport(Some(lighting));
         }
         ui.add_space(space::S);
+        section(ui, "Branding");
+        self.branding_settings(ui);
         ui.label(
             egui::RichText::new(
                 "The name, description and splash are on the start screen: open the project's \

@@ -14,6 +14,8 @@ use std::sync::atomic::AtomicBool;
 
 use axcenity_project as project;
 
+mod icons;
+
 /// The command-line flag that builds a game and exits.
 pub const BUILD_FLAG: &str = "--build-game";
 
@@ -107,6 +109,9 @@ pub struct BuiltGame {
     /// Why the macOS app bundle couldn't be signed, when signing was tried
     /// and failed (see [`sign_app`]). The game still runs on this Mac.
     pub unsigned: Option<String>,
+    /// What's wrong with the project's branding: the build uses Axcenity's
+    /// pictures in its place.
+    pub notes: Vec<String>,
 }
 
 /// Built on Windows for macOS or Linux, the copied player can't be marked
@@ -116,33 +121,51 @@ pub fn needs_archive(target: ExportTarget) -> bool {
     cfg!(windows) && target != ExportTarget::Windows
 }
 
-const MAC_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+/// The macOS app's `Info.plist`, naming the game `name`, with
+/// `Resources/game.icns` as its icon when `icon`.
+fn mac_info_plist(name: &str, icon: bool) -> String {
+    let icon = if icon {
+        "  <key>CFBundleIconFile</key><string>game</string>\n"
+    } else {
+        ""
+    };
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
 <plist version=\"1.0\">\n\
 <dict>\n\
   <key>CFBundleDevelopmentRegion</key><string>en</string>\n\
   <key>CFBundleExecutable</key><string>AxcenityPlayer</string>\n\
+{icon}\
   <key>CFBundleIdentifier</key><string>com.axcenity.player</string>\n\
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n\
-  <key>CFBundleName</key><string>Axcenity Player</string>\n\
+  <key>CFBundleName</key><string>{}</string>\n\
   <key>CFBundlePackageType</key><string>APPL</string>\n\
   <key>CFBundleShortVersionString</key><string>1.0</string>\n\
   <key>CFBundleVersion</key><string>1</string>\n\
   <key>LSMinimumSystemVersion</key><string>11.0</string>\n\
   <key>NSHighResolutionCapable</key><true/>\n\
 </dict>\n\
-</plist>\n";
+</plist>\n",
+        icons::xml_text(name)
+    )
+}
 
 /// The Linux launcher. A desktop entry runs from the user's home folder,
 /// so `Exec` finds the player through `%k`, this file's own path. Desktop
 /// entries quote only with double quotes, and the file format doubles each
 /// backslash: the command is `exec "$(dirname "$0")/AxcenityPlayer"`.
-const LINUX_DESKTOP_ENTRY: &str = "[Desktop Entry]\n\
+fn linux_desktop_entry(name: &str) -> String {
+    format!(
+        "[Desktop Entry]\n\
 Type=Application\n\
-Name=Axcenity Player\n\
+Name={}\n\
 Exec=sh -c \"exec \\\\\"\\\\$(dirname \\\\\"\\\\$0\\\\\")/AxcenityPlayer\\\\\"\" %k\n\
 Terminal=false\n\
-Categories=Game;\n";
+Categories=Game;\n",
+        icons::desktop_text(name)
+    )
+}
 
 /// `CREDITS.txt` for the Toolbox assets still in the project at `folder`,
 /// from its `.axcenity/asset-sources.json`; `None` when it has none.
@@ -190,6 +213,24 @@ pub fn build_game(
     let report = axcenity_cook::cook_project(folder, &AtomicBool::new(false), |_, _| {});
     let game =
         project::pack_game(folder).map_err(|err| format!("could not pack the project: {err}"))?;
+    // The game's name and icon (CW8.2); a bad icon is said and left out, so
+    // the build uses Axcenity's.
+    let manifest = project::read_manifest(folder);
+    let name = manifest
+        .as_ref()
+        .map(|manifest| manifest.name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "Axcenity Player".to_owned());
+    let branding = manifest
+        .map(|manifest| manifest.branding)
+        .unwrap_or_default();
+    let mut notes = project::branding::check(folder, &branding);
+    let icon = project::branding::usable_icon(folder, &branding).and_then(|path| {
+        let read = fs::read(&path)
+            .map_err(|err| format!("the icon can't be read: {err}"))
+            .and_then(|bytes| icons::GameIcon::read(&bytes));
+        read.map_err(|why| notes.push(why)).ok()
+    });
 
     let app = destination.join("AxcenityPlayer.app");
     // In the macOS app, only the player goes in `Contents/MacOS`: codesign
@@ -229,18 +270,47 @@ pub fn build_game(
     write(credits.join("game.axgame"), Contents::Bytes(&game), false)?;
     drop(game);
     match target {
-        ExportTarget::MacOS => write(
-            app.join("Contents/Info.plist"),
-            Contents::Bytes(MAC_INFO_PLIST.as_bytes()),
-            false,
-        )?,
+        ExportTarget::MacOS => {
+            if let Some(icon) = &icon {
+                write(
+                    credits.join("game.icns"),
+                    Contents::Bytes(&icon.icns()),
+                    false,
+                )?;
+            }
+            write(
+                app.join("Contents/Info.plist"),
+                Contents::Bytes(mac_info_plist(&name, icon.is_some()).as_bytes()),
+                false,
+            )?
+        }
         // Some file managers launch only desktop entries marked executable.
-        ExportTarget::Linux => write(
-            destination.join("AxcenityPlayer.desktop"),
-            Contents::Bytes(LINUX_DESKTOP_ENTRY.as_bytes()),
-            true,
-        )?,
-        ExportTarget::Windows => {}
+        ExportTarget::Linux => {
+            if let Some(icon) = &icon {
+                write(
+                    destination.join("icon.png"),
+                    Contents::Bytes(&icon.linux_png()),
+                    false,
+                )?;
+            }
+            write(
+                destination.join("AxcenityPlayer.desktop"),
+                Contents::Bytes(linux_desktop_entry(&name).as_bytes()),
+                true,
+            )?
+        }
+        // The .exe keeps Axcenity's file icon (changing it means editing its
+        // resources); the window and taskbar show the game's while it runs,
+        // and the .ico is there for shortcuts and installers.
+        ExportTarget::Windows => {
+            if let Some(icon) = &icon {
+                write(
+                    destination.join("game.ico"),
+                    Contents::Bytes(&icon.ico()),
+                    false,
+                )?;
+            }
+        }
     }
     let notices = format!(
         "Axcenity Engine and third-party license notices\n\n{}",
@@ -287,6 +357,7 @@ pub fn build_game(
         uncooked: report.failed,
         archive,
         unsigned,
+        notes,
     })
 }
 
@@ -407,6 +478,9 @@ pub fn build_from_command_line(mut args: impl Iterator<Item = OsString>) -> bool
             }
             if let Some(reason) = &built.unsigned {
                 println!("the app isn't signed (codesign: {reason})");
+            }
+            for note in &built.notes {
+                println!("{note} The build uses Axcenity's in its place.");
             }
             true
         }
@@ -548,6 +622,55 @@ mod tests {
             fs::read_to_string(scratch.out("AxcenityPlayer.app/Contents/Info.plist")).unwrap();
         assert!(info.contains("<key>CFBundleExecutable</key><string>AxcenityPlayer</string>"));
         assert!(info.contains("<key>LSMinimumSystemVersion</key><string>11.0</string>"));
+    }
+
+    #[test]
+    fn a_build_carries_the_games_name_and_icon_and_a_bad_icon_falls_back() {
+        let scratch = Scratch::new("branding");
+        let project = scratch.root.join("project");
+        // No branding: no icon files, and the game's own name.
+        scratch.build(ExportTarget::Windows, false);
+        assert!(!scratch.out("game.ico").exists());
+        let name = project::read_manifest(&project).unwrap().name;
+
+        fs::create_dir_all(project.join("assets/branding")).unwrap();
+        image::RgbaImage::from_pixel(128, 128, image::Rgba([30, 90, 200, 255]))
+            .save(project.join("assets/branding/icon.png"))
+            .unwrap();
+        let branding = project::branding::Branding {
+            icon: Some("assets/branding/icon.png".into()),
+            banner: None,
+        };
+        project::branding::set_branding(&project, &branding).unwrap();
+        let built = scratch.build(ExportTarget::Windows, false);
+        assert!(built.notes.is_empty(), "{:?}", built.notes);
+        let ico = fs::read(scratch.out("game.ico")).unwrap();
+        assert_eq!(&ico[..4], &[0, 0, 1, 0]);
+
+        scratch.build(ExportTarget::MacOS, false);
+        let icns =
+            fs::read(scratch.out("AxcenityPlayer.app/Contents/Resources/game.icns")).unwrap();
+        assert_eq!(&icns[..4], b"icns");
+        let info =
+            fs::read_to_string(scratch.out("AxcenityPlayer.app/Contents/Info.plist")).unwrap();
+        assert!(info.contains("<key>CFBundleIconFile</key><string>game</string>"));
+        assert!(info.contains(&format!("<key>CFBundleName</key><string>{name}</string>")));
+
+        scratch.build(ExportTarget::Linux, false);
+        let png = image::open(scratch.out("icon.png")).unwrap();
+        assert_eq!((png.width(), png.height()), (128, 128));
+        let entry = fs::read_to_string(scratch.out("AxcenityPlayer.desktop")).unwrap();
+        assert!(entry.contains(&format!("Name={name}\n")), "{entry}");
+
+        // A banner-shaped icon is said, and the build goes on without it.
+        image::RgbaImage::from_pixel(300, 100, image::Rgba([0, 0, 0, 255]))
+            .save(project.join("assets/branding/icon.png"))
+            .unwrap();
+        let _ = fs::remove_dir_all(scratch.root.join("out"));
+        let built = scratch.build(ExportTarget::Windows, false);
+        assert_eq!(built.notes.len(), 1, "{:?}", built.notes);
+        assert!(built.notes[0].contains("300×100"), "{:?}", built.notes);
+        assert!(!scratch.out("game.ico").exists());
     }
 
     #[test]

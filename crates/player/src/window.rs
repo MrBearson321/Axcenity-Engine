@@ -94,7 +94,7 @@ impl ApplicationHandler for App {
         let mut attributes = Window::default_attributes()
             .with_title(&self.title)
             .with_inner_size(DEFAULT_WINDOW_SIZE)
-            .with_window_icon(icon::window_icon());
+            .with_window_icon(icon::game_icon(self.icon.as_deref()));
         // `--size`, else `AXCENITY_WINDOW_SIZE=1920x1080` (physical pixels),
         // for benchmarks that need the same window every run, in every engine.
         let size = self.window_size.or_else(|| {

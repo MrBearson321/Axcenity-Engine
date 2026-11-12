@@ -58,6 +58,10 @@ impl EditorApp {
                 "The texture `{path}` ships as it is (it couldn't be cooked: {reason})."
             ));
         }
+        for note in &built.notes {
+            self.output
+                .warning(format!("{note} The build uses Axcenity's in its place."));
+        }
         if let Some(reason) = &built.unsigned {
             self.output.warning(format!(
                 "The game's app couldn't be signed, so macOS may refuse to open it on \

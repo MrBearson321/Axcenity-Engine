@@ -438,7 +438,7 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_digit() || c == '-')
 }
 
-fn safe_relative(path: &str) -> bool {
+pub(crate) fn safe_relative(path: &str) -> bool {
     let path = Path::new(path);
     !path.is_absolute()
         && path

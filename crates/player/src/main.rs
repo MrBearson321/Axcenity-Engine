@@ -267,6 +267,9 @@ fn main() -> Result<()> {
         splash.hold();
     }
     let assets = Assets::new(&project.folder);
+    // `branding://icon` and `branding://banner`, for ImageLabels and scripts.
+    let branding = &project.manifest.branding;
+    assets.set_branding(branding.icon.as_deref(), branding.banner.as_deref());
     // The Workspace's models and textures load on other threads while the
     // scripts start and the window opens; the splash or loading screen
     // stays up until they're in (roadmap I11).
@@ -352,6 +355,9 @@ fn main() -> Result<()> {
 
     let mut app = App::new(world, scripts, stylesheets, assets, animators, camera);
     app.title = format!("{} - Axcenity Player", project.manifest.name);
+    // The game's icon when it has a good one; Axcenity's otherwise.
+    app.icon = axcenity_project::branding::usable_icon(&project.folder, branding)
+        .and_then(|path| std::fs::read(path).ok());
     app.show_splash = show_splash && replay.is_none();
     app.splash = splash;
     app.loading_gui = if replay.is_none() { loading_gui } else { None };
@@ -672,6 +678,8 @@ fn cursor_icon(cursor: UiCursor) -> CursorIcon {
 /// `None` because winit only allows creating windows once the event loop has started.
 struct App {
     title: String,
+    /// The game's icon (PNG bytes), when it has one (`icon::game_icon`).
+    icon: Option<Vec<u8>>,
     show_splash: bool,
     splash: splash::Splash,
     /// The game's own loading screen, when the project names one.
@@ -809,6 +817,7 @@ impl App {
         let map = scripts.input_map();
         App {
             title: String::new(),
+            icon: None,
             show_splash: false,
             splash: splash::Splash::new(),
             loading_gui: None,

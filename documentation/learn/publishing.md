@@ -16,12 +16,15 @@ samples: [hello-part, hello-loading]
 
 The build writes two things: the **player** (`AxcenityPlayer.exe` on Windows, `AxcenityPlayer` on Linux, `AxcenityPlayer.app` on macOS) and **`game.axgame`**, an archive with your world, levels, scripts, styles and assets. Block scripts are translated to Lua, and textures and models go in already compressed. Editor-only files stay behind. Zip the folder and share it.
 
+With an icon, the game's window and taskbar show it, and the build adds it for each system: `game.ico` beside the Windows player (for shortcuts and installers; the `.exe` file itself keeps Axcenity's icon), `game.icns` in the macOS app (Finder and the Dock show it), and `icon.png` beside the Linux player. The macOS app and the Linux launcher carry your game's name.
+
 Every build also writes `LICENSES.txt` (the engine's notices) and, when you used Toolbox assets, `CREDITS.txt` with the credits their licences ask for.
 
 ## Before you ship
 
 - **Loading screen** (File > Build Game > Loading screen): the Axcenity splash, none, or one of your own ScreenGuis.
 - **Developer Console (F9)**: off by default in builds; tick it for a test build.
+- **Your game's icon and banner** (Settings > This project > Branding): pick a square PNG for the icon (16×16 up to 1024×1024; 256×256 or more looks sharp) and a wide PNG or JPEG for the banner (at least 640×160, two to six times as wide as it is high). The settings show each one and say what's wrong with a picture that won't do; until it's fixed, the build uses Axcenity's. Show them in your own UI with an ImageLabel whose Image is `branding://icon` or `branding://banner`.
 - Play the build on a computer without the editor, and check `logs/latest.log` in the game's data folder if something goes wrong.
 - Run your game tests (`axcenity-test`) one last time.
 
