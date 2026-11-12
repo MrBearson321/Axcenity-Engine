@@ -63,7 +63,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 | Profiler panel (Game and Graphics tabs) | `profiler.rs`, fed by `Session::cost` and `TextureRenderer::stats` |
 | Background cooking of textures and models | `cooking.rs` ([Cooking](../Asset-Pipeline/Cooking.md)) |
 | Asset Check and fixes | `asset_check.rs`, `app/asset_fixes.rs` over `project::check_assets`, `plan_fix` |
-| Engine rebuild and relaunch (debug, source tree), hot-patching (`hot-patch` feature, dev only) | `rebuild.rs`, `relaunch.rs`, `hot_patch.rs` |
+| Engine rebuild and relaunch (debug, source tree, `engine-dev` feature; engine hot-patching removed in Phase 89) | `rebuild.rs`, `relaunch.rs`, `app/engine.rs` |
 | Build Game, `--build-game`, `--cook` | `build_game.rs`, `cooking.rs` |
 | Visual-debug overlays, debug views (`debug-views` feature of `render`) | `viewport/overlays.rs`, `viewport/view_mode.rs` |
 | Steady frames on VRR displays | `EditorApp::keep_frames_steady` ([Hardware notes](../Performance/Hardware-Notes.md)) |
