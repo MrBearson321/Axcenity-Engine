@@ -7,7 +7,7 @@ use axcenity_core::{ClassName, InstanceId, World};
 use axcenity_render::glam::Vec3;
 
 use super::{Obb, Obstacle};
-use crate::constraints;
+use crate::attachments;
 
 /// The most markers shown around a drag, nearest first.
 const MOST_SHOWN: usize = 240;
@@ -85,10 +85,10 @@ pub fn sites(world: &World, moving: &[InstanceId]) -> Sites {
         if instance.class() != ClassName::Attachment {
             continue;
         }
-        let Some((at, _)) = constraints::world_pose(world, id) else {
+        let Some((at, _)) = attachments::world_pose(world, id) else {
             continue;
         };
-        if constraints::on_one_of(world, id, moving) {
+        if attachments::on_one_of(world, id, moving) {
             sites.own.push(at);
         } else {
             sites.others.push(at);

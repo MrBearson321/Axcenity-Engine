@@ -137,7 +137,7 @@ mod tests {
                 "viewport/view_cube.rs",
                 include_str!("viewport/view_cube.rs"),
             ),
-            ("gizmo.rs", include_str!("gizmo.rs")),
+            ("gizmo.rs", include_str!("../../editor-tools/src/gizmo.rs")),
             ("splines.rs", include_str!("splines.rs")),
             ("constraints.rs", include_str!("constraints.rs")),
             ("ui_handles.rs", include_str!("ui_handles.rs")),

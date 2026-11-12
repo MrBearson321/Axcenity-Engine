@@ -469,9 +469,7 @@ pub fn is_map(name: &str) -> bool {
 /// Where properties that no group lists go, so a new property always shows.
 const OTHER: &str = "Other";
 
-/// The smallest a part can be on any axis, the same as Roblox. Zero would
-/// leave nothing to see or click. The Scale tool stops here too.
-pub const MIN_SIZE: f32 = 0.001;
+pub use crate::gizmo::MIN_SIZE;
 /// Numbers show at most this many decimals, so a typed 0.3 doesn't show up
 /// as 0.30000001 (the closest a 32-bit float gets).
 const MAX_DECIMALS: usize = 3;

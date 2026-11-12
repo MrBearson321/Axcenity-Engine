@@ -737,6 +737,7 @@ dependencies = [
  "axcenity-editor-benchmark",
  "axcenity-editor-kit",
  "axcenity-editor-toolbox",
+ "axcenity-editor-tools",
  "axcenity-gameplay",
  "axcenity-mcp",
  "axcenity-mesh-edit",
@@ -832,6 +833,21 @@ dependencies = [
  "rfd",
  "serde_json",
  "zip",
+]
+
+[[package]]
+name = "axcenity-editor-tools"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "log",
 ]
 
 [[package]]

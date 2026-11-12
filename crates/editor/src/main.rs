@@ -15,6 +15,8 @@ use axcenity_editor_kit::{color_palette, lua_syntax, responsive, screen, wheel, 
 // Panel families in crates of their own, under their old module names.
 use axcenity_editor_benchmark as graphics_benchmark;
 use axcenity_editor_toolbox as toolbox_panel;
+// The viewport tools, shared with the studios, under their old module names.
+use axcenity_editor_tools::{gizmo, shortcuts, snapping};
 
 mod angular;
 mod anim_import;
@@ -39,7 +41,6 @@ mod dialogue_editor;
 mod explorer;
 mod find_in_scripts;
 mod game_tests;
-mod gizmo;
 mod global_assets;
 mod history;
 mod hot_patch;
@@ -70,9 +71,7 @@ mod ribbon_tabs;
 mod script_completion;
 mod scripts;
 mod sequencer;
-mod shortcuts;
 mod side_warnings;
-mod snapping;
 mod spawning;
 mod splines;
 mod start;

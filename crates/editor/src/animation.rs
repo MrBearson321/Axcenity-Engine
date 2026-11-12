@@ -29,8 +29,10 @@ mod clip_editor;
 mod controller_editor;
 mod graph;
 pub(crate) mod object_preview;
-mod posing;
-pub(crate) mod preview;
+// Posing and the preview live in `axcenity-editor-tools`, shared with the
+// Model Studio; they keep their old paths here.
+use axcenity_editor_tools::posing;
+pub(crate) use axcenity_editor_tools::preview;
 pub(crate) mod property_editor;
 pub mod store;
 #[cfg(test)]
