@@ -16,6 +16,8 @@ use crate::op::Op;
 use crate::presence::{self, ChatLine, Collaborator, Presence, Profile};
 use crate::role::{Capability, Role};
 
+mod history;
+
 /// How many applied transactions the host keeps to catch a reconnecting
 /// member up; one further behind gets a fresh snapshot instead.
 pub const LOG_KEPT: usize = 10_000;
@@ -99,6 +101,12 @@ pub struct Host {
     live: BTreeMap<String, HostDoc>,
     /// The chat's last [`presence::CHAT_KEPT`] lines, in memory only (C8).
     chat: VecDeque<ChatLine>,
+    /// The project's checkpoints (C9), kept while the journal is.
+    history: Option<crate::history::History>,
+    /// When the newest checkpoint was made, and as of which transaction.
+    checkpointed: (Instant, u64),
+    /// Who changed the session since the newest checkpoint.
+    edited_since: std::collections::BTreeSet<MemberId>,
 }
 
 /// A live document the host keeps.
@@ -149,6 +157,9 @@ impl Host {
             handled: Handled::new(),
             live: BTreeMap::new(),
             chat: VecDeque::new(),
+            history: None,
+            checkpointed: (Instant::now(), 0),
+            edited_since: Default::default(),
         }
     }
 
@@ -180,6 +191,7 @@ impl Host {
             &handled,
         )?);
         self.snapshot_at = self.clock;
+        self.start_history(project);
         Ok(())
     }
 
@@ -254,6 +266,7 @@ impl Host {
     pub fn tick(&mut self, now: Instant) -> Vec<Outgoing> {
         self.clock = now;
         let mut out = self.write_back(now, false);
+        out.extend(self.hourly_checkpoint(now));
         if now.saturating_duration_since(self.snapshot_at) >= journal::SNAPSHOT_EVERY {
             self.snapshot();
         }
@@ -587,6 +600,8 @@ impl Host {
                 self.update_doc(member, path, update)
             }
             ToHost::Chat(text) => self.chat(member, &text),
+            ToHost::Checkpoint(label) => self.save_checkpoint(member, &label),
+            ToHost::Restore(id) => self.restore(member, id),
             ToHost::NeedIds => {
                 let block = self.ids.block();
                 let m = self.members.get_mut(&member).expect("checked above");
@@ -654,6 +669,12 @@ impl Host {
             out.push(Outgoing {
                 to: member,
                 message: ToClient::ChatHistory(self.chat.iter().cloned().collect()),
+            });
+        }
+        if let Some(list) = self.checkpoints() {
+            out.push(Outgoing {
+                to: member,
+                message: ToClient::Checkpoints(list),
             });
         }
         for (&other, m) in &self.members {
@@ -771,6 +792,9 @@ impl Host {
         applied: apply::Applied,
     ) -> Vec<Outgoing> {
         self.seq += 1;
+        if !applied.ops.is_empty() {
+            self.edited_since.insert(author);
+        }
         let logged = Logged {
             seq: self.seq,
             author,

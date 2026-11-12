@@ -64,6 +64,8 @@ pub enum Notice {
     /// The host didn't take a change to the live document at `path`; the
     /// copy here was opened again from the host's (C7).
     DocRefused { path: String, reason: String },
+    /// About a checkpoint or restore this member asked for (C9).
+    History(String),
 }
 
 /// A live document this member has open (C7).
@@ -172,6 +174,8 @@ pub struct Client {
     new_chat: usize,
     /// When this member's last chat lines went, for the rate limit.
     chatted: VecDeque<std::time::Instant>,
+    /// The session's checkpoints, newest first (C9).
+    checkpoints: Vec<crate::history::Checkpoint>,
 }
 
 impl Client {
@@ -210,6 +214,7 @@ impl Client {
             chat: VecDeque::new(),
             new_chat: 0,
             chatted: VecDeque::new(),
+            checkpoints: Vec::new(),
         }
     }
 
@@ -341,6 +346,37 @@ impl Client {
         }
         self.chatted.push_back(now);
         self.outbox.push(ToHost::Chat(text));
+        Ok(())
+    }
+
+    /// The session's checkpoints, newest first (C9).
+    pub fn checkpoints(&self) -> &[crate::history::Checkpoint] {
+        &self.checkpoints
+    }
+
+    /// Asks the host to keep a checkpoint now. Refused when offline or for
+    /// a Viewer.
+    pub fn save_checkpoint(&mut self, label: &str) -> Result<(), String> {
+        if !self.is_online() {
+            return Err("Not connected to the session".to_owned());
+        }
+        if !self.role.can(crate::role::Capability::SaveCheckpoint) {
+            return Err("Viewers can't save checkpoints".to_owned());
+        }
+        self.outbox.push(ToHost::Checkpoint(label.to_owned()));
+        Ok(())
+    }
+
+    /// Asks the host to put the session back as checkpoint `id` was, for
+    /// everyone. Only the Owner can.
+    pub fn restore_checkpoint(&mut self, id: u64) -> Result<(), String> {
+        if !self.is_online() {
+            return Err("Not connected to the session".to_owned());
+        }
+        if self.role != Role::Owner {
+            return Err("Only the owner can restore a checkpoint".to_owned());
+        }
+        self.outbox.push(ToHost::Restore(id));
         Ok(())
     }
 
@@ -1085,6 +1121,8 @@ impl Client {
                     .filter(|line| line.member != me)
                     .count();
             }
+            ToClient::Checkpoints(list) => self.checkpoints = list,
+            ToClient::HistoryNotice(text) => self.notices.push(Notice::History(text)),
             ToClient::DocRefused { path, reason } => {
                 if self.live.contains_key(&path) {
                     self.live.insert(path.clone(), ClientDoc::new());

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
 use crate::files::{FileHash, Manifest, Piece};
+use crate::history::Checkpoint;
 use crate::ids::IdBlock;
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
@@ -25,7 +26,7 @@ use crate::presence::{Camera, ChatLine, Collaborator, Presence, TextCursor};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 5;
+pub const FORMAT: u8 = 6;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -538,6 +539,8 @@ enum WireToHost {
     DocOpen(String, Blob),
     DocUpdate(String, Blob),
     Chat(String),
+    Checkpoint(String),
+    Restore(u64),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -612,6 +615,8 @@ impl From<&ToHost> for WireToHost {
                 WireToHost::DocUpdate(path.clone(), Blob(update.clone()))
             }
             ToHost::Chat(text) => WireToHost::Chat(text.clone()),
+            ToHost::Checkpoint(label) => WireToHost::Checkpoint(label.clone()),
+            ToHost::Restore(id) => WireToHost::Restore(*id),
         }
     }
 }
@@ -652,6 +657,8 @@ impl WireToHost {
                 update: update.0,
             },
             WireToHost::Chat(text) => ToHost::Chat(text),
+            WireToHost::Checkpoint(label) => ToHost::Checkpoint(label),
+            WireToHost::Restore(id) => ToHost::Restore(id),
         })
     }
 }
@@ -707,6 +714,8 @@ enum WireToClient {
     DocRefused(String, String),
     Chat(ChatLine),
     ChatHistory(Vec<ChatLine>),
+    Checkpoints(Vec<Checkpoint>),
+    HistoryNotice(String),
 }
 
 impl From<&ToClient> for WireToClient {
@@ -821,6 +830,8 @@ impl From<&ToClient> for WireToClient {
             }
             ToClient::Chat(line) => WireToClient::Chat(line.clone()),
             ToClient::ChatHistory(lines) => WireToClient::ChatHistory(lines.clone()),
+            ToClient::Checkpoints(list) => WireToClient::Checkpoints(list.clone()),
+            ToClient::HistoryNotice(reason) => WireToClient::HistoryNotice(reason.clone()),
         }
     }
 }
@@ -937,6 +948,8 @@ impl WireToClient {
             WireToClient::DocRefused(path, reason) => ToClient::DocRefused { path, reason },
             WireToClient::Chat(line) => ToClient::Chat(line),
             WireToClient::ChatHistory(lines) => ToClient::ChatHistory(lines),
+            WireToClient::Checkpoints(list) => ToClient::Checkpoints(list),
+            WireToClient::HistoryNotice(reason) => ToClient::HistoryNotice(reason),
         })
     }
 }

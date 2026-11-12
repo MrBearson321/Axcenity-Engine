@@ -1225,3 +1225,83 @@ fn only_paths_of_instances_become_links() {
     );
     assert_eq!(pieces("plain", &a.world), [Piece::Text("plain")]);
 }
+
+// History (C9).
+
+#[test]
+fn the_owner_restores_a_checkpoint_for_everyone_from_the_panel() {
+    use super::team_history::HistoryAction;
+    let project = copy_of_example("hello-touched", "team-history-host");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = a
+        .host_network_session(Some(&team_folder("history-host")), 0)
+        .expect("hosting");
+    let mut b = EditorApp::new(None);
+    let joiner = team_folder("history-joiner");
+    b.join_network_session(&over_loopback(invite), Some(&joiner))
+        .expect("joining");
+    let checkpoints = |app: &EditorApp| team_client(app).map_or(0, |c| c.checkpoints().len());
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq)
+            && caught_up(b, seq)
+            && b.project
+                .as_ref()
+                .is_some_and(|p| p.folder.starts_with(&joiner))
+            && checkpoints(a) == 1
+            && checkpoints(b) == 1
+    });
+    // The joiner keeps a version of its copy as it joined.
+    let mirror = b.project.as_ref().unwrap().folder.clone();
+    assert!(
+        axcenity_project::list_versions(&mirror)
+            .iter()
+            .any(|v| v.label == super::team::MIRROR_CHECKPOINT)
+    );
+
+    // The joiner saves a checkpoint from the panel, then renames a part.
+    b.team_panel.checkpoint_label = "Before the rename".into();
+    b.team_history_action(HistoryAction::Save);
+    settle_net(&mut a, &mut b, |a, b| {
+        checkpoints(a) == 2 && checkpoints(b) == 2
+    });
+    let saved = team_client(&b).unwrap().checkpoints()[0].clone();
+    assert_eq!(saved.label, "Before the rename");
+    let workspace = b.world.workspace();
+    let part = b
+        .world
+        .get(workspace)
+        .unwrap()
+        .children()
+        .iter()
+        .copied()
+        .find(|&id| b.world.get(id).unwrap().class() == ClassName::Part)
+        .expect("a part");
+    let old_name = b.world.get(part).unwrap().name().to_owned();
+    rename(&mut b, part, "Renamed");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq) && a.world.get(part).unwrap().name() == "Renamed"
+    });
+
+    // An Editor can't restore; the Owner can, after saying so once.
+    b.team_history_action(HistoryAction::Restore(saved.id));
+    assert!(b.team_panel.history_problem.is_some());
+    a.team_history_action(HistoryAction::Confirm(Some(saved.id)));
+    draw_panel(&mut a, "collaborate-history");
+    a.team_history_action(HistoryAction::Restore(saved.id));
+    assert_eq!(a.team_panel.confirm_restore, None);
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq)
+            && caught_up(b, seq)
+            && a.world.get(part).unwrap().name() == old_name
+            && b.world.get(part).unwrap().name() == old_name
+            && checkpoints(b) == 3
+    });
+    assert_eq!(dump(&a.world), dump(&b.world));
+    assert_eq!(
+        team_client(&b).unwrap().checkpoints()[0].label,
+        "Before restoring \u{201c}Before the rename\u{201d}"
+    );
+}

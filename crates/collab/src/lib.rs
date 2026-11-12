@@ -37,6 +37,7 @@ pub mod capture;
 pub mod client;
 pub mod files;
 pub mod handshake;
+pub mod history;
 pub mod host;
 pub mod hosted;
 pub mod identity;
@@ -59,6 +60,8 @@ mod capture_tests;
 mod convergence_tests;
 #[cfg(test)]
 mod files_tests;
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod journal_tests;
 #[cfg(test)]

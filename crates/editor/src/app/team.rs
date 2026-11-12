@@ -99,6 +99,8 @@ pub(crate) const SESSION_CHECKPOINT: &str = "Before Collaborate session";
 /// Version History's name for a member's copy before edits made offline
 /// were sent again.
 pub(crate) const OFFLINE_CHECKPOINT: &str = "Before sending changes made offline";
+/// The Version History version a joining editor keeps of its copy (C9).
+pub(crate) const MIRROR_CHECKPOINT: &str = "Joined Collaborate session";
 pub const OLD_JOIN_FLAG: &str = "--team-join";
 
 /// A session to start once the project has opened (from the command line).
@@ -422,6 +424,22 @@ impl Team {
     pub(crate) fn send_chat(&mut self, text: &str) -> Result<(), String> {
         match self.client.as_mut() {
             Some(client) => client.send_chat(text),
+            None => Err("Not in the session yet".to_owned()),
+        }
+    }
+
+    /// Asks the host to keep a checkpoint now (C9).
+    pub(crate) fn save_checkpoint(&mut self, label: &str) -> Result<(), String> {
+        match self.client.as_mut() {
+            Some(client) => client.save_checkpoint(label),
+            None => Err("Not in the session yet".to_owned()),
+        }
+    }
+
+    /// Asks the host to restore checkpoint `id` for everyone (the Owner).
+    pub(crate) fn restore_checkpoint(&mut self, id: u64) -> Result<(), String> {
+        match self.client.as_mut() {
+            Some(client) => client.restore_checkpoint(id),
             None => Err("Not in the session yet".to_owned()),
         }
     }
@@ -1305,6 +1323,13 @@ impl EditorApp {
             "Collaborate: opened the session's files (kept in `{}`)",
             root.display()
         ));
+        // A Version History version of this copy as it joined (C9), to
+        // compare with or go back to on this computer alone.
+        if let Err(error) = axcenity_project::record_version(root, MIRROR_CHECKPOINT) {
+            self.output.warning(format!(
+                "Collaborate: couldn't keep a version of the session's files: {error}"
+            ));
+        }
     }
 
     /// After the session's World took the place of the one a project load
@@ -1659,6 +1684,10 @@ impl EditorApp {
                     ));
                     self.toasts
                         .warning(format!("Your typing in {path} wasn't taken: {reason}"));
+                }
+                Notice::History(text) => {
+                    self.output.warning(format!("Collaborate: {text}"));
+                    self.team_panel.history_problem = Some(text);
                 }
             }
         }

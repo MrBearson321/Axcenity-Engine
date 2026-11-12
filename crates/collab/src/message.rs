@@ -79,6 +79,11 @@ pub enum ToHost {
     DocUpdate { path: String, update: Vec<u8> },
     /// A line for the session's chat (C8).
     Chat(String),
+    /// Asks the host to keep a checkpoint now, with this label (C9).
+    Checkpoint(String),
+    /// Asks the host to put the session back as checkpoint `id` was, for
+    /// everyone (the Owner only).
+    Restore(u64),
 }
 
 /// From the host to a client.
@@ -173,4 +178,10 @@ pub enum ToClient {
     Chat(ChatLine),
     /// The chat so far, to someone joining.
     ChatHistory(Vec<ChatLine>),
+    /// The session's checkpoints, newest first (C9): to a joiner, and to
+    /// everyone when one is made.
+    Checkpoints(Vec<crate::history::Checkpoint>),
+    /// About a checkpoint or restore this member asked for: why it didn't
+    /// happen, or what a restore couldn't put back.
+    HistoryNotice(String),
 }
