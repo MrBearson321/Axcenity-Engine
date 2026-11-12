@@ -442,6 +442,20 @@ impl EditorApp {
         found(ui, &row, "Show constraints");
         let row = ui
             .checkbox(
+                &mut self.overlays.contacts,
+                theme::with_icon(icons::ARROWS_IN_LINE_VERTICAL, "Show contacts"),
+            )
+            .on_hover_text("Where parts touch and how hard they push, during Play.");
+        found(ui, &row, "Show contacts");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.bodies,
+                theme::with_icon(icons::CROSSHAIR, "Show bodies"),
+            )
+            .on_hover_text("Each moving body's center of mass, awake or asleep, during Play.");
+        found(ui, &row, "Show bodies");
+        let row = ui
+            .checkbox(
                 &mut self.overlays.culling,
                 theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
             )

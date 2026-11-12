@@ -664,3 +664,59 @@ pub(super) fn bounds_edges(instance: &Instance) -> Option<[(Vec3, Vec3); 12]> {
 pub(super) fn v3(v: axcenity_core::Vector3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
 }
+
+/// The Contacts and Bodies overlays (roadmap G15), from the simulation
+/// during Play: each contact point as a dot with a line along the way it
+/// pushes the first part out, longer the harder it pushed; and each moving
+/// body's center of mass as a cross in a ring, yellow while it's simulated
+/// and blue once it's asleep.
+pub(crate) fn paint_physics(
+    painter: &egui::Painter,
+    screen: &Screen,
+    view: &axcenity_physics::DebugView,
+    overlays: OverlayToggles,
+) {
+    if overlays.contacts {
+        let stroke = egui::Stroke::new(1.5_f32, CONTACT_COLOR);
+        for contact in &view.contacts {
+            let at = v3(contact.point);
+            let Some(dot) = screen.point(at) else {
+                continue;
+            };
+            painter.circle_filled(dot, 3.0, CONTACT_COLOR);
+            // Half a stud for a resting touch, up to 3 for a hard hit.
+            let length = (0.5 + contact.impulse.sqrt() * 0.1).min(3.0);
+            if let Some(line) = screen.line(at, at + v3(contact.normal) * length) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    }
+    if overlays.bodies {
+        for body in &view.bodies {
+            let center = v3(body.center_of_mass);
+            let color = if body.sleeping {
+                ASLEEP_COLOR
+            } else {
+                AWAKE_COLOR
+            };
+            let stroke = egui::Stroke::new(1.5_f32, color);
+            for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                if let Some(line) = screen.line(center - axis * 0.4, center + axis * 0.4) {
+                    painter.line_segment(line, stroke);
+                }
+            }
+            if let Some(dot) = screen.point(center) {
+                painter.circle_stroke(dot, 6.0, stroke);
+                if body.sleeping {
+                    painter.text(
+                        dot + egui::vec2(7.0, -7.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        "z",
+                        egui::FontId::proportional(11.0),
+                        color,
+                    );
+                }
+            }
+        }
+    }
+}

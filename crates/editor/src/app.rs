@@ -774,6 +774,8 @@ const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
 const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
+const OVERLAY_CONTACTS_KEY: &str = "overlay contacts";
+const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -1117,6 +1119,9 @@ impl EditorApp {
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             self.overlays.constraints =
                 storage.get_string(OVERLAY_CONSTRAINTS_KEY).as_deref() == Some("on");
+            self.overlays.contacts =
+                storage.get_string(OVERLAY_CONTACTS_KEY).as_deref() == Some("on");
+            self.overlays.bodies = storage.get_string(OVERLAY_BODIES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
                 self.recent_tabs = welcome::RecentTabs::from_text(&text);
             }
@@ -1250,6 +1255,11 @@ impl eframe::App for EditorApp {
             OVERLAY_CONSTRAINTS_KEY,
             flag(self.overlays.constraints).to_owned(),
         );
+        storage.set_string(
+            OVERLAY_CONTACTS_KEY,
+            flag(self.overlays.contacts).to_owned(),
+        );
+        storage.set_string(OVERLAY_BODIES_KEY, flag(self.overlays.bodies).to_owned());
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
         storage.set_string(
