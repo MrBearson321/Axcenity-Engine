@@ -537,3 +537,84 @@ pub(super) fn add_node(script: &mut BlockScript, item: &PaletteItem) -> Option<N
         PaletteItem::NewVariable => None,
     }
 }
+
+/// What Ctrl+C puts on the clipboard from a block script's graph: each
+/// node's block (its mouths empty, as Ctrl+D copies it) or value, and
+/// where it was from the copied nodes' top left corner.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Clip {
+    axcenity_graph_nodes: Vec<(ClipNode, [f32; 2])>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+enum ClipNode {
+    Block(Box<BlockKind>),
+    Value(Expression),
+}
+
+/// `nodes` as clipboard text (JSON), or `None` if none can be copied.
+pub(super) fn copy_nodes(
+    script: &BlockScript,
+    nodes: &HashSet<NodeRef>,
+    places: &HashMap<NodeRef, Pos2>,
+) -> Option<String> {
+    let mut copied: Vec<(ClipNode, Pos2)> = Vec::new();
+    for node in nodes {
+        let at = places.get(node).copied().unwrap_or(Pos2::ZERO);
+        let clip = match node {
+            NodeRef::Block(id) => {
+                let mut kind = find_block(script, *id)?.kind.clone();
+                for body in kind.bodies_mut() {
+                    body.clear();
+                }
+                ClipNode::Block(Box::new(kind))
+            }
+            NodeRef::Value(at) => ClipNode::Value(value(script, at)?.clone()),
+        };
+        copied.push((clip, at));
+    }
+    let corner = copied.iter().map(|(_, at)| *at).reduce(|a, b| a.min(b))?;
+    let clip = Clip {
+        axcenity_graph_nodes: copied
+            .into_iter()
+            .map(|(node, at)| (node, [at.x - corner.x, at.y - corner.y]))
+            .collect(),
+    };
+    serde_json::to_string(&clip).ok()
+}
+
+/// Adds the nodes in clipboard `text` (from [`copy_nodes`]) with their top
+/// left corner at `at`, each a new node wired to nothing. Returns them, or
+/// nothing if `text` isn't copied nodes.
+pub(super) fn paste_nodes(script: &mut BlockScript, text: &str, at: Pos2) -> Vec<NodeRef> {
+    let Ok(clip) = serde_json::from_str::<Clip>(text) else {
+        return Vec::new();
+    };
+    let mut pasted = Vec::new();
+    for (node, offset) in clip.axcenity_graph_nodes {
+        let node = match node {
+            ClipNode::Block(kind) => {
+                let block = Block::new(*kind).duplicate();
+                let id = block.id;
+                if block.kind.is_event() {
+                    script.blocks.push(block);
+                } else {
+                    add_loose_stack(script, vec![block]);
+                }
+                NodeRef::Block(id)
+            }
+            ClipNode::Value(expression) => {
+                let loose = LooseValue::new(expression);
+                let id = loose.id;
+                script.graph.loose.push(loose);
+                NodeRef::Value(ValueAt::loose(id))
+            }
+        };
+        script.graph.nodes.insert(
+            node.key(),
+            [(at.x + offset[0]).round(), (at.y + offset[1]).round()],
+        );
+        pasted.push(node);
+    }
+    pasted
+}

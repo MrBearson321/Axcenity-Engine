@@ -57,7 +57,7 @@ These were decided in the developer's interview of 2026-10-27.
 | --- | --- | --- | --- |
 | 1 | Phase 89: engine hot-patching out, game files hot reload like s&box (**Changed** 2026-11-12) | Done in this phase's PR. Was: not started. Script reload (Phase 24, `ScriptRuntime::reload_script`) reruns a script from scratch. `hot_patch.rs`, `hot_patch/` and the `hot-patch` feature (`subsecond`, `dioxus-*`) are still in `crates/editor`. | `rebuild.rs`, `relaunch.rs` and `app/engine.rs` stayed in `crates/editor` through the crate split. `blocks` already has a full Luau reader with source spans (`blocks/src/lua.rs`), which wraps scripts' top-level locals. |
 | 2 | Phase 90: a narrower Model Studio | Done in this phase's PR. Was: not started. | Model Studio moved to `crates/editor-model-studio` (G11, #189): delete `sculpt*` and `retopo*` there, not in `editor/src/model_studio/`. The usability audit (MS4) already folded Retopology and Bake away, which agrees with removing them. Rigging still needs `sculpt::remesh::field_mesh` (`rig/template.rs`), `retopo::Reference` (`rig/weights.rs`) and `sculpt::subdivide` (`rig_tests.rs`). Terrain sculpting is a different tool and stays. |
-| 3 | Phase 91: one graph canvas | Not started (also proposed as V24 by the usability refactor audit). | `node_graph` is now the `editor-node-graph` crate (#193). `block_editor/graph.rs` is 1,436 lines and `animation/graph.rs` 930. The material graph's own view is `editor/src/material_editor/graph.rs`. |
+| 3 | Phase 91: one graph canvas | Done in this phase's PR, except the line-count goal (see the phase). | `node_graph` is now the `editor-node-graph` crate (#193). `block_editor/graph.rs` is 1,436 lines and `animation/graph.rs` 930. The material graph's own view is `editor/src/material_editor/graph.rs`. |
 | 4 | Phase 92: legacy paths, old templates and dead weight | Partly superseded. The genre templates (Phase 69) landed, so the Starter template can go. | `project::FORMAT_VERSION` is already 5 (the release system's engine record, #98 era), so this phase bumps it to **6**, not 5. There are four alpha releases now (`releases/history`: 0.1.0-alpha.1 to .3 and 0.2.0-alpha.1). |
 | 5 | Phase 93: a multithreaded frame | About half done by the roadmap. Physics runs on rapier's parallel feature in its own pool of at most 12 threads with the same results at any thread count (M3 #25, `physics/src/threads.rs`). Frame planning and culling run on the renderer's pool (`render/src/renderer/parallel.rs`). The nav mesh builds on a worker (M13 #32). The retained draw list (M4 #23) removed most of the draw-list build. | Left: animator posing across threads, mesh decoding on a shared pool, per-thread time in the Profiler, the 200-character and 2,000-body benchmark, and test runs with 1 and 8 threads. The modernization report (§ `rayon` usage) asks for the same: posing, audio diff and nav fingerprint over `&World`, applied in index order. "Limited on mobile" is deferred with Milestone 20. |
 | 6 | Phase 80's open criterion: the 4 × 4 km benchmark | No benchmark scene exists for it. | Build a generated 50,000-part, 4 × 4 km scene as an ignored bench test. Measuring it needs the reference machine (the developer's PC). |
@@ -2828,10 +2828,12 @@ The block Graph view and the state machine view keep their own node rules and dr
 
 ### Acceptance criteria
 
-- [ ] Every existing graph test passes unchanged: blocks, state machines, UI Event Graph, behavior trees and material graphs.
-- [ ] A script switches between Code, Blocks and Graph and runs the same, as before.
-- [ ] The same shortcuts work in all five graph views, checked by one shared test.
-- [ ] `block_editor/graph.rs` and `animation/graph.rs` together are at least 800 lines smaller.
+- [x] Every existing graph test passes unchanged: blocks, state machines, UI Event Graph, behavior trees and material graphs. (One state machine test reads the pan as `view.pan` instead of `view.offset`; its checks are the same.)
+- [x] A script switches between Code, Blocks and Graph and runs the same, as before.
+- [x] The same shortcuts work in all five graph views, checked by one shared test (`editor/src/graph_keys_tests.rs`).
+- [ ] `block_editor/graph.rs` and `animation/graph.rs` together are at least 800 lines smaller. (Not met: 2,366 to 2,346. About 850 lines of their own canvas code went into `editor-node-graph/src/canvas.rs` (641 lines), but both views gained copy and paste, the shared keys and the state machine a minimap. The 800 assumed more of them was shared than was.)
+
+**Done (Phase 91)**: `editor-node-graph/src/canvas.rs` holds pan, zoom and fit, box select, the shared keys, the searchable menu, pins, wires, the minimap and notices. Every view uses it. Comment boxes and reroute points stay in the `node_graph` views only: block scripts and state machines have nowhere in their files to keep them.
 
 ---
 

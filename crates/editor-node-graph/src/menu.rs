@@ -3,37 +3,24 @@
 //! the new node is wired to it.
 
 use super::*;
+use crate::canvas::{MenuEntry, SearchMenu};
 
 /// The open node menu.
 #[derive(Clone, Debug)]
 pub(super) struct NodeMenu {
-    /// Where it opened, on screen and in the graph (where the node goes).
-    pub(super) screen: Pos2,
-    pub(super) graph: Pos2,
+    pub(super) menu: SearchMenu,
     /// The pin a wire was dropped from (an output when true), to wire the
     /// new node to.
     pub(super) from: Option<(PinRef, bool)>,
-    search: String,
-    /// The menu opened this frame: give the search box focus.
-    fresh: bool,
 }
 
 impl NodeMenu {
     pub(super) fn new(screen: Pos2, graph: Pos2, from: Option<(PinRef, bool)>) -> Self {
         Self {
-            screen,
-            graph,
+            menu: SearchMenu::new(screen, graph),
             from,
-            search: String::new(),
-            fresh: true,
         }
     }
-}
-
-pub(super) enum MenuChoice {
-    Open,
-    Close,
-    Pick(usize),
 }
 
 /// The pin of a node of `spec` that a wire from `from` would join: the
@@ -104,86 +91,32 @@ pub(super) fn show(
     specs: &[&NodeSpec],
     key: &str,
 ) -> MenuChoice {
-    let mut choice = MenuChoice::Open;
-    let search = menu.search.to_lowercase();
-    let matches: Vec<usize> = specs
+    let words: Vec<String> = specs
         .iter()
-        .enumerate()
-        .filter(|(_, spec)| {
-            search.is_empty()
-                || spec.title.to_lowercase().contains(&search)
-                || spec.category.to_lowercase().contains(&search)
-        })
-        .map(|(index, _)| index)
+        .map(|spec| format!("{} {}", spec.title, spec.category).to_lowercase())
         .collect();
-    let area = egui::Area::new(egui::Id::new(("node graph menu", key)))
-        .order(egui::Order::Foreground)
-        .fixed_pos(menu.screen)
-        .constrain(true)
-        .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_width(240.0);
-                let title = if menu.from.is_some() {
-                    "Nodes for this wire"
-                } else {
-                    "Add a node"
-                };
-                ui.label(egui::RichText::new(title).strong());
-                let search_box = ui.add(
-                    egui::TextEdit::singleline(&mut menu.search)
-                        .hint_text(theme::with_icon(icons::MAGNIFYING_GLASS, "Search"))
-                        .desired_width(f32::INFINITY),
-                );
-                if menu.fresh {
-                    search_box.request_focus();
-                }
-                if search_box.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    && let Some(first) = matches.first()
-                {
-                    choice = MenuChoice::Pick(*first);
-                }
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(340.0)
-                    .show(ui, |ui| {
-                        if matches.is_empty() {
-                            ui.weak("No nodes match.");
-                        }
-                        let mut shown = None;
-                        for &index in &matches {
-                            let spec = specs[index];
-                            if shown != Some(spec.category) {
-                                shown = Some(spec.category);
-                                ui.label(
-                                    egui::RichText::new(spec.category)
-                                        .color(category_color(spec.category))
-                                        .strong()
-                                        .size(theme::type_scale::SMALL),
-                                );
-                            }
-                            if ui
-                                .selectable_label(false, spec.title)
-                                .on_hover_text(spec.help)
-                                .clicked()
-                            {
-                                choice = MenuChoice::Pick(index);
-                            }
-                        }
-                    });
-            });
-        });
-    let fresh = std::mem::replace(&mut menu.fresh, false);
-    let (escape, pressed, pointer) = ui.input(|i| {
-        (
-            i.key_pressed(egui::Key::Escape),
-            i.pointer.any_pressed(),
-            i.pointer.interact_pos(),
-        )
-    });
-    let outside = pressed && pointer.is_some_and(|pointer| !area.response.rect.contains(pointer));
-    if matches!(choice, MenuChoice::Open) && (escape || (outside && !fresh)) {
-        choice = MenuChoice::Close;
-    }
-    choice
+    let entries: Vec<MenuEntry> = specs
+        .iter()
+        .zip(&words)
+        .map(|(spec, words)| MenuEntry {
+            group: spec.category,
+            color: category_color(spec.category),
+            title: spec.title,
+            words,
+        })
+        .collect();
+    let title = if menu.from.is_some() {
+        "Nodes for this wire"
+    } else {
+        "Add a node"
+    };
+    menu.menu.show(
+        ui.ctx(),
+        egui::Id::new(("node graph menu", key)),
+        title,
+        &entries,
+        Some(&|ui: &mut egui::Ui, index: usize| {
+            ui.label(specs[index].help);
+        }),
+    )
 }

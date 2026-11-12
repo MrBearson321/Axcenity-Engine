@@ -54,7 +54,7 @@ flowchart LR
 
 - "Every block must correspond to a real Lua API" (no block-only features), so a new script API needs a matching block to be reachable from blocks.
 - `BEHAVIOR_NODE_KINDS` in `nav` must match `blocks::behavior_tree::BEHAVIOR_NODES` (an editor test compares them).
-- Phase 91 ("One graph canvas") plans to merge the graph canvases; not started.
+- Phase 91 ("One graph canvas") put every graph view on `editor-node-graph`'s `canvas.rs`; the nodes each view draws stay its own.
 
 ## Development guidance
 

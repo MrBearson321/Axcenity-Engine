@@ -25,6 +25,7 @@
 //! Each finished edit comes back as [`GraphResponse::step`], the graph as
 //! it was before, so a drag or a typed value is one undo step.
 
+pub mod canvas;
 mod draw;
 mod menu;
 #[cfg(test)]
@@ -48,10 +49,10 @@ use axcenity_editor_kit::color_palette;
 #[cfg(test)]
 use axcenity_editor_kit::snapshot;
 use axcenity_editor_kit::theme::{self, icons};
-use axcenity_editor_tools::shortcuts;
-pub use draw::draw_wire;
+pub use canvas::draw_wire;
+use canvas::{BoxSelect, Canvas, MenuChoice, PinAction};
 use draw::{NodeDraw, draw_node, scale_style};
-use menu::{MenuChoice, NodeMenu};
+use menu::NodeMenu;
 pub use variables::variables_panel;
 
 // Sizes at zoom 1, in graph units (points).
@@ -339,26 +340,25 @@ enum CommentDrag {
 /// the editor runs.
 #[derive(Debug)]
 pub struct GraphView {
-    pub pan: Vec2,
-    pub zoom: f32,
+    /// Pan, zoom, the selection box and notices; `view.pan` and
+    /// `view.zoom` reach it through `Deref`.
+    board: Canvas,
     pub selected: BTreeSet<u32>,
     pub selected_comments: BTreeSet<u32>,
     /// A wire being dragged out of this pin (an output when true).
     wire: Option<(PinRef, bool)>,
-    /// Where a box selection started, on screen.
-    boxing: Option<Pos2>,
     /// The selected nodes are being dragged.
     moving: bool,
     comment_drag: Option<CommentDrag>,
     /// The comment whose title is being typed.
     renaming: Option<u32>,
     menu: Option<NodeMenu>,
-    /// Why the last wire didn't join, and until when to say so.
-    notice: Option<(String, f64)>,
     /// The graph before the edit under way (a drag, or typing), for undo.
     before: Option<NodeGraph>,
     /// Fit every node into view on the next frame.
     frame_next: bool,
+    /// ... or only the selected ones (F).
+    frame_selection: bool,
     /// Whether the graph has been framed since it opened: the first time,
     /// it never zooms out past [`OPEN_ZOOM`].
     opened: bool,
@@ -371,22 +371,34 @@ pub struct GraphView {
     canvas: Rect,
 }
 
+impl std::ops::Deref for GraphView {
+    type Target = Canvas;
+
+    fn deref(&self) -> &Canvas {
+        &self.board
+    }
+}
+
+impl std::ops::DerefMut for GraphView {
+    fn deref_mut(&mut self) -> &mut Canvas {
+        &mut self.board
+    }
+}
+
 impl Default for GraphView {
     fn default() -> Self {
         Self {
-            pan: vec2(40.0, 40.0),
-            zoom: 1.0,
+            board: Canvas::new(vec2(40.0, 40.0)),
             selected: BTreeSet::new(),
             selected_comments: BTreeSet::new(),
             wire: None,
-            boxing: None,
             moving: false,
             comment_drag: None,
             renaming: None,
             menu: None,
-            notice: None,
             before: None,
             frame_next: true,
+            frame_selection: false,
             opened: false,
             pins: Vec::new(),
             rects: Vec::new(),
@@ -437,7 +449,7 @@ impl GraphView {
         let toolbar = Rect::from_min_size(rect.min, vec2(rect.width(), TOOLBAR_HEIGHT));
         let canvas = Rect::from_min_max(pos2(rect.left(), toolbar.bottom()), rect.max);
         let add = self.toolbar(ui, toolbar, graph, context);
-        let hovered = self.canvas(ui, canvas, graph, context, add);
+        let hovered = self.draw_canvas(ui, canvas, graph, context, add);
         ui.advance_cursor_after_rect(rect);
 
         // A drag or typing is one step, from when it began.
@@ -503,33 +515,8 @@ impl GraphView {
             }
         });
         bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .button(icons::CORNERS_OUT)
-                .on_hover_text("Frame all: fit every node into view")
-                .clicked()
-            {
+            if canvas::zoom_buttons(ui, &mut self.board, MIN_ZOOM..=MAX_ZOOM) {
                 self.frame_next = true;
-            }
-            if ui
-                .button(icons::MAGNIFYING_GLASS_PLUS)
-                .on_hover_text("Zoom in")
-                .clicked()
-            {
-                self.zoom = (self.zoom * 1.2).min(MAX_ZOOM);
-            }
-            if ui
-                .button(format!("{:.0}%", self.zoom * 100.0))
-                .on_hover_text("Back to 100%")
-                .clicked()
-            {
-                self.zoom = 1.0;
-            }
-            if ui
-                .button(icons::MAGNIFYING_GLASS_MINUS)
-                .on_hover_text("Zoom out")
-                .clicked()
-            {
-                self.zoom = (self.zoom / 1.2).max(MIN_ZOOM);
             }
         });
         add
@@ -567,12 +554,11 @@ impl GraphView {
 
     /// A screen point as a graph point, on last frame's canvas.
     fn to_graph(&self, at: Pos2) -> Pos2 {
-        let origin = self.canvas.min + self.pan;
-        pos2((at.x - origin.x) / self.zoom, (at.y - origin.y) / self.zoom)
+        self.board.to_graph(self.canvas, at)
     }
 
     /// The canvas. Returns whether it has the pointer.
-    fn canvas(
+    fn draw_canvas(
         &mut self,
         ui: &mut egui::Ui,
         rect: Rect,
@@ -586,7 +572,6 @@ impl GraphView {
         let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         canvas.set_clip_rect(rect);
         let painter = canvas.painter_at(rect);
-        painter.rect_filled(rect, 0, colors.background);
 
         let shapes: BTreeMap<u32, NodeShape> = graph
             .nodes
@@ -606,56 +591,22 @@ impl GraphView {
             self.opened = true;
         }
 
-        let back = canvas.interact(
+        let frame = self.board.begin(
+            &mut canvas,
             rect,
             egui::Id::new(("node graph canvas", context.key)),
-            Sense::click_and_drag(),
+            MIN_ZOOM..=MAX_ZOOM,
+            self.menu.is_none(),
         );
-        if back.dragged_by(egui::PointerButton::Secondary)
-            || back.dragged_by(egui::PointerButton::Middle)
-        {
-            self.pan += back.drag_delta();
-        }
-        let hovered = canvas.rect_contains_pointer(rect);
-        if hovered && self.menu.is_none() {
-            let (scroll, zoom, pointer) =
-                canvas.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
-            self.pan += scroll;
-            if zoom != 1.0
-                && let Some(pointer) = pointer
-            {
-                let old = self.zoom;
-                self.zoom = (old * zoom).clamp(MIN_ZOOM, MAX_ZOOM);
-                let from_origin = pointer - rect.min - self.pan;
-                self.pan = pointer - rect.min - from_origin * (self.zoom / old);
-            }
-        }
-        let z = self.zoom;
-        let origin = rect.min + self.pan;
-        let to_screen = |at: Pos2| origin + at.to_vec2() * z;
-        let to_graph = |at: Pos2| pos2((at.x - origin.x) / z, (at.y - origin.y) / z);
-
-        // A grid, which moves with the nodes.
-        let spacing = 32.0 * z;
-        let line = colors.grid;
-        let mut x = rect.left() + self.pan.x.rem_euclid(spacing);
-        while x < rect.right() {
-            painter.vline(x, rect.y_range(), Stroke::new(1.0_f32, line));
-            x += spacing;
-        }
-        let mut y = rect.top() + self.pan.y.rem_euclid(spacing);
-        while y < rect.bottom() {
-            painter.hline(rect.x_range(), y, Stroke::new(1.0_f32, line));
-            y += spacing;
-        }
+        let (back, hovered, z) = (&frame.back, frame.hovered, frame.zoom);
+        let to_screen = |at: Pos2| frame.to_screen(at);
+        let to_graph = |at: Pos2| frame.to_graph(at);
 
         if graph.nodes.is_empty() && graph.comments.is_empty() {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
+            canvas::empty_hint(
+                &canvas,
+                rect,
                 "Right-click to add a node, such as \"Button Activated\".",
-                FontId::proportional(14.0),
-                ui.visuals().weak_text_color(),
             );
         }
 
@@ -786,34 +737,19 @@ impl GraphView {
         }
 
         // The box being dragged out.
-        if context.editable && back.drag_started_by(egui::PointerButton::Primary) {
-            self.boxing = back.interact_pointer_pos();
-            if !canvas.input(|i| i.modifiers.shift || i.modifiers.command) {
+        match self.board.box_select(&canvas, &frame, context.editable) {
+            BoxSelect::Started { add: false } => {
                 self.selected.clear();
                 self.selected_comments.clear();
             }
-        }
-        if let (Some(start), Some(pointer)) = (self.boxing, pointer) {
-            let area = Rect::from_two_pos(start, pointer);
-            let accent = ui.visuals().selection.bg_fill;
-            painter.rect(
-                area,
-                2,
-                accent.gamma_multiply(0.15),
-                Stroke::new(1.0_f32, accent),
-                egui::StrokeKind::Inside,
-            );
-            if back.drag_stopped() {
+            BoxSelect::Done(area) => {
                 for (id, node_rect) in &self.rects {
                     if area.intersects(*node_rect) {
                         self.selected.insert(*id);
                     }
                 }
-                self.boxing = None;
             }
-        }
-        if !canvas.input(|i| i.pointer.primary_down()) {
-            self.boxing = None;
+            _ => {}
         }
         if back.clicked() {
             self.selected.clear();
@@ -893,8 +829,7 @@ impl GraphView {
                 Some(to) => {
                     let (out, input) = if output { (from, to) } else { (to, from) };
                     if let Err(why) = graph.connect(context.library, out, input) {
-                        let now = canvas.input(|i| i.time);
-                        self.notice = Some((why.to_owned(), now + 4.0));
+                        self.board.say(&ctx, why);
                     }
                 }
                 None => {
@@ -932,12 +867,12 @@ impl GraphView {
                 MenuChoice::Close => {}
                 MenuChoice::Pick(index) => {
                     let spec = specs[index];
-                    let id = graph.add_node(spec, [menu.graph.x.round(), menu.graph.y.round()]);
+                    let id = graph
+                        .add_node(spec, [menu.menu.graph.x.round(), menu.menu.graph.y.round()]);
                     if let Some((from, output)) = &menu.from
                         && let Err(why) = menu::wire_new(graph, context.library, from, *output, id)
                     {
-                        let now = canvas.input(|i| i.time);
-                        self.notice = Some((why.to_owned(), now + 4.0));
+                        self.board.say(&ctx, why);
                     }
                     self.selected = BTreeSet::from([id]);
                     self.selected_comments.clear();
@@ -945,28 +880,22 @@ impl GraphView {
             }
         }
 
+        // The minimap, once some nodes are out of view.
+        let nodes: Vec<Rect> = graph
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                let size = shapes.get(&node.id)?.size;
+                Some(Rect::from_min_size(
+                    pos2(node.position[0], node.position[1]),
+                    size,
+                ))
+            })
+            .collect();
+        self.board.minimap(&mut canvas, &frame, &nodes);
+
         // Why the last wire didn't join.
-        let now = canvas.input(|i| i.time);
-        if let Some((text, until)) = &self.notice {
-            if now < *until {
-                let at = pos2(rect.center().x, rect.bottom() - 24.0);
-                let galley = painter.layout_no_wrap(
-                    text.clone(),
-                    FontId::proportional(13.0),
-                    Color32::WHITE,
-                );
-                let back_rect = Rect::from_center_size(at, galley.size() + vec2(20.0, 10.0));
-                painter.rect_filled(
-                    back_rect,
-                    6,
-                    Color32::from_rgba_unmultiplied(160, 40, 40, 230),
-                );
-                painter.galley(back_rect.min + vec2(10.0, 5.0), galley, Color32::WHITE);
-                ctx.request_repaint_after(std::time::Duration::from_millis(250));
-            } else {
-                self.notice = None;
-            }
-        }
+        self.board.show_notice(&canvas, &frame);
         hovered
     }
 
@@ -996,69 +925,64 @@ impl GraphView {
         self.selected_comments.clear();
     }
 
-    /// Delete, Ctrl+D, copy, cut and paste, select all and Escape, while
-    /// nothing is being typed.
+    /// The graph keys every view shares (`canvas::keys`): Delete, Ctrl+D,
+    /// copy, cut and paste, select all, Escape, F to frame the selection
+    /// (or everything) and Space for the node menu at the pointer.
     fn keys(&mut self, ctx: &egui::Context, graph: &mut NodeGraph, pointer: Option<Pos2>) {
-        if ctx.egui_wants_keyboard_input() {
-            return;
-        }
-        let (delete, duplicate, all, escape, events) = ctx.input(|i| {
-            use crate::shortcuts::{Action, pressed};
-            (
-                pressed(i, Action::DeleteNodes),
-                pressed(i, Action::DuplicateNodes),
-                pressed(i, Action::SelectAllNodes),
-                pressed(i, Action::ClearNodeSelection),
-                i.events.clone(),
-            )
-        });
-        if delete {
+        let keys = canvas::keys(ctx);
+        if keys.delete {
             graph.remove_nodes(&self.selected);
             graph
                 .comments
                 .retain(|comment| !self.selected_comments.contains(&comment.id));
         }
-        if duplicate {
+        if keys.duplicate {
             let ids = self.selected.clone();
             self.duplicate(graph, &ids);
         }
-        if all {
+        if keys.select_all {
             self.selected = graph.nodes.iter().map(|node| node.id).collect();
         }
-        if escape {
+        if keys.escape {
             self.selected.clear();
             self.selected_comments.clear();
         }
-        for event in events {
-            match event {
-                egui::Event::Copy | egui::Event::Cut
-                    if !self.selected.is_empty() || !self.selected_comments.is_empty() =>
-                {
-                    ctx.copy_text(copy_text(graph, &self.selected, &self.selected_comments));
-                    if event == egui::Event::Cut {
-                        graph.remove_nodes(&self.selected);
-                        graph
-                            .comments
-                            .retain(|comment| !self.selected_comments.contains(&comment.id));
-                    }
-                }
-                egui::Event::Paste(text) => {
-                    if let Ok(copied) = serde_json::from_str::<NodeGraph>(&text) {
-                        let at = pointer.unwrap_or(pos2(0.0, 0.0));
-                        let (nodes, comments) = graph.paste(&copied, [at.x.round(), at.y.round()]);
-                        self.selected = nodes;
-                        self.selected_comments = comments;
-                    }
-                }
-                _ => {}
+        if keys.frame {
+            self.frame_next = true;
+            self.frame_selection = true;
+        }
+        if keys.search {
+            let screen = ctx
+                .input(|i| i.pointer.hover_pos())
+                .filter(|at| self.canvas.contains(*at))
+                .unwrap_or(self.canvas.center());
+            self.menu = Some(NodeMenu::new(screen, self.to_graph(screen), None));
+        }
+        if (keys.copy || keys.cut)
+            && (!self.selected.is_empty() || !self.selected_comments.is_empty())
+        {
+            ctx.copy_text(copy_text(graph, &self.selected, &self.selected_comments));
+            if keys.cut {
+                graph.remove_nodes(&self.selected);
+                graph
+                    .comments
+                    .retain(|comment| !self.selected_comments.contains(&comment.id));
             }
+        }
+        if let Some(text) = keys.paste
+            && let Ok(copied) = serde_json::from_str::<NodeGraph>(&text)
+        {
+            let at = pointer.unwrap_or(pos2(0.0, 0.0));
+            let (nodes, comments) = graph.paste(&copied, [at.x.round(), at.y.round()]);
+            self.selected = nodes;
+            self.selected_comments = comments;
         }
     }
 
-    /// Fits every node and comment into `rect`.
-    /// Fits every node into view; or, when the graph is opening (`start`
-    /// is its start node), fits it only down to [`OPEN_ZOOM`] and shows its
-    /// start if it doesn't fit.
+    /// Fits the selected nodes into view, or every node and comment
+    /// without a selection; or, when the graph is opening (`start` is its
+    /// start node), fits it only down to [`OPEN_ZOOM`] and shows its start
+    /// if it doesn't fit.
     fn fit(
         &mut self,
         rect: Rect,
@@ -1066,30 +990,30 @@ impl GraphView {
         shapes: &BTreeMap<u32, NodeShape>,
         start: Option<u32>,
     ) {
+        let picked = std::mem::take(&mut self.frame_selection)
+            && !self.selected.is_empty()
+            && start.is_none();
         let nodes = graph.nodes.iter().filter_map(|node| {
+            if picked && !self.selected.contains(&node.id) {
+                return None;
+            }
             let shape = shapes.get(&node.id)?;
             Some(Rect::from_min_size(
                 pos2(node.position[0], node.position[1]),
                 shape.size,
             ))
         });
-        let comments = graph.comments.iter().map(|comment| {
+        let comments = graph.comments.iter().filter(|_| !picked).map(|comment| {
             Rect::from_min_size(
                 pos2(comment.position[0], comment.position[1]),
                 vec2(comment.size[0], comment.size[1]),
             )
         });
-        let Some(area) = nodes.chain(comments).reduce(|a, b| a.union(b)) else {
-            self.pan = vec2(40.0, 40.0);
-            self.zoom = 1.0;
+        let area = nodes.chain(comments).reduce(|a, b| a.union(b));
+        self.board.fit(rect, area, MIN_ZOOM, 1.0);
+        let (Some(area), fitted) = (area, self.zoom) else {
             return;
         };
-        let room = (rect.size() - Vec2::splat(80.0)).max(vec2(1.0, 1.0));
-        let fitted = (room.x / area.width().max(1.0))
-            .min(room.y / area.height().max(1.0))
-            .clamp(MIN_ZOOM, 1.0);
-        self.zoom = fitted;
-        self.pan = rect.size() * 0.5 - area.center().to_vec2() * self.zoom;
         let start = start.and_then(|id| {
             let node = graph.nodes.iter().find(|node| node.id == id)?;
             let size = shapes.get(&id)?.size;

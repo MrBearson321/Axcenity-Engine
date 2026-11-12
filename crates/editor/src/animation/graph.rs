@@ -13,10 +13,15 @@
 //!   draws that editor: `controller_editor/wire_editor.rs`).
 //! - Drop a clip (from Open ▾ or the Assets panel) to make a state playing
 //!   it, and a parameter chip ([`parameters_panel`]) on a wire to test it.
-//! - Drag a node to move it; drag the background (or the middle button) to
-//!   pan; the wheel zooms around the mouse. Right-click a state for Make
-//!   Transition, Set as Default State, Rename and Delete, and the
-//!   background to add a state.
+//! - It draws on the shared graph canvas (`node_graph::canvas`, Phase 91),
+//!   with the same keys as every graph: F frames the selected state (or
+//!   all), Space opens the new-state search at the mouse, Delete deletes,
+//!   Ctrl+D duplicates a state, and Ctrl+C, X and V copy, cut and paste
+//!   one. Drag a node to move it; drag the background with any button, or
+//!   the wheel, to pan; Ctrl + wheel zooms around the mouse. Right-click a
+//!   state for Make Transition, Set as Default State, Rename and Delete,
+//!   and the background to add a state. A state machine selects one thing
+//!   at a time, so a left-drag pans rather than drawing a box.
 //!
 //! It only reports what was done ([`GraphEvent`]); the controller editor
 //! changes the file.
@@ -31,6 +36,7 @@ use axcenity_anim::{ANY_STATE, StateMachineFile};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 use crate::asset_browser::{AssetKind, AssetPayload};
+use crate::node_graph::canvas::{self as graph_canvas, Canvas, MenuChoice, MenuEntry, SearchMenu};
 use crate::theme::icons;
 
 mod draw;
@@ -51,6 +57,8 @@ const PIN_INSET: f32 = 10.0;
 /// How near a wire a click selects it, and a chip lands on it.
 const WIRE_REACH: f32 = 10.0;
 const DROP_REACH: f32 = 28.0;
+const MIN_ZOOM: f32 = 0.35;
+const MAX_ZOOM: f32 = 2.5;
 
 /// A node in the graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,22 +127,26 @@ impl ParameterKind {
 #[derive(Clone, Debug)]
 pub struct ParameterChip(pub String);
 
-/// The menu a wire let go on empty space opens.
+/// The new-state menu: opened by a wire let go on empty space (wired
+/// from where it came from) or by Space.
 #[derive(Clone, Debug)]
 struct DropMenu {
-    from: Node,
-    at: [f32; 2],
-    screen: Pos2,
-    search: String,
-    fresh: bool,
+    from: Option<Node>,
+    menu: SearchMenu,
+}
+
+/// What Ctrl+C puts on the clipboard: one state, as its file has it.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StateClip {
+    axcenity_state: axcenity_anim::files::StateDef,
 }
 
 /// How the graph is panned and zoomed, and what's in progress, kept
 /// between frames.
 #[derive(Clone, Debug)]
 pub struct GraphView {
-    pub offset: Vec2,
-    pub zoom: f32,
+    /// Pan and zoom; `view.pan` and `view.zoom` reach it through `Deref`.
+    canvas: Canvas,
     /// A transition being made from the right-click menu: from here to the
     /// mouse, until a state is clicked.
     pub linking: Option<Node>,
@@ -156,8 +168,7 @@ pub struct GraphView {
 impl Default for GraphView {
     fn default() -> Self {
         Self {
-            offset: Vec2::new(300.0, 140.0),
-            zoom: 1.0,
+            canvas: Canvas::new(Vec2::new(300.0, 140.0)),
             linking: None,
             wiring: None,
             drop_menu: None,
@@ -167,6 +178,20 @@ impl Default for GraphView {
             rect: Rect::NOTHING,
             chips: Vec::new(),
         }
+    }
+}
+
+impl std::ops::Deref for GraphView {
+    type Target = Canvas;
+
+    fn deref(&self) -> &Canvas {
+        &self.canvas
+    }
+}
+
+impl std::ops::DerefMut for GraphView {
+    fn deref_mut(&mut self) -> &mut Canvas {
+        &mut self.canvas
     }
 }
 
@@ -188,6 +213,10 @@ pub enum GraphEvent {
     AddBlendTree([f32; 2]),
     /// A state was double-clicked, to open its clip.
     Open(usize),
+    /// Ctrl+D on this state: a copy of it beside it.
+    Duplicate(usize),
+    /// Ctrl+V: this state (from the clipboard) added as a new one.
+    Paste(axcenity_anim::files::StateDef),
     /// A parameter chip was dropped on this transition's wire.
     AddCondition(usize, String),
     AddParameter(ParameterKind),
@@ -258,12 +287,13 @@ fn bow(file: &StateMachineFile, index: usize, from: [f32; 2], to: [f32; 2]) -> f
 
 impl GraphView {
     fn to_screen(&self, rect: Rect, position: [f32; 2]) -> Pos2 {
-        rect.min + self.offset + Vec2::new(position[0], position[1]) * self.zoom
+        self.canvas
+            .to_screen(rect, Pos2::new(position[0], position[1]))
     }
 
     fn to_graph(&self, rect: Rect, point: Pos2) -> [f32; 2] {
-        let local = (point - rect.min - self.offset) / self.zoom;
-        [local.x, local.y]
+        let at = self.canvas.to_graph(rect, point);
+        [at.x, at.y]
     }
 
     /// Where `node` is on screen, in a graph drawn in `rect`.
@@ -326,32 +356,26 @@ impl GraphView {
     ) -> Vec<GraphEvent> {
         let mut events = Vec::new();
         let size = ui.available_size();
-        let (rect, canvas) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
         self.rect = rect;
         let colors = crate::theme::canvas(ui.ctx());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, colors.background);
-        let z = self.zoom;
         let pointer = ui.input(|input| input.pointer.latest_pos());
 
-        // Pan and zoom.
-        if canvas.dragged_by(egui::PointerButton::Primary)
-            || canvas.dragged_by(egui::PointerButton::Middle)
-        {
-            self.offset += canvas.drag_delta();
+        // The shared canvas: background, grid, pan and zoom. A left-drag
+        // pans too, since there's no box to draw.
+        let frame = self.canvas.begin(
+            ui,
+            rect,
+            ui.id().with("state machine canvas"),
+            MIN_ZOOM..=MAX_ZOOM,
+            self.drop_menu.is_none(),
+        );
+        let canvas = frame.back.clone();
+        if canvas.dragged_by(egui::PointerButton::Primary) {
+            self.canvas.pan += canvas.drag_delta();
         }
-        if canvas.hovered() {
-            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-            if scroll != 0.0
-                && let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
-            {
-                let before = self.to_graph(rect, pointer);
-                self.zoom = (self.zoom * (1.0 + scroll * 0.0015)).clamp(0.35, 2.5);
-                let after = self.to_screen(rect, before);
-                self.offset += pointer - after;
-            }
-        }
-        draw_grid(&painter, rect, self.offset, z);
+        let z = self.zoom;
 
         // Something dragged over the graph: a parameter chip (onto the
         // nearest wire) or a clip (to make a state).
@@ -553,11 +577,8 @@ impl GraphView {
                     Some(to) => events.push(GraphEvent::Link(from, to)),
                     None if rect.contains(pointer) => {
                         self.drop_menu = Some(DropMenu {
-                            from,
-                            at: self.to_graph(rect, pointer),
-                            screen: pointer,
-                            search: String::new(),
-                            fresh: true,
+                            from: Some(from),
+                            menu: SearchMenu::new(pointer, self.canvas.to_graph(rect, pointer)),
                         });
                     }
                     None => {}
@@ -676,16 +697,23 @@ impl GraphView {
             }
         }
 
-        // Delete removes the selection while the mouse is over the graph.
-        let typing = ui.ctx().memory(|memory| memory.focused().is_some());
-        if canvas.hovered()
-            && !typing
-            && ui.input(|input| {
-                crate::shortcuts::pressed(input, crate::shortcuts::Action::DeleteNodes)
-            })
-        {
-            events.push(GraphEvent::Delete(selected));
+        // The keys every graph shares, while the mouse is over it.
+        if frame.hovered && self.drop_menu.is_none() {
+            self.keys(ui, file, selected, &frame, &mut events);
         }
+        let nodes: Vec<Rect> = (0..file.states.len())
+            .map(Node::State)
+            .chain([Node::Any, Node::Entry])
+            .map(|node| {
+                let at = node_position(file, node);
+                let size = match node {
+                    Node::State(_) => STATE,
+                    Node::Any | Node::Entry => SMALL,
+                };
+                Rect::from_center_size(Pos2::new(at[0], at[1]), size)
+            })
+            .collect();
+        self.canvas.minimap(ui, &frame, &nodes);
         if clip.is_some() {
             // Its own hint is up.
         } else if self.linking.is_some() {
@@ -701,60 +729,134 @@ impl GraphView {
         events
     }
 
-    /// The menu a wire let go on empty space opens: a new state there,
-    /// playing one of the project's clips (searchable) or nothing, wired
-    /// from where the wire came from.
+    /// Delete, Ctrl+D, Ctrl+C, X and V, Escape, F and Space, read by the
+    /// shared canvas (`canvas::keys`).
+    fn keys(
+        &mut self,
+        ui: &egui::Ui,
+        file: &StateMachineFile,
+        selected: Selected,
+        frame: &graph_canvas::Frame,
+        events: &mut Vec<GraphEvent>,
+    ) {
+        let keys = graph_canvas::keys(ui.ctx());
+        let state = match selected {
+            Selected::Node(Node::State(index)) => file.states.get(index).map(|s| (index, s)),
+            _ => None,
+        };
+        if (keys.copy || keys.cut)
+            && let Some((_, state)) = state
+        {
+            let mut copy = state.clone();
+            copy.returns = None;
+            if let Ok(text) = serde_json::to_string(&StateClip {
+                axcenity_state: copy,
+            }) {
+                ui.ctx().copy_text(text);
+            }
+        }
+        if keys.delete || (keys.cut && state.is_some()) {
+            events.push(GraphEvent::Delete(selected));
+        }
+        if keys.duplicate
+            && let Some((index, _)) = state
+        {
+            events.push(GraphEvent::Duplicate(index));
+        }
+        if let Some(text) = keys.paste
+            && let Ok(clip) = serde_json::from_str::<StateClip>(&text)
+        {
+            let at = frame.pointer_in_graph();
+            let mut state = clip.axcenity_state;
+            state.position = [at.x.round(), at.y.round()];
+            events.push(GraphEvent::Paste(state));
+        }
+        if keys.escape {
+            events.push(GraphEvent::Select(Selected::Controller));
+        }
+        if keys.frame {
+            let nodes: Vec<Node> = match selected {
+                Selected::Node(node) => vec![node],
+                _ => (0..file.states.len())
+                    .map(Node::State)
+                    .chain([Node::Any, Node::Entry])
+                    .collect(),
+            };
+            let area = nodes
+                .into_iter()
+                .map(|node| {
+                    let at = node_position(file, node);
+                    Rect::from_center_size(Pos2::new(at[0], at[1]), STATE)
+                })
+                .reduce(|a, b| a.union(b));
+            self.canvas.fit(frame.rect, area, MIN_ZOOM, 1.0);
+        }
+        if keys.search {
+            let at = frame.pointer_in_graph();
+            self.drop_menu = Some(DropMenu {
+                from: None,
+                menu: SearchMenu::new(frame.to_screen(at), at),
+            });
+        }
+    }
+
+    /// The new-state menu: a state there, playing one of the project's
+    /// clips (searchable) or nothing, wired from where its wire came from.
     fn show_drop_menu(&mut self, ui: &egui::Ui, clips: &[String], events: &mut Vec<GraphEvent>) {
         let Some(menu) = &mut self.drop_menu else {
             return;
         };
-        let mut close = false;
-        let area = egui::Area::new(ui.id().with("new state menu"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(menu.screen)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(220.0);
-                    ui.strong("New state, wired from here");
-                    let field = ui.add(
-                        egui::TextEdit::singleline(&mut menu.search)
-                            .hint_text(format!("{} Search clips", icons::MAGNIFYING_GLASS))
-                            .desired_width(f32::INFINITY),
-                    );
-                    if menu.fresh {
-                        field.request_focus();
-                    }
-                    let enter =
-                        field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                    let mut chosen = None;
-                    if ui.button(format!("{} Empty state", icons::PLUS)).clicked() {
-                        chosen = Some(None);
-                    }
-                    ui.separator();
-                    let needle = menu.search.trim().to_lowercase();
-                    if let Some(clip) = clip_list(ui, clips, &needle) {
-                        chosen = Some(Some(clip));
-                    }
-                    if enter {
-                        chosen = Some(matching(clips, &needle).first().map(|c| (*c).clone()));
-                    }
-                    if let Some(clip) = chosen {
-                        events.push(GraphEvent::AddState(menu.at, clip, Some(menu.from)));
-                        close = true;
-                    }
-                });
-            });
-        let clicked_outside = !menu.fresh
-            && ui.input(|input| {
-                input.pointer.any_click()
-                    && input
-                        .pointer
-                        .interact_pos()
-                        .is_some_and(|pointer| !area.response.rect.contains(pointer))
-            });
-        menu.fresh = false;
-        if close || clicked_outside || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.drop_menu = None;
+        let titles: Vec<String> = clips
+            .iter()
+            .map(|clip| axcenity_anim::files::clip_name(clip).to_owned())
+            .collect();
+        let groups: Vec<String> = clips
+            .iter()
+            .map(|clip| super::store::group_of(clip).to_owned())
+            .collect();
+        let words: Vec<String> = titles.iter().map(|title| title.to_lowercase()).collect();
+        let color = ui.visuals().weak_text_color();
+        let empty = format!("{} Empty state", icons::PLUS);
+        let entries: Vec<MenuEntry> = std::iter::once(MenuEntry {
+            group: "",
+            color,
+            title: &empty,
+            words: "empty state",
+        })
+        .chain(
+            titles
+                .iter()
+                .zip(&groups)
+                .zip(&words)
+                .map(|((title, group), words)| MenuEntry {
+                    group,
+                    color,
+                    title,
+                    words,
+                }),
+        )
+        .collect();
+        let title = if menu.from.is_some() {
+            "New state, wired from here"
+        } else {
+            "New state"
+        };
+        let choice = menu.menu.show(
+            ui.ctx(),
+            ui.id().with("new state menu"),
+            title,
+            &entries,
+            None,
+        );
+        match choice {
+            MenuChoice::Open => {}
+            MenuChoice::Close => self.drop_menu = None,
+            MenuChoice::Pick(index) => {
+                let at = [menu.menu.graph.x, menu.menu.graph.y];
+                let clip = index.checked_sub(1).map(|clip| clips[clip].clone());
+                events.push(GraphEvent::AddState(at, clip, menu.from));
+                self.drop_menu = None;
+            }
         }
     }
 

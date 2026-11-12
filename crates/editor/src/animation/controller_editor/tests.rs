@@ -318,9 +318,8 @@ fn a_state_machine_saved_before_the_node_graph_opens_the_same() {
     // Each state is drawn where it was.
     let view = &graph.doc.view;
     for (index, state) in file.states.iter().enumerate() {
-        let at = view.rect.min
-            + view.offset
-            + egui::vec2(state.position[0], state.position[1]) * view.zoom;
+        let at =
+            view.rect.min + view.pan + egui::vec2(state.position[0], state.position[1]) * view.zoom;
         let drawn = view.node_rect(view.rect, file, Node::State(index)).center();
         assert!(drawn.distance(at) < 0.01, "{}", state.name);
     }

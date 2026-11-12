@@ -63,7 +63,9 @@ use crate::theme::{self, AnimKind, icons};
 use crate::widgets;
 pub use axcenity_editor_tools::animatable::{animator_of, can_animate};
 use clip_editor::ClipDoc;
-use controller_editor::ControllerDoc;
+pub(crate) use controller_editor::ControllerDoc;
+#[cfg(test)]
+pub(crate) use graph::Selected;
 use object_preview::{ObjectPreview, PreviewEvent};
 use posing::Poser;
 use preview::Preview;
