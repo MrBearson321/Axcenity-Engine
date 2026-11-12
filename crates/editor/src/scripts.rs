@@ -23,6 +23,7 @@ use axcenity_project::{is_stylesheet, script_name};
 use eframe::egui;
 
 use crate::luau_check::{Diagnostic, Severity};
+use crate::script_completion::{self, Definition};
 use crate::side_warnings::SideWarning;
 use crate::theme::{self, icons};
 use crate::{css_syntax, lua_syntax};
@@ -101,6 +102,10 @@ pub struct ScriptTab {
     /// This member's selection while the text box has the focus, as
     /// characters (anchor, head), for others to see (C8).
     pub cursor: Option<(usize, usize)>,
+    /// Where Go to Definition (F12, or Ctrl+click) asked to go outside the
+    /// tab: an Instance or an API entry, for the editor to open
+    /// ([`ScriptTabs::take_definition`]).
+    pub definition: Option<Definition>,
     /// Others' cursors in this tab's live document. The app sets them
     /// each frame.
     pub others: Vec<OtherCursor>,
@@ -201,6 +206,7 @@ impl ScriptTabs {
             live_undo: None,
             remote_span: None,
             cursor: None,
+            definition: None,
             others: Vec::new(),
         });
         self.next_id += 1;
@@ -226,6 +232,11 @@ impl ScriptTabs {
     #[cfg(test)]
     pub fn world_shown(&self) -> bool {
         self.active.is_none()
+    }
+
+    /// Where a tab's Go to Definition asked to go outside it, once.
+    pub fn take_definition(&mut self) -> Option<Definition> {
+        self.tabs.iter_mut().find_map(|tab| tab.definition.take())
     }
 
     /// The tab with this id was clicked or typed in.
@@ -602,6 +613,11 @@ fn code_editor(
                 // The list's keys are taken before the text box sees them.
                 let focused = !stylesheet && ui.memory(|memory| memory.has_focus(id));
                 let keys = tab.assist.take_keys(ui, focused);
+                // Go to Definition (G4): F12, or Ctrl+click below.
+                let mut go_to_definition = focused
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::F12)
+                    });
                 if let Some(span) = tab.remote_span.take() {
                     keep_cursor(ui.ctx(), id, span);
                 }
@@ -644,6 +660,18 @@ fn code_editor(
                     .then(|| output.state.cursor.char_range())
                     .flatten()
                     .map(|range| (range.secondary.index.0, range.primary.index.0));
+                go_to_definition |= !stylesheet
+                    && output.response.clicked()
+                    && ui.input(|input| input.modifiers.command);
+                if go_to_definition && let Some((_, cursor)) = tab.cursor {
+                    let byte = assist::byte_of_char(&tab.text, cursor);
+                    match script_completion::definition_at(&tab.text, byte, world) {
+                        Some(Definition::Here(at)) => {
+                            tab.go_to_line = Some(tab.text[..at].matches('\n').count() + 1);
+                        }
+                        found => tab.definition = found,
+                    }
+                }
                 others::paint(ui, &tab.text, &output, &tab.others);
                 if !stylesheet {
                     underline_problems(ui, &tab.text, &tab.problems, &output);

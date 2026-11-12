@@ -46,7 +46,7 @@ use axcenity_assets::{
     AUDIO_EXTENSIONS, PROJECT_AUDIO_FOLDER, PROJECT_SKY_FOLDER, PROJECT_TEXTURES_FOLDER,
     TEXTURE_EXTENSIONS, TEXTURE_SET_SUFFIX, texture_set_from_files, write_texture_set,
 };
-use axcenity_core::InstanceId;
+use axcenity_core::{InstanceId, Vector3};
 use axcenity_toolbox::ambientcg::AMBIENTCG;
 use axcenity_toolbox::db::{self, Database, Install};
 use axcenity_toolbox::directory::{self, AssetDirectory};
@@ -128,10 +128,34 @@ impl Sources {
 }
 
 /// Where a texture got for a purpose goes once it's in the project.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Target {
     /// Terrain Studio's "From Toolbox…" for this layer.
     TerrainLayer(InstanceId),
+    /// A card was dragged out of the Toolbox and let go over the viewport
+    /// (roadmap G1): what it brings is placed there, as a tile dropped from
+    /// the Assets panel would be.
+    Drop(Spot),
+}
+
+/// Where a Toolbox card was let go over the viewport: the point on the
+/// surface under the mouse, the way that surface faces, and the part or UI
+/// element there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spot {
+    pub point: Vector3,
+    pub normal: Vector3,
+    pub part: Option<InstanceId>,
+    pub ui: Option<InstanceId>,
+}
+
+/// The drag payload of a Toolbox card (its picture is the handle): the
+/// result's key in the page shown and its name. The editor hands it to
+/// [`ToolboxPanel::get_dropped`] when it's let go over the viewport.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardDrag {
+    pub key: String,
+    pub name: String,
 }
 
 /// What the editor should do after the panel drew.
@@ -148,8 +172,12 @@ pub enum ToolboxAction {
     },
     /// A sky is in the project: ask whether to use it.
     AskSky(String),
-    /// A sound is in the project; the Assets panel should show it.
-    Sound(String),
+    /// A sound is in the project at `path`; the Assets panel should show
+    /// it. With a [`Target::Drop`], place it there.
+    Sound {
+        path: String,
+        target: Option<Target>,
+    },
     /// A model is in the asset directory: open the Import dialog on it, and
     /// record the install under `key` once it's imported.
     ImportModel {
@@ -490,6 +518,38 @@ impl ToolboxPanel {
         }
     }
 
+    /// A card dragged out of the panel ([`CardDrag`]) was let go over the
+    /// viewport: Get it, and hand it back with `target` so the editor places
+    /// it there. False (with the reason shown in the panel) when it can't be
+    /// got now: another download is running or the card is gone.
+    pub fn get_dropped(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Path,
+        drag: &CardDrag,
+        target: Target,
+    ) -> bool {
+        if self.download.is_some() {
+            self.error = Some(format!(
+                "Wait for the download to finish before dragging {} in.",
+                drag.name
+            ));
+            return false;
+        }
+        let Some(listing) = self.listing(&drag.key).cloned() else {
+            self.error = Some(format!("{} is no longer in the results.", drag.name));
+            return false;
+        };
+        self.target = Some(target);
+        self.start_listing_download(ctx, project, &listing);
+        if self.download.is_none() {
+            // It had no download; a drop target mustn't wait for the next Get.
+            self.target = None;
+            return false;
+        }
+        true
+    }
+
     /// The tab was opened: show the popular assets if nothing is shown.
     pub fn opened(&mut self) {
         self.search_on_show = true;
@@ -610,9 +670,8 @@ impl ToolboxPanel {
                 self.start_search(ui.ctx(), 1);
             }
         });
-        if let Some(target) = self.target {
+        if let Some(Target::TerrainLayer(_)) = self.target {
             ui.horizontal_wrapped(|ui| {
-                let Target::TerrainLayer(_) = target;
                 ui.label(
                     egui::RichText::new("The next texture you get fills the terrain layer.")
                         .color(palette.accent_text),
@@ -931,8 +990,23 @@ impl ToolboxPanel {
     /// name, kind and Get.
     fn card(&mut self, ui: &mut egui::Ui, project: Option<&Path>, can_get: bool, card: &Card) {
         ui.spacing_mut().item_spacing.y = 2.0;
-        let (rect, response) =
-            ui.allocate_exact_size(egui::Vec2::splat(CARD_PICTURE), egui::Sense::click());
+        let gettable = can_get && card.plan.is_some() && self.download.is_none();
+        // The picture can be dragged onto the viewport when Get would work.
+        let sense = if gettable {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::click()
+        };
+        let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(CARD_PICTURE), sense);
+        if gettable && response.drag_started() {
+            egui::DragAndDrop::set_payload(
+                ui.ctx(),
+                CardDrag {
+                    key: card.key.clone(),
+                    name: card.name.clone(),
+                },
+            );
+        }
         let preview = self.previews.get(&card.key);
         let selected = self
             .drawer
@@ -963,7 +1037,11 @@ impl ToolboxPanel {
         if let Some(why) = card.blocked {
             tip.push_str(&format!("\nNot for a commercial game: {why}."));
         }
-        tip.push_str("\nClick for details.");
+        tip.push_str(if gettable {
+            "\nClick for details, or drag it onto the scene."
+        } else {
+            "\nClick for details."
+        });
         let clicked = response.clicked();
         match preview {
             Some(Some(texture)) => {
@@ -988,10 +1066,7 @@ impl ToolboxPanel {
             None => egui::RichText::new(&card.detail).weak().small(),
         };
         ui.add(egui::Label::new(detail).truncate());
-        let button = ui.add_enabled(
-            can_get && card.plan.is_some() && self.download.is_none(),
-            egui::Button::new("Get"),
-        );
+        let button = ui.add_enabled(gettable, egui::Button::new("Get"));
         let button = match &card.plan {
             Some(plan) if can_get => button.on_hover_text(plan),
             Some(_) => {
@@ -1166,18 +1241,7 @@ impl ToolboxPanel {
             Ok(Ok(DownloadResult::Saved { text, installed })) => {
                 self.status = None;
                 actions.push(ToolboxAction::Notice { error: false, text });
-                actions.push(match installed {
-                    Installed::TextureSet { path, name } => ToolboxAction::TextureSet {
-                        path,
-                        name,
-                        target: self.target.take(),
-                    },
-                    Installed::Sky(path) => ToolboxAction::AskSky(path),
-                    Installed::Sound(path) => ToolboxAction::Sound(path),
-                    Installed::Model { file, key, variant } => {
-                        ToolboxAction::ImportModel { file, key, variant }
-                    }
-                });
+                actions.push(installed_action(installed, &mut self.target));
                 self.refresh_drawer();
                 if self.view != View::Search {
                     self.load_view(ctx);
@@ -1496,6 +1560,37 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
         [image.width() as usize, image.height() as usize],
         image.as_raw(),
     ))
+}
+
+/// What the editor does with an asset Get has just installed. A texture set
+/// takes any target (a terrain layer or a drop); a sound takes only a drop;
+/// a drop on anything else (a sky, a model through the Import dialog) is
+/// used up, so it can't place the next Get.
+fn installed_action(installed: Installed, target: &mut Option<Target>) -> ToolboxAction {
+    let drop = matches!(target, Some(Target::Drop(_)));
+    match installed {
+        Installed::TextureSet { path, name } => ToolboxAction::TextureSet {
+            path,
+            name,
+            target: target.take(),
+        },
+        Installed::Sound(path) => ToolboxAction::Sound {
+            path,
+            target: if drop { target.take() } else { None },
+        },
+        Installed::Sky(path) => {
+            if drop {
+                *target = None;
+            }
+            ToolboxAction::AskSky(path)
+        }
+        Installed::Model { file, key, variant } => {
+            if drop {
+                *target = None;
+            }
+            ToolboxAction::ImportModel { file, key, variant }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2236,5 +2331,103 @@ mod tests {
         assert!(maps.metalness.is_none());
         assert_eq!(material.roughness, Some(1.0));
         assert_eq!(material.metalness, None);
+    }
+
+    fn spot() -> Spot {
+        Spot {
+            point: Vector3::new(4.0, 0.0, -2.0),
+            normal: Vector3::new(0.0, 1.0, 0.0),
+            part: None,
+            ui: None,
+        }
+    }
+
+    #[test]
+    fn a_dropped_texture_set_or_sound_carries_where_it_was_let_go() {
+        let mut target = Some(Target::Drop(spot()));
+        let action = installed_action(
+            Installed::TextureSet {
+                path: "assets/textures/Rock030/Rock030.texture.json".into(),
+                name: "Rock 030".into(),
+            },
+            &mut target,
+        );
+        assert_eq!(
+            action,
+            ToolboxAction::TextureSet {
+                path: "assets/textures/Rock030/Rock030.texture.json".into(),
+                name: "Rock 030".into(),
+                target: Some(Target::Drop(spot())),
+            }
+        );
+        assert_eq!(target, None, "a drop places one asset");
+
+        let mut target = Some(Target::Drop(spot()));
+        let action = installed_action(
+            Installed::Sound("assets/audio/rain.ogg".into()),
+            &mut target,
+        );
+        assert_eq!(
+            action,
+            ToolboxAction::Sound {
+                path: "assets/audio/rain.ogg".into(),
+                target: Some(Target::Drop(spot())),
+            }
+        );
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn a_terrain_layer_waits_for_a_texture_and_a_drop_never_outlives_its_get() {
+        let layer = Target::TerrainLayer(InstanceId::from_bits(1));
+        // A sound got while a layer waits leaves the layer waiting.
+        let mut target = Some(layer);
+        let action = installed_action(Installed::Sound("assets/audio/a.ogg".into()), &mut target);
+        assert_eq!(
+            action,
+            ToolboxAction::Sound {
+                path: "assets/audio/a.ogg".into(),
+                target: None,
+            }
+        );
+        assert_eq!(target, Some(layer));
+        // A sky or a model dropped on the scene can't be placed there (the
+        // sky asks, the model goes through the Import dialog): the drop is
+        // used up, so the next Get isn't placed where this one was let go.
+        let mut target = Some(Target::Drop(spot()));
+        let action = installed_action(Installed::Sky("assets/sky/a_2k.hdr".into()), &mut target);
+        assert_eq!(action, ToolboxAction::AskSky("assets/sky/a_2k.hdr".into()));
+        assert_eq!(target, None);
+        let mut target = Some(Target::Drop(spot()));
+        installed_action(
+            Installed::Model {
+                file: PathBuf::from("Chair.glb"),
+                key: "polyhaven:chair".into(),
+                variant: "glTF 1K".into(),
+            },
+            &mut target,
+        );
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn a_dropped_card_that_is_gone_or_waits_on_a_download_is_refused() {
+        let ctx = egui::Context::default();
+        let mut panel = ToolboxPanel::idle();
+        let drag = CardDrag {
+            key: "ambientcg:Rock030".into(),
+            name: "Rock 030".into(),
+        };
+        let project = Path::new("project");
+        // No results shown: the card is gone.
+        assert!(!panel.get_dropped(&ctx, project, &drag, Target::Drop(spot())));
+        assert_eq!(panel.target, None);
+        assert!(panel.error.as_deref().unwrap().contains("no longer"));
+        // A download running: wait for it.
+        let (_tx, rx) = mpsc::channel();
+        panel.download = Some(Job { rx });
+        assert!(!panel.get_dropped(&ctx, project, &drag, Target::Drop(spot())));
+        assert!(panel.error.as_deref().unwrap().starts_with("Wait"));
+        assert_eq!(panel.target, None);
     }
 }

@@ -20,6 +20,10 @@ tags: [system/editor, assets, toolbox]
 
 Textures and skies search **All sources** by default: `search` in `editor-toolbox`'s `lib.rs` asks each source on its own thread (`std::thread::scope`), interleaves their pages, and reports a source that fails while others answered (`Found::failed`) instead of failing the search. Results are deduplicated by `provider:id` only; assets from two sources are never merged. The Sounds tab carries a licence notice (`SOUND_LICENCE_NOTICE`) above Openverse's results; each card keeps its own licence.
 
+## Dragging a card into the scene
+
+A result card's picture is a drag handle when Get would work (competitive roadmap item 3, G1's gap): `editor-toolbox` sets a `CardDrag` payload; the editor's frame (`app.rs`, beside Assets-panel drops) hands one let go over the viewport to `EditorApp::drop_toolbox_card`, which calls `ToolboxPanel::get_dropped` with `Target::Drop(Spot)`. The Get runs as usual on its thread; `installed_action` gives the drop to the texture set or sound it installed, and `app/toolbox.rs` places it through `drop_asset`, the same path as a tile. A sky or model uses the drop up (the sky asks, the model opens the Import dialog), so it never places a later Get.
+
 ## Where its assets show
 
 The Assets panel groups a project's assets by where they came from (`asset_browser/origin.rs`): each Toolbox source gets a section, read from the project's `.axcenity/asset-sources.json` (`Snapshot::source_of`), beside Built-in, Made in Axcenity, Imported and Global assets. A model's folder takes its model's origin, and a material made from a texture set is listed under that set.

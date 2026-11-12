@@ -176,3 +176,114 @@ fn completion_stays_fast_in_a_long_script() {
     // A debug build; a release build is many times faster.
     assert!(elapsed.as_millis() < 250, "{elapsed:?}");
 }
+
+/// Where Go to Definition goes from the first `marker` (`|`) in `source`.
+fn definition(marked: &str) -> Option<Definition> {
+    let cursor = marked.find('|').expect("a cursor mark");
+    let source = marked.replacen('|', "", 1);
+    definition_at(&source, cursor, &world())
+}
+
+#[test]
+fn a_local_goes_to_where_it_is_declared() {
+    let source = "local door = workspace.Door\nlocal open = false\nprint(do|or)";
+    assert_eq!(definition(source), Some(Definition::Here("local ".len())));
+    // The nearest declaration before the cursor wins, as Lua scopes do.
+    let source = "local n = 1\nlocal n = 2\nprint(|n)";
+    assert_eq!(
+        definition(source),
+        Some(Definition::Here("local n = 1\nlocal ".len()))
+    );
+    // A second name in a list, a function, a parameter, a loop variable.
+    let source = "local a, b = 1, 2\nprint(|b)";
+    assert_eq!(
+        definition(source),
+        Some(Definition::Here("local a, ".len()))
+    );
+    let source = "local function greet(name)\n  print(na|me)\nend";
+    assert_eq!(
+        definition(source),
+        Some(Definition::Here("local function greet(".len()))
+    );
+    let source = "local function greet(name)\nend\ngre|et()";
+    assert_eq!(
+        definition(source),
+        Some(Definition::Here("local function ".len()))
+    );
+    let source = "for _, child in workspace:GetChildren() do\n  print(ch|ild)\nend";
+    assert_eq!(definition(source), Some(Definition::Here("for _, ".len())));
+    let source = "local part: Part = workspace.Door\npar|t.Anchored = true";
+    assert_eq!(definition(source), Some(Definition::Here("local ".len())));
+}
+
+#[test]
+fn a_global_function_declared_later_is_found() {
+    let source = "sp|awn()\n\nfunction spawn()\nend";
+    assert_eq!(
+        definition(source),
+        Some(Definition::Here("spawn()\n\nfunction ".len()))
+    );
+}
+
+#[test]
+fn an_instance_path_goes_to_the_instance() {
+    let world = world();
+    let door = world
+        .find_first_child(world.workspace(), "Door")
+        .expect("the door");
+    let lamp = world
+        .find_first_child(
+            world.find_first_child(world.workspace(), "Lights").unwrap(),
+            "Lamp",
+        )
+        .unwrap();
+    assert_eq!(
+        definition("workspace.Do|or.Anchored = true"),
+        Some(Definition::Instance(door))
+    );
+    assert_eq!(
+        definition("local lamp = workspace.Lights.La|mp"),
+        Some(Definition::Instance(lamp))
+    );
+    assert_eq!(
+        definition("work|space.Door"),
+        Some(Definition::Instance(world.workspace()))
+    );
+    // Through a local.
+    assert_eq!(
+        definition("local lights = workspace.Lights\nlocal l = lights.La|mp"),
+        Some(Definition::Instance(lamp))
+    );
+}
+
+#[test]
+fn an_api_member_or_global_goes_to_its_reference_entry() {
+    let Some(Definition::Api(name)) = definition("workspace.Door.Touc|hed:Connect(print)") else {
+        panic!("an API entry");
+    };
+    assert!(name.ends_with(".Touched"), "{name}");
+    let Some(Definition::Api(name)) = definition("workspace.Door:Dest|roy()") else {
+        panic!("an API entry");
+    };
+    assert!(
+        name.ends_with(":Destroy") || name.ends_with(".Destroy"),
+        "{name}"
+    );
+    assert_eq!(
+        definition("ta|sk.wait(1)"),
+        Some(Definition::Api("task".into()))
+    );
+    let Some(Definition::Api(name)) = definition("task.wa|it(1)") else {
+        panic!("an API entry");
+    };
+    assert!(name.contains("wait"), "{name}");
+}
+
+#[test]
+fn keywords_strings_comments_and_unknown_names_go_nowhere() {
+    assert_eq!(definition("lo|cal x = 1"), None);
+    assert_eq!(definition("print(\"do|or\")"), None);
+    assert_eq!(definition("-- the do|or opens"), None);
+    assert_eq!(definition("print(nowh|ere)"), None);
+    assert_eq!(definition("x = 1 |  "), None);
+}

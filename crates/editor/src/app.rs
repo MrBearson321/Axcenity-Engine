@@ -1722,11 +1722,17 @@ impl EditorApp {
             self.output.warning(warning);
         }
         // An asset let go over the viewport is placed where it was dropped.
-        if let Some(target) = output.drop.filter(|target| target.released)
-            && let Some(payload) = egui::DragAndDrop::take_payload::<AssetPayload>(ctx)
-        {
-            self.drop_asset(&payload.0, Some(target));
-            ctx.request_repaint();
+        if let Some(target) = output.drop.filter(|target| target.released) {
+            if let Some(payload) = egui::DragAndDrop::take_payload::<AssetPayload>(ctx) {
+                self.drop_asset(&payload.0, Some(target));
+                ctx.request_repaint();
+            } else if let Some(card) =
+                egui::DragAndDrop::take_payload::<crate::toolbox_panel::CardDrag>(ctx)
+            {
+                // A Toolbox card: got first, then placed there (G1).
+                self.drop_toolbox_card(ctx, &card, target);
+                ctx.request_repaint();
+            }
         }
         if let Some(edit) = output.drag {
             self.dragged_parts = edit.parts.iter().map(|(id, _)| *id).collect();
