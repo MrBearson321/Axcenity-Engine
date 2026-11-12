@@ -304,6 +304,24 @@ enum StepKind {
     Edits(edits::Edits),
 }
 
+impl StepKind {
+    /// The project files the step changed as text.
+    fn texts(&self) -> &[TextChange] {
+        match self {
+            StepKind::Fields { texts, .. }
+            | StepKind::Many { texts, .. }
+            | StepKind::Files { texts, .. }
+            | StepKind::World { texts, .. } => texts,
+            StepKind::Tree(_)
+            | StepKind::Blobs { .. }
+            | StepKind::Terrain { .. }
+            | StepKind::Strings { .. }
+            | StepKind::Annotations { .. }
+            | StepKind::Edits(_) => &[],
+        }
+    }
+}
+
 /// A whole world kept by a step. Its own type, to print as just its size in
 /// `Debug` output.
 struct WorldCopy(Box<World>);
@@ -1247,6 +1265,67 @@ impl History {
     /// is in the history: its edits were made before a relaunch.
     pub fn mark_unsaved(&mut self) {
         self.saved_at = u64::MAX;
+    }
+
+    /// The project files the history rewrote since the last save, each as
+    /// it is now (`before`) and as it was saved (`after`): going from one to
+    /// the other puts it back. Only files that `wanted` names and that were
+    /// rewritten, not created, deleted or renamed (those are asset
+    /// operations, done on disk at once). Empty when the save point is
+    /// unknown (after [`History::mark_unsaved`]).
+    ///
+    /// "Don't Save" uses it for documents written as they're edited, such as
+    /// animation clips and sequences, so declining to save puts them back.
+    pub fn rewritten_since_saved(&self, wanted: impl Fn(&str) -> bool) -> Vec<TextChange> {
+        // Each path's text now and at the save, in the order first seen.
+        let mut files: Vec<TextChange> = Vec::new();
+        let mut note = |path: &str, now: &Option<String>, saved: &Option<String>| {
+            if !wanted(path) {
+                return;
+            }
+            match files.iter_mut().find(|file| file.path == path) {
+                // Walking away from now: the newest "now" was seen first,
+                // and the save's text is the last one seen.
+                Some(file) => file.after = saved.clone(),
+                None => files.push(TextChange {
+                    path: path.to_owned(),
+                    before: now.clone(),
+                    after: saved.clone(),
+                }),
+            }
+        };
+        if self.saved_at == u64::MAX {
+            return Vec::new();
+        }
+        if self.is_saved() {
+            return Vec::new();
+        }
+        let below = self.undo.iter().any(|step| step.number == self.saved_at) || self.saved_at == 0;
+        if below {
+            // Saved further down the undo stack: walk down to it.
+            for step in self.undo.iter().rev() {
+                if step.number == self.saved_at {
+                    break;
+                }
+                for text in step.kind.texts() {
+                    note(&text.path, &text.after, &text.before);
+                }
+            }
+        } else if self.redo.iter().any(|step| step.number == self.saved_at) {
+            // Saved, then undone past it: walk up the redo stack to it.
+            for step in self.redo.iter().rev() {
+                for text in step.kind.texts() {
+                    note(&text.path, &text.before, &text.after);
+                }
+                if step.number == self.saved_at {
+                    break;
+                }
+            }
+        }
+        files.retain(|file| {
+            file.before.is_some() && file.after.is_some() && file.before != file.after
+        });
+        files
     }
 
     /// True if the world is the same as when it was last saved (or opened).
