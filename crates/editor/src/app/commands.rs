@@ -64,6 +64,13 @@ impl EditorApp {
                     self.play();
                 }
             }
+            Command::Run => {
+                if self.playing() {
+                    self.output.info("Already playing.");
+                } else {
+                    self.run();
+                }
+            }
             Command::Stop => {
                 if self.playing() {
                     self.stop();

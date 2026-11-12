@@ -496,7 +496,7 @@ impl EditorApp {
                     self.team_chip(ui);
                     self.repo_chip(ui);
                     if self.playing() {
-                        playing_badge(ui, self.paused());
+                        playing_badge(ui, self.paused(), self.running());
                     }
                     ui.available_rect_before_wrap()
                 })

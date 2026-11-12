@@ -657,6 +657,116 @@ fn play(world: &World, scripts: &[ScriptFile], clients: usize, output: &mut Outp
     .unwrap()
 }
 
+/// Starts Run of `world` (roadmap G14), asking for `clients` clients.
+fn run(world: &World, scripts: &[ScriptFile], clients: usize, output: &mut Output) -> Play {
+    Play::start(
+        world,
+        scripts,
+        &Breakpoints::new(),
+        output,
+        Assets::default(),
+        CameraState::default(),
+        &LoadingScreen::default(),
+        &InputMap::default(),
+        None,
+        &GraphicsSettings::default(),
+        &Capabilities::default(),
+        PlayLevels::default(),
+        PlaySettings {
+            clients,
+            run: true,
+            ..PlaySettings::default()
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn run_steps_scripts_and_physics_with_no_player_local_scripts_or_input() {
+    let mut world = World::new();
+    let ball = world.create(ClassName::Part).unwrap();
+    world.set_name(ball, "Ball").unwrap();
+    world
+        .set_property(
+            ball,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 50.0, 0.0)),
+        )
+        .unwrap();
+    world.set_parent(ball, Some(world.workspace())).unwrap();
+    let server = script(
+        &mut world,
+        "print('server', #game.Players:GetPlayers())\n\
+         game.Players.PlayerAdded:Connect(function(p) print('joined', p.Name) end)",
+    );
+    let local = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(local, Some(world.starter_player_scripts()))
+        .unwrap();
+    let client = ScriptFile {
+        instance: local,
+        path: "scripts/hello.client.lua".to_owned(),
+        source: "print('local ran')".to_owned(),
+    };
+    let scripts = [server, client];
+
+    // Several clients asked for: Run still has one device, the server.
+    let mut output = Output::default();
+    let mut game = run(&world, &scripts, 3, &mut output);
+    assert!(game.running());
+    assert_eq!(game.clients(), 1);
+    assert_eq!(game.view(), PlayView::Server);
+    let names: Vec<String> = game.views().into_iter().map(|(_, name)| name).collect();
+    assert_eq!(names, ["Server"]);
+    game.set_view(PlayView::Client(0));
+    assert_eq!(game.view(), PlayView::Server, "Run has no client to show");
+    let height = |game: &Play| match game.world().get(ball).and_then(|b| b.property("Position")) {
+        Some(Value::Vector3(at)) => at.y,
+        other => panic!("{other:?}"),
+    };
+    let start = height(&game);
+    for _ in 0..30 {
+        game.frame(
+            1.0 / 60.0,
+            &[],
+            MoveInput::default(),
+            CameraState::default(),
+            &mut output,
+        )
+        .unwrap();
+    }
+    let lines: Vec<&str> = output.lines().iter().map(|l| l.text.as_str()).collect();
+    assert!(said(&output, "server\t0"), "{lines:#?}");
+    assert!(
+        !lines.iter().any(|line| line.contains("local ran")),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("joined")),
+        "{lines:#?}"
+    );
+    let players = game.world().get(game.world().players()).unwrap();
+    assert!(players.children().is_empty(), "no Player joined");
+    assert!(!game.holds_camera(), "the fly camera stays the view");
+    let fallen = height(&game);
+    assert!(fallen < start - 0.5, "physics ran: {start} -> {fallen}");
+
+    // Play of the same world has its player, and runs the LocalScript.
+    let mut output = Output::default();
+    let mut game = play(&world, &scripts, 1, &mut output);
+    assert!(!game.running());
+    game.frame(
+        1.0 / 60.0,
+        &[],
+        MoveInput::default(),
+        CameraState::default(),
+        &mut output,
+    )
+    .unwrap();
+    assert!(said(&output, "local ran"));
+    assert!(said(&output, "joined\tPlayer"));
+}
+
 fn said(output: &Output, text: &str) -> bool {
     output.lines().iter().any(|line| line.text == text)
 }
