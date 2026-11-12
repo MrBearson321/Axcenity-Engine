@@ -42,7 +42,8 @@ pie title S10k frame instructions (PR #59, Callgrind)
 | UI | Fine after M14 | Style cache | No retained layout |
 | Networking | Fine after M7 | postcard, motion revisions | — |
 | Startup | Mostly solved by L2 | I11 preload, M5, L2, #65 | Terrain layer maps decoded on the main thread (~1.2 s on Farmhouse) |
-| Loading `world.json` | Slow for huge worlds | — | S10k's 10 MB world takes ~5.5 s in release |
+| Loading `world.json` | Fine after C11 | Prefab segments looked up only inside copies | S10k's 10 MB world takes 0.19 s in release (was ~5.5 s); no binary world format |
+| Collaborate | Fine at S10k (C11) | zstd for messages ≥16 KiB, presence sent only on change | Folder check every 0.5 s (~1 ms on S10k) |
 
 ## Principles
 

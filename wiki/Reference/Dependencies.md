@@ -27,7 +27,7 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | Images | `image` 0.25 (bmp, exr, hdr, jpeg, png, tga), `png` 0.18 | assets, terrain, player icon, editor thumbnails | MIT/Apache | |
 | Texture cooking | `intel_tex_2` 0.5 | cook (editor only) | MIT/Apache | Prebuilt ISPC kernels; never linked by player/server/testing |
 | Networking | `renet` 2, `renet_netcode` 2, `postcard` 1.1 (`use-std`) | net | MIT/Apache | renet pair moves together |
-| Packing | `zstd` 0.13, `zip` 2 (deflate) | project, editor | MIT/BSD; MIT | zstd builds C with `cc` |
+| Packing | `zstd` 0.13, `zip` 2 (deflate) | project, editor, collab (wire messages of 16 KiB or more, C11) | MIT/BSD; MIT | zstd builds C with `cc` |
 | UI layout | `taffy` 0.7 | ui | MIT | |
 | Controllers | `gilrs` 0.11 | ui, player, editor | Apache/MIT | libudev on Linux |
 | File watching | `notify` 8.2 | project | CC0 | Polling fallback |

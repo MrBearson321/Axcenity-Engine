@@ -25,7 +25,7 @@ Projects should diff cleanly in git, be readable and editable by other tools, su
 |---|---|---|
 | Binary scene files | Fast to load | Opaque diffs and merges |
 | RON | Rust-friendly, comments | Few editors highlight or validate it; non-Rust tools can't read it |
-| **JSON (deterministic)** | Every editor highlights and validates; JSON Schema possible; any tool reads it | No comments; verbose; slow for huge worlds (S10k's 10 MB `world.json` takes ~5.5 s) |
+| **JSON (deterministic)** | Every editor highlights and validates; JSON Schema possible; any tool reads it | No comments; verbose; slow for huge worlds (S10k's 10 MB `world.json` took ~5.5 s; 0.19 s since C11 fixed a quadratic step, of which the JSON is 35 ms) |
 
 ## Decision
 

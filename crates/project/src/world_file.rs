@@ -450,14 +450,18 @@ fn add_instance(
 
     // Prefab copies (Phase 49): this node's overrides go in its parent's,
     // unless it was added to the copy; a link outside a copy starts one.
-    let segment = axcenity_core::prefab::segment_of(world, id).expect("it has a parent");
+    // Its segment is found only inside a copy: finding it reads every
+    // sibling, so doing it for each of a Workspace's 10,000 children took
+    // seconds.
+    let segment =
+        |world: &World| axcenity_core::prefab::segment_of(world, id).expect("it has a parent");
     let mut starts = None;
     let mut here = match region {
         Some(parent) if node.added => {
-            parent.added.push(segment);
+            parent.added.push(segment(world));
             None
         }
-        Some(parent) => Some(parent.children.entry(segment).or_default()),
+        Some(parent) => Some(parent.children.entry(segment(world)).or_default()),
         None => None,
     };
     if here.is_none() && node.prefab.is_some() {

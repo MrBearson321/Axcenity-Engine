@@ -73,6 +73,8 @@ mod live_tests;
 #[cfg(test)]
 mod net_tests;
 #[cfg(test)]
+mod perf_tests;
+#[cfg(test)]
 mod presence_tests;
 #[cfg(test)]
 mod rejoin_tests;

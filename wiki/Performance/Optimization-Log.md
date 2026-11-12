@@ -22,6 +22,7 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 
 | Item | PR | Area | Headline (Measured) | Machine |
 |---|---|---|---|---|
+| Collaborate packing and the world load | C11 | Collaborate, project | S10k join message 953 → 82 KiB; `project::load` of S10k 5.66 → 0.19 s | Container |
 | DirectX 12 shader compiler and parallel pipelines | #172, #182 | Startup | Wet Patch assets loaded 11.4 → 2.25 s on DirectX 12 (Vulkan 0.98 s) | Desktop |
 | Render planning pool | #88 | Render | Unpinned Render step 6–18% less CPU (S10k 2.60 → 2.14 ms) | Desktop |
 | Physics own pool | #86, #93 | Physics | Unpinned S10k Physics 2.71 → 2.19 ms, frame 3.37 → 2.81 | Desktop |
@@ -55,6 +56,22 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 | Culling, LOD | graphics Ph. 12–13 | Render | Edge views draw only what's seen; foliage cull distances | Desktop |
 
 ## Entries
+
+### Collaborate on S10k and the world load (2026-11-12)
+
+| | |
+|---|---|
+| **Roadmap item / PR** | Collaborate C11 |
+| **Evidence** | Measured |
+| **Problem** | The brief asked for an idle session under 0.1 ms a frame and a join of S10k under 10 s. Measuring showed the member's join spent 5.9 s opening the session's files as a project, on the UI thread, and the join message was 953 KiB |
+| **Root cause** | `parse_world` looked up each Instance's prefab segment (`prefab::segment_of`), which lists all its siblings: 10,000² comparisons for S10k's Workspace. Every open of a big project paid it, not only Collaborate |
+| **Solution** | Find the segment only inside a prefab copy, where it's used. Pack wire messages of 16 KiB or more with zstd level 1 when that saves an eighth, bounded by each side's message limit |
+| **Affected components** | `crates/project/src/world_file.rs`, `crates/collab/src/wire.rs` |
+| **Before → after** | `project::load` of S10k 5.66 → 0.19 s release, ~30 → 0.8 s debug; a member's open of S10k 5.9 → 0.35 s; join message 953 → 82 KiB (1 ms to pack). Idle `team_frame` mean 48–57 µs host, 34–36 µs member |
+| **Method** | Ignored tests `collab::perf_tests` and `editor::team_tests::idle_session_cost_on_s10k`, release, 300 frames 16 ms apart |
+| **Hardware** | Container |
+| **Trade-offs** | A new dependency (zstd, BSD-3); the wire format went to 8. Snapshot streaming and more presence coalescing were measured as not needed at S10k's size |
+| **Detail** | `docs/benchmarks.md`, "Collaborate on S10k (C11)"; `docs/research/collaborate.md` §9.6 |
 
 ### DirectX 12 startup (2026-11-11)
 

@@ -41,7 +41,7 @@ All four hosts load through `project::load`. The editor adds save, version histo
 
 ## Performance
 
-**Measured** (M9, cloud container): `.axgame` v2 compresses `world.json` about 50× (S10k 10 MB → 0.2 MB), cooked games 10–21% smaller, unpacking on up to 8 threads (hello-roads 210 → 166 ms). Opening S10k's 10 MB `world.json` takes about 5.5 s in release, 30 s in debug (**Measured**, I1 baseline; not optimized yet).
+**Measured** (M9, cloud container): `.axgame` v2 compresses `world.json` about 50× (S10k 10 MB → 0.2 MB), cooked games 10–21% smaller, unpacking on up to 8 threads (hello-roads 210 → 166 ms). Opening S10k's 10 MB `world.json` took about 5.5 s in release and 30 s in debug (**Measured**, I1 baseline), nearly all in one quadratic step: each Instance looked up its prefab segment among all its siblings. Since C11 that lookup happens only inside prefab copies, and S10k loads in 0.19 s in release, 0.8 s in debug (**Measured**).
 
 ## Testing
 
@@ -49,7 +49,7 @@ All four hosts load through `project::load`. The editor adds save, version histo
 
 ## Limitations
 
-- Loading a large `world.json` is slow (above); there's no binary world format.
+- There's no binary world format; reading S10k's 10 MB of JSON is about 35 ms of its 0.19 s load.
 - A cooked game ships both the source texture and its cooked copy (about twice the size for texture-heavy games); see [Known bottlenecks](../Performance/Known-Bottlenecks.md).
 - References name assets by path, not by asset ID.
 

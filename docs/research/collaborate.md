@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1) and its two-machine test over Tailscale passed (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built and were used for a real session (§5.4, §5.6). C5's fixes and checkpoints are built (§5.5). C6's field-being-dragged bar is built and passed with two people over Tailscale (§5.6). C7's live scripts and stylesheets are built and passed a two-machine typing test ([§4.1](#41-built-c7)). C8's chat and others' cursors in script tabs are built (§5.7). C9's host checkpoints and restores are built (§5.8). C10's identity seam, per-message budgets, handshake limits and audit log are built and its security review is [§6.1](#61-security-review-c10). C11 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1) and its two-machine test over Tailscale passed (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built and were used for a real session (§5.4, §5.6). C5's fixes and checkpoints are built (§5.5). C6's field-being-dragged bar is built and passed with two people over Tailscale (§5.6). C7's live scripts and stylesheets are built and passed a two-machine typing test ([§4.1](#41-built-c7)). C8's chat and others' cursors in script tabs are built (§5.7). C9's host checkpoints and restores are built (§5.8). C10's identity seam, per-message budgets, handshake limits and audit log are built and its security review is [§6.1](#61-security-review-c10). C11's packing of big messages is built and its measurements are [§9.6](#96-performance-c11); C12 follows the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -33,7 +33,7 @@ Verdicts: **Reuse** (works as the brief asks), **Extend** (exists, needs more), 
 | Resolve conflicting scene edits | Last writer per property in host order, delete wins with Restore, cycle refusal, create under a deleted parent goes to the nearest survivor (`docs/research/team-create.md` §8, one test per rule in `tests.rs`) | Reuse |
 | Clients keep a local working copy and get increments | Each editor works on its own World and applies others' transactions; joining sends one snapshot, then only transactions | Reuse |
 | Never send the whole project per change | Per-frame capture of the World's edit journal (`capture.rs`) into one small transaction; files go by SHA-256 once | Reuse |
-| Batching and serialization | One transaction per frame or per gesture (drags at most 20 a second), postcard on the wire behind a format byte (`wire.rs`) | Reuse; compression for big messages in C11 |
+| Batching and serialization | One transaction per frame or per gesture (drags at most 20 a second), postcard on the wire behind a format byte (`wire.rs`) | Reuse; big messages packed with zstd since C11 (§9.6) |
 
 ### 2.2 Content-specific synchronization (brief's table)
 
@@ -347,7 +347,18 @@ Per-member budgets for each kind are in [§6.1](#61-security-review-c10); the li
 - **World edits:** one transaction per frame from the World's edit journal (`capture.rs`); an open gesture (a drag) is held and sent at most 20 times a second, then once at the end.
 - **Text:** `yrs` updates typed within one frame are merged (`yrs::merge_updates_v1`) into one `DocUpdate`.
 - **Presence and cursors:** coalesced to the latest, at most 10 a second.
-- **Large messages** (snapshots, big transactions, file pieces) get zstd in C11, measured first; small ones stay as they are.
+- **Large messages** (snapshots, big transactions, file pieces) of 16 KiB or more are packed with zstd level 1 when that saves at least an eighth (C11); small ones stay as they are.
+- **Writes:** each connection writes every message queued since its last turn, then flushes once.
+
+### 9.6 Performance (C11)
+
+Measured on S10k (10,388 Instances, 200 scripts); the tables and how to run them are in [benchmarks](../benchmarks.md#collaborate-on-s10k-c11).
+
+- **Packing.** A packed message starts with `FORMAT | 0x80` (format 8), then one zstd frame that must state its size. The receiver unpacks only up to its limit (`TO_HOST_MOST` 32 MiB, `TO_CLIENT_MOST` 1 GiB), so a small packed message can't fill its memory (`wire_fuzz_tests.rs` feeds it a bomb, a frame without a size and garbage). S10k's join message goes from 953 KiB to 82 KiB, for about 1 ms of packing.
+- **Joining.** On one computer a member joins S10k in about 0.3 s and opens it as its project in 0.35 s more. The open took 5.9 s before C11 because loading any `world.json` was quadratic in a parent's children (each Instance looked up its prefab segment among all its siblings); now that lookup happens only inside prefab copies, and S10k loads in 0.19 s instead of 5.7.
+- **Idle.** An idle session adds a mean of about 50 µs a frame to the hosting editor and 35 µs to a member (medians 15 and 3 µs); the goal was under 0.1 ms. Most of it is the folder check every 0.5 s (`Mirror::sync`, about 1 ms on S10k's 209 files), which finds saves made outside the editor. If a much bigger project makes that check show, it can move to a worker or follow the editor's file watcher.
+- **Not built, by measurement.** Snapshot streaming (S10k's World is 82 KiB packed, about 70 ms at 10 Mbit/s) and more presence coalescing (four busy members are 19 KiB a second; editors already send at most 10 a second and only changes, and the host drops repeats). Both stay options for much bigger worlds or sessions.
+- **Still to record.** A join of S10k over Tailscale between two machines (goal: under 10 s).
 
 ## 10. Risks
 

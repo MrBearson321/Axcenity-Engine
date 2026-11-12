@@ -118,6 +118,11 @@ fn to_host_samples() -> Vec<ToHost> {
             path: "scripts/a.lua".into(),
             update: vec![0; 40],
         },
+        // Big enough to go packed.
+        ToHost::DocUpdate {
+            path: "scripts/b.lua".into(),
+            update: b"local x = 1\n".repeat(4_000),
+        },
         ToHost::Chat("hi".into()),
         ToHost::Checkpoint("mine".into()),
         ToHost::Restore(42),
@@ -149,6 +154,11 @@ fn to_client_samples() -> Vec<ToClient> {
         ToClient::Missing(FileHash::of(b"x")),
         ToClient::HistoryNotice("no".into()),
         ToClient::AuditLog(Vec::new()),
+        ToClient::DocUpdate {
+            path: "scripts/b.lua".into(),
+            update: b"local x = 1\n".repeat(4_000),
+            author: MemberId(2),
+        },
     ]
 }
 
@@ -219,4 +229,54 @@ fn bad_greetings_never_panic_the_handshake() {
         let _ = gate.receive(&bytes, &mut access, crate::access::now());
         let _ = gate.receive(&mutate(&mut rng, &samples[2]), &mut access, 0);
     }
+}
+
+#[test]
+fn big_messages_go_packed_and_read_back() {
+    let update = |bytes: Vec<u8>| ToHost::DocUpdate {
+        path: "scripts/a.lua".into(),
+        update: bytes,
+    };
+    // Text-like: packed, much smaller.
+    let big = update(b"print('hello')\n".repeat(8_000));
+    let bytes = wire::encode_to_host(&big);
+    assert_eq!(bytes[0], wire::FORMAT | 0x80);
+    assert!(bytes.len() < 4_000, "{} bytes", bytes.len());
+    let ToHost::DocUpdate { update: back, .. } = wire::decode_to_host(&bytes).unwrap() else {
+        panic!("a DocUpdate")
+    };
+    assert_eq!(back, b"print('hello')\n".repeat(8_000));
+    // Small, or already packed (random): as it is.
+    assert_eq!(wire::encode_to_host(&update(vec![7; 100]))[0], wire::FORMAT);
+    let mut rng = Rng(42);
+    let noise: Vec<u8> = (0..100_000).map(|_| rng.next() as u8).collect();
+    assert_eq!(wire::encode_to_host(&update(noise))[0], wire::FORMAT);
+}
+
+#[test]
+fn a_packed_message_never_unpacks_past_the_limit() {
+    let packed = |body: &[u8]| {
+        let mut bytes = vec![wire::FORMAT | 0x80];
+        bytes.extend(zstd::bulk::compress(body, 1).unwrap());
+        bytes
+    };
+    // A few KiB that would unpack past what a member may send the host.
+    let bomb = packed(&vec![0; wire::TO_HOST_MOST + 1]);
+    assert!(bomb.len() < 8_000);
+    assert!(matches!(
+        wire::decode_to_host(&bomb),
+        Err(wire::WireError::Unpack)
+    ));
+    // A frame that doesn't say how big it unpacks.
+    let mut sizeless = vec![wire::FORMAT | 0x80];
+    let mut encoder = zstd::stream::Encoder::new(&mut sizeless, 1).unwrap();
+    encoder.include_contentsize(false).unwrap();
+    std::io::Write::write_all(&mut encoder, &[0; 100]).unwrap();
+    encoder.finish().unwrap();
+    assert!(matches!(
+        wire::decode_to_host(&sizeless),
+        Err(wire::WireError::Unpack)
+    ));
+    // Packed bytes that aren't zstd.
+    assert!(wire::decode_to_client(&[wire::FORMAT | 0x80, 1, 2, 3]).is_err());
 }

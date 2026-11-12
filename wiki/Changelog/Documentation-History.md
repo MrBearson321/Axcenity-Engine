@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | Optimization log, benchmark history, performance overview, known bottlenecks, project and serialization, known limitations, ADR-0016, inventory, roadmap | Collaborate C11: zstd for big messages, S10k session measurements, and the quadratic `world.json` load fixed (S10k 5.66 → 0.19 s) | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C10: `IdentityProvider` seam, per-member budgets for each message kind and handshake limits (`crates/collab/src/limits.rs`), the host's audit log (`audit.rs`), security review in `docs/research/collaborate.md` §6.1 | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C9: host checkpoints (`crates/collab/src/history.rs`, `.axcenity/teamcreate/history`, contents by hash) and the Owner's restore for everyone as one transaction | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C8: session chat (host keeps the last 200 lines in memory, Instance paths as links, unread count on the chip) and others' cursors in live script tabs (`crates/editor/src/app/team_chat.rs`, `crates/editor/src/scripts/others.rs`) | Claude |

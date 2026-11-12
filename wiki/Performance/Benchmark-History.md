@@ -85,6 +85,20 @@ The pre-#65 Farmhouse row is from the PR's own run and isn't directly comparable
 
 **Unexplained**: `bench_10000_parts`'s `build_draw_list` rose from 3.3 to 8–9 ms between the commit that added the render benchmarks and `556b72b`; not bisected ([Known bottlenecks](Known-Bottlenecks.md)).
 
+## Collaborate on S10k (C11)
+
+Container, release, 2026-11-12 ([Optimization log](Optimization-Log.md#collaborate-on-s10k-and-the-world-load-2026-11-12)):
+
+| Measure | Before | After |
+|---|---|---|
+| Join message (the session's World) | 953 KiB | 82 KiB (zstd level 1, 1 ms) |
+| A member opens the session's files as its project | 5.9 s | 0.35 s |
+| `project::load` of S10k | 5.66 s (debug ~30 s) | 0.19 s (debug 0.8 s) |
+| Idle `team_frame`, mean (median) | | host 48–57 µs (12–19), member 34–36 µs (2–3) |
+| Four busy members' presence through the host | | 19 KiB a second |
+
+The join over Tailscale between two machines is still to be recorded (goal: under 10 s).
+
 ## Against other engines (XB10k)
 
 `benchmarks/cross-engine/` defines XB10k (S10k's parts, physics and scripts rebuilt in each engine with one timing rule; PR #80). On the Desktop, 2026-11-11, median frame: **s&box 2.05 ms** (real time, not ranked), **Unity 3.11**, **Axcenity 5.14** (6.70 before #84/#86/#88/#93), **Godot 10.27**; Unreal and Roblox not timed yet. Results: `benchmarks/cross-engine/results.md`; what the numbers mean against each engine's features: `docs/research/engine-comparison.md`.
