@@ -81,6 +81,7 @@ mod splines;
 mod tags;
 pub(crate) mod team;
 mod team_audit;
+mod team_board;
 mod team_chat;
 mod team_history;
 mod team_panel;
@@ -331,6 +332,8 @@ pub struct EditorApp {
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
     tags: crate::tags::TagsPanel,
+    /// The Team Board: the project's tasks (`app/team_board.rs`).
+    team_board: team_board::TeamBoard,
     /// Each script's uses of APIs from the other side, for the warning badges.
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
@@ -566,6 +569,7 @@ impl DockViewer<'_> {
                 .version_explorer
                 .show(ui, &axcenity_release::BuildInfo::current()),
             Pane::TeamCreate => self.app.team_create_pane(ui),
+            Pane::TeamBoard => self.app.team_board_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -956,6 +960,7 @@ impl EditorApp {
             cooker: None,
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
+            team_board: Default::default(),
             tabs: ScriptTabs::default(),
             luau: Default::default(),
             confirm_delete: None,
@@ -1813,6 +1818,7 @@ impl EditorApp {
         self.join_requests_window(ctx);
         self.collab_setup_windows(ctx);
         self.repo_ui_frame(ctx);
+        self.team_board_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
@@ -1961,6 +1967,8 @@ mod solid_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod strings_tests;
+#[cfg(test)]
+mod team_board_tests;
 #[cfg(test)]
 mod team_tests;
 #[cfg(test)]
