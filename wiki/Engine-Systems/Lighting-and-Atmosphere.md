@@ -57,6 +57,7 @@ flowchart LR
 | Spot / point shadows | Per-light maps; `near` offset so a lamp doesn't shade its own beam | Count and size by shadow quality |
 | Contact shadows | Screen-space, need the prepass depth | High and Ultra |
 | Environment | Sky baked into a cubemap only when it changes; GGX-filtered mips; spherical harmonics on the CPU | Reflection quality Low (analytic, no maps) → Ultra (256²) |
+| Default sky | New Baseplate and Empty projects get a CC0 Poly Haven HDRI (`project/src/default_sky.rs`, 2K `.hdr`, 5.4 MB) as `SkyImage`, with `ClockTime` and latitude set to its sun | A project file like any sky; exported with the game |
 | Reflection probes | Editor bakes a cubemap at a part's middle; used inside its box with `BlendDistance` | Left out at Low |
 | Light probe volumes | Grid of probes in a part's box (`Spacing`, max 16 a side); diffuse indirect light | Bake fingerprint warns when stale |
 | Real-time GI | Re-traces `PROBES_PER_FRAME` (2) probes each frame with a kept `ProbeCamera` | `realtime_gi` setting, off by default |

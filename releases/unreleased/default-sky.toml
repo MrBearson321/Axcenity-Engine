@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "project"
+title = "New blank projects start under a default HDR sky"
+details = "New Project's Baseplate and Empty templates now start with a built-in sky image (Kloofendal 48d Partly Cloudy, a CC0 HDRI from Poly Haven) in assets/sky/partly-cloudy-sky.hdr, with Lighting's ClockTime and GeographicLatitude set so the sun and shadows match it. Lighting's SkyImage row has a sun button that puts the default sky into any project. Genre templates and existing projects are unchanged."
+features = ["project.templates"]
+fixes = []
+introduces_issues = []
+prs = [247]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

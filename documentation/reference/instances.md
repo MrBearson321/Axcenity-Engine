@@ -86,6 +86,22 @@ connection:Disconnect()
 
 Each connected function runs as its own coroutine, in the order they were connected, so it may `task.wait()` without holding up the others. Change events (`Changed`, `ChildAdded` and the rest) are delivered just after the change, in the order things changed.
 
+`Signal:Once()` connects a function for the next time only. `Signal:Wait()` pauses the script until the event next fires and gives back what the event passed:
+
+```lua
+local pad = workspace.Pad
+local otherPart = pad.Touched:Wait()
+print(otherPart.Name, "stepped on the pad")
+
+pad:GetAttributeChangedSignal("Locked"):Once(function()
+	print("Locked changed for the first time:", pad:GetAttribute("Locked"))
+end)
+```
+
+`game:GetService("Players")` gets a service; `game:FindService(name)` is the same but gives `nil` instead of an error when there's no such service.
+
+Block scripts have the same tools: **when *property* of *object* changes** and **when attribute *name* of *object* changes** (Events), **wait until *object* *event* fires** (Control), and **set attribute** and **attribute *name* of *object*** (Variables).
+
 ## Copies and prefabs
 
 `Instance:Clone()` copies an Instance with everything inside it; set the copy's **Parent** to place it. A **prefab** is a saved object you can place many times as linked copies (see [Assets: import and manage](../learn/assets.md)).

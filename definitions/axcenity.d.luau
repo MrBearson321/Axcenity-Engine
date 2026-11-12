@@ -1311,6 +1311,10 @@ end
 declare extern type Signal with
 	--- Runs `callback` every time the event fires, each time as its own task (so it may `task.wait`). Returns a Connection for stopping it.
 	function Connect(self, callback: (...any) -> ()): Connection
+	--- Runs `callback` the next time the event fires, then disconnects it, as its own task. Returns a Connection, so it can be stopped before then.
+	function Once(self, callback: (...any) -> ()): Connection
+	--- Pauses the script until the event next fires, and returns the values the event gave its handlers: `local otherPart = part.Touched:Wait()`. A script that stops while waiting never carries on.
+	function Wait(self): ...any
 end
 
 --- A function connected to an event, returned by `Connect`.
@@ -1463,6 +1467,8 @@ declare extern type DataModel extends Instance with
 	[string]: any
 	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"ReplayService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"ContentProvider"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
+	--- Like GetService, but nil when there's no service with this name, instead of an error: `if game:FindService("QuestService") then ... end`.
+	function FindService(self, className: string): Instance?
 end
 
 --- The service that holds the 3D world. Parts inside it are drawn.
