@@ -24,7 +24,7 @@ tags: [guide, recipe, dependencies]
 1. **License**: confirm Apache-2.0 compatibility (MIT, Apache-2.0, BSD, Zlib, CC0 have been accepted; note anything unusual in the comment).
 2. **Pin it once** in `[workspace.dependencies]` of the root `Cargo.toml` with a comment saying what it's for and its license; turn off default features you don't need.
 3. Use it from the crate with `name.workspace = true`.
-4. If it's development-only, put it behind a crate feature nothing else can turn on (like the editor's `hot-patch`).
+4. If it's development-only, put it behind a crate feature nothing else can turn on (like the editor's `engine-dev`).
 5. Run `cargo hakari generate` (and `cargo hakari manage-deps` for a new crate). Check `.config/hakari.toml`'s `final-excludes` if it must stay out of the player or server.
 6. Confirm the player and server didn't gain it if they shouldn't: `cargo tree -p axcenity-server -e normal -i <crate>`, and the platform script's "player has no editor code" check.
 7. Update `docs/architecture/crates.md` for a new engine edge, and [Dependencies](../../Reference/Dependencies.md).

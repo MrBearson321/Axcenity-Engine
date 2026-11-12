@@ -74,6 +74,7 @@ mod errors;
 mod events;
 mod gui_service;
 mod handler_threads;
+pub mod hot_reload;
 mod http;
 mod input;
 mod instance;
@@ -689,13 +690,18 @@ impl ScriptRuntime {
     /// Code with a syntax error isn't run: the old code keeps running, and
     /// the error (`path:line: message`) joins the output and is returned.
     /// A script no longer in the game isn't run either.
+    ///
+    /// With [`Self::enable_hot_reload`], the new run keeps the old run's
+    /// top-level locals (see `hot_reload`), a ModuleScript's table keeps its
+    /// identity, and the scripts that run again keep theirs too. Returns
+    /// the names the changed script kept (none without hot reload).
     pub fn reload_script(
         &mut self,
         world: &mut World,
         script: InstanceId,
         path: &str,
         source: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         let Some(class) = world.get(script).map(|instance| instance.class()) else {
             return Err(format!("`{path}` isn't in the game any more."));
         };
@@ -711,14 +717,27 @@ impl ScriptRuntime {
             return Err(text);
         }
         if class != ClassName::ModuleScript {
-            self.context(side).stop_script(script);
-            self.start_script(world, script, path, source);
-            return Ok(());
+            return Ok(self.run_again(world, script, path, source));
         }
         self.remember(script, path, source);
         let mut again = BTreeSet::new();
+        let mut kept = Vec::new();
         for side in [Side::Server, Side::Client] {
-            again.extend(self.context(side).replace_module(script, path, source));
+            match self
+                .context(side)
+                .reload_module_keeping(world, script, path, source)
+            {
+                // The scripts that required it hold its table, now filled
+                // with the new code, so they keep running as they are.
+                Some((_, names)) => {
+                    for name in names {
+                        if !kept.contains(&name) {
+                            kept.push(name);
+                        }
+                    }
+                }
+                None => again.extend(self.context(side).replace_module(script, path, source)),
+            }
         }
         let again: Vec<(InstanceId, String, String)> = self
             .started
@@ -727,14 +746,37 @@ impl ScriptRuntime {
             .map(|started| (started.script, started.path.clone(), started.source.clone()))
             .collect();
         for (script, path, source) in again {
-            let Some(class) = world.get(script).map(|instance| instance.class()) else {
-                continue;
-            };
-            let side = Side::of_class(class).unwrap_or(Side::Server);
-            self.context(side).stop_script(script);
-            self.start_script(world, script, &path, &source);
+            if world.contains(script) {
+                self.run_again(world, script, &path, &source);
+            }
         }
-        Ok(())
+        Ok(kept)
+    }
+
+    /// Stops `script` and runs `source` as its new start, keeping its
+    /// top-level locals when hot reload is on. Returns the names it kept.
+    fn run_again(
+        &mut self,
+        world: &mut World,
+        script: InstanceId,
+        path: &str,
+        source: &str,
+    ) -> Vec<String> {
+        let class = world.get(script).map(|instance| instance.class());
+        let side = class.and_then(Side::of_class).unwrap_or(Side::Server);
+        self.context(side).hot_snapshot(script);
+        self.context(side).stop_script(script);
+        self.start_script(world, script, path, source);
+        self.context(side).hot_finish(script)
+    }
+
+    /// Turns on hot reload that keeps scripts' state (unified Phase 89, the
+    /// editor's Play only): `wrap` rewrites each script's top-level locals
+    /// as it loads (`axcenity_blocks::hot_reload::wrap`). Call it before
+    /// scripts start. The player never does, so its scripts load as written.
+    pub fn enable_hot_reload(&mut self, wrap: hot_reload::Wrap) {
+        hot_reload::install(&self.server.lua, wrap);
+        hot_reload::install(&self.client.lua, wrap);
     }
 
     /// Tells LocalScripts where the camera is now (`workspace.CurrentCamera`).
