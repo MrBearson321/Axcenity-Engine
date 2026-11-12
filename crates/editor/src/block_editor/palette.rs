@@ -839,12 +839,40 @@ pub(super) fn item_lua(item: &PaletteItem) -> Option<String> {
     }
 }
 
-/// A palette or node menu item's tooltip: `how` to use it, then the Lua
-/// it becomes, so a beginner sees what it does and learns the Lua too.
-pub(super) fn lua_hint(ui: &mut egui::Ui, how: &str, lua: Option<String>) {
-    ui.set_max_width(380.0);
-    ui.label(format!("{how} It becomes this Lua:"));
+/// What the catalogue says about a palette or node menu item.
+pub(super) fn item_info(item: &PaletteItem) -> Option<axcenity_blocks::catalogue::NodeInfo> {
+    match item {
+        PaletteItem::Block(kind) => Some(axcenity_blocks::catalogue::block_info(kind)),
+        PaletteItem::Reporter(expression) => {
+            Some(axcenity_blocks::catalogue::expression_info(expression))
+        }
+        PaletteItem::NewVariable => None,
+    }
+}
+
+/// A palette, node menu or node tooltip (cohesion pass CW4.2): the
+/// catalogue's card (what it does, its inputs, what it gives, an example),
+/// `how` to use it, then the Lua it becomes, so a beginner sees what it
+/// does and learns the Lua too.
+pub(super) fn lua_hint(
+    ui: &mut egui::Ui,
+    how: &str,
+    info: Option<axcenity_blocks::catalogue::NodeInfo>,
+    lua: Option<String>,
+) {
+    match &info {
+        Some(info) => crate::node_graph::node_card(ui, info, how),
+        None => {
+            ui.set_max_width(crate::widgets::INFO_CARD_WIDTH);
+            ui.label(how);
+        }
+    }
     if let Some(lua) = lua {
+        ui.label(
+            egui::RichText::new("It becomes this Lua:")
+                .size(theme::type_scale::SMALL)
+                .color(theme::palette(ui.ctx()).text_weak),
+        );
         let job = lua_syntax::layout_job(&lua, FontId::monospace(12.0), ui.visuals());
         ui.add(egui::Label::new(job));
     }
@@ -1092,7 +1120,14 @@ pub(super) fn palette_block(
     let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
     let response = response
         .on_hover_cursor(CursorIcon::Grab)
-        .on_hover_ui(|ui| lua_hint(ui, "Drag it onto the canvas.", block_lua(&kind)));
+        .on_hover_ui(|ui| {
+            lua_hint(
+                ui,
+                "Drag it onto the canvas.",
+                Some(axcenity_blocks::catalogue::block_info(&kind)),
+                block_lua(&kind),
+            )
+        });
     let mut painter = BlockPainter::new(
         ui.painter().clone(),
         1.0,
@@ -1144,6 +1179,7 @@ pub(super) fn palette_reporter(
             lua_hint(
                 ui,
                 "Drag it into a slot of the same shape.",
+                Some(axcenity_blocks::catalogue::expression_info(&expression)),
                 axcenity_blocks::expression_lua(&expression, true).ok(),
             )
         });

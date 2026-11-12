@@ -1459,3 +1459,58 @@ pub fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
         .galley(rect.center() - galley.size() / 2.0, galley, color);
     response
 }
+
+/// What one tooltip card says about a block, a reporter or a graph node
+/// (cohesion pass CW4.2): every visual scripting view shows these the same
+/// way, through [`info_card`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InfoCard<'a> {
+    pub title: &'a str,
+    /// What it does.
+    pub description: &'a str,
+    /// What it's for, as an example; empty for none.
+    pub example: &'a str,
+    /// Each input's name and what it takes.
+    pub inputs: &'a [(String, String)],
+    /// What it gives back, for a value.
+    pub output: Option<&'a str>,
+    /// How to use it here, such as "Drag it onto the canvas."; empty for none.
+    pub how: &'a str,
+}
+
+/// The widest an [`info_card`] grows.
+pub const INFO_CARD_WIDTH: f32 = 340.0;
+
+/// Draws `card` in a tooltip (or anywhere): the title, what it does, its
+/// inputs and output, an example and how to use it here. Callers add
+/// anything after it, such as the Lua it becomes.
+pub fn info_card(ui: &mut egui::Ui, card: &InfoCard) {
+    let palette = crate::theme::palette(ui.ctx());
+    ui.set_max_width(INFO_CARD_WIDTH);
+    ui.spacing_mut().item_spacing.y = 4.0;
+    ui.label(
+        RichText::new(card.title)
+            .strong()
+            .size(crate::theme::type_scale::BODY)
+            .color(palette.text_strong),
+    );
+    if !card.description.is_empty() {
+        ui.label(card.description);
+    }
+    let small = |text: String| RichText::new(text).size(crate::theme::type_scale::SMALL);
+    if !card.inputs.is_empty() {
+        ui.label(small("Inputs".to_owned()).color(palette.text_weak).strong());
+        for (name, what) in card.inputs {
+            ui.label(small(format!("{name}: {what}")));
+        }
+    }
+    if let Some(output) = card.output {
+        ui.label(small(format!("Gives {output}")).color(palette.text_weak));
+    }
+    if !card.example.is_empty() {
+        ui.label(small(format!("For example: {}", card.example)).italics());
+    }
+    if !card.how.is_empty() {
+        ui.label(small(card.how.to_owned()).color(palette.text_weak));
+    }
+}
