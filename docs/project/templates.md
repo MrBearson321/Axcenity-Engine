@@ -1,4 +1,4 @@
-# Genre templates
+# Templates
 
 New Project's playable templates (unified Phase 69): First Person, Third Person, Vehicle, Top Down and Multiplayer Arena, beside Baseplate and Empty (the Starter scene went in unified Phase 92: the genre templates replace it; projects made from it are unaffected). Code: `crates/project/src/templates.rs` (`Template`, `create_project_from`), `crates/project/build.rs`, and the editor's `start.rs` and `start/dialogs.rs`.
 
@@ -31,6 +31,16 @@ Each has a `Hud` ScreenGui and `hud.css`, and comments starting "START HERE" in 
 - **Save and Load** call the `SaveGame` RemoteFunction that `GameSaves.server.lua` makes: `SaveService:SaveSlot(1)` and `LoadSlot(1)` (slot from `MenuSettings`), then the `GameLoaded` BindableEvent so scripts put their HUD numbers back. The Arena's keeps only the player's Kills and Deaths in their per-player data, since loading the world mid-match would move everyone.
 - **Each device's own UI**: ScreenGuis are in the Workspace, which a host shares with every player, so `LocalGui.claim(name)` gives the first device to ask the ScreenGui itself (its `Owner` attribute) and every later device a copy of its own, switching the original off there. Single-player always gets the original. Both the menu and the HUDs use it.
 
+## Your own templates
+
+Any project can become a template (`.axtemplate`) that New Project lists beside the built-in ones. Code: `crates/project/src/user_templates.rs` (`save_template`, `read_template`, `list_templates`, `create_project_from_template_file`), the editor's `app/save_template.rs` (File > Save as Template…) and `start/dialogs.rs` (Your templates).
+
+- **File > Save as Template…** (also in Ctrl+K) asks for a name and a description, saves unsaved changes first, and writes `<name>.axtemplate` into the editor's templates folder: `Templates/` in the editor's data folder, beside its settings (`EditorApp::default_templates_folder`). A template of the same name is replaced, and the dialog says so first. Characters file systems don't allow in a name become `-`.
+- **The file** is a zip: `axtemplate.json` (`format` 1, `name`, `description`, the engine version that made it), the project's `thumbnail.png` as its picture when it has one, and every project file under `project/`. `.axcenity/` (this computer's cache, version history and AutoRecover) and a Collaborate project's `.git/` and `collaborate.json` (its repository, remote and project ID) are left out. A newer `format`, a zip without `axtemplate.json`, or a path that would climb out of the project is refused.
+- **New Project > Your templates** lists every `.axtemplate` in that folder, by name, with its picture (or a placeholder) and description. **Import…** copies a template file someone gave you into the folder (as `Name 2.axtemplate` when the name is taken); the folder icon shows the folder. A file there that isn't a template is left out of the list.
+- **Making a project** from one unpacks its files into the new folder (refusing a folder that exists, and removing what it wrote if it fails), then gives the manifest the new project's name and this engine's version. The new project starts with its own empty history. It doesn't get the default sky unless the template had it.
+- To share a template, send its `.axtemplate` file; it holds only project files, never settings or keys from the computer that made it.
+
 ## Pictures
 
 `thumbnail.png` (320 × 180) in each template folder is its picture on the start page ("Or from a game") and in the New Project dialog (`Template::picture`), and the new project's first thumbnail. They're drawn from the game's own camera a second in (the Vehicle and Arena from above) by `cargo test -p axcenity-player write_template_pictures -- --ignored`; run it after changing a template's world.
@@ -40,4 +50,6 @@ Each has a `Hud` ScreenGui and `hud.css`, and comments starting "START HERE" in 
 - `crates/testing/tests/templates.rs`: a project from each template loads without problems and passes its `tests/*.spec.lua` through `Runner` and the `axcenity-test` binary, with no errors or warnings in the output.
 - `crates/editor/src/app/template_tests.rs`: each plays in the editor without errors, and the Tests panel gives the command line's results.
 - `crates/player/src/template_tests.rs`: each plays as a built game (`pack_game`, `unpack_game`) without errors, and the Arena hosted on a UDP port with two players joined keeps their teams, characters, menus (the host's pause doesn't open theirs), chat and knockouts.
+- `crates/project/src/user_templates.rs`: a saved template makes projects with the same world and scripts under their own name, without `.axcenity/`, `.git/` or `collaborate.json`; the template isn't packed into itself; non-templates, newer formats and climbing paths are refused without leaving a folder.
+- `crates/editor/src/app/save_template.rs`: Save as Template saves unsaved changes first and a project made from it has them; the dialog draws and Escape closes it. `crates/editor/src/start/tests.rs`: New Project lists your templates, imports one and makes a project from it.
 - `crates/project/src/tests.rs`: every template loads, has the shared files and a block script; a template's own file replaces the shared one; each picture is 320 × 180.

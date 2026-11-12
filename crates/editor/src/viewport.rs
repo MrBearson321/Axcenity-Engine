@@ -69,8 +69,8 @@ mod move_overlay;
 mod overlays;
 mod view_cube;
 mod view_mode;
-pub(crate) use overlays::paint_agent_paths;
 use overlays::*;
+pub(crate) use overlays::{paint_agent_paths, paint_physics};
 pub use view_mode::ViewMode;
 
 /// Where the camera starts, looking at the origin (the same as the player).
@@ -121,6 +121,12 @@ const FROZEN_VIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 80);
 const FROZEN_VIEW_LENGTH: f32 = 60.0;
 /// The Agent Paths overlay: what's left of each agent's path.
 const AGENT_PATH_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 40);
+/// Contact points and their push (roadmap G15).
+const CONTACT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 200);
+/// A moving body's center of mass while it's simulated.
+const AWAKE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 200, 60);
+/// A body rapier has put to sleep.
+const ASLEEP_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 160, 255);
 
 /// A left click in the viewport, with the UI element or part under the
 /// mouse (`None` for empty space, which clears the selection). Starting to
@@ -370,6 +376,9 @@ pub struct ViewportScene<'a> {
     /// The path each NavigationAgent is walking during Play, from its feet,
     /// for the Agent Paths overlay.
     pub agent_paths: &'a [(InstanceId, Vec<axcenity_core::Vector3>)],
+    /// The simulation's contacts and bodies during Play, for the Contacts
+    /// and Bodies overlays; `None` outside Play or with both off.
+    pub physics: Option<&'a axcenity_physics::DebugView>,
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// Moving parts drawn between physics steps during Play (roadmap G3);
@@ -419,6 +428,11 @@ pub struct OverlayToggles {
     pub agent_paths: bool,
     /// Welds and Attachments (selected Attachments always show).
     pub constraints: bool,
+    /// During Play: where bodies touch, and how hard (roadmap G15).
+    pub contacts: bool,
+    /// During Play: each moving body's center of mass, coloured by
+    /// whether it's awake or asleep (roadmap G15).
+    pub bodies: bool,
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
@@ -433,6 +447,8 @@ impl OverlayToggles {
             || self.nav_mesh
             || self.agent_paths
             || self.constraints
+            || self.contacts
+            || self.bodies
             || self.culling
     }
 }
@@ -1022,6 +1038,7 @@ impl Viewport {
             debug_rays,
             nav_mesh,
             agent_paths,
+            physics,
             poses,
             blends,
             playing: game_playing,
@@ -1507,6 +1524,9 @@ impl Viewport {
         }
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
+        }
+        if let Some(physics) = physics {
+            paint_physics(&ui.painter_at(rect), &screen, physics, overlays);
         }
         if game_playing && let Some(settings) = self.terrain.streaming.settings() {
             paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);

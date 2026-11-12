@@ -278,6 +278,25 @@ impl EditorApp {
                 let _ = self.assets.reload(&blob.path);
             }
         }
+        // An import preset picked in a sidecar (or the pick undone, R12): its
+        // texture is cooked again as the preset wants and drawn from that.
+        for blob in blobs.iter().take(written) {
+            if axcenity_assets::is_import_file(&blob.path)
+                && blob.before.is_some()
+                && blob.after.is_some()
+            {
+                let texture = &blob.path[..blob.path.len() - axcenity_assets::IMPORT_SUFFIX.len()];
+                if crate::app::import_presets::is_texture_file(texture) {
+                    if let Some(axcenity_cook::Outcome::Failed(reason)) =
+                        axcenity_cook::refresh_texture(&folder, texture)
+                    {
+                        self.output
+                            .error(format!("Could not cook `{texture}`: {reason}."));
+                    }
+                    self.assets.forget(texture);
+                }
+            }
+        }
         self.move_object_files(&blobs[..written]);
         // A script Replace All (or its undo) rewrote: its tab and blocks take it.
         for blob in blobs.iter().take(written) {

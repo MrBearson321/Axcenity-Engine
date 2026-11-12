@@ -282,6 +282,8 @@ impl EditorApp {
             }
             self.tests_saved();
         }
+        // Everything is on disk: AutoRecover's copy isn't needed.
+        self.autorecover_done();
         // The project list shows the picture taken at the last save.
         self.thumbnail_wanted.get_or_insert(false);
         true

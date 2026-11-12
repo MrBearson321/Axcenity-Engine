@@ -296,6 +296,9 @@ impl AssetBrowser {
             ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
             ItemMenu::EditModel { path } => return Some(BrowserAction::EditModel(path)),
             ItemMenu::FindReferences { path } => return Some(BrowserAction::FindReferences(path)),
+            ItemMenu::ImportPreset { path, preset } => {
+                return Some(BrowserAction::SetImportPreset { path, preset });
+            }
             ItemMenu::View { path } => return Some(BrowserAction::View(path)),
             ItemMenu::Move { path } => {
                 self.dialog = Some(AssetDialog::Move {
@@ -976,6 +979,12 @@ impl AssetBrowser {
                     menu = Some(ItemMenu::EditModel { path: path.clone() });
                     ui.close();
                 }
+                if crate::app::import_presets::is_texture_file(&path)
+                    && let Some(folder) = &self.folder
+                    && let Some(chosen) = import_preset_menu(ui, folder, &path)
+                {
+                    menu = Some(chosen);
+                }
                 if !prefab
                     && ui
                         .button(format!("{} Rename or Move…", icons::PENCIL_SIMPLE))
@@ -1066,4 +1075,48 @@ impl AssetBrowser {
             }
         }
     }
+}
+
+/// The Import preset ▸ submenu of a texture file's tile (R12): every preset,
+/// the file's ticked. Picking its folder's preset takes away its own pick.
+fn import_preset_menu(ui: &mut egui::Ui, folder: &std::path::Path, path: &str) -> Option<ItemMenu> {
+    let mut chosen = None;
+    ui.menu_button(
+        format!("{} Import preset", icons::SLIDERS_HORIZONTAL),
+        |ui| {
+            let presets = axcenity_assets::ImportPresets::read_or_default(folder);
+            let current = presets.preset_of(folder, path);
+            let inherited = presets
+                .folder_preset(path)
+                .unwrap_or_else(|| axcenity_assets::DEFAULT_PRESET.to_owned());
+            for name in presets.names() {
+                let tip = presets
+                    .settings(&name)
+                    .map(|settings| settings.describe())
+                    .unwrap_or_default();
+                let label = if name == inherited {
+                    format!("{name} (its folder's)")
+                } else {
+                    name.clone()
+                };
+                if ui
+                    .radio(name == current, label)
+                    .on_hover_text(tip)
+                    .clicked()
+                    && name != current
+                {
+                    chosen = Some(ItemMenu::ImportPreset {
+                        path: path.to_owned(),
+                        preset: (name != inherited).then_some(name),
+                    });
+                    ui.close();
+                }
+            }
+        },
+    )
+    .response
+    .on_hover_text(
+        "How this texture is compressed and how big it's kept. Undo puts the last one back.",
+    );
+    chosen
 }

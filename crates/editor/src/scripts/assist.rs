@@ -298,6 +298,7 @@ fn icon(kind: ItemKind) -> &'static str {
         ItemKind::Function => icons::FUNCTION,
         ItemKind::Enum => icons::LIST_BULLETS,
         ItemKind::EnumItem => icons::DOT_OUTLINE,
+        ItemKind::Name => icons::QUOTES,
     }
 }
 

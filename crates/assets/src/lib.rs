@@ -36,6 +36,7 @@ mod cooked;
 mod data_table;
 mod fonts;
 mod import;
+mod import_presets;
 mod light_probes;
 mod loading;
 mod material;
@@ -55,9 +56,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use loading::{Kind, LoadKey};
 
 pub use asset_id::{
-    AssetId, IMPORT_SUFFIX, KNOWN_IDS_FILE, asset_ids, encode_import_file, give_asset_id,
-    give_asset_ids, id_files, import_path, is_import_file, moved_assets, read_asset_id,
-    takes_asset_id,
+    AssetId, IMPORT_SUFFIX, KNOWN_IDS_FILE, asset_ids, encode_import_file, encode_import_file_with,
+    give_asset_id, give_asset_ids, id_files, import_path, is_import_file, moved_assets,
+    read_asset_id, read_preset, takes_asset_id,
 };
 pub use color_grading::{
     ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,
@@ -65,10 +66,11 @@ pub use color_grading::{
 };
 pub use cooked::{
     COOKED_EXTENSION, COOKED_FOLDER, COOKED_ONLY_FILE, CookedFormat, CookedTexture, SourceStamp,
-    content_hash, cooked_format, cooked_path, cooked_relative_path, decode_cooked,
+    content_hash, cooked_format, cooked_header, cooked_path, cooked_relative_path, decode_cooked,
     decode_top_level, embedded_cooked_done, embedded_cooked_files, embedded_cooked_format,
     embedded_cooked_path, embedded_cooked_relative_path, encode_cooked, has_alpha, is_cooked,
-    mark_embedded_cooked, read_cooked, sampled_average, write_cooked, write_embedded_cooked,
+    mark_embedded_cooked, read_cooked, remove_cooked, sampled_average, texture_file_size,
+    write_cooked, write_embedded_cooked,
 };
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
@@ -81,6 +83,10 @@ pub use import::{
     TEXTURES_FOLDER, import_animation_file, import_audio, import_grading_file, import_model,
     import_picks, import_sky_image, import_texture, list_model_objects, load_model_file,
     load_takes_file, safe_file_name, unique_file_name,
+};
+pub use import_presets::{
+    Compression, DEFAULT_PRESET, ImportPresets, PRESETS_FILE, TextureSettings, built_in_presets,
+    sidecar_with_preset,
 };
 pub use light_probes::{
     LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, decode_light_probes,

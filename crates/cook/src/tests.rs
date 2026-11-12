@@ -502,3 +502,67 @@ fn a_cooked_top_level_decodes_close_to_its_source() {
         assert_eq!(pixel[3], 255);
     }
 }
+
+#[test]
+fn import_presets_pick_the_format_the_size_or_no_cooking_and_a_change_cooks_again() {
+    let folder = project("presets");
+    fs::create_dir_all(folder.join("assets/images")).unwrap();
+    let rgba = gradient(64, 32, 255);
+    let rock = "assets/textures/stone/rock.png";
+    let button = "assets/images/button.png";
+    write_png(&folder.join(rock), 64, 32, &rgba);
+    write_png(&folder.join(button), 64, 32, &rgba);
+    // The images folder is kept exact; rock gets a size limit of its own.
+    fs::write(
+        folder.join(axcenity_assets::PRESETS_FILE),
+        r#"{ "format_version": 1, "folders": { "assets/images": "UI and pixel art" } }"#,
+    )
+    .unwrap();
+    axcenity_assets::give_asset_id(&folder, rock).unwrap();
+    let sidecar = |preset: Option<&str>| {
+        let bytes = axcenity_assets::sidecar_with_preset(&folder, rock, preset).unwrap();
+        fs::write(folder.join(axcenity_assets::import_path(rock)), bytes).unwrap();
+    };
+    sidecar(Some("Small (1024)"));
+    fs::write(
+        folder.join(axcenity_assets::PRESETS_FILE),
+        r#"{ "format_version": 1,
+             "presets": { "Small (1024)": { "compression": "normal_map", "max_size": 16 } },
+             "folders": { "assets/images": "UI and pixel art" } }"#,
+    )
+    .unwrap();
+
+    let stop = AtomicBool::new(false);
+    let report = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!((report.cooked, report.uncompressed), (1, 1), "{report:?}");
+    assert!(read_cooked(&folder, button).is_none(), "kept uncompressed");
+    let cooked = read_cooked(&folder, rock).expect("cooked");
+    assert_eq!(cooked.format, CookedFormat::Bc5, "the project's own preset");
+    assert_eq!((cooked.width, cooked.height), (16, 8), "halved to fit 16");
+    assert_eq!(cooked.levels.len(), CookedTexture::level_count(16, 8));
+    let again = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!((again.cooked, again.current, again.uncompressed), (0, 1, 1));
+
+    // Loading uses the smaller copy, and its pixels match its size.
+    let assets = Assets::new(&folder);
+    let image = assets.texture_blocking(rock).expect("loads");
+    assert_eq!((image.width, image.height), (16, 8));
+    assert_eq!(image.rgba().len(), 16 * 8 * 4);
+    let button_image = assets.texture_blocking(button).expect("loads");
+    assert!(button_image.cooked().is_none());
+    assert_eq!(button_image.rgba(), &rgba[..], "every pixel exact");
+
+    // Picking Default instead (or undoing the pick) brings it back in line.
+    sidecar(None);
+    assert_eq!(refresh_texture(&folder, rock), Some(Outcome::Cooked));
+    let cooked = read_cooked(&folder, rock).expect("cooked");
+    assert_eq!(
+        (cooked.format, cooked.width, cooked.height),
+        (CookedFormat::Bc7, 64, 32)
+    );
+    assert_eq!(refresh_texture(&folder, rock), None, "already in line");
+    sidecar(Some("UI and pixel art"));
+    assert_eq!(refresh_texture(&folder, rock), Some(Outcome::Uncompressed));
+    assert!(!axcenity_assets::cooked_path(&folder, rock).exists());
+    let _ = fs::remove_dir_all(folder);
+}

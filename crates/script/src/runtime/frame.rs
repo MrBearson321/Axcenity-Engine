@@ -125,6 +125,10 @@ impl ScriptRuntime {
                 .step(world, messages, seconds, &destroyed);
             self.collect(side);
             self.fire_changes(world);
+            // A pause asked for has happened: the other side stops asking.
+            if self.context(side).pause().is_some() {
+                self.request_pause(false);
+            }
         }
         // SplineFollowers move on, after scripts that change them; a
         // device following a server sees the server's.
