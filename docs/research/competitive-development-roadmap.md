@@ -64,16 +64,16 @@ In particular (status checked on main `5143a5a`):
 | G4 | Script completion and diagnostics | **Implemented** (#145 via #153; go to definition #239) |
 | G5 | UI prefabs | **Implemented** (#122) |
 | G6 | Debugger stepping and watches | **Implemented** (#131). Limit: a coroutine the script made itself can't pause |
-| G7 | Memory profiling | **Partial** (#125, #126): breakdown by kind and class. Gaps: memory over time, peaks, budgets |
+| G7 | Memory profiling | **Implemented** (#125, #126; history, peaks and budget warnings #241) |
 | G8 | Audio occlusion | **Implemented** (#128) |
 | G9 | Upscaling | **Partial**: stage 1 spatial FSR-class upscale (#155, timings #171); stage 2 (temporal, inside TAA) not started |
 | G10 | Plugin API | **Partial**: toolbars, dock widgets, selection, settings, project files, mouse. Viewport drawing, property rows and importer hooks missing |
 | G11 | Editor modularization | **Implemented** for every planned move (#162, #164, #166, #189, #193, #194); further moves as they pay off |
-| G12 | Cooked-only games | **Missing**: games ship sources beside cooked copies |
+| G12 | Cooked-only games | **Implemented** (#243): Build Game leaves texture sources out; reading the pack in place not planned |
 | G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines |
-| G14 | Run without a player | **Missing** |
-| G15 | Physics debug views | **Partial**: collider wireframes, rays, Size boxes; no contacts, sleeping or centers of mass |
-| G16 | Humanoid retargeting | **Implemented** (stage 1: roles by bone name and rest-pose correction; hand-edited maps and profiles later) |
+| G14 | Run without a player | **Implemented** (#245): Run, F8 |
+| G15 | Physics debug views | **Implemented** (#253): Contacts and Bodies overlays (centers of mass, sleeping) beside collider wireframes, rays and Size boxes |
+| G16 | Humanoid retargeting | **Implemented** (stage 1, #244: roles by bone name and rest-pose correction; hand-edited maps and profiles later) |
 
 **Important:** These existing tasks must not be recreated as duplicate implementations or competing PRs. Extend their existing plans and update their implementation status as necessary.
 
@@ -312,7 +312,7 @@ Extend the existing debugger.
 
 **Priority:** High
 **Existing reference:** G7
-**Status:** Partial. The Profiler's Memory tab and F9 Stats break memory down by textures, models, lighting data, GPU buffers, audio, physics colliders, Instances by class and both Lua heaps (`core::memory::MemoryBreakdown`). Missing: memory over time, peaks, changes, and budget warnings.
+**Status:** Implemented. The Profiler's Memory tab and F9 Stats break memory down by textures, models, lighting data, GPU buffers, audio, physics colliders, Instances by class and both Lua heaps (`core::memory::MemoryBreakdown`), and since #241 keep its history, the peak this Play, the change since Play started, and per-project budgets (Settings > This project > Memory budget) that warn in Output once per Play.
 
 Expand memory monitoring beyond aggregate process and Lua heap measurements.
 
@@ -406,7 +406,7 @@ Expand asset management beyond discovery and downloading.
 
 **Priority:** High
 **Existing reference:** G12
-**Status:** Partial. `.axgame` v2 with zstd, file times and threaded unpacking (M9, #61), cooked textures and models, installers for three OSes, `scripts/check-packages.py`. Missing: cooked-only packs (G12), build profiles and build reports (R13).
+**Status:** Partial. `.axgame` v2 with zstd, file times and threaded unpacking (M9, #61), cooked textures and models, installers for three OSes, `scripts/check-packages.py`. Cooked-only packs are built (G12, #243: Build Game leaves texture sources out). Missing: build profiles and build reports (R13).
 
 Improve the game build pipeline.
 
@@ -661,7 +661,7 @@ Develop Model Studio into a stronger integrated asset-authoring environment.
 
 **Priority:** High
 **Existing reference:** G16
-**Status:** Missing. Clips bind by bone name; only the Mixamo-named template rigs.
+**Status:** Implemented, stage 1 (#244). A take made for another humanoid skeleton plays through 22 roles found by bone name (Mixamo, Unreal, Blender/Rigify, Biped and similar), with rest-pose correction between the skeletons' worlds and hip travel scaled by leg length (`anim/src/retarget.rs`). Later: a hand-edited role map, retargeting profiles and fingers.
 
 Implement a general-purpose animation retargeting system.
 
@@ -1076,7 +1076,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Duplicate detection | Missing | Audit tools | — | — | Third-party | R12 | Medium | project | Implement |
 | Import presets and compression profiles | Missing | Texture groups, LOD settings | `.import` presets | Per asset | Presets, platform overrides | R12 | Medium | assets, cook | Implement |
 | Cooked textures and models | Implemented | Cooking | Import cache | Compiled assets | Import pipeline | L2, `crates/cook` | Critical | cook | Keep |
-| Cooked-only game packages | Missing (ships sources beside cooked) | Cooked pak | `.pck` | Compiled | Built player | G12 | High | cook, project | Implement |
+| Cooked-only game packages | Implemented (#243) | Cooked pak | `.pck` | Compiled | Built player | G12 | High | cook, project | Keep |
 | Build profiles and reports | Missing | Build profiles, cook reports | Export presets | Publish wizard | Build profiles, build report | R13 | High | project | Implement |
 
 ### Editor and production
@@ -1085,11 +1085,11 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 |---|---|---|---|---|---|---|---|---|---|
 | Prefabs with overrides, nesting, variants | Implemented | Blueprints, Level Instances | Scenes | Prefabs | Prefabs | Phase 49, `docs/editor/assets.md` | High | project | Keep |
 | UI prefabs | Implemented | Widget Blueprints | Scenes | Razor panels | UI prefabs | G5 | High | ui, project | Keep |
-| Memory breakdown | Partial: no history, peaks or budgets | Memory Insights | Monitors | — | Memory Profiler | `editor/src/profiler.rs`, `core::memory` (G7) | High | sim, render | Improve |
+| Memory breakdown | Implemented, with history, peaks and budgets (#241) | Memory Insights | Monitors | — | Memory Profiler | `editor/src/profiler.rs`, `core::memory` (G7) | High | sim, render | Keep |
 | CPU and GPU profiling | Implemented | Unreal Insights | Profiler | Profiler | Profiler | Profiler panel, Tracy, `--bench` | High | — | Keep |
 | Editor plugins | Partial: no viewport drawing, property rows, importer hooks | Editor modules, Utility Widgets | EditorPlugin | Editor tools (C#) | Editor scripting | `crates/plugins` (G10) | Medium-High | plugins | Improve |
-| Simulate without a player | Missing | Simulate | Run scene | — | Play without player | G14 | Medium | editor Play | Implement |
-| Physics debug views | Partial: colliders, rays only | Chaos Visual Debugger | Visible collision shapes | Physics debug | Physics Debugger | G15 | Medium | physics | Implement |
+| Simulate without a player | Implemented (Run, F8, #245) | Simulate | Run scene | — | Play without player | G14 | Medium | editor Play | Keep |
+| Physics debug views | Implemented: colliders, rays, contacts, centers of mass, sleeping (#253) | Chaos Visual Debugger | Visible collision shapes | Physics debug | Physics Debugger | G15 | Medium | physics | Keep |
 | Live collaboration | Implemented (hand checks open) | Multi-User Editing | — | — | Unity Version Control | Collaborate 2.0, ADR-0022 | Strategic | collab, repo | Keep |
 | Editor modularization | Implemented for planned moves | Modules | Modules | — | Packages | G11 | Medium | — | Continue when it pays off |
 | AI assistant in the editor | Deferred (MCP server for outside clients exists) | AI Assistant | — | — | Unity AI | `docs/editor/mcp.md` | Low | — | Defer |
@@ -1142,13 +1142,13 @@ The following is the recommended order for execution. **Status** is on main `514
 | 2 | Scripts inside objects | G2 | Implemented (#111–#120, #230) | Nothing |
 | 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238) | Drag into Assets; sound preview |
 | 4 | Script completion and diagnostics | G4 | Implemented (#153, #239) | Nothing |
-| 5 | Memory profiler | G7 | Partial | Memory over time, peaks and budget warnings |
+| 5 | Memory profiler | G7 | Implemented (#241) | Nothing |
 | 6 | Audio occlusion and roll-off | G8 | Implemented (#128) | Nothing |
 | 7 | Debugger stepping and watches | G6 | Implemented (#131) | Nothing now (coroutine limit recorded) |
 | 8 | UI prefabs | G5 | Implemented (#122) | Nothing |
-| 9 | Cooked-only games | G12 | Missing | Ship cooked only |
-| 10 | Humanoid retargeting | G16 | Implemented (stage 1) | Hand-edited maps, profiles, fingers |
-| 11 | Plugin API improvements | G10 | Partial | Viewport drawing, property rows, importer hooks |
+| 9 | Cooked-only games | G12 | Implemented (#243) | Hand check a real game's size on the PC |
+| 10 | Humanoid retargeting | G16 | Implemented (stage 1, #244) | Hand-edited maps, profiles, fingers |
+| 11 | Plugin API improvements | G10 | Partial | Owned by the scripting thread (viewport drawing, property rows, importer hooks) |
 | 12 | Advanced asset management | New (R12) | Partial | Duplicates, import presets |
 | 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
@@ -1159,7 +1159,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 19 | Online services architecture | New (R19) | Missing | Design document only |
 | 20 | Platform expansion | New (R20) | Deferred | Research document only |
 
-Also open: G14 (run without a player) and G15 (physics debug views), small, after item 11; G13 (LAN scale test) when Paul's machines are free.
+Also done: G14 (Run without a player, #245) and G15 (physics debug views, #253). Still open: G13 (LAN scale test) when Paul's machines are free.
 
 This sequence is a default dependency-aware recommendation, not a requirement to block all independent work.
 
