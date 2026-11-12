@@ -58,10 +58,10 @@ In particular (status checked on main `5143a5a`):
 
 | Existing item | Work | Status |
 |---|---|---|
-| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Gaps: dragging a result card into the scene, sound preview playback, Freesound |
+| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238. Gaps: dragging a card into the Assets panel, sound preview playback, Freesound |
 | G2 | Scripts inside objects | **Implemented** (#91, #111, #114, #115, #117, #120; Code/Blocks switch #230) |
 | G3 | Physics interpolation | **Implemented** (#110) |
-| G4 | Script completion and diagnostics | **Implemented** (#145 via #153). Gap: go to definition |
+| G4 | Script completion and diagnostics | **Implemented** (#145 via #153; go to definition #239) |
 | G5 | UI prefabs | **Implemented** (#122) |
 | G6 | Debugger stepping and watches | **Implemented** (#131). Limit: a coroutine the script made itself can't pause |
 | G7 | Memory profiling | **Partial** (#125, #126): breakdown by kind and class. Gaps: memory over time, peaks, budgets |
@@ -80,7 +80,7 @@ In particular (status checked on main `5143a5a`):
 ## 2.1 Reconciliation notes
 
 - **One ID per piece of work.** Roadmap items that are G items keep their G ID; the new items (sequence 12, 13, 15–20) are named here as **R12, R13, R15, R16, R17, R18, R19, R20** by their place in section 12.
-- **Model Studio (6.6) and Phase 90.** On 12 Nov 2026 the unified plan's Phase 90 took sculpting, retopology and baking out of Model Studio on purpose ("creators sculpt and bake in Blender and import the `.glb`", `plans/axcenity-engine-unified.md`, about 5,600 lines removed). Section 6.6 asks to improve sculpting and baking. Until Paul decides otherwise, R15 improves what Model Studio still has (modeling, UVs, paint, rigging, weights, collision, LODs, previews, Blender round trip) and leaves sculpting and baking to Blender, which section 9 ("Full Blender replacement: do not pursue") also supports.
+- **Model Studio (6.6) and Phase 90.** On 12 Nov 2026 the unified plan's Phase 90 took sculpting, retopology and baking out of Model Studio (about 5,600 lines). Asked the same day, **Paul chose to bring sculpting and baking back** (12 Nov 2026, 20:42Z), as section 6.6 asks: R15 restores them from Phase 90's removal and builds on them. Section 9's "no full Blender replacement" still holds: Blender stays the target for advanced work.
 - **Collaboration (7.2) is largely built.** Collaborate 2.0 (#208–#219) gives persistent projects without a fixed host, Git-backed sync and checkpoints, host handoff, per-file conflicts and the guide; C1–C12 add Tailscale, live scripts, chat, permissions and the account seam (C12, a document). What's left is Paul's hand checks, so 7.2 needs no new work.
 - **Accounts (7.1)** have a design already: [collaborate-accounts.md](collaborate-accounts.md) (C12). The online-services architecture (R19) builds on it.
 - **Phases 4 and 5 are documents only.** The [development policy](../development-policy.md) says no infrastructure before it's needed and desktop first; so R19 and R20 are research and design, and nothing hosted is built unless Paul says so.
@@ -172,7 +172,7 @@ Improve visual smoothness for physics-driven objects when rendering above the ph
 
 **Priority:** Critical
 **Existing reference:** G4
-**Status:** Partial. Completion (Instance paths, members, `GetService`, Enums, signatures) and luau-lsp errors and lints in code tabs and Output are built (`editor/src/script_completion.rs`, `luau_check.rs`). Go to definition is the gap; luau-lsp isn't shipped with the editor.
+**Status:** Implemented. Completion (Instance paths, members, `GetService`, Enums, signatures), luau-lsp errors and lints in code tabs and Output, and Go to Definition (F12 or Ctrl+click: a local's line, an Instance, or an API Reference entry; #239) are built (`editor/src/script_completion.rs`, `luau_check.rs`). luau-lsp isn't shipped with the editor.
 
 Develop a more complete built-in scripting experience.
 
@@ -208,7 +208,7 @@ Use `luau-lsp` as a child process for diagnostics, following the existing archit
 
 **Priority:** Critical
 **Existing reference:** G1 and Toolbox integration documentation
-**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Gaps: dragging a result card into the scene or the Assets panel, sound preview playback, and Freesound (later, with a user's own key, as decided in G1).
+**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Gaps: dragging a card into the Assets panel, sound preview playback, and Freesound (later, with a user's own key, as decided in G1).
 
 Complete the centralized Toolbox architecture.
 
@@ -551,6 +551,8 @@ Require representative benchmark evidence demonstrating a meaningful bottleneck 
 **Priority:** Medium
 **Status:** Partial (R18). Baked light probe volumes with stale-bake warnings, baked reflection probes, and optional real-time probe GI (off by default).
 
+**Ray-traced GI:** RT2 in [hardware-ray-tracing.md](hardware-ray-tracing.md) (ray-traced probe GI, DDGI-style) writes into the same light probe volumes and replaces `realtime_gi.rs`'s raster cube faces when ray tracing is on. It is R18's additional real-time GI technique on RT-capable GPUs. The rest of R18 (probe placement, diagnostics, quality settings, the non-RT path) applies to every GPU. G9 stage 2 is independent, because RT denoisers run before TAA.
+
 Improve indirect lighting while preserving the existing baked-probe and optional real-time probe architecture.
 
 ### Requirements
@@ -630,7 +632,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed on purpose by Phase 90 on 12 Nov 2026; see section 2.1.
+**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1).
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -952,7 +954,7 @@ The following should not become immediate development priorities.
 |---|---|---|
 | Complete Nanite equivalent | Deferred | Requires demonstrated large-world need |
 | Full Lumen equivalent | Deferred | Existing GI architecture is sufficient for current scope |
-| Hardware ray tracing | Deferred | Cost and compatibility |
+| Hardware ray tracing | Planned, optional (RT0–RT5) | Paul overrode the deferral on 2026-11-12: [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240), off by default and only on RT-capable GPUs |
 | Occlusion culling overhaul | Deferred | Existing measurements do not justify it |
 | Parallel Luau | Deferred | Current script performance does not justify added complexity |
 | ECS replacement | Do not pursue currently | Preserve the Instance architecture |
@@ -1056,7 +1058,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Physics render interpolation | Implemented | Physics smoothing, async physics | Physics interpolation (4.3+) | Rigidbody interpolation | `Rigidbody.interpolation` | `physics/src/blend.rs` (G3) | Critical | physics, scene | Keep |
 | Code completion in the built-in editor | Implemented | n/a (IDE, Blueprints) | Built-in editor with completion | IDE (C#) | IDE (C#) | `editor/src/script_completion.rs` (G4) | Critical | script definitions | Keep |
 | Inline diagnostics | Implemented (needs luau-lsp installed) | IDE | Built-in | IDE | IDE | `editor/src/luau_check.rs` (G4) | Critical | luau-lsp | Keep |
-| Go to definition | Missing | IDE | Built-in | IDE | IDE | G4 gap | High | completion | Implement |
+| Go to definition | Implemented (#239) | IDE | Built-in | IDE | IDE | `script_completion::definition_at` (G4) | High | completion | Keep |
 | Debugger: breakpoints, stepping, watches | Implemented (script-made coroutines can't pause) | Blueprint and C++ debuggers | Built-in debugger | IDE debugger | IDE debugger | `script/src/debugger.rs` (G6) | High | script | Keep; improve coroutines when a game needs it |
 | Hot reload of game code | Implemented (scripts keep state) | Live Coding | Script reload | C# hotload | Domain reload | Phase 89, ADR-0023 | High | script | Keep |
 | Parallel scripting | Deferred | n/a | Threads | Async tasks | Jobs | gap analysis P4 | Low | script | Defer (scripts 0.74 ms of XB10k) |
@@ -1067,7 +1069,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 
 | Feature | Axcenity | Unreal | Godot | s&box | Unity | Reference | Priority | Dependencies | Decision |
 |---|---|---|---|---|---|---|---|---|---|
-| Built-in asset discovery | Partial: no card drag, no sound preview | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
+| Built-in asset discovery | Partial: card drag into the scene (#238); no sound preview | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
 | Licence and attribution tracking | Implemented | Fab licences | Per asset | Platform | Asset Store EULA | `toolbox` `license.rs`, `provenance.rs`, CREDITS.txt | Critical | toolbox | Keep |
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
@@ -1102,11 +1104,11 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Occlusion culling | Deferred (measured ≤ 1.9 ms) | HZB | Occluders | PVS | Umbra | `docs/rendering/performance.md` | Low | — | Defer |
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
 | Global illumination | Partial: baked probes, optional real-time probes | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
-| Ray tracing | Deferred | Yes | — | — | HDRP | gap analysis P4 | Low | — | Defer |
+| Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
 | Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; editor diagnostics partial | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
-| In-editor modeling | Implemented (sculpt, retopology, bake removed on purpose) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Improve what's kept |
+| In-editor modeling | Partial: sculpt and bake to come back (Paul, 12 Nov) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
 | Humanoid retargeting | Missing | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Implement |
 | Runtime IK | Implemented | Control Rig | SkeletonIK3D | IK | Animation Rigging | `anim/src/ik_control.rs` | — | anim | Keep |
 
@@ -1138,8 +1140,8 @@ The following is the recommended order for execution. **Status** is on main `514
 |---|---|---|---|---|
 | 1 | Physics interpolation | G3 | Implemented (#110) | Nothing; hand check at 120–240 fps on the PC |
 | 2 | Scripts inside objects | G2 | Implemented (#111–#120, #230) | Nothing |
-| 3 | Complete Toolbox integration | G1 | Partial | Drag cards into the scene and Assets; sound preview |
-| 4 | Script completion and diagnostics | G4 | Partial | Go to definition |
+| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238) | Drag into Assets; sound preview |
+| 4 | Script completion and diagnostics | G4 | Implemented (#153, #239) | Nothing |
 | 5 | Memory profiler | G7 | Partial | Memory over time, peaks and budget warnings |
 | 6 | Audio occlusion and roll-off | G8 | Implemented (#128) | Nothing |
 | 7 | Debugger stepping and watches | G6 | Implemented (#131) | Nothing now (coroutine limit recorded) |
@@ -1150,7 +1152,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 12 | Advanced asset management | New (R12) | Partial | Duplicates, import presets |
 | 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial | Within Phase 90's scope (section 2.1) |
+| 15 | Advanced Model Studio workflows | New (R15) | Partial | Bring sculpting and baking back (Paul's decision, section 2.1) |
 | 16 | Large-world rendering and authoring | New (R16) | Partial | Streaming diagnostics in the editor |
 | 17 | Visual effects editor | New (R17) | Missing | Design, then curves and an effect asset |
 | 18 | Global illumination improvements | New (R18) | Partial | Measure and document options |
