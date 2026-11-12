@@ -343,6 +343,12 @@ fn every_tool_is_short_flat_and_in_budget() {
         instructions <= 150,
         "instructions take ~{instructions} tokens"
     );
+    // The full profile names the Toolbox tools up front.
+    let full = super::setup(Profile::Full, None).instructions;
+    assert!(full.contains("toolbox_search, then toolbox_get"), "{full}");
+    assert!(estimate_tokens(&full) <= 175, "{full}");
+    let standard = super::setup(Profile::Standard, None).instructions;
+    assert!(!standard.contains("toolbox"), "{standard}");
     // Budgets from docs/research/mcp/tool-inventory.md.
     for (profile, budget) in [
         (Profile::Lite, 2100),
@@ -2264,8 +2270,16 @@ pub(super) struct LiveClient {
 
 impl LiveClient {
     pub(super) fn connect(folder: &std::path::Path, mode: Mode) -> LiveClient {
+        Self::connect_with(folder, mode, Profile::Standard)
+    }
+
+    pub(super) fn connect_with(
+        folder: &std::path::Path,
+        mode: Mode,
+        profile: Profile,
+    ) -> LiveClient {
         let hello = super::live::Hello {
-            profile: Profile::Standard,
+            profile,
             mode,
             import_folders: Vec::new(),
             probe: false,
@@ -2673,6 +2687,179 @@ fn view_capture_draws_the_scene_as_a_png_from_the_camera_an_object_or_a_point() 
     // Reading changes nothing: no undo step.
     let history = ok(host, "history", json!({}));
     assert!(history.starts_with("0 steps to undo"), "{history}");
+}
+
+#[test]
+fn toolbox_search_and_get_bring_an_asset_in_as_one_undo_step() {
+    let mut opened = open("hello-part", "mcp-toolbox");
+    let assets = std::env::temp_dir().join(format!(
+        "axcenity-mcp-toolbox-assets-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&assets);
+    let project = opened.folder.clone();
+    let host = &mut opened.app;
+    // Never the network: ambientCG's answers from memory.
+    host.session.toolbox_http = Some(std::sync::Arc::new(
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(true),
+    ));
+    host.session.asset_dir = Some(assets.clone());
+    let found = ok(host, "toolbox_search", json!({"query": "fabric"}));
+    assert!(
+        found.starts_with("1 of 1 texture result for \"fabric\"\nambientcg:Fabric086 · Fabric 086 · CC0 · 1K 2K · JPG"),
+        "{found}"
+    );
+    assert!(found.contains("\nnot searched: Poly Haven"), "{found}");
+    assert!(
+        found.ends_with("toolbox_get {\"key\":\"ambientcg:Fabric086\"}"),
+        "{found}"
+    );
+    let wrong = call(
+        host,
+        "toolbox_search",
+        json!({"query": "rain", "kind": "sound", "source": "ambientcg"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    let wrong = call(host, "toolbox_get", json!({"key": "Fabric086"})).unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    assert!(wrong.to_string().contains("ambientcg:Ground054"), "{wrong}");
+
+    let got = ok(host, "toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+    let set = "assets/textures/Fabric086/Fabric086.texture.json";
+    assert!(
+        got.starts_with(&format!(
+            "got Fabric 086 (1K JPG, CC0 1.0): texture set {set}, material assets/materials/"
+        )),
+        "{got}"
+    );
+    assert!(got.ends_with("undo \"AI (test): Get Fabric 086\""), "{got}");
+    let material = got
+        .split("material ")
+        .nth(1)
+        .and_then(|rest| rest.split(" · ").next())
+        .unwrap()
+        .to_owned();
+    assert!(project.join(set).is_file(), "{got}");
+    assert!(project.join(&material).is_file(), "{got}");
+    // The material is ready to assign.
+    ok(
+        host,
+        "material_edit",
+        json!({"action": "assign", "path": material, "id": "Workspace/Block"}),
+    );
+    ok(host, "history", json!({"action": "undo"}));
+    // One undo takes the texture set and the material away; redo brings them back.
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join(set).exists(), "{got}");
+    assert!(!project.join(&material).exists(), "{got}");
+    ok(host, "history", json!({"action": "redo"}));
+    assert!(project.join(set).is_file() && project.join(&material).is_file());
+    // Got again: from the asset directory (nothing fetched), and the same
+    // material, not a second one.
+    host.session.toolbox_http = Some(std::sync::Arc::new(
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(false),
+    ));
+    let again = ok(host, "toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+    assert!(again.contains(&format!("material {material} ·")), "{again}");
+    let materials = std::fs::read_dir(project.join("assets/materials"))
+        .unwrap()
+        .count();
+    assert_eq!(materials, 1, "{again}");
+    let _ = std::fs::remove_dir_all(&assets);
+}
+
+/// Answers as `inner` does, but only once `open` is set: a slow network.
+struct Gate {
+    inner: axcenity_toolbox::http::Fixture,
+    open: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl axcenity_toolbox::http::Http for Gate {
+    fn fetch(
+        &self,
+        url: &str,
+        limit: u64,
+        out: &mut dyn std::io::Write,
+    ) -> Result<u64, axcenity_toolbox::SourceError> {
+        while !self.open.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        self.inner.fetch(url, limit, out)
+    }
+}
+
+#[test]
+fn the_open_editor_keeps_drawing_while_a_toolbox_download_runs() {
+    use super::live::Live;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let folder = copy_of_example("hello-part", "mcp-live-toolbox");
+    let assets = std::env::temp_dir().join(format!(
+        "axcenity-mcp-live-toolbox-assets-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&assets);
+    let mut app = EditorApp::new(Some(&folder));
+    let mut live = Live::start(&folder, axcenity_mcp::Waker(Arc::new(|| {}))).unwrap();
+    let open = Arc::new(AtomicBool::new(false));
+    let gate: Arc<dyn axcenity_toolbox::http::Http> = Arc::new(Gate {
+        inner: crate::toolbox_panel::agent::testing::fabric_on_ambientcg(true),
+        open: open.clone(),
+    });
+    let dir = assets.clone();
+    live.prepare = Some(Box::new(move |session| {
+        session.toolbox_http = Some(gate.clone());
+        session.asset_dir = Some(dir.clone());
+    }));
+    let client_folder = folder.clone();
+    let client = std::thread::spawn(move || {
+        let mut client = LiveClient::connect_with(&client_folder, Mode::Edit, Profile::Full);
+        let got = client.call("toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+        let after = client.call("object_create", json!({"kind": "Block", "name": "After"}));
+        (got, after)
+    });
+    // Frames go on while the download waits: none of them blocks.
+    let set = folder.join("assets/textures/Fabric086/Fabric086.texture.json");
+    let started = std::time::Instant::now();
+    let mut frames = 0;
+    while !client.is_finished() {
+        assert!(started.elapsed().as_secs() < 60, "the client finished");
+        let frame = std::time::Instant::now();
+        live.drain(&mut app);
+        assert!(
+            frame.elapsed().as_millis() < 500,
+            "a frame waited for the download"
+        );
+        frames += 1;
+        if frames == 200 {
+            assert!(
+                !set.exists(),
+                "nothing is installed before the download ends"
+            );
+            open.store(true, Ordering::SeqCst);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let ((got, failed), (after, _)) = client.join().unwrap();
+    assert!(frames > 200, "{frames}: {got} {after}");
+    assert!(!failed, "{got}");
+    assert!(
+        got.starts_with("got Fabric 086 (1K JPG, CC0 1.0): texture set"),
+        "{got}"
+    );
+    assert!(set.is_file());
+    // The client's next call was answered after, in order.
+    assert!(after.contains("\"After\""), "{after}");
+    let labels = app.history.undo_labels();
+    assert!(
+        labels.contains(&"AI (Live Test): Get Fabric 086"),
+        "{labels:?}"
+    );
+    drop(live);
+    let _ = std::fs::remove_dir_all(&folder);
+    let _ = std::fs::remove_dir_all(&assets);
 }
 
 #[test]
