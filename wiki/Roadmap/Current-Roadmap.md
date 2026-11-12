@@ -86,7 +86,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 
 | Range | Status |
 |---|---|
-| Phases 1–80 | **Built**; six hand checks need the developer's PC, Mac or two computers, and Phase 80's 4 × 4 km benchmark scene isn't built yet (the plan's "Audit of 2026-11-12") |
+| Phases 1–80 | **Built**; six hand checks need the developer's PC, Mac or two computers, and Phase 80's 4 × 4 km benchmark scene is now built (`axcenity-test --make-streaming`, 2026-11-12; the server's frame on it went 21.9 → 4.2 ms in the container) with its desktop numbers measured on the PC (the plan's "Audit of 2026-11-12") |
 | Phases 60–61: sculpting, retopology and baking | **Removed** by Phase 90 (narrower Model Studio, done 2026-11-12, about 5,600 lines out): creators sculpt and bake in Blender and import the `.glb`. Rigging keeps the pieces it used (`mesh_edit` `bvh.rs`, `reference.rs`, `remesh.rs`) |
 | Phase 81: lag compensation and replays | **Planned**, after Phase 93 |
 | Phases 82–88: Android and iOS | **Deferred** by policy; every criterion marked so |
