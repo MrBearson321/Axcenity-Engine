@@ -18,7 +18,7 @@ use super::*;
 use axcenity_core::PartType;
 use axcenity_project as project;
 
-fn bare_remote(name: &str) -> String {
+pub(super) fn bare_remote(name: &str) -> String {
     let dir = std::env::temp_dir().join(format!(
         "axcenity-editor-remote-{name}-{}",
         std::process::id()
@@ -37,7 +37,7 @@ fn bare_remote(name: &str) -> String {
 
 /// A copy of hello-part linked to a new bare remote, as connecting it in
 /// the panel would leave it.
-fn linked_project(name: &str) -> (std::path::PathBuf, String) {
+pub(super) fn linked_project(name: &str) -> (std::path::PathBuf, String) {
     let folder = copy_of_example("hello-part", name);
     let url = bare_remote(name);
     let spec = RemoteSpec {
@@ -66,7 +66,7 @@ fn linked_project(name: &str) -> (std::path::PathBuf, String) {
     (folder, url)
 }
 
-fn manager() -> Arc<RepositoryManager> {
+pub(super) fn manager() -> Arc<RepositoryManager> {
     Arc::new(RepositoryManager::new(
         Git::system(),
         GitHub::default(),
@@ -75,7 +75,7 @@ fn manager() -> Arc<RepositoryManager> {
 }
 
 /// Runs frames until the sync state is `want` (or panics after 60 s).
-fn frames_until(app: &mut EditorApp, want: &State) {
+pub(super) fn frames_until(app: &mut EditorApp, want: &State) {
     let start = Instant::now();
     loop {
         app.repo_frame();
@@ -92,7 +92,7 @@ fn frames_until(app: &mut EditorApp, want: &State) {
     }
 }
 
-fn remote_log(url: &str, test: &str) -> Vec<checkpoint::Entry> {
+pub(super) fn remote_log(url: &str, test: &str) -> Vec<checkpoint::Entry> {
     let dest = std::env::temp_dir().join(format!(
         "axcenity-editor-check-{test}-{}",
         std::process::id()
@@ -281,7 +281,7 @@ fn draw_collaborate(app: &mut EditorApp, ctx: &egui::Context) -> String {
 }
 
 /// Waits for the Project section's background task.
-fn task_done(app: &mut EditorApp, ctx: &egui::Context) {
+pub(super) fn task_done(app: &mut EditorApp, ctx: &egui::Context) {
     let start = Instant::now();
     while app.repo.ui.busy_for_test() {
         assert!(start.elapsed() < Duration::from_secs(60));
@@ -404,4 +404,123 @@ fn the_resolve_window_merges_with_each_files_choice() {
     );
     let _ = std::fs::remove_dir_all(&folder);
     let _ = std::fs::remove_dir_all(&sam);
+}
+
+/// Adds a part named `name` and saves.
+fn add_saved_part(app: &mut EditorApp, name: &str) {
+    app.insert(Insertable::Part(PartType::Block), None);
+    let part = app.selected.expect("the new part is selected");
+    app.change(
+        part,
+        Field::Name,
+        format!("Rename to {name}"),
+        vec![crate::properties::Edit::Name(name.into())],
+    );
+    app.history.seal();
+    assert!(app.save());
+}
+
+fn has_part(app: &EditorApp, name: &str) -> bool {
+    let world = &app.world;
+    world
+        .descendants(world.root())
+        .into_iter()
+        .any(|id| world.get(id).is_some_and(|i| i.name() == name))
+}
+
+/// Scenario E (the brief): changes made while the repository can't be
+/// reached are kept as checkpoints here and upload when it's back.
+#[test]
+fn changes_made_offline_are_kept_and_upload_when_the_repository_is_back() {
+    let (folder, url) = linked_project("scenario-e");
+    let mut app = EditorApp::new(Some(&folder));
+    app.repo.manager = Some(manager());
+    frames_until(&mut app, &State::Synced);
+    let remote = std::path::PathBuf::from(url.trim_start_matches("file://"));
+    let away = remote.with_extension("away");
+    std::fs::rename(&remote, &away).unwrap();
+    add_saved_part(&mut app, "MadeOffline");
+    app.run_console_command("checkpoint Offline work");
+    let start = Instant::now();
+    while !matches!(app.repo.state(), Some(State::Offline | State::Error(_))) {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{:?}",
+            app.repo.last
+        );
+        app.repo_frame();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Kept here as a checkpoint, the folder untouched.
+    let here = checkpoint::history(&Git::system(), &folder, 5).unwrap();
+    assert_eq!(here[0].title(), "Manual checkpoint: Offline work");
+    assert!(has_part(&EditorApp::new(Some(&folder)), "MadeOffline"));
+    // Back: Sync now uploads it.
+    std::fs::rename(&away, &remote).unwrap();
+    app.run_console_command("checkpoint");
+    frames_until(&mut app, &State::Synced);
+    let log = remote_log(&url, "scenario-e");
+    assert!(
+        log.iter()
+            .any(|e| e.title() == "Manual checkpoint: Offline work")
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Scenario D (the brief): two people change the same scene on their own
+/// computers; neither version is overwritten, and keeping both works.
+#[test]
+fn the_same_scene_changed_on_two_computers_keeps_both() {
+    let (paul_folder, url) = linked_project("scenario-d");
+    let mut paul = EditorApp::new(Some(&paul_folder));
+    paul.repo.manager = Some(manager());
+    frames_until(&mut paul, &State::Synced);
+    let sam_folder = std::env::temp_dir().join(format!(
+        "axcenity-editor-scenario-d-sam-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&sam_folder);
+    repository::clone_project(&Git::system(), &url, &sam_folder, None).unwrap();
+    let mut sam = EditorApp::new(Some(&sam_folder));
+    sam.repo.manager = Some(manager());
+    frames_until(&mut sam, &State::Synced);
+
+    add_saved_part(&mut paul, "PaulsPart");
+    add_saved_part(&mut sam, "SamsPart");
+    paul.run_console_command("checkpoint");
+    frames_until(&mut paul, &State::Synced);
+    sam.run_console_command("checkpoint");
+    let start = Instant::now();
+    while !matches!(sam.repo.state(), Some(State::Conflict(_))) {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{:?}",
+            sam.repo.last
+        );
+        sam.repo_frame();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Sam's scene is untouched, and Paul's is beside it.
+    let found = sam.repo_conflicts().unwrap();
+    let world = found.iter().find(|c| c.path == "world.json").unwrap();
+    let copy = world.copy.clone().unwrap();
+    assert!(has_part(&sam, "SamsPart") && !has_part(&sam, "PaulsPart"));
+    let theirs = std::fs::read_to_string(sam_folder.join(&copy)).unwrap();
+    assert!(theirs.contains("PaulsPart") && !theirs.contains("SamsPart"));
+    // Keep both: Sam's stays the scene, Paul's is kept as the copy for
+    // everyone.
+    for conflict in &found {
+        sam.repo.ui.choices.insert(
+            conflict.path.clone(),
+            axcenity_repo::conflicts::Choice::Both,
+        );
+    }
+    sam.resolve_chosen();
+    frames_until(&mut sam, &State::Synced);
+    paul.run_console_command("checkpoint");
+    frames_until(&mut paul, &State::Synced);
+    let kept = std::fs::read_to_string(paul_folder.join(&copy)).unwrap();
+    assert!(kept.contains("PaulsPart"));
+    let _ = std::fs::remove_dir_all(&paul_folder);
+    let _ = std::fs::remove_dir_all(&sam_folder);
 }

@@ -67,6 +67,8 @@ pub(crate) enum Done {
     /// "Upload my version" or "Use the repository's version" finished.
     Settled(Result<(), String>),
     History(Result<Vec<checkpoint::Entry>, String>),
+    /// A successor's copy got the project's history.
+    MirrorLinked(Result<(), String>),
     Restored(Result<String, String>),
 }
 
@@ -253,6 +255,27 @@ impl EditorApp {
                     self.open(&folder);
                 }
             }
+            Done::MirrorLinked(Ok(())) => {
+                self.output.info(
+                    "Collaborate: this copy now keeps the project's history, so checkpoints \
+                     upload from here while you host.",
+                );
+                // The session's World over the repository's `world.json`.
+                if self.team.as_ref().is_some_and(|t| t.hosting().is_some()) {
+                    self.save_world_for_checkpoint();
+                }
+                self.repo_checkpoint(Kind::Handoff, None);
+            }
+            Done::MirrorLinked(Err(why)) => {
+                // Try again later (the repository may be out of reach).
+                if let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) {
+                    self.repo.retry_mirror_later(&folder);
+                }
+                self.output.warning(format!(
+                    "Collaborate: this copy couldn't get the project's history, so checkpoints \
+                     won't upload from here: {why}"
+                ));
+            }
             Done::History(Ok(entries)) => self.repo.ui.history = Some(entries),
             Done::History(Err(why)) | Done::Restored(Err(why)) => self.repo.ui.problem = Some(why),
             Done::Restored(Ok(_)) => {
@@ -265,6 +288,45 @@ impl EditorApp {
                 self.load_repo_history();
             }
         }
+    }
+
+    /// A successor hosting from its copy: links the copy to the project's
+    /// repository, keeping the copy's files. What a copy never holds (the
+    /// World's own files, plugins, hidden files) comes from the repository,
+    /// and the Handoff checkpoint then puts the session on top. Once.
+    pub(crate) fn repo_link_mirror(&mut self, folder: &std::path::Path) {
+        if self.repo.ui.busy.is_some() {
+            return;
+        }
+        let Some(link) = self.repo.link.clone() else {
+            return;
+        };
+        let folder = folder.to_owned();
+        let author = self.repo_author(&folder);
+        self.repo.mark_mirror_checked(&folder);
+        self.repo_task("Getting the project's history", move |manager| {
+            let git = manager.git_with_token();
+            let spec = repository::RemoteSpec {
+                url: link.url.clone(),
+                branch: Some(link.branch.clone()),
+                replace_remote: false,
+            };
+            let result = repository::link(&git, &folder, &spec, &author)
+                .map_err(|e| e.to_string())
+                .and_then(|(_, linked)| match linked {
+                    Linked::Adopted { differences } => {
+                        let not_carried: Vec<String> = differences
+                            .into_iter()
+                            .map(|change| change.path)
+                            .filter(|path| !axcenity_collab::files::is_synced(path))
+                            .collect();
+                        repository::bring_back_missing(&git, &folder, &not_carried)
+                            .map_err(|e| e.to_string())
+                    }
+                    _ => Ok(()),
+                });
+            Done::MirrorLinked(result)
+        });
     }
 
     /// Writes a new link into `collaborate.json` and starts syncing.
@@ -1109,8 +1171,7 @@ impl EditorApp {
                     };
                     ui.vertical(|ui| {
                         ui.label(format!("{icon} {}", entry.title()));
-                        let when = SystemTime::UNIX_EPOCH
-                            + Duration::from_secs(entry.commit.time);
+                        let when = SystemTime::UNIX_EPOCH + Duration::from_secs(entry.commit.time);
                         weak(
                             ui,
                             &palette,

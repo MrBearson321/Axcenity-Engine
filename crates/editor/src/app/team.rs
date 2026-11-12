@@ -971,6 +971,10 @@ impl EditorApp {
         let handed_on = hand_on
             && self.team.as_ref().is_some_and(|t| t.hosting().is_some())
             && self.hand_off_hosting();
+        // Ending it here: the repository gets the session's last state.
+        if !handed_on && self.team.as_ref().is_some_and(|t| t.hosting().is_some()) {
+            self.repo_session_ending(axcenity_repo::checkpoint::Kind::Ended);
+        }
         let Some(team) = self.team.take() else {
             return;
         };
@@ -1829,9 +1833,15 @@ impl EditorApp {
                 Notice::Arrived { name, .. } => self
                     .output
                     .info(format!("Collaborate: {name} joined the session")),
-                Notice::Left { name, .. } => self
-                    .output
-                    .info(format!("Collaborate: {name} left the session")),
+                Notice::Left { name, .. } => {
+                    self.output
+                        .info(format!("Collaborate: {name} left the session"));
+                    // The host checkpoints what they did (P2's "User left
+                    // session").
+                    if self.team.as_ref().is_some_and(|t| t.hosting().is_some()) {
+                        self.repo_checkpoint(axcenity_repo::checkpoint::Kind::Left, None);
+                    }
+                }
                 Notice::Resynced => self.output.warning(
                     "Collaborate: this copy disagreed with the session and was reloaded \
                      (your unsent edits were kept)",

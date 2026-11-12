@@ -1877,6 +1877,8 @@ mod collab_project_tests;
 #[cfg(test)]
 mod collab_repo_tests;
 #[cfg(test)]
+mod collab_scenario_tests;
+#[cfg(test)]
 mod collab_setup_tests;
 #[cfg(test)]
 mod decal_tests;
