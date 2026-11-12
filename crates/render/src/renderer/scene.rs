@@ -368,6 +368,7 @@ impl ScenePipeline {
             frozen_view: None,
             culling_bounds: Vec::new(),
             lods: LodStates::default(),
+            ray_scene: None,
             #[cfg(feature = "debug-views")]
             debug_views: None,
             texture_bytes,
@@ -404,6 +405,7 @@ impl ScenePipeline {
             software: real.software || limits.software,
             msaa_samples: real.msaa_samples & limits.msaa_samples,
             compute_shaders: real.compute_shaders && limits.compute_shaders,
+            ray_queries: real.ray_queries && limits.ray_queries,
         };
         let settings = self.settings.clone();
         self.apply_graphics(&settings);
@@ -1071,6 +1073,7 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        let traces_rays = self.traces_rays();
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
             Some(timer) if self.time_gpu => timer.collect(&self.device),
@@ -1082,6 +1085,19 @@ impl ScenePipeline {
                 timer.mark(encoder, pass);
             }
         };
+        mark(&mut encoder, FramePass::AccelerationStructures);
+        let tracing = ray_tracing::prepare_scene(
+            &mut self.ray_scene,
+            (&self.device, &self.meshes, &self.custom_meshes),
+            &mut encoder,
+            (
+                traces_rays,
+                self.frame,
+                glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
+                self.graphics.ray_tracing_distance,
+            ),
+            &draws,
+        );
         mark(&mut encoder, FramePass::Shadows);
         let mut counts = FrameCounts {
             items_submitted,
@@ -1530,6 +1546,7 @@ impl ScenePipeline {
             let prepass = self.frame_targets.occlusion.is_some();
             timer.submitted(
                 [
+                    tracing,
                     shadows,
                     prepass,
                     prepass && ambient_occlusion,
@@ -1884,6 +1901,10 @@ impl ScenePipeline {
             surface_shaders,
             broken_shaders,
             gpu_particles: self.gpu_particles.as_ref().map_or(0, |p| p.count()),
+            ray_tracing: self
+                .ray_scene
+                .as_ref()
+                .map_or_else(Default::default, |scene| scene.stats),
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),
             target_bytes: self.frame_targets.bytes
@@ -2455,7 +2476,7 @@ pub(super) enum BatchPass {
 
 /// The GPU copy of a mesh among `meshes` and `custom_meshes`, or `None` for
 /// a caller's mesh that was never uploaded.
-fn gpu_mesh_in<'a>(
+pub(super) fn gpu_mesh_in<'a>(
     meshes: &'a Meshes,
     custom_meshes: &'a FxHashMap<u64, Cached<GpuMesh>>,
     key: MeshKey,

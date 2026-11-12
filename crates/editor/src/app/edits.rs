@@ -105,6 +105,10 @@ impl EditorApp {
                 self.ask_sky(path);
                 return;
             }
+            Edit::UseDefaultSky => {
+                self.ask_default_sky();
+                return;
+            }
             Edit::OpenSourceFile => {
                 self.open_script_instance(id);
                 return;
@@ -1466,6 +1470,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::OpenBehaviorTree
         | Edit::PickSkyImage
         | Edit::AskSkyImage(_)
+        | Edit::UseDefaultSky
         | Edit::PickClip
         | Edit::OpenClip
         | Edit::Animate

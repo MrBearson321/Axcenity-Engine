@@ -9,6 +9,7 @@ These pages describe the engine as it is today. The **Learn** chapters teach eac
 
 ## Where to start
 
+- Checking your computer can run it? See [System requirements](reference/system-requirements.md).
 - New to Axcenity? Start with [Getting started](learn/getting-started.md), then follow the chapters in order.
 - Writing code? Read [Scripting reference](reference/scripting.md), then look things up in the **API Reference**, which lists every class, property, method, event, data type and enum the engine has.
 - Want to know how the engine fits together? Read [Engine architecture](reference/architecture.md).

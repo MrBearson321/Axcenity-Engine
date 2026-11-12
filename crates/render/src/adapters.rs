@@ -67,6 +67,35 @@ fn preference(info: &wgpu::AdapterInfo, windows: bool) -> (u8, u8) {
     (kind, api)
 }
 
+/// Adds hardware ray tracing to `descriptor` when `adapter` has it: wgpu's
+/// ray queries (an experimental wgpu feature) and the adapter's
+/// acceleration structure limits. Ray traced effects are off until a
+/// setting turns one on (`docs/rendering/ray-tracing.md`), but the device
+/// must be opened with the feature for them to be turned on later.
+/// `AXCENITY_RAY_TRACING=0` opens devices without it.
+// The one unsafe call is wgpu's opt-in to its experimental features.
+#[allow(unsafe_code)]
+pub fn with_ray_queries(adapter: &wgpu::Adapter, descriptor: &mut wgpu::DeviceDescriptor<'_>) {
+    let wanted = std::env::var("AXCENITY_RAY_TRACING").map_or(true, |value| value != "0");
+    if !wanted
+        || !adapter
+            .features()
+            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
+    {
+        return;
+    }
+    descriptor.required_features |= wgpu::Features::EXPERIMENTAL_RAY_QUERY;
+    descriptor.required_limits = descriptor
+        .required_limits
+        .clone()
+        .using_acceleration_structure_values(adapter.limits());
+    // SAFETY: wgpu marks ray queries experimental: its API may change and
+    // misuse may not be caught. The renderer only builds acceleration
+    // structures and traces rays while a ray traced effect is on, through
+    // `renderer/ray_tracing.rs`, whose tests run on every backend we have.
+    descriptor.experimental_features = unsafe { wgpu::ExperimentalFeatures::enabled() };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

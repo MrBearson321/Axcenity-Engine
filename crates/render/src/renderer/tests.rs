@@ -26,6 +26,7 @@ mod level_of_detail;
 mod light_probe_volumes;
 mod outlines;
 mod point_and_contact_shadows;
+mod ray_tracing;
 mod realtime_gi;
 mod reflection_probes;
 mod shading;
@@ -392,6 +393,23 @@ pub(super) fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = crate::adapters::instance();
     let adapter = pollster::block_on(crate::adapters::adapter(&instance, None)).ok()?;
     pollster::block_on(adapter.request_device(&Default::default())).ok()
+}
+
+/// A GPU device with hardware ray tracing (wgpu's ray queries), or `None`
+/// where the GPU (or its driver) has none. Lavapipe, Mesa's software
+/// Vulkan, has them, so these run on machines without a GPU too.
+pub(super) fn ray_test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let instance = crate::adapters::instance();
+    let adapter = pollster::block_on(crate::adapters::adapter(&instance, None)).ok()?;
+    let mut descriptor = wgpu::DeviceDescriptor::default();
+    crate::adapters::with_ray_queries(&adapter, &mut descriptor);
+    if !descriptor
+        .required_features
+        .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
+    {
+        return None;
+    }
+    pollster::block_on(adapter.request_device(&descriptor)).ok()
 }
 
 fn point_light(position: Vec3, range: f32) -> Light {
@@ -955,7 +973,10 @@ fn stats_time_each_pass_the_frame_draws() {
     for pass in FramePass::ALL {
         let expected = !matches!(
             pass,
-            FramePass::Ui | FramePass::VolumetricFog | FramePass::Particles
+            FramePass::AccelerationStructures
+                | FramePass::Ui
+                | FramePass::VolumetricFog
+                | FramePass::Particles
         );
         assert_eq!(stats.pass_time(pass).is_some(), expected, "{pass:?}");
     }

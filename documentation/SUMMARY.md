@@ -2,6 +2,10 @@
 
 * [Axcenity documentation](README.md)
 
+## Before you start
+
+* [System requirements](reference/system-requirements.md)
+
 ## Learn: The basics
 
 * [Getting started](learn/getting-started.md)
