@@ -292,6 +292,15 @@ impl HostSession {
                     self.conns.remove(&member);
                     let out = self.host.disconnected(member);
                     self.route(out);
+                    // A dropped or quiet connection, or one closed on
+                    // purpose: the joiner reconnects on its own if it can.
+                    let name = self
+                        .access
+                        .members()
+                        .iter()
+                        .find(|m| m.id == member)
+                        .map_or_else(|| format!("member {}", member.0), |m| m.name.clone());
+                    log::info!("Team Create: {name} left (or their connection dropped)");
                 }
             }
         }

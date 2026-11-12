@@ -493,7 +493,16 @@ fn connect(
         StreamOwned::new(conn, stream),
         Some(ws_config(MAX_TO_CLIENT)),
     )
-    .map_err(|error| io::Error::other(error.to_string()))?;
+    .map_err(|error| match error {
+        // The read timeout ran out mid-handshake: a dead link or a host
+        // that's busy. Said plainly, not as "Interrupted handshake
+        // (WouldBlock)".
+        tungstenite::HandshakeError::Interrupted(_) => io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("no answer within {} s", CONNECT_TIMEOUT.as_secs()),
+        ),
+        tungstenite::HandshakeError::Failure(error) => io::Error::other(error.to_string()),
+    })?;
     ws.get_ref().sock.set_read_timeout(Some(POLL))?;
     Ok(ws)
 }
