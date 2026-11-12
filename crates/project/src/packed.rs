@@ -101,7 +101,7 @@ pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
 }
 
 /// How [`pack_game_with`] packs a game.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PackOptions {
     /// Leave out each texture's source when it has a current cooked copy
     /// (roadmap G12, cooked-only games): the file ships empty and is listed
@@ -110,15 +110,55 @@ pub struct PackOptions {
     /// and the game's icon and banner always ship whole: they're read as
     /// files, not as textures.
     pub cooked_only: bool,
+    /// zstd's level for the entries, 1 to 19 (a build profile's, R13);
+    /// 0 is the usual level, 3.
+    pub compression_level: i32,
+    /// The Developer Console setting the game's manifest gets (a build
+    /// profile's, R13), or `None` for the project's own.
+    pub developer_console: Option<bool>,
+}
+
+/// One file in a packed game, for a build report (R13).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackedEntry {
+    /// Its path in the game, such as `assets/textures/wood.png` (a block
+    /// script under its translated `.lua` name).
+    pub name: String,
+    /// Its size unpacked.
+    pub bytes: u64,
+    /// The bytes it takes in the game file (compressed, if that helped).
+    pub stored: u64,
+}
+
+/// What [`pack_game_reporting`] packed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PackReport {
+    /// Every file, in the game file's order.
+    pub entries: Vec<PackedEntry>,
+    /// Texture sources left out for their cooked copies (G12), with the
+    /// bytes each would have been.
+    pub left_out: Vec<(String, u64)>,
 }
 
 /// [`pack_game`], with `options`.
 pub fn pack_game_with(folder: &Path, options: PackOptions) -> Result<Vec<u8>, PackError> {
+    pack_game_reporting(folder, options).map(|(game, _)| game)
+}
+
+/// [`pack_game_with`], also saying what went in (for Build Game's report).
+pub fn pack_game_reporting(
+    folder: &Path,
+    options: PackOptions,
+) -> Result<(Vec<u8>, PackReport), PackError> {
+    let mut report = PackReport::default();
     let mut files = Vec::new();
     collect_runtime_files(folder, folder, &mut files)?;
     add_cooked_textures(folder, &mut files)?;
     if options.cooked_only {
-        leave_out_cooked_sources(folder, &mut files);
+        report.left_out = leave_out_cooked_sources(folder, &mut files);
+    }
+    if let Some(on) = options.developer_console {
+        set_packed_developer_console(&mut files, on);
     }
     add_asset_index(folder, &mut files);
     files.sort_by(|a, b| a.name.cmp(&b.name));
@@ -126,6 +166,10 @@ pub fn pack_game_with(folder: &Path, options: PackOptions) -> Result<Vec<u8>, Pa
         return Err(PackError::TooManyFiles);
     }
 
+    let level = match options.compression_level {
+        0 => ZSTD_LEVEL,
+        level => level.clamp(1, 19),
+    };
     let mut names = HashSet::new();
     let mut output = Vec::new();
     output.extend_from_slice(MAGIC);
@@ -148,15 +192,47 @@ pub fn pack_game_with(folder: &Path, options: PackOptions) -> Result<Vec<u8>, Pa
             if !names.insert(translated_name.clone()) {
                 return Err(PackError::InvalidArchive);
             }
-            append_entry(&mut output, &translated_name, source.as_bytes(), 0)?;
+            let stored = append_entry(&mut output, &translated_name, source.as_bytes(), 0, level)?;
+            report.entries.push(PackedEntry {
+                name: translated_name,
+                bytes: source.len() as u64,
+                stored,
+            });
             continue;
         }
         if !names.insert(name.clone()) {
             return Err(PackError::InvalidArchive);
         }
-        append_entry(&mut output, &name, &file.contents, file.modified)?;
+        let stored = append_entry(&mut output, &name, &file.contents, file.modified, level)?;
+        report.entries.push(PackedEntry {
+            bytes: file.contents.len() as u64,
+            name,
+            stored,
+        });
     }
-    Ok(output)
+    Ok((output, report))
+}
+
+/// The game's copy of the manifest with `developer_console` set to `on`
+/// (a build profile's, R13); the project's file isn't changed.
+fn set_packed_developer_console(files: &mut [PackFile], on: bool) {
+    let Some(file) = files
+        .iter_mut()
+        .find(|file| file.name == crate::MANIFEST_FILE)
+    else {
+        return;
+    };
+    let Ok(mut manifest) = serde_json::from_slice::<serde_json::Value>(&file.contents) else {
+        return;
+    };
+    let Some(fields) = manifest.as_object_mut() else {
+        return;
+    };
+    fields.insert("developer_console".to_owned(), serde_json::Value::Bool(on));
+    if let Ok(mut text) = serde_json::to_vec_pretty(&manifest) {
+        text.push(b'\n');
+        file.contents = text;
+    }
 }
 
 /// Extracts a packed game into an empty folder, refusing paths that could
@@ -427,7 +503,7 @@ fn add_cooked_textures(root: &Path, files: &mut Vec<PackFile>) -> Result<(), Pac
 /// Empties each texture source in `files` whose current cooked copy is in
 /// `files` too, and lists them in `assets::COOKED_ONLY_FILE` (G12). Terrain
 /// data (`terrain_files`) and the manifest's icon and banner are kept.
-fn leave_out_cooked_sources(root: &Path, files: &mut Vec<PackFile>) {
+fn leave_out_cooked_sources(root: &Path, files: &mut Vec<PackFile>) -> Vec<(String, u64)> {
     let packed: HashSet<String> = files.iter().map(|file| file.name.clone()).collect();
     let branding = crate::read_manifest(root)
         .map(|manifest| manifest.branding)
@@ -448,18 +524,20 @@ fn leave_out_cooked_sources(root: &Path, files: &mut Vec<PackFile>) {
             && packed.contains(&axcenity_assets::cooked_relative_path(name))
             && axcenity_assets::is_cooked(root, name)
         {
+            left_out.push((name.clone(), file.contents.len() as u64));
             file.contents = Vec::new();
-            left_out.push(name.clone());
         }
     }
     if !left_out.is_empty() {
         left_out.sort();
+        let names: Vec<&str> = left_out.iter().map(|(name, _)| name.as_str()).collect();
         files.push(PackFile {
             name: axcenity_assets::COOKED_ONLY_FILE.to_owned(),
-            contents: (left_out.join("\n") + "\n").into_bytes(),
+            contents: (names.join("\n") + "\n").into_bytes(),
             modified: 0,
         });
     }
+    left_out
 }
 
 fn is_texture_file(name: &str) -> bool {
@@ -540,13 +618,14 @@ fn append_entry(
     name: &str,
     contents: &[u8],
     modified: u64,
-) -> Result<(), PackError> {
+    level: i32,
+) -> Result<u64, PackError> {
     if !safe_entry_path(name) || name.len() > MAX_PATH_BYTES {
         return Err(PackError::InvalidArchive);
     }
     // With zstd's checksum, so a damaged entry fails to unpack instead of
     // giving the game other bytes.
-    let compressed = zstd::bulk::Compressor::new(ZSTD_LEVEL)
+    let compressed = zstd::bulk::Compressor::new(level)
         .and_then(|mut compressor| {
             compressor.include_checksum(true)?;
             compressor.compress(contents)
@@ -570,7 +649,7 @@ fn append_entry(
     output.extend_from_slice(&file_len.to_le_bytes());
     output.extend_from_slice(name.as_bytes());
     output.extend_from_slice(data);
-    Ok(())
+    Ok(data_len)
 }
 
 fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, PackError> {
@@ -863,7 +942,10 @@ mod tests {
             axcenity_assets::write_cooked(&project, name, stamp, &cooked).unwrap();
         }
 
-        let options = PackOptions { cooked_only: true };
+        let options = PackOptions {
+            cooked_only: true,
+            ..PackOptions::default()
+        };
         let game = pack_game_with(&project, options).unwrap();
         let unpacked = temp_folder("cooked-only-unpacked");
         let _ = fs::remove_dir_all(&unpacked);
@@ -891,6 +973,51 @@ mod tests {
         fs::rename(&unpacked, &other).unwrap();
         assert!(axcenity_assets::read_cooked(&other, wood).is_none());
         for folder in [project, other] {
+            let _ = fs::remove_dir_all(folder);
+        }
+    }
+
+    #[test]
+    fn a_profiles_options_set_the_games_console_and_compression_and_say_what_went_in() {
+        let project = temp_folder("pack-report");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("scripts")).unwrap();
+        fs::write(
+            project.join(crate::MANIFEST_FILE),
+            r#"{"name": "Crates", "format_version": 1, "developer_console": false}"#,
+        )
+        .unwrap();
+        let script = "print('hello')\n".repeat(400);
+        fs::write(project.join("scripts/Main.server.lua"), &script).unwrap();
+
+        let fast = PackOptions {
+            compression_level: 1,
+            developer_console: Some(true),
+            ..PackOptions::default()
+        };
+        let (game, report) = pack_game_reporting(&project, fast).unwrap();
+        let names: Vec<&str> = report
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, [crate::MANIFEST_FILE, "scripts/Main.server.lua"]);
+        let main = &report.entries[1];
+        assert_eq!(main.bytes, script.len() as u64);
+        assert!(main.stored < main.bytes / 10, "compressed: {main:?}");
+        assert!(report.left_out.is_empty());
+
+        let unpacked = temp_folder("pack-report-unpacked");
+        let _ = fs::remove_dir_all(&unpacked);
+        unpack_game(&game, &unpacked).unwrap();
+        let manifest = crate::read_manifest(&unpacked).unwrap();
+        assert!(manifest.developer_console, "the profile's setting");
+        assert_eq!(manifest.name, "Crates");
+        let own = crate::read_manifest(&project).unwrap();
+        assert!(!own.developer_console, "the project's file is unchanged");
+        // The same files and settings make the same game file.
+        assert_eq!(pack_game_reporting(&project, fast).unwrap().0, game);
+        for folder in [project, unpacked] {
             let _ = fs::remove_dir_all(folder);
         }
     }
@@ -1070,7 +1197,7 @@ mod tests {
         archive.extend_from_slice(&VERSION.to_le_bytes());
         archive.extend_from_slice(&(entries.len() as u32).to_le_bytes());
         for (name, contents, modified) in entries {
-            append_entry(&mut archive, name, contents, *modified).unwrap();
+            append_entry(&mut archive, name, contents, *modified, ZSTD_LEVEL).unwrap();
         }
         archive
     }

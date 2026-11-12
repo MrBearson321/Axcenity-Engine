@@ -34,6 +34,7 @@ Every file the engine reads or writes, with its owner and where the full format 
 | `<asset>.import.json` | Stable asset ID `ax://…` | `assets::asset_id` | format_version 1 | `docs/editor/assets.md` |
 | `tests/**/*.spec.lua` | Game tests | `testing` | — | `docs/project/game-tests.md` |
 | `objects/**/*.lua` | Scripts inside objects, named by a script node's `SourceFile` (G2); world, level and prefab files holding such nodes are written as format `2` | `project` | — | `docs/project/world.md` |
+| `build-profiles.json`; beside a built game `build-report.json`, `build-report.txt` | Build profiles (R13; not packed); what a build put in the game and with what settings | `project::build_profiles` | format_version 1 | `docs/project/export.md` |
 | `CREDITS.txt` | Credits for assets fetched through the Toolbox | `toolbox::provenance` | — | `docs/research/asset-sources/` |
 | `assets/probes/*` | Reflection-probe and light-probe bakes | `assets::probe`, `light_probes` | — | `docs/rendering/sky.md` |
 | Terrain folders (`heights.png`, paint maps, `foliage.json`) | Terrain data | `terrain::files`, `project::terrain_files` | `GENERATOR_VERSION` for generators | `docs/terrain.md` |
