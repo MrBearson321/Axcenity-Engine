@@ -124,6 +124,13 @@ impl Template {
         files
     }
 
+    /// Whether a project made from it starts under the default sky
+    /// ([`DEFAULT_SKY_PATH`]). The genre templates have skies of their own
+    /// (their times of day), so only the blank ones do.
+    pub fn has_default_sky(self) -> bool {
+        Template::BLANK.contains(&self)
+    }
+
     pub(super) fn world(self) -> &'static str {
         match self {
             Template::Baseplate => BASEPLATE_WORLD,
@@ -135,13 +142,18 @@ impl Template {
 }
 
 // New worlds use Neutral tone mapping; a world saved without it is Classic.
+// The blank ones start under the default sky (`default_sky.rs`), with the
+// sun where its sun is; `create_project_from` writes its file.
 
 pub(super) const EMPTY_WORLD: &str = r#"{
   "format_version": 1,
   "workspace": {},
   "lighting": {
     "properties": {
-      "ToneMapping": "Neutral"
+      "ToneMapping": "Neutral",
+      "SkyImage": "assets/sky/partly-cloudy-sky.hdr",
+      "ClockTime": 10.52,
+      "GeographicLatitude": -36.77
     }
   }
 }
@@ -166,7 +178,10 @@ pub(super) const BASEPLATE_WORLD: &str = r#"{
   },
   "lighting": {
     "properties": {
-      "ToneMapping": "Neutral"
+      "ToneMapping": "Neutral",
+      "SkyImage": "assets/sky/partly-cloudy-sky.hdr",
+      "ClockTime": 10.52,
+      "GeographicLatitude": -36.77
     }
   }
 }
@@ -200,6 +215,9 @@ pub fn create_project_from(
         .map_err(SaveError::new(&folder))
         .and_then(|()| write_through_temporary(&folder.join(MANIFEST_FILE), &manifest_text))
         .and_then(|()| write_through_temporary(&folder.join(WORLD_FILE), template.world()));
+    if template.has_default_sky() {
+        written = written.and_then(|()| add_default_sky(&folder).map(|_| ()));
+    }
     for (path, bytes) in template.files() {
         if written.is_err() {
             break;

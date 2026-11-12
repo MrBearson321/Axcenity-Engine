@@ -4,7 +4,11 @@
 //! On Windows and Linux the OS frame is removed entirely, so this draws the
 //! minimize, maximize and close buttons, and resize grips along the edges.
 //! On macOS the frame stays and the content runs under a transparent title
-//! bar, so the system's traffic lights sit at the header's left.
+//! bar, so the system's traffic lights sit at the header's left, and the
+//! menus are in the system menu bar (`app/native_menu.rs`), so the header
+//! keeps only the title and the status chips. In full screen the traffic
+//! lights go and the system shows the menu bar and title bar when the
+//! pointer reaches the top of the screen, as for any Mac app.
 
 use eframe::egui::{
     self, Color32, CursorIcon, Rect, ResizeDirection, Sense, Stroke, StrokeKind, ViewportCommand,
@@ -19,8 +23,22 @@ pub const HEIGHT: f32 = 34.0;
 /// Whether this OS keeps its own window buttons (macOS's traffic lights).
 const NATIVE_BUTTONS: bool = cfg!(target_os = "macos");
 
-/// Room left free at the header's left for the traffic lights.
-pub const LEFT_INSET: f32 = if NATIVE_BUTTONS { 76.0 } else { 0.0 };
+/// Whether the menus are in the system menu bar rather than the header.
+/// Tests draw the header's menus on every OS, so they can click them.
+pub const NATIVE_MENU: bool = cfg!(all(target_os = "macos", not(test)));
+
+/// Room the traffic lights take at the header's left.
+const TRAFFIC_LIGHTS: f32 = 76.0;
+
+/// Room to leave free at the header's left: the traffic lights' on macOS,
+/// except in full screen, where macOS hides them.
+pub fn left_inset(ctx: &egui::Context) -> f32 {
+    if NATIVE_BUTTONS && !fullscreen(ctx) {
+        TRAFFIC_LIGHTS
+    } else {
+        0.0
+    }
+}
 
 const BUTTON_WIDTH: f32 = 46.0;
 
@@ -54,17 +72,55 @@ fn fullscreen(ctx: &egui::Context) -> bool {
 }
 
 /// Makes `rect` move the window when dragged, and maximize or restore it when
-/// double-clicked. Call it before adding the header's widgets: egui gives the
-/// pointer to the widget added last, so they stay clickable on top of it.
+/// double-clicked (on macOS, what System Settings says a double-click on a
+/// title bar does). Call it before adding the header's widgets: egui gives
+/// the pointer to the widget added last, so they stay clickable on top of it.
 pub fn drag_region(ui: &mut egui::Ui, rect: Rect) {
     let response = ui.interact(rect, ui.id().with("drag window"), Sense::click_and_drag());
     if response.double_clicked() {
-        let maximized = maximized(ui.ctx());
-        ui.ctx()
-            .send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+        match double_click() {
+            DoubleClick::Zoom => {
+                let maximized = maximized(ui.ctx());
+                ui.ctx()
+                    .send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+            }
+            DoubleClick::Minimize => ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true)),
+            DoubleClick::Nothing => {}
+        }
     } else if response.drag_started_by(egui::PointerButton::Primary) {
         ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
     }
+}
+
+/// What a double-click on the title bar does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+enum DoubleClick {
+    /// Maximize or restore (on macOS, zoom or fill).
+    Zoom,
+    Minimize,
+    Nothing,
+}
+
+/// On macOS, System Settings > Desktop & Dock > "Double-click a window's
+/// title bar to": Fill or Zoom (the default), Minimize, or Do Nothing.
+#[cfg(target_os = "macos")]
+fn double_click() -> DoubleClick {
+    use objc2_foundation::{NSUserDefaults, ns_string};
+    let defaults = NSUserDefaults::standardUserDefaults();
+    let action = defaults
+        .stringForKey(ns_string!("AppleActionOnDoubleClick"))
+        .map(|action| action.to_string());
+    match action.as_deref() {
+        Some("Minimize") => DoubleClick::Minimize,
+        Some("None") => DoubleClick::Nothing,
+        _ => DoubleClick::Zoom,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn double_click() -> DoubleClick {
+    DoubleClick::Zoom
 }
 
 /// What a panel window's buttons asked for.

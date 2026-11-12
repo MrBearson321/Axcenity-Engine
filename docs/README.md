@@ -23,6 +23,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Levels, `LevelService`, the Levels panel | [project/levels.md](project/levels.md) |
 | Cutscene sequences, the Sequence Instance, the Sequencer tab | [project/sequences.md](project/sequences.md) |
 | Platforms or file access | [architecture/portability.md](architecture/portability.md) |
+| The user-facing system requirements (supported systems, minimum and recommended processor, memory, graphics, network, storage) | [../documentation/reference/system-requirements.md](../documentation/reference/system-requirements.md) |
 | Build speed, test commands, or nextest settings | [development.md](development.md) |
 | Scope and priorities: CI (off on purpose), target platforms, determinism, the Vector3 caveat, dedicated hosting, and the development policy | [development-policy.md](development-policy.md) |
 | Whole-frame benchmarks, the S10k scene, `--bench`, profiler spans and Tracy | [benchmarks.md](benchmarks.md) |

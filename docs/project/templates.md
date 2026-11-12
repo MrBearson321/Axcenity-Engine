@@ -2,6 +2,8 @@
 
 New Project's playable templates (unified Phase 69): First Person, Third Person, Vehicle, Top Down and Multiplayer Arena, beside Baseplate and Empty (the Starter scene went in unified Phase 92: the genre templates replace it; projects made from it are unaffected). Code: `crates/project/src/templates.rs` (`Template`, `create_project_from`), `crates/project/build.rs`, and the editor's `start.rs` and `start/dialogs.rs`.
 
+Baseplate and Empty start under the default sky: `create_project_from` writes `assets/sky/partly-cloudy-sky.hdr` (`Template::has_default_sky`) and their worlds set it as Lighting's `SkyImage` with the sun to match ([../rendering/sky.md](../rendering/sky.md), The default sky). The genre templates keep their own skies.
+
 ## Where they live
 
 - Each is a folder in the repository's `templates/` (`first-person`, `third-person`, `vehicle`, `top-down`, `arena`). `templates/shared/` holds what every one has: the `GameMenu` prefab (`assets/prefabs/GameMenu.prefab.json`), `menu.css`, `scripts/GameMenu.client.lua`, `GameSaves.server.lua`, `LocalGui.module.lua`, `MenuSettings.module.lua` and `tests/menu.spec.lua`.

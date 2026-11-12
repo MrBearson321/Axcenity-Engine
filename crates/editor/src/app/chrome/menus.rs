@@ -14,7 +14,7 @@ impl EditorApp {
         }
         let row_height = ui.spacing().interact_size.y;
         let row = egui::Rect::from_x_y_ranges(
-            bar.left() + 10.0 + window_frame::LEFT_INSET
+            bar.left() + 10.0 + window_frame::left_inset(ui.ctx())
                 ..=bar.right() - window_frame::buttons_width() - 6.0,
             bar.center().y - row_height * 0.5..=bar.center().y + row_height * 0.5,
         );
@@ -72,432 +72,10 @@ impl EditorApp {
                     );
                 }
                 ui.add_space(4.0);
-                ui.menu_button("File", |ui| {
-                    let editing = self.project.is_some() && !self.playing();
-                    let not_editing = if self.playing() {
-                        "Press Stop to edit."
-                    } else {
-                        "Open a project first."
-                    };
-                    widgets::section_label(ui, "Project");
-                    if ui
-                        .button(item(ui, icons::FILE_PLUS, "New Project…"))
-                        .on_hover_text("Close this project and make a new one.")
-                        .clicked()
-                    {
-                        self.request_and_go_ahead(ui.ctx(), Discard::NewProject);
-                    }
-                    if ui
-                        .button(item(ui, icons::FOLDER_OPEN, "Open Project…"))
-                        .clicked()
-                    {
-                        self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
-                    }
-                    let save = egui::Button::new(item(ui, icons::FLOPPY_DISK, "Save"))
-                        .shortcut_text(crate::shortcuts::Action::Save.menu_text(ui.ctx()));
-                    if ui.add_enabled(self.project.is_some(), save).clicked() {
-                        self.save();
-                    }
-                    if ui
-                        .add_enabled(
-                            editing,
-                            egui::Button::new(item(
-                                ui,
-                                icons::CLOCK_COUNTER_CLOCKWISE,
-                                "Version History…",
-                            )),
-                        )
-                        .clicked()
-                    {
-                        self.version_history.open = true;
-                    }
-                    if ui
-                        .add_enabled(
-                            editing,
-                            egui::Button::new(item(ui, icons::PUSH_PIN, "Save Checkpoint…")),
-                        )
-                        .on_hover_text(
-                            "Save with a message, and keep that version however many saves follow.",
-                        )
-                        .clicked()
-                    {
-                        self.version_history.open_for_checkpoint();
-                    }
-                    if ui
-                    .add_enabled(
-                        editing,
-                        egui::Button::new(item(ui, icons::ARCHIVE, "Back Up Project")),
-                    )
-                    .on_hover_text(
-                        "Write a .zip of the project to its backup folder (asked the first time).",
-                    )
-                    .clicked()
-                {
-                    self.back_up_project(false);
+                // On macOS they're in the system menu bar instead (`native_menu.rs`).
+                if !window_frame::NATIVE_MENU {
+                    self.header_menus(ui);
                 }
-                    if ui
-                        .add_enabled(
-                            editing,
-                            egui::Button::new(item(ui, icons::COPY_SIMPLE, "Save as Template…")),
-                        )
-                        .on_hover_text(
-                            "Keep this project as a starting point that New Project offers \
-                             under Your templates.",
-                        )
-                        .clicked()
-                    {
-                        self.open_save_template();
-                    }
-                    if ui
-                        .add_enabled(
-                            self.project.is_some(),
-                            egui::Button::new(item(ui, icons::GAME_CONTROLLER, "Input…")),
-                        )
-                        .on_hover_text(
-                            "The game's actions (Move, Jump, Interact…) and the keys, mouse \
-                         buttons and controller buttons bound to each.",
-                        )
-                        .on_disabled_hover_text("Open a project first.")
-                        .clicked()
-                    {
-                        self.input_settings.open = true;
-                    }
-                    if ui
-                        .add_enabled(
-                            editing,
-                            egui::Button::new(item(ui, icons::HOUSE, "Close Project")),
-                        )
-                        .clicked()
-                    {
-                        self.request_and_go_ahead(ui.ctx(), Discard::CloseProject);
-                    }
-
-                    ui.separator();
-                    widgets::section_label(ui, "Import");
-                    let import = egui::Button::new(item(ui, icons::FILE_ARROW_DOWN, "Import…"));
-                    if ui
-                        .add_enabled(editing, import)
-                        .on_hover_text(IMPORT_HOVER)
-                        .on_disabled_hover_text(not_editing)
-                        .clicked()
-                    {
-                        self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
-                    }
-
-                    ui.separator();
-                    widgets::section_label(ui, "Collaborate");
-                    if ui
-                        .add_enabled(
-                            editing && self.team.is_none(),
-                            egui::Button::new(item(
-                                ui,
-                                icons::SHARE_NETWORK,
-                                "Start Collaborate Session…",
-                            )),
-                        )
-                        .on_hover_text("Host a session others can join with an invite link.")
-                        .clicked()
-                    {
-                        self.share_with_team_create();
-                    }
-                    if ui
-                        .add_enabled(
-                            editing && self.team.is_none(),
-                            egui::Button::new(item(
-                                ui,
-                                icons::SIGN_IN,
-                                "Join Collaborate Session…",
-                            )),
-                        )
-                        .on_hover_text("Join someone's session with their invite link.")
-                        .clicked()
-                    {
-                        self.join_team_create();
-                    }
-                    if ui
-                        .button(item(ui, icons::GEAR, "Set Up Collaborate…"))
-                        .on_hover_text(
-                            "Get Tailscale ready so people anywhere can join your sessions.",
-                        )
-                        .clicked()
-                    {
-                        self.set_up_collaborate();
-                    }
-
-                    ui.separator();
-                    widgets::section_label(ui, "Publish");
-                    self.build_game_menu(ui, editing);
-
-                    ui.separator();
-                    if ui
-                        .add_enabled(editing, egui::Button::new(plain(ui, "Open Stylesheet…")))
-                        .clicked()
-                    {
-                        self.open_stylesheet_with_dialog();
-                    }
-                    if ui
-                        .add_enabled(editing, egui::Button::new(plain(ui, "New Stylesheet")))
-                        .clicked()
-                    {
-                        self.new_stylesheet();
-                    }
-                    if ui
-                        .add_enabled(
-                            self.project.is_some(),
-                            egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Check Assets")),
-                        )
-                        .on_hover_text(
-                            "Scan the open project for missing files, invalid references, \
-                         import failures, and broken dependencies.",
-                        )
-                        .on_disabled_hover_text("Open a project first.")
-                        .clicked()
-                    {
-                        self.run_asset_check();
-                    }
-                    if ui
-                        .add_enabled(
-                            self.project.is_some(),
-                            egui::Button::new(item(
-                                ui,
-                                icons::SPARKLE,
-                                "Set Up VS Code Autocomplete",
-                            )),
-                        )
-                        .on_hover_text(
-                            "Add the engine's API to this project for luau-lsp, so VS Code \
-                         autocompletes it and checks scripts as Luau.",
-                        )
-                        .on_disabled_hover_text("Open a project first.")
-                        .clicked()
-                    {
-                        self.set_up_autocomplete();
-                    }
-                    ui.separator();
-                    let settings = egui::Button::new(item(ui, icons::GEAR_SIX, "Settings…"))
-                        .shortcut_text(crate::shortcuts::Action::Settings.menu_text(ui.ctx()));
-                    if ui.add(settings).clicked() {
-                        self.settings.open = true;
-                    }
-                    ui.separator();
-                    if ui.button(item(ui, icons::SIGN_OUT, "Quit")).clicked() {
-                        self.request_and_go_ahead(ui.ctx(), Discard::Quit);
-                    }
-                });
-                ui.menu_button("Edit", |ui| {
-                    // Nothing can be edited mid-drag, or while the game plays.
-                    let busy = self.viewport.is_dragging() || self.playing();
-                    // "Undo Move Pad", so it's clear what will be undone.
-                    let undo_label = self.history.undo_label().map(str::to_string);
-                    let undo = egui::Button::new(item(
-                        ui,
-                        icons::ARROW_COUNTER_CLOCKWISE,
-                        &match &undo_label {
-                            Some(label) => format!("Undo {label}"),
-                            None => "Undo".to_string(),
-                        },
-                    ))
-                    .shortcut_text(crate::shortcuts::Action::Undo.menu_text(ui.ctx()));
-                    if ui
-                        .add_enabled(undo_label.is_some() && !busy, undo)
-                        .clicked()
-                    {
-                        self.undo();
-                    }
-                    let redo_label = self.history.redo_label().map(str::to_string);
-                    let redo = egui::Button::new(item(
-                        ui,
-                        icons::ARROW_CLOCKWISE,
-                        &match &redo_label {
-                            Some(label) => format!("Redo {label}"),
-                            None => "Redo".to_string(),
-                        },
-                    ))
-                    .shortcut_text(crate::shortcuts::Action::Redo.menu_text(ui.ctx()));
-                    if ui
-                        .add_enabled(redo_label.is_some() && !busy, redo)
-                        .clicked()
-                    {
-                        self.redo();
-                    }
-                    ui.add_enabled_ui(!busy, |ui| {
-                        crate::widgets::menu_button(
-                            ui,
-                            Some(icons::CLOCK_COUNTER_CLOCKWISE),
-                            "Undo History",
-                            |ui| {
-                                if let Some(jump) = undo_history(ui, &self.history) {
-                                    self.jump_in_history(jump);
-                                    ui.close();
-                                }
-                            },
-                        );
-                    });
-                    ui.separator();
-
-                    // These act on the selection, the same as its right-click menu in the Explorer.
-                    let selected = self.selected;
-                    let renamable = selected
-                        .and_then(|id| self.world.get(id))
-                        .is_some_and(properties::can_rename)
-                        && !self.playing();
-                    let editable = selected
-                        .is_some_and(|id| tree::check_editable(&self.world, id).is_ok())
-                        && !busy;
-                    let rename = egui::Button::new(item(ui, icons::PENCIL_SIMPLE, "Rename"))
-                        .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
-                    if ui.add_enabled(renamable, rename).clicked()
-                        && let Some(id) = selected
-                    {
-                        self.explorer.start_rename(&self.world, id);
-                    }
-                    let duplicate = egui::Button::new(item(ui, icons::COPY, "Duplicate"))
-                        .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx()));
-                    if ui.add_enabled(editable, duplicate).clicked() && selected.is_some() {
-                        self.duplicate_selected();
-                    }
-                    let deletable = selected
-                        .is_some_and(|id| tree::check_delete(&self.world, id).is_ok())
-                        && !busy;
-                    let delete = egui::Button::new(item(ui, icons::TRASH, "Delete"))
-                        .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx()));
-                    if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
-                        self.delete_selected();
-                    }
-                    ui.separator();
-                    let search =
-                        egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Search Everything…"))
-                            .shortcut_text(crate::shortcuts::Action::Search.menu_text(ui.ctx()));
-                    if ui.add(search).clicked() {
-                        self.palette.toggle();
-                    }
-                    let palette = egui::Button::new(item(ui, icons::COMMAND, "Command Palette"))
-                        .shortcut_text(crate::shortcuts::Action::Palette.menu_text(ui.ctx()));
-                    if ui.add(palette).clicked() {
-                        self.palette.toggle_commands();
-                    }
-                    let quick =
-                        egui::Button::new(item(ui, icons::FILE_MAGNIFYING_GLASS, "Quick Open…"))
-                            .shortcut_text(crate::shortcuts::Action::QuickOpen.menu_text(ui.ctx()));
-                    if ui.add_enabled(self.project.is_some(), quick).clicked() {
-                        self.palette.toggle();
-                    }
-                    let find =
-                        egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Find in Scripts…"))
-                            .shortcut_text(
-                                crate::shortcuts::Action::FindInScripts.menu_text(ui.ctx()),
-                            );
-                    if ui.add_enabled(self.project.is_some(), find).clicked() {
-                        self.find.show_and_focus();
-                        self.search_scripts();
-                    }
-                });
-                // View: the editor's own windows and how they're laid out. The
-                // look of the whole editor (theme, accent, text size) is in
-                // Settings, one click away on the gear at the right.
-                ui.menu_button("View", |ui| {
-                    widgets::section_label(ui, "Panels");
-                    for pane in Pane::CLOSABLE {
-                        let item = egui::Button::selectable(
-                            self.layout.is_open(pane),
-                            item(ui, pane.icon(), pane.label()),
-                        );
-                        if ui
-                            .add(item)
-                            .on_hover_text("Show or hide it. Drag a panel by its tab to move it.")
-                            .clicked()
-                        {
-                            self.layout.toggle(pane);
-                        }
-                    }
-                    if ui
-                        .button(item(ui, icons::ARROW_COUNTER_CLOCKWISE, "Reset Layout"))
-                        .on_hover_text("Put every panel back where it starts.")
-                        .clicked()
-                    {
-                        self.layout.reset();
-                    }
-                    crate::widgets::menu_button(ui, Some(icons::LAYOUT), "Layout", |ui| {
-                        self.layout_menu(ui);
-                    });
-                    ui.separator();
-                    if ui
-                        .button(item(ui, icons::STAR, "New Ribbon Tab…"))
-                        .on_hover_text("Make your own ribbon tab from any of the ribbon's groups.")
-                        .clicked()
-                    {
-                        self.ribbon_tabs.edit(None);
-                    }
-                });
-                // Viewport: what the Scene view draws over the world while editing.
-                ui.menu_button("Viewport", |ui| self.viewport_menu(ui));
-                ui.menu_button("Debug", |ui| {
-                    if ui
-                        .button(item(ui, icons::GAUGE, "Graphics Benchmark…"))
-                        .on_hover_text(
-                            "Measure how this computer draws the viewport and get recommended \
-                         editor graphics settings. Changes nothing until you apply them.",
-                        )
-                        .clicked()
-                    {
-                        self.open_graphics_benchmark();
-                    }
-                    // Only in debug builds (`cargo run`), never in a release.
-                    if cfg!(debug_assertions) {
-                        ui.separator();
-                        let panic =
-                            egui::Button::new(item(ui, icons::WARNING, "Panic during Play"));
-                        if ui
-                            .add_enabled(self.playing(), panic)
-                            .on_hover_text(
-                                "Makes the engine panic on the next frame, to check that \
-                             Play stops and reports it instead of closing the editor.",
-                            )
-                            .on_disabled_hover_text("Press Play first.")
-                            .clicked()
-                            && let Some(session) = &mut self.play
-                        {
-                            session.panic_next_frame();
-                        }
-                    }
-                });
-                ui.menu_button("Help", |ui| {
-                    if ui
-                        .add_enabled(
-                            self.project.is_some(),
-                            egui::Button::selectable(
-                                self.learn_open,
-                                item(ui, icons::BOOK_OPEN, "Learn"),
-                            ),
-                        )
-                        .on_hover_text("Tutorials and the API Reference, beside your project")
-                        .on_disabled_hover_text(
-                            "Learn is on the start screen until a project is open.",
-                        )
-                        .clicked()
-                    {
-                        self.learn_open = !self.learn_open;
-                    }
-                    if ui
-                        .button(item(ui, icons::GIT_BRANCH, "Version Explorer"))
-                        .on_hover_text(
-                            "This build's version, the releases, features, known issues, \
-                         and what changed between two versions",
-                        )
-                        .clicked()
-                    {
-                        self.layout.open(Pane::VersionExplorer);
-                    }
-                    if ui
-                        .button(item(ui, icons::ARROW_CIRCLE_UP, "Check for Updates…"))
-                        .clicked()
-                    {
-                        self.open_updates();
-                    }
-                    if ui.button(item(ui, icons::INFO, "About Axcenity")).clicked() {
-                        self.about_open = true;
-                    }
-                });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     if widgets::icon_button(ui, icons::GEAR_SIX, "Settings", self.settings.open)
@@ -516,6 +94,407 @@ impl EditorApp {
                 .inner
             })
             .inner
+    }
+
+    /// File, Edit, View, Viewport, Debug and Help, drawn in the header on
+    /// Windows and Linux. macOS shows the same items in its menu bar
+    /// (`app/native_menu.rs`); a change here needs one there too.
+    fn header_menus(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("File", |ui| {
+            let editing = self.project.is_some() && !self.playing();
+            let not_editing = if self.playing() {
+                "Press Stop to edit."
+            } else {
+                "Open a project first."
+            };
+            widgets::section_label(ui, "Project");
+            if ui
+                .button(item(ui, icons::FILE_PLUS, "New Project…"))
+                .on_hover_text("Close this project and make a new one.")
+                .clicked()
+            {
+                self.request_and_go_ahead(ui.ctx(), Discard::NewProject);
+            }
+            if ui
+                .button(item(ui, icons::FOLDER_OPEN, "Open Project…"))
+                .clicked()
+            {
+                self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
+            }
+            let save = egui::Button::new(item(ui, icons::FLOPPY_DISK, "Save"))
+                .shortcut_text(crate::shortcuts::Action::Save.menu_text(ui.ctx()));
+            if ui.add_enabled(self.project.is_some(), save).clicked() {
+                self.save();
+            }
+            if ui
+                .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::CLOCK_COUNTER_CLOCKWISE, "Version History…")),
+                )
+                .clicked()
+            {
+                self.version_history.open = true;
+            }
+            if ui
+                .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::PUSH_PIN, "Save Checkpoint…")),
+                )
+                .on_hover_text(
+                    "Save with a message, and keep that version however many saves follow.",
+                )
+                .clicked()
+            {
+                self.version_history.open_for_checkpoint();
+            }
+            if ui
+                .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::ARCHIVE, "Back Up Project")),
+                )
+                .on_hover_text(
+                    "Write a .zip of the project to its backup folder (asked the first time).",
+                )
+                .clicked()
+            {
+                self.back_up_project(false);
+            }
+            if ui
+                .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::COPY_SIMPLE, "Save as Template…")),
+                )
+                .on_hover_text(
+                    "Keep this project as a starting point that New Project offers under \
+                     Your templates.",
+                )
+                .clicked()
+            {
+                self.open_save_template();
+            }
+            if ui
+                .add_enabled(
+                    self.project.is_some(),
+                    egui::Button::new(item(ui, icons::GAME_CONTROLLER, "Input…")),
+                )
+                .on_hover_text(
+                    "The game's actions (Move, Jump, Interact…) and the keys, mouse \
+                         buttons and controller buttons bound to each.",
+                )
+                .on_disabled_hover_text("Open a project first.")
+                .clicked()
+            {
+                self.input_settings.open = true;
+            }
+            if ui
+                .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::HOUSE, "Close Project")),
+                )
+                .clicked()
+            {
+                self.request_and_go_ahead(ui.ctx(), Discard::CloseProject);
+            }
+
+            ui.separator();
+            widgets::section_label(ui, "Import");
+            let import = egui::Button::new(item(ui, icons::FILE_ARROW_DOWN, "Import…"));
+            if ui
+                .add_enabled(editing, import)
+                .on_hover_text(IMPORT_HOVER)
+                .on_disabled_hover_text(not_editing)
+                .clicked()
+            {
+                self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
+            }
+
+            ui.separator();
+            widgets::section_label(ui, "Collaborate");
+            if ui
+                .add_enabled(
+                    editing && self.team.is_none(),
+                    egui::Button::new(item(ui, icons::SHARE_NETWORK, "Start Collaborate Session…")),
+                )
+                .on_hover_text("Host a session others can join with an invite link.")
+                .clicked()
+            {
+                self.share_with_team_create();
+            }
+            if ui
+                .add_enabled(
+                    editing && self.team.is_none(),
+                    egui::Button::new(item(ui, icons::SIGN_IN, "Join Collaborate Session…")),
+                )
+                .on_hover_text("Join someone's session with their invite link.")
+                .clicked()
+            {
+                self.join_team_create();
+            }
+            if ui
+                .button(item(ui, icons::GEAR, "Set Up Collaborate…"))
+                .on_hover_text("Get Tailscale ready so people anywhere can join your sessions.")
+                .clicked()
+            {
+                self.set_up_collaborate();
+            }
+
+            ui.separator();
+            widgets::section_label(ui, "Publish");
+            self.build_game_menu(ui, editing);
+
+            ui.separator();
+            if ui
+                .add_enabled(editing, egui::Button::new(plain(ui, "Open Stylesheet…")))
+                .clicked()
+            {
+                self.open_stylesheet_with_dialog();
+            }
+            if ui
+                .add_enabled(editing, egui::Button::new(plain(ui, "New Stylesheet")))
+                .clicked()
+            {
+                self.new_stylesheet();
+            }
+            if ui
+                .add_enabled(
+                    self.project.is_some(),
+                    egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Check Assets")),
+                )
+                .on_hover_text(
+                    "Scan the open project for missing files, invalid references, \
+                         import failures, and broken dependencies.",
+                )
+                .on_disabled_hover_text("Open a project first.")
+                .clicked()
+            {
+                self.run_asset_check();
+            }
+            if ui
+                .add_enabled(
+                    self.project.is_some(),
+                    egui::Button::new(item(ui, icons::SPARKLE, "Set Up VS Code Autocomplete")),
+                )
+                .on_hover_text(
+                    "Add the engine's API to this project for luau-lsp, so VS Code \
+                         autocompletes it and checks scripts as Luau.",
+                )
+                .on_disabled_hover_text("Open a project first.")
+                .clicked()
+            {
+                self.set_up_autocomplete();
+            }
+            ui.separator();
+            let settings = egui::Button::new(item(ui, icons::GEAR_SIX, "Settings…"))
+                .shortcut_text(crate::shortcuts::Action::Settings.menu_text(ui.ctx()));
+            if ui.add(settings).clicked() {
+                self.settings.open = true;
+            }
+            ui.separator();
+            if ui.button(item(ui, icons::SIGN_OUT, "Quit")).clicked() {
+                self.request_and_go_ahead(ui.ctx(), Discard::Quit);
+            }
+        });
+        ui.menu_button("Edit", |ui| {
+            // Nothing can be edited mid-drag, or while the game plays.
+            let busy = self.viewport.is_dragging() || self.playing();
+            // "Undo Move Pad", so it's clear what will be undone.
+            let undo_label = self.history.undo_label().map(str::to_string);
+            let undo = egui::Button::new(item(
+                ui,
+                icons::ARROW_COUNTER_CLOCKWISE,
+                &match &undo_label {
+                    Some(label) => format!("Undo {label}"),
+                    None => "Undo".to_string(),
+                },
+            ))
+            .shortcut_text(crate::shortcuts::Action::Undo.menu_text(ui.ctx()));
+            if ui
+                .add_enabled(undo_label.is_some() && !busy, undo)
+                .clicked()
+            {
+                self.undo();
+            }
+            let redo_label = self.history.redo_label().map(str::to_string);
+            let redo = egui::Button::new(item(
+                ui,
+                icons::ARROW_CLOCKWISE,
+                &match &redo_label {
+                    Some(label) => format!("Redo {label}"),
+                    None => "Redo".to_string(),
+                },
+            ))
+            .shortcut_text(crate::shortcuts::Action::Redo.menu_text(ui.ctx()));
+            if ui
+                .add_enabled(redo_label.is_some() && !busy, redo)
+                .clicked()
+            {
+                self.redo();
+            }
+            ui.add_enabled_ui(!busy, |ui| {
+                crate::widgets::menu_button(
+                    ui,
+                    Some(icons::CLOCK_COUNTER_CLOCKWISE),
+                    "Undo History",
+                    |ui| {
+                        if let Some(jump) = undo_history(ui, &self.history) {
+                            self.jump_in_history(jump);
+                            ui.close();
+                        }
+                    },
+                );
+            });
+            ui.separator();
+
+            // These act on the selection, the same as its right-click menu in the Explorer.
+            let selected = self.selected;
+            let renamable = selected
+                .and_then(|id| self.world.get(id))
+                .is_some_and(properties::can_rename)
+                && !self.playing();
+            let editable =
+                selected.is_some_and(|id| tree::check_editable(&self.world, id).is_ok()) && !busy;
+            let rename = egui::Button::new(item(ui, icons::PENCIL_SIMPLE, "Rename"))
+                .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
+            if ui.add_enabled(renamable, rename).clicked()
+                && let Some(id) = selected
+            {
+                self.explorer.start_rename(&self.world, id);
+            }
+            let duplicate = egui::Button::new(item(ui, icons::COPY, "Duplicate"))
+                .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx()));
+            if ui.add_enabled(editable, duplicate).clicked() && selected.is_some() {
+                self.duplicate_selected();
+            }
+            let deletable =
+                selected.is_some_and(|id| tree::check_delete(&self.world, id).is_ok()) && !busy;
+            let delete = egui::Button::new(item(ui, icons::TRASH, "Delete"))
+                .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx()));
+            if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
+                self.delete_selected();
+            }
+            ui.separator();
+            let search = egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Search Everything…"))
+                .shortcut_text(crate::shortcuts::Action::Search.menu_text(ui.ctx()));
+            if ui.add(search).clicked() {
+                self.palette.toggle();
+            }
+            let palette = egui::Button::new(item(ui, icons::COMMAND, "Command Palette"))
+                .shortcut_text(crate::shortcuts::Action::Palette.menu_text(ui.ctx()));
+            if ui.add(palette).clicked() {
+                self.palette.toggle_commands();
+            }
+            let quick = egui::Button::new(item(ui, icons::FILE_MAGNIFYING_GLASS, "Quick Open…"))
+                .shortcut_text(crate::shortcuts::Action::QuickOpen.menu_text(ui.ctx()));
+            if ui.add_enabled(self.project.is_some(), quick).clicked() {
+                self.palette.toggle();
+            }
+            let find = egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Find in Scripts…"))
+                .shortcut_text(crate::shortcuts::Action::FindInScripts.menu_text(ui.ctx()));
+            if ui.add_enabled(self.project.is_some(), find).clicked() {
+                self.find.show_and_focus();
+                self.search_scripts();
+            }
+        });
+        // View: the editor's own windows and how they're laid out. The
+        // look of the whole editor (theme, accent, text size) is in
+        // Settings, one click away on the gear at the right.
+        ui.menu_button("View", |ui| {
+            widgets::section_label(ui, "Panels");
+            for pane in Pane::CLOSABLE {
+                let item = egui::Button::selectable(
+                    self.layout.is_open(pane),
+                    item(ui, pane.icon(), pane.label()),
+                );
+                if ui
+                    .add(item)
+                    .on_hover_text("Show or hide it. Drag a panel by its tab to move it.")
+                    .clicked()
+                {
+                    self.layout.toggle(pane);
+                }
+            }
+            if ui
+                .button(item(ui, icons::ARROW_COUNTER_CLOCKWISE, "Reset Layout"))
+                .on_hover_text("Put every panel back where it starts.")
+                .clicked()
+            {
+                self.layout.reset();
+            }
+            crate::widgets::menu_button(ui, Some(icons::LAYOUT), "Layout", |ui| {
+                self.layout_menu(ui);
+            });
+            ui.separator();
+            if ui
+                .button(item(ui, icons::STAR, "New Ribbon Tab…"))
+                .on_hover_text("Make your own ribbon tab from any of the ribbon's groups.")
+                .clicked()
+            {
+                self.ribbon_tabs.edit(None);
+            }
+        });
+        // Viewport: what the Scene view draws over the world while editing.
+        ui.menu_button("Viewport", |ui| self.viewport_menu(ui));
+        ui.menu_button("Debug", |ui| {
+            if ui
+                .button(item(ui, icons::GAUGE, "Graphics Benchmark…"))
+                .on_hover_text(
+                    "Measure how this computer draws the viewport and get recommended \
+                         editor graphics settings. Changes nothing until you apply them.",
+                )
+                .clicked()
+            {
+                self.open_graphics_benchmark();
+            }
+            // Only in debug builds (`cargo run`), never in a release.
+            if cfg!(debug_assertions) {
+                ui.separator();
+                let panic = egui::Button::new(item(ui, icons::WARNING, "Panic during Play"));
+                if ui
+                    .add_enabled(self.playing(), panic)
+                    .on_hover_text(
+                        "Makes the engine panic on the next frame, to check that \
+                             Play stops and reports it instead of closing the editor.",
+                    )
+                    .on_disabled_hover_text("Press Play first.")
+                    .clicked()
+                    && let Some(session) = &mut self.play
+                {
+                    session.panic_next_frame();
+                }
+            }
+        });
+        ui.menu_button("Help", |ui| {
+            if ui
+                .add_enabled(
+                    self.project.is_some(),
+                    egui::Button::selectable(self.learn_open, item(ui, icons::BOOK_OPEN, "Learn")),
+                )
+                .on_hover_text("Tutorials and the API Reference, beside your project")
+                .on_disabled_hover_text("Learn is on the start screen until a project is open.")
+                .clicked()
+            {
+                self.learn_open = !self.learn_open;
+            }
+            if ui
+                .button(item(ui, icons::GIT_BRANCH, "Version Explorer"))
+                .on_hover_text(
+                    "This build's version, the releases, features, known issues, \
+                         and what changed between two versions",
+                )
+                .clicked()
+            {
+                self.layout.open(Pane::VersionExplorer);
+            }
+            if ui
+                .button(item(ui, icons::ARROW_CIRCLE_UP, "Check for Updates…"))
+                .clicked()
+            {
+                self.open_updates();
+            }
+            if ui.button(item(ui, icons::INFO, "About Axcenity")).clicked() {
+                self.about_open = true;
+            }
+        });
     }
 
     /// Menu bar > Viewport: the guides drawn over the Scene view while
@@ -739,7 +718,7 @@ impl EditorApp {
 pub(in crate::app) type HistoryJump = isize;
 
 /// The newest steps that can be undone and redone, at most this many of each.
-const HISTORY_ROWS: usize = 25;
+pub(in crate::app) const HISTORY_ROWS: usize = 25;
 
 /// Edit ▸ Undo History: the steps that can be redone (dimmed, the furthest
 /// at the top), then the steps that can be undone, newest first. Clicking
