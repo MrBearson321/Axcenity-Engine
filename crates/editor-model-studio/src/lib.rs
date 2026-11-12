@@ -918,7 +918,7 @@ impl ModelStudio {
         let palette = theme::palette(ui.ctx());
         responsive::toolbar(ui, |ui| {
             ui.add_enabled_ui(editable, |ui| {
-                ui.menu_button(theme::with_icon(icons::PLUS, "New"), |ui| {
+                axcenity_editor_kit::widgets::menu_button(ui, Some(icons::PLUS), "New", |ui| {
                     if self.new_menu(ui) {
                         let doc = StudioDoc::new(
                             String::new(),
@@ -929,21 +929,26 @@ impl ModelStudio {
                         ui.close();
                     }
                 });
-                ui.menu_button(theme::with_icon(icons::FOLDER_OPEN, "Open"), |ui| {
-                    if models.is_empty() {
-                        ui.weak("The project has no models yet.");
-                    }
-                    egui::ScrollArea::vertical()
-                        .max_height(320.0)
-                        .show(ui, |ui| {
-                            for path in models {
-                                if ui.button(path).clicked() {
-                                    actions.push(StudioAction::Open(path.clone()));
-                                    ui.close();
+                axcenity_editor_kit::widgets::menu_button(
+                    ui,
+                    Some(icons::FOLDER_OPEN),
+                    "Open",
+                    |ui| {
+                        if models.is_empty() {
+                            ui.weak("The project has no models yet.");
+                        }
+                        egui::ScrollArea::vertical()
+                            .max_height(320.0)
+                            .show(ui, |ui| {
+                                for path in models {
+                                    if ui.button(path).clicked() {
+                                        actions.push(StudioAction::Open(path.clone()));
+                                        ui.close();
+                                    }
                                 }
-                            }
-                        });
-                });
+                            });
+                    },
+                );
             });
             let Some(doc) = &mut self.doc else {
                 return;

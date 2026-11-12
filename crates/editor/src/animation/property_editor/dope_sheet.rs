@@ -209,7 +209,7 @@ impl PropertyDoc {
                 })
                 .unwrap_or_default();
             ui.add_enabled_ui(!addable.is_empty(), |ui| {
-                ui.menu_button(format!("{} Add track", icons::PLUS), |ui| {
+                crate::widgets::menu_button(ui, Some(icons::PLUS), "Add track", |ui| {
                     for value in &addable {
                         if ui.button(value.property.as_str()).clicked() {
                             self.key_values(std::slice::from_ref(*value));

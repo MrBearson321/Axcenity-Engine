@@ -1258,3 +1258,85 @@ fn the_join_dialog_asks_for_a_link_then_says_how_joining_goes() {
         "Join only if you expected this invite. It's reached over Tailscale",
     );
 }
+
+#[test]
+fn only_reading_pages_sit_on_the_reading_glass() {
+    let page = Rect::from_min_size(pos2(220.0, 0.0), vec2(1000.0, 800.0));
+    for (shown, reads) in [
+        (Page::Projects, false),
+        (Page::Global, false),
+        (Page::Learn, true),
+        (Page::Docs, true),
+        (Page::Reference, true),
+    ] {
+        assert_eq!(shown.reads(), reads, "{shown:?}");
+        let glass = shown.reading_glass(300.0, 800.0, page);
+        assert_eq!(glass.is_some(), reads, "{shown:?}");
+        if let Some(glass) = glass {
+            assert_eq!(glass.top(), page.top() + GLASS_MARGIN);
+            assert!(page.contains_rect(glass.shrink(0.5)), "{glass:?}");
+        }
+    }
+}
+
+#[test]
+fn scrolled_reading_pages_stay_inside_the_glass() {
+    for shown in [Page::Docs, Page::Reference, Page::Learn] {
+        let mut projects = vec![link("Space Race")];
+        let mut start = StartScreen {
+            page: shown,
+            ..Default::default()
+        };
+        let ctx = theme::test_context();
+        let mut output = None;
+        for frame in 0..8 {
+            let events = if (2..6).contains(&frame) {
+                vec![
+                    egui::Event::PointerMoved(pos2(700.0, 400.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: vec2(0.0, -300.0),
+                        modifiers: Default::default(),
+                        phase: egui::TouchPhase::Move,
+                    },
+                ]
+            } else {
+                Vec::new()
+            };
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 800.0))),
+                time: Some(frame as f64 * 10.0),
+                events,
+                ..Default::default()
+            };
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
+                theme::apply(ctx, &theme::Appearance::default());
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                    .show(ui, |ui| {
+                        let brand = Brand::load(ui.ctx());
+                        assert!(start.show(ui, &mut projects, &brand).is_none());
+                    });
+            }));
+        }
+        let output = output.unwrap();
+        let mut page_text = 0;
+        for clipped in &output.shapes {
+            let egui::Shape::Text(text) = &clipped.shape else {
+                continue;
+            };
+            let shown_part = text.visual_bounding_rect().intersect(clipped.clip_rect);
+            // The page's own text, right of the sidebar.
+            if shown_part.is_positive() && shown_part.left() > nav::SIDEBAR_WIDTH + 1.0 {
+                page_text += 1;
+                assert!(
+                    shown_part.top() >= GLASS_MARGIN - 0.5,
+                    "{shown:?}: `{}` shows above the glass at {shown_part:?}",
+                    text.galley.text()
+                );
+            }
+        }
+        assert!(page_text > 5, "{shown:?}: the page drew its text");
+    }
+}

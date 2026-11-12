@@ -177,20 +177,59 @@ impl egui::Widget for RibbonButton<'_> {
     }
 }
 
+/// The tallest ribbon row drawn: in the frame before (which this frame's
+/// groups grow to) and so far in this one.
+#[derive(Clone, Copy, Default)]
+struct RowHeights {
+    frame: u64,
+    last: f32,
+    this: f32,
+}
+
 /// A group of ribbon buttons (or other controls) with `caption` centred
-/// under them, or no caption when the density is compact.
+/// under them, or no caption when the density is compact. Every group's row
+/// is as tall as the tallest one (Snapping's two rows of switches, say), so
+/// all captions sit on one line at the bottom of the ribbon.
 pub fn group(ui: &mut egui::Ui, caption: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    group_tinted(ui, caption, None, add_contents);
+}
+
+/// [`group`], with the caption in a category colour (cohesion pass CW2.2).
+pub fn group_tinted(
+    ui: &mut egui::Ui,
+    caption: &str,
+    hue: Option<theme::Hue>,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
     let density = theme::density(ui.ctx());
     let palette = theme::palette(ui.ctx());
+    let id = egui::Id::new(("ribbon row heights", density as u8));
+    let frame = theme::frame_number(ui.ctx());
+    let mut heights = ui.data(|data| data.get_temp::<RowHeights>(id).unwrap_or_default());
+    if heights.frame != frame {
+        heights = RowHeights {
+            frame,
+            last: heights.this,
+            this: 0.0,
+        };
+    }
+    let row_height = button_height(density).max(heights.last);
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        // The row at its own height (a minimum would feed back: a grid of
+        // fields grows with the room it's given), then the space down to
+        // the tallest row, so every caption sits on the same line.
         let row = ui
             .horizontal(|ui| {
-                ui.set_min_height(button_height(density));
                 ui.spacing_mut().item_spacing.x = 2.0;
                 add_contents(ui);
             })
             .response;
+        // Measured by where the cursor is, which is what the caption follows.
+        let used = ui.cursor().top() - ui.min_rect().top();
+        heights.this = heights.this.max(used);
+        ui.data_mut(|data| data.insert_temp(id, heights));
+        ui.add_space((row_height - used).max(0.0));
         if density == Density::Compact {
             return;
         }
@@ -198,12 +237,27 @@ pub fn group(ui: &mut egui::Ui, caption: &str, add_contents: impl FnOnce(&mut eg
             egui::vec2(row.rect.width(), CAPTION_HEIGHT),
             egui::Sense::hover(),
         );
+        let color = hue.map_or(palette.text_weak, |hue| {
+            theme::mix(hue.ink(&palette), palette.text_weak, 0.35)
+        });
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             caption,
             FontId::proportional(type_scale::CAPTION - 0.5),
-            palette.text_weak,
+            color,
         );
+        if let Some(hue) = hue {
+            // A short bar of the group's colour under its caption.
+            let bar = egui::Rect::from_center_size(
+                egui::pos2(rect.center().x, rect.bottom() - 0.5),
+                egui::vec2(14.0, 2.0),
+            );
+            ui.painter().rect_filled(
+                bar,
+                theme::radius::NONE,
+                hue.ink(&palette).gamma_multiply(0.8),
+            );
+        }
     });
 }

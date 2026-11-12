@@ -32,8 +32,13 @@ pub const TAB_BAR_HEIGHT: f32 = 30.0;
 /// One dockable panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Pane {
-    /// The viewport. Always there: it can be moved but not closed or floated.
+    /// The viewport. It can be moved and closed but not floated; closed,
+    /// it leaves the [`Pane::Welcome`] page in its place.
     Scene,
+    /// The welcome page (`app/welcome.rs`): shown where the documents go
+    /// whenever no document tab is open (the Scene closed and no script or
+    /// editor tab), and gone again as soon as one opens.
+    Welcome,
     Explorer,
     Properties,
     /// The log and the command line. Saved layouts from before it was
@@ -147,6 +152,7 @@ impl Pane {
     pub fn label(self) -> &'static str {
         match self {
             Pane::Scene => "Scene View",
+            Pane::Welcome => "Welcome",
             Pane::Explorer => "Explorer",
             Pane::Properties => "Properties",
             Pane::Console => "Console",
@@ -180,6 +186,7 @@ impl Pane {
     pub fn icon(self) -> &'static str {
         match self {
             Pane::Scene => icons::CUBE,
+            Pane::Welcome => icons::HOUSE,
             Pane::Explorer => icons::TREE_STRUCTURE,
             Pane::Properties => icons::SLIDERS_HORIZONTAL,
             Pane::Console => icons::TERMINAL_WINDOW,
@@ -208,6 +215,23 @@ impl Pane {
             Pane::Script(_) => icons::CODE,
             Pane::Plugin(_) => icons::PUZZLE_PIECE,
         }
+    }
+
+    /// Whether the tab is a document (the Scene, a script or an editor of
+    /// one file), the kind the welcome page stands in for. Animation and the
+    /// UI Designer follow the selection, like panels, so they aren't.
+    pub fn is_document(self) -> bool {
+        matches!(
+            self,
+            Pane::Scene
+                | Pane::Script(_)
+                | Pane::BehaviorTree
+                | Pane::Dialogue
+                | Pane::DataTable
+                | Pane::Material
+                | Pane::Sequencer
+                | Pane::ModelStudio
+        )
     }
 
     /// The title shown on the panel's tab.
@@ -258,9 +282,9 @@ impl Layout {
     }
 
     /// Opens `pane` if it's closed, or closes it if it's open. The Scene
-    /// always stays.
+    /// and the welcome page aren't toggled: the Scene closes from its tab.
     pub fn toggle(&mut self, pane: Pane) {
-        if pane == Pane::Scene {
+        if matches!(pane, Pane::Scene | Pane::Welcome) {
             return;
         }
         if let Some(found) = self.dock.find_tab(&pane) {
@@ -291,7 +315,8 @@ impl Layout {
             return;
         }
         let neighbor = match pane {
-            Pane::Scene => None,
+            // Where the documents go (see `documents_place`).
+            Pane::Scene | Pane::Welcome => Some(Pane::Scene),
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
             Pane::Console | Pane::Toolbox | Pane::Inventory => Some(Pane::Assets),
@@ -318,9 +343,14 @@ impl Layout {
             | Pane::Plugin(_) => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
         };
-        let beside = neighbor
-            .and_then(|neighbor| self.dock.find_main_surface_tab(&neighbor))
-            .map(|(node, _)| node);
+        let beside = match neighbor {
+            Some(Pane::Scene) => self.documents_place(),
+            Some(neighbor) => self
+                .dock
+                .find_main_surface_tab(&neighbor)
+                .map(|(node, _)| node),
+            None => None,
+        };
         let tree = self.dock.main_surface_mut();
         match (pane, beside) {
             (_, Some(node)) => {
@@ -373,7 +403,8 @@ impl Layout {
             let beside = self
                 .last_script
                 .and_then(|last| self.dock.find_tab(&Pane::Script(last)))
-                .or_else(|| self.dock.find_tab(&Pane::Scene));
+                .or_else(|| self.dock.find_tab(&Pane::Scene))
+                .or_else(|| self.dock.find_tab(&Pane::Welcome));
             match beside {
                 Some(egui_dock::TabPath { surface, node, .. }) => {
                     let front = match &self.dock[surface][node] {
@@ -413,6 +444,74 @@ impl Layout {
             self.last_script = Some(id);
         }
         self.switched = false;
+    }
+
+    /// Where documents open in the main window: beside the Scene, or the
+    /// welcome page standing in for it, or else any open document.
+    fn documents_place(&self) -> Option<NodeIndex> {
+        let tree = self.dock.main_surface();
+        [Pane::Scene, Pane::Welcome]
+            .iter()
+            .find_map(|pane| tree.find_tab(pane))
+            .or_else(|| tree.find_tab_from(|pane| pane.is_document()))
+            .map(|(node, _)| node)
+    }
+
+    /// Closes the Scene, leaving the welcome page in its place if no other
+    /// document is open (see [`keep_a_document`](Self::keep_a_document)).
+    pub fn close_scene(&mut self) {
+        for (_, pane) in self.dock.iter_all_tabs_mut() {
+            if *pane == Pane::Scene {
+                *pane = Pane::Welcome;
+            }
+        }
+        self.keep_a_document();
+        if let Some(found) = self.dock.find_tab(&Pane::Welcome) {
+            let _ = self.dock.set_active_tab(found);
+        }
+    }
+
+    /// Shows the welcome page where the documents go while no document tab
+    /// is open, and takes it away once one is. Called each frame after the
+    /// script tabs are synced.
+    pub fn keep_a_document(&mut self) {
+        let documents = self
+            .dock
+            .iter_all_tabs()
+            .any(|(_, pane)| pane.is_document())
+            || self.windows.iter().any(|window| {
+                window
+                    .dock
+                    .iter_all_tabs()
+                    .any(|(_, pane)| pane.is_document())
+            });
+        let welcome = self.dock.find_tab(&Pane::Welcome);
+        match (documents, welcome) {
+            (true, Some(_)) => self.dock.retain_tabs(|pane| *pane != Pane::Welcome),
+            (false, None) => {
+                // The biggest place in the main window, as it was last drawn.
+                let biggest = self
+                    .dock
+                    .main_surface()
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, node)| match node {
+                        egui_dock::Node::Leaf(leaf) => Some((index, leaf.rect.area())),
+                        _ => None,
+                    })
+                    .max_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(index, _)| NodeIndex(index));
+                let tree = self.dock.main_surface_mut();
+                match biggest {
+                    Some(node) => {
+                        tree.set_focused_node(node);
+                        tree.push_to_focused_leaf(Pane::Welcome);
+                    }
+                    None => tree.push_to_first_leaf(Pane::Welcome),
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Makes the plugin dock tabs match `open`, the plugin widgets that
@@ -459,7 +558,8 @@ impl Layout {
 
     /// A layout saved by [`to_text`](Self::to_text), or by a version from
     /// before panels had windows (then the text is just the dock). A damaged
-    /// one, or one that somehow lost the Scene, gives the starting layout.
+    /// one, or one with neither the Scene nor the welcome page, gives the
+    /// starting layout.
     pub fn from_text(text: &str) -> Self {
         let saved = serde_json::from_str::<serde_json::Value>(text)
             .ok()
@@ -479,7 +579,11 @@ impl Layout {
                     })
                 }
             })
-            .filter(|saved| saved.dock.find_main_surface_tab(&Pane::Scene).is_some())
+            .filter(|saved| {
+                [Pane::Scene, Pane::Welcome]
+                    .iter()
+                    .any(|pane| saved.dock.find_main_surface_tab(pane).is_some())
+            })
             .map(|mut saved| {
                 // The Animation and Animator tabs of older layouts both
                 // load as Animation; keep the first.
@@ -665,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn closed_panels_open_again_and_the_scene_never_closes() {
+    fn closed_panels_open_again_and_the_scene_does_not_toggle() {
         let mut layout = Layout::default();
         for pane in Pane::CLOSABLE {
             if layout.is_open(pane) {
@@ -749,5 +853,75 @@ mod tests {
         assert!(!layout.is_open(Pane::Script(0)));
         assert!(layout.is_open(Pane::Script(1)));
         assert!(!Layout::from_text(&layout.to_text()).is_open(Pane::Script(1)));
+    }
+
+    fn front_of(layout: &Layout, pane: Pane) -> bool {
+        layout
+            .dock
+            .iter_leaves()
+            .any(|(_, leaf)| leaf.tabs.get(leaf.active.0) == Some(&pane))
+    }
+
+    #[test]
+    fn closing_the_scene_leaves_the_welcome_page_in_its_place() {
+        let mut layout = Layout::default();
+        let scene = layout.dock.find_tab(&Pane::Scene).unwrap();
+        layout.close_scene();
+        assert!(!layout.is_open(Pane::Scene));
+        let welcome = layout.dock.find_tab(&Pane::Welcome).expect("welcome");
+        assert_eq!(welcome, scene, "in the Scene's own place");
+        assert!(front_of(&layout, Pane::Welcome));
+
+        // Show Scene puts the Scene back there, and the page goes.
+        layout.open(Pane::Scene);
+        layout.keep_a_document();
+        assert_eq!(
+            layout.dock.find_tab(&Pane::Scene).map(|at| at.node),
+            Some(scene.node)
+        );
+        assert!(!layout.is_open(Pane::Welcome));
+    }
+
+    #[test]
+    fn the_welcome_page_shows_only_while_no_document_is_open() {
+        let mut layout = Layout::default();
+        layout.close_scene();
+        // A script opens where the page was, and the page goes.
+        layout.sync_scripts(&[7], Some(7), Some(7));
+        layout.keep_a_document();
+        assert!(layout.is_open(Pane::Script(7)));
+        assert!(!layout.is_open(Pane::Welcome));
+        // Closing the last document brings it back.
+        layout.sync_scripts(&[], None, None);
+        layout.keep_a_document();
+        assert!(layout.is_open(Pane::Welcome));
+        // With the Scene open it never shows.
+        let mut layout = Layout::default();
+        layout.keep_a_document();
+        assert!(!layout.is_open(Pane::Welcome));
+        // And it isn't toggled from the View menu.
+        layout.toggle(Pane::Welcome);
+        assert!(!layout.is_open(Pane::Welcome));
+    }
+
+    #[test]
+    fn the_scene_comes_back_beside_open_scripts() {
+        let mut layout = Layout::default();
+        layout.sync_scripts(&[3], Some(3), Some(3));
+        layout.close_scene();
+        assert!(!layout.is_open(Pane::Welcome), "a script is open");
+        layout.open(Pane::Scene);
+        let scene = layout.dock.find_tab(&Pane::Scene).unwrap();
+        let script = layout.dock.find_tab(&Pane::Script(3)).unwrap();
+        assert_eq!(scene.node, script.node, "beside the script, not split off");
+    }
+
+    #[test]
+    fn a_saved_layout_with_the_scene_closed_loads() {
+        let mut layout = Layout::default();
+        layout.close_scene();
+        let loaded = Layout::from_text(&layout.to_text());
+        assert!(loaded.is_open(Pane::Welcome));
+        assert!(!loaded.is_open(Pane::Scene));
     }
 }

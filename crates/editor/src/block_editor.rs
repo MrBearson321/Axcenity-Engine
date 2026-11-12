@@ -17,7 +17,7 @@
 //! under it) and then outlined as one path.
 //!
 //! The look (usability brief §5): a category's colour is one deep hue its
-//! white labels read on (`Category::base_fill`), with a darker shade of it
+//! white labels read on (`Category::hue`, the kit's `theme::Hue`), with a darker shade of it
 //! as the block's edge and the shadow it casts, so stacks read as raised
 //! pieces. Labels are Inter Medium. Blocks join with a rounded tab and
 //! notch; an event block (a hat) has a flat top with a lighter band and
@@ -235,34 +235,39 @@ impl Category {
     /// The category's colour, darkened with Increase contrast until its
     /// white labels reach 4.5:1.
     fn fill(self, palette: &theme::Palette) -> Color32 {
-        palette.under_white_text(self.base_fill())
+        self.hue().fill(palette)
     }
 
-    /// Axcenity's category colours: one hue each, a step apart around the
-    /// wheel (warm for what starts and steers a script, cool for what it
-    /// moves and shows, green for values), all deep enough that their
-    /// white labels reach 3:1 without Increase contrast.
-    fn base_fill(self) -> Color32 {
+    /// Axcenity's category colours, shared with the rest of the editor as
+    /// the kit's [`theme::Hue`]s: warm for what starts and steers a script,
+    /// cool for what it moves and shows, green for values.
+    fn hue(self) -> theme::Hue {
         match self {
-            Category::Events => Color32::from_rgb(190, 128, 18),
-            Category::Control => Color32::from_rgb(212, 98, 40),
-            Category::Variables => Color32::from_rgb(206, 62, 62),
-            Category::More => Color32::from_rgb(200, 56, 128),
-            Category::Sound => Color32::from_rgb(166, 70, 196),
-            Category::Looks => Color32::from_rgb(118, 88, 224),
-            Category::Tweens => Color32::from_rgb(72, 96, 214),
-            Category::Motion => Color32::from_rgb(30, 116, 206),
-            Category::Sensing => Color32::from_rgb(18, 130, 168),
-            Category::Animation => Color32::from_rgb(22, 138, 112),
-            Category::Operators => Color32::from_rgb(64, 138, 58),
-            Category::Lua => Color32::from_rgb(92, 100, 120),
+            Category::Events => theme::Hue::Amber,
+            Category::Control => theme::Hue::Orange,
+            Category::Variables => theme::Hue::Red,
+            Category::More => theme::Hue::Magenta,
+            Category::Sound => theme::Hue::Purple,
+            Category::Looks => theme::Hue::Violet,
+            Category::Tweens => theme::Hue::Indigo,
+            Category::Motion => theme::Hue::Blue,
+            Category::Sensing => theme::Hue::Cyan,
+            Category::Animation => theme::Hue::Teal,
+            Category::Operators => theme::Hue::Green,
+            Category::Lua => theme::Hue::Slate,
         }
+    }
+
+    /// The category's colour before Increase contrast.
+    #[cfg(test)]
+    fn base_fill(self) -> Color32 {
+        self.hue().base()
     }
 
     /// The darker shade under a block (its edge and the shadow it casts),
     /// and the background of menus on the block.
     fn edge(self, palette: &theme::Palette) -> Color32 {
-        palette.under_white_text(shade(self.base_fill()))
+        self.hue().edge(palette)
     }
 
     /// What the category's blocks are for, drawn white on its swatch in
@@ -283,12 +288,6 @@ impl Category {
             Category::Lua => icons::CODE,
         }
     }
-}
-
-/// A category colour's darker shade: the same hue at 78%.
-fn shade(color: Color32) -> Color32 {
-    let darker = |value: u8| (f32::from(value) * 0.78).round() as u8;
-    Color32::from_rgb(darker(color.r()), darker(color.g()), darker(color.b()))
 }
 
 fn block_category(kind: &BlockKind) -> Category {
@@ -2140,14 +2139,22 @@ fn show_toolbar(
         })
         .response
         .on_hover_text(tip);
-    bar.weak("Drag blocks onto the canvas. Drop them back on the palette to delete.");
+    // The buttons go on the right first; the hint gets whatever room is left
+    // and shortens itself (full text on hover) instead of running under them.
+    let narrow = rect.width() < TOOLBAR_WORDS_FROM;
+    let worded = |icon: &str, text: &str| {
+        if narrow {
+            icon.to_owned()
+        } else {
+            theme::with_icon(icon, text)
+        }
+    };
     bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let lua = egui::Button::new(theme::with_icon(icons::CODE, "View as Lua"))
-            .selected(state.show_lua);
+        let lua = egui::Button::new(worded(icons::CODE, "View as Lua")).selected(state.show_lua);
         if ui
             .add(lua)
             .on_hover_text(
-                "Shows the Lua these blocks become. It runs exactly like a typed script.",
+                "View as Lua: shows the Lua these blocks become. It runs exactly like a typed script.",
             )
             .clicked()
         {
@@ -2176,8 +2183,8 @@ fn show_toolbar(
             state.zoom = (state.zoom / 1.2).max(0.5);
         }
         if ui
-            .button(theme::with_icon(icons::BROOM, "Clean up"))
-            .on_hover_text("Lines the scripts up down the left side")
+            .button(worded(icons::BROOM, "Clean up"))
+            .on_hover_text("Clean up: lines the scripts up down the left side")
             .clicked()
         {
             for block in &mut script.blocks {
@@ -2185,8 +2192,22 @@ fn show_toolbar(
             }
             state.pan = Vec2::ZERO;
         }
+        ui.allocate_ui_with_layout(
+            ui.available_size(),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(TOOLBAR_HINT).weak()).truncate());
+            },
+        );
     });
 }
+
+/// What the Blocks toolbar says between the side chip and its buttons.
+pub(crate) const TOOLBAR_HINT: &str =
+    "Drag blocks onto the canvas. Drop them back on the palette to delete.";
+
+/// Below this width the toolbar's buttons show only their icons.
+const TOOLBAR_WORDS_FROM: f32 = 560.0;
 
 fn show_categories(ui: &mut egui::Ui, rect: Rect, state: &mut State) {
     let visuals = ui.visuals().clone();

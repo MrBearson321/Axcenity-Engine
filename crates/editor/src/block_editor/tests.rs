@@ -650,3 +650,77 @@ fn the_tab_is_a_convex_rounded_bump() {
         "{turns:?}"
     );
 }
+
+#[test]
+fn the_toolbar_hint_never_runs_under_its_buttons() {
+    let objects: Vec<ObjectInfo> = Vec::new();
+    for width in [1500.0, 900.0, 640.0, 420.0] {
+        let ctx = theme::test_context();
+        let mut script = BlockScript::default();
+        let mut output = None;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 600.0))),
+                ..Default::default()
+            };
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        show(
+                            ui,
+                            &mut script,
+                            BlockContext {
+                                key: "toolbar test",
+                                client: false,
+                                highlighted: None,
+                                objects: &objects,
+                            },
+                        );
+                    });
+            }));
+        }
+        let texts: Vec<(String, Rect)> = output
+            .unwrap()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    // What shows of it.
+                    let rect = text.visual_bounding_rect().intersect(clipped.clip_rect);
+                    // Only what's wholly on the bar (the palette's icons
+                    // start just under it).
+                    (rect.is_positive()
+                        && rect.bottom() <= TOOLBAR_HEIGHT + 0.5
+                        && !text.galley.text().is_empty())
+                    .then(|| (text.galley.text().to_owned(), rect))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts.iter().any(|(text, _)| text.contains("Server blocks")),
+            "{width}: the side chip is drawn: {texts:?}"
+        );
+        for (index, (a, a_rect)) in texts.iter().enumerate() {
+            assert!(
+                a_rect.right() <= width + 0.5,
+                "{width}: `{a}` runs off the bar"
+            );
+            for (b, b_rect) in &texts[index + 1..] {
+                assert!(
+                    !a_rect.shrink(0.5).intersects(b_rect.shrink(0.5)),
+                    "{width}: `{a}` {a_rect:?} overlaps `{b}` {b_rect:?}"
+                );
+            }
+        }
+        if width >= 900.0 {
+            assert!(
+                texts
+                    .iter()
+                    .any(|(text, _)| text.starts_with("Drag blocks")),
+                "{width}: there's room for the hint: {texts:?}"
+            );
+        }
+    }
+}

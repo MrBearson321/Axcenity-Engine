@@ -423,10 +423,16 @@ fn a_sidecar_with_fields_no_longer_read_still_opens_and_saves_without_them() {
     let mut reopened = ModelDoc::open(&glb, &std::env::temp_dir(), ModelFormat::Gltf).unwrap();
     assert_eq!(reopened.read_sidecar(&old, &glb), Ok(1));
     let mesh = reopened.objects[0].mesh.as_ref().unwrap();
-    assert_eq!(mesh.positions(), doc.objects[0].mesh.as_ref().unwrap().positions());
+    assert_eq!(
+        mesh.positions(),
+        doc.objects[0].mesh.as_ref().unwrap().positions()
+    );
     assert_eq!(reopened.objects[0].modifiers, doc.objects[0].modifiers);
 
     let saved = reopened.write_sidecar(&reopened.write_glb()).unwrap();
     let text = String::from_utf8(saved).unwrap();
-    assert!(!text.contains("sculpt") && !text.contains("retopo"), "{text}");
+    assert!(
+        !text.contains("sculpt") && !text.contains("retopo"),
+        "{text}"
+    );
 }

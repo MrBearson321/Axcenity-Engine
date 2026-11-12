@@ -15,6 +15,9 @@ const LABEL_LENGTH: usize = 40;
 impl EditorApp {
     /// The Console: the command line at the bottom, the log above it.
     pub(super) fn console_pane(&mut self, ui: &mut egui::Ui) {
+        // The command line takes at most a third of the panel, so the log
+        // above it always has room (cohesion pass CW2.5).
+        self.console.room = ui.available_height() / 3.0;
         egui::Panel::bottom("console command line")
             .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 4)))
             .show_separator_line(false)

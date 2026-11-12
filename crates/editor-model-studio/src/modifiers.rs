@@ -99,7 +99,7 @@ pub(super) fn panel(
     let mut change: Option<String> = None;
     let mut apply = None;
     ui.add_enabled_ui(editable, |ui| {
-        ui.menu_button(theme::with_icon(icons::PLUS, "Add Modifier"), |ui| {
+        axcenity_editor_kit::widgets::menu_button(ui, Some(icons::PLUS), "Add Modifier", |ui| {
             for kind in ModifierKind::defaults() {
                 if ui.button(kind.label()).on_hover_text(tip(&kind)).clicked() {
                     change = Some(format!("Add {}", kind.label()));

@@ -29,7 +29,7 @@ pub(super) fn layer_editor(
         .filter(|pick| pick.entry.kind == AssetKind::Texture)
         .collect();
     ui.horizontal_wrapped(|ui| {
-        ui.menu_button(theme::with_icon(icons::SQUARES_FOUR, "Use texture set"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::SQUARES_FOUR), "Use texture set", |ui| {
             if let Some(entry) = texture_menu(
                 ui,
                 &sets,
@@ -41,7 +41,9 @@ pub(super) fn layer_editor(
             ui.separator();
             if ui
                 .button(theme::with_icon(icons::TOOLBOX, "From Toolbox…"))
-                .on_hover_text("Find a texture on ambientCG or Poly Haven; the one you get fills this layer.")
+                .on_hover_text(
+                    "Find a texture on ambientCG or Poly Haven; the one you get fills this layer.",
+                )
                 .clicked()
             {
                 actions.push(TerrainAction::FromToolbox(layer));
@@ -556,7 +558,7 @@ impl TerrainStudio {
                 );
             }
             ui.horizontal(|ui| {
-                ui.menu_button(theme::with_icon(icons::PLUS, "Add layer"), |ui| {
+                crate::widgets::menu_button(ui, Some(icons::PLUS), "Add layer", |ui| {
                     for preset in presets::ALL {
                         if ui.button(preset.name).clicked() {
                             actions.push(TerrainAction::AddLayer(preset));

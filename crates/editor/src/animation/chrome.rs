@@ -267,7 +267,7 @@ impl AnimationStudio {
             let mut paths = self.files.controllers.clone();
             paths.extend(self.files.clips.iter().cloned());
             let pick = picker(ui, &mut self.search, &paths, open.as_deref(), used);
-            ui.menu_button(format!("{} New", icons::PLUS), |ui| {
+            crate::widgets::menu_button(ui, Some(icons::PLUS), "New", |ui| {
                 let visuals = ui.visuals().clone();
                 let item =
                     |kind: AnimKind, text: &str| (kind.rich_icon(&visuals), format!("  {text}"));

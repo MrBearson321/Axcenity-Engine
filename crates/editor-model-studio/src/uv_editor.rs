@@ -483,7 +483,7 @@ impl ModelStudio {
     /// The toolbar's UV menu.
     pub(super) fn uv_menu(&mut self, ui: &mut egui::Ui) {
         let mut chosen = None;
-        ui.menu_button(theme::with_icon(icons::SQUARES_FOUR, "UV"), |ui| {
+        axcenity_editor_kit::widgets::menu_button(ui, Some(icons::SQUARES_FOUR), "UV", |ui| {
             chosen = self.uv_items(ui);
             if chosen.is_some() {
                 ui.close();
@@ -553,7 +553,7 @@ impl ModelStudio {
                 state.channel = channel;
                 state.selected.clear();
             }
-            ui.menu_button("Stretch", |ui| {
+            axcenity_editor_kit::widgets::menu_button(ui, None, "Stretch", |ui| {
                 ui.selectable_value(&mut state.stretch, StretchShow::Off, "Off");
                 ui.selectable_value(&mut state.stretch, StretchShow::Angle, "By angle");
                 ui.selectable_value(&mut state.stretch, StretchShow::Area, "By area");
@@ -569,7 +569,7 @@ impl ModelStudio {
                 state.checker = !state.checker;
             }
             if editable {
-                ui.menu_button("Edit", |ui| {
+                axcenity_editor_kit::widgets::menu_button(ui, None, "Edit", |ui| {
                     for (choice, keys) in [
                         (UvAction::Pin, "P"),
                         (UvAction::Unpin, "Alt+P"),

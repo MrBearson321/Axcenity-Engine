@@ -89,7 +89,7 @@ impl ToolboxPanel {
     /// in a collection. Returns a plugin import when the creator picked one.
     pub(super) fn packs_menu(&mut self, ui: &mut egui::Ui) -> Option<PackAction> {
         let mut action = None;
-        ui.menu_button("Packs", |ui| {
+        axcenity_editor_kit::widgets::menu_button(ui, None, "Packs", |ui| {
             if ui
                 .button("Import pack…")
                 .on_hover_text(

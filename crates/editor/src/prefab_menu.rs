@@ -73,14 +73,15 @@ pub fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<Pref
     let path = world.get(id)?.prefab()?.path.clone();
     let mut chosen = None;
     let title = format!("Prefab · {}", prefab_name(&path));
-    ui.menu_button(theme::with_icon(icons::PACKAGE, &title), |ui| {
+    crate::widgets::menu_button(ui, Some(icons::PACKAGE), &title, |ui| {
         let count = place.overrides.count();
         let apply = ui
             .add_enabled(
                 count > 0,
-                egui::Button::new(theme::with_icon(
+                egui::Button::new(theme::menu_item(
+                    ui.ctx(),
                     icons::UPLOAD_SIMPLE,
-                    &format!("Apply overrides to prefab ({count})"),
+                    format!("Apply overrides to prefab ({count})"),
                 )),
             )
             .on_hover_text(format!(
@@ -93,7 +94,7 @@ pub fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<Pref
         }
         let properties = overridden_properties(world, id, &place.overrides);
         if !properties.is_empty() {
-            ui.menu_button(theme::with_icon(icons::UPLOAD_SIMPLE, "Apply one"), |ui| {
+            crate::widgets::menu_button(ui, Some(icons::UPLOAD_SIMPLE), "Apply one", |ui| {
                 for (holder, property) in &properties {
                     let label = match world.get(*holder) {
                         Some(instance) if *holder != id => {
@@ -122,7 +123,8 @@ pub fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<Pref
         if ui
             .add_enabled(
                 count > 0,
-                egui::Button::new(theme::with_icon(
+                egui::Button::new(theme::menu_item(
+                    ui.ctx(),
                     icons::ARROW_COUNTER_CLOCKWISE,
                     "Revert all",
                 )),
@@ -135,7 +137,7 @@ pub fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<Pref
             chosen = Some(PrefabAction::RevertAll(id));
         }
         if ui
-            .button(theme::with_icon(icons::LINK_BREAK, "Unpack"))
+            .button(theme::menu_item(ui.ctx(), icons::LINK_BREAK, "Unpack"))
             .on_hover_text(
                 "Unlink it from the prefab. It stays as it is, and no longer follows the \
                  prefab's changes.",

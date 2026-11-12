@@ -658,7 +658,7 @@ impl GraphView {
                 events.push(GraphEvent::AddBlendTree(at));
                 ui.close();
             }
-            ui.menu_button("Add State with Clip", |ui| {
+            crate::widgets::menu_button(ui, None, "Add State with Clip", |ui| {
                 if let Some(clip) = clip_list(ui, clips, "") {
                     events.push(GraphEvent::AddState(at, Some(clip), None));
                     ui.close();

@@ -293,6 +293,9 @@ fn common_prefix(candidates: &[String]) -> &str {
 /// The command line: what's typed, the history, and the last completions.
 #[derive(Default)]
 pub struct Console {
+    /// How tall the command line may grow, in points: a share of its panel,
+    /// set by the panel before drawing (0: no limit beyond two lines).
+    pub room: f32,
     input: String,
     /// Commands run before, oldest first.
     history: Vec<String>,
@@ -436,14 +439,23 @@ impl Console {
             if more > 0 {
                 text.push_str(&format!("  … {more} more"));
             }
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(egui::TextStyle::Monospace.resolve(ui.style()))
-                        .color(palette.text_weak),
-                )
-                .wrap(),
-            );
+            // At most a few lines, scrolling, so a long list never covers
+            // the log or pushes the command line out of a short Console.
+            let line = egui::TextStyle::Monospace.resolve(ui.style()).size * 1.4;
+            egui::ScrollArea::vertical()
+                .id_salt("console completions")
+                .max_height(line * COMPLETION_LINES)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .font(egui::TextStyle::Monospace.resolve(ui.style()))
+                                .color(palette.text_weak),
+                        )
+                        .wrap(),
+                    );
+                });
         }
 
         let font = egui::TextStyle::Monospace.resolve(ui.style());
@@ -455,24 +467,34 @@ impl Console {
                         .font(egui::FontId::proportional(font.size))
                         .color(palette.accent_text),
                 );
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.input)
-                        .id(id)
-                        .font(font.clone())
-                        .desired_rows(1)
-                        .desired_width(f32::INFINITY)
-                        // Shift+Enter makes a new line; Enter is taken above.
-                        .return_key(egui::KeyboardShortcut::new(
-                            egui::Modifiers::SHIFT,
-                            egui::Key::Enter,
-                        ))
-                        // Tab stays in the field, for completion.
-                        .lock_focus(true)
-                        .hint_text(
-                            egui::RichText::new("Lua, or a command such as help")
-                                .color(palette.text_muted),
-                        ),
-                )
+                // A long multi-line command scrolls in its own box rather
+                // than growing over the log.
+                let room = self.room;
+                egui::ScrollArea::vertical()
+                    .id_salt("console input")
+                    .max_height(room.max(line_height(ui) * 2.0))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.input)
+                                .id(id)
+                                .font(font.clone())
+                                .desired_rows(1)
+                                .desired_width(f32::INFINITY)
+                                // Shift+Enter makes a new line; Enter is taken above.
+                                .return_key(egui::KeyboardShortcut::new(
+                                    egui::Modifiers::SHIFT,
+                                    egui::Key::Enter,
+                                ))
+                                // Tab stays in the field, for completion.
+                                .lock_focus(true)
+                                .hint_text(
+                                    egui::RichText::new("Lua, or a command such as help")
+                                        .color(palette.text_muted),
+                                ),
+                        )
+                    })
+                    .inner
             })
             .inner;
         if response.changed() {
@@ -493,6 +515,14 @@ impl Console {
         }
         submitted
     }
+}
+
+/// How many lines of completions show before they scroll.
+const COMPLETION_LINES: f32 = 3.0;
+
+/// One line of the command line's text, in points.
+fn line_height(ui: &egui::Ui) -> f32 {
+    egui::TextStyle::Monospace.resolve(ui.style()).size * 1.4
 }
 
 /// The byte index of the `chars`th character of `text`.

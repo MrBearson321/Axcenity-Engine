@@ -81,19 +81,19 @@ impl EditorApp {
                     };
                     widgets::section_label(ui, "Project");
                     if ui
-                        .button(theme::with_icon(icons::FILE_PLUS, "New Project…"))
+                        .button(item(ui, icons::FILE_PLUS, "New Project…"))
                         .on_hover_text("Close this project and make a new one.")
                         .clicked()
                     {
                         self.request_and_go_ahead(ui.ctx(), Discard::NewProject);
                     }
                     if ui
-                        .button(theme::with_icon(icons::FOLDER_OPEN, "Open Project…"))
+                        .button(item(ui, icons::FOLDER_OPEN, "Open Project…"))
                         .clicked()
                     {
                         self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
                     }
-                    let save = egui::Button::new(theme::with_icon(icons::FLOPPY_DISK, "Save"))
+                    let save = egui::Button::new(item(ui, icons::FLOPPY_DISK, "Save"))
                         .shortcut_text(crate::shortcuts::Action::Save.menu_text(ui.ctx()));
                     if ui.add_enabled(self.project.is_some(), save).clicked() {
                         self.save();
@@ -101,7 +101,8 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             editing,
-                            egui::Button::new(theme::with_icon(
+                            egui::Button::new(item(
+                                ui,
                                 icons::CLOCK_COUNTER_CLOCKWISE,
                                 "Version History…",
                             )),
@@ -113,10 +114,7 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             editing,
-                            egui::Button::new(theme::with_icon(
-                                icons::PUSH_PIN,
-                                "Save Checkpoint…",
-                            )),
+                            egui::Button::new(item(ui, icons::PUSH_PIN, "Save Checkpoint…")),
                         )
                         .on_hover_text(
                             "Save with a message, and keep that version however many saves follow.",
@@ -128,7 +126,7 @@ impl EditorApp {
                     if ui
                     .add_enabled(
                         editing,
-                        egui::Button::new(theme::with_icon(icons::ARCHIVE, "Back Up Project")),
+                        egui::Button::new(item(ui, icons::ARCHIVE, "Back Up Project")),
                     )
                     .on_hover_text(
                         "Write a .zip of the project to its backup folder (asked the first time).",
@@ -140,7 +138,7 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             self.project.is_some(),
-                            egui::Button::new(theme::with_icon(icons::GAME_CONTROLLER, "Input…")),
+                            egui::Button::new(item(ui, icons::GAME_CONTROLLER, "Input…")),
                         )
                         .on_hover_text(
                             "The game's actions (Move, Jump, Interact…) and the keys, mouse \
@@ -154,7 +152,7 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             editing,
-                            egui::Button::new(theme::with_icon(icons::HOUSE, "Close Project")),
+                            egui::Button::new(item(ui, icons::HOUSE, "Close Project")),
                         )
                         .clicked()
                     {
@@ -163,8 +161,7 @@ impl EditorApp {
 
                     ui.separator();
                     widgets::section_label(ui, "Import");
-                    let import =
-                        egui::Button::new(theme::with_icon(icons::FILE_ARROW_DOWN, "Import…"));
+                    let import = egui::Button::new(item(ui, icons::FILE_ARROW_DOWN, "Import…"));
                     if ui
                         .add_enabled(editing, import)
                         .on_hover_text(IMPORT_HOVER)
@@ -179,7 +176,8 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             editing && self.team.is_none(),
-                            egui::Button::new(theme::with_icon(
+                            egui::Button::new(item(
+                                ui,
                                 icons::SHARE_NETWORK,
                                 "Start Collaborate Session…",
                             )),
@@ -192,7 +190,8 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             editing && self.team.is_none(),
-                            egui::Button::new(theme::with_icon(
+                            egui::Button::new(item(
+                                ui,
                                 icons::SIGN_IN,
                                 "Join Collaborate Session…",
                             )),
@@ -203,7 +202,7 @@ impl EditorApp {
                         self.join_team_create();
                     }
                     if ui
-                        .button(theme::with_icon(icons::GEAR, "Set Up Collaborate…"))
+                        .button(item(ui, icons::GEAR, "Set Up Collaborate…"))
                         .on_hover_text(
                             "Get Tailscale ready so people anywhere can join your sessions.",
                         )
@@ -218,13 +217,13 @@ impl EditorApp {
 
                     ui.separator();
                     if ui
-                        .add_enabled(editing, egui::Button::new("Open Stylesheet…"))
+                        .add_enabled(editing, egui::Button::new(plain(ui, "Open Stylesheet…")))
                         .clicked()
                     {
                         self.open_stylesheet_with_dialog();
                     }
                     if ui
-                        .add_enabled(editing, egui::Button::new("New Stylesheet"))
+                        .add_enabled(editing, egui::Button::new(plain(ui, "New Stylesheet")))
                         .clicked()
                     {
                         self.new_stylesheet();
@@ -232,10 +231,7 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             self.project.is_some(),
-                            egui::Button::new(theme::with_icon(
-                                icons::MAGNIFYING_GLASS,
-                                "Check Assets",
-                            )),
+                            egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Check Assets")),
                         )
                         .on_hover_text(
                             "Scan the open project for missing files, invalid references, \
@@ -249,7 +245,8 @@ impl EditorApp {
                     if ui
                         .add_enabled(
                             self.project.is_some(),
-                            egui::Button::new(theme::with_icon(
+                            egui::Button::new(item(
+                                ui,
                                 icons::SPARKLE,
                                 "Set Up VS Code Autocomplete",
                             )),
@@ -264,17 +261,13 @@ impl EditorApp {
                         self.set_up_autocomplete();
                     }
                     ui.separator();
-                    let settings =
-                        egui::Button::new(theme::with_icon(icons::GEAR_SIX, "Settings…"))
-                            .shortcut_text(crate::shortcuts::Action::Settings.menu_text(ui.ctx()));
+                    let settings = egui::Button::new(item(ui, icons::GEAR_SIX, "Settings…"))
+                        .shortcut_text(crate::shortcuts::Action::Settings.menu_text(ui.ctx()));
                     if ui.add(settings).clicked() {
                         self.settings.open = true;
                     }
                     ui.separator();
-                    if ui
-                        .button(theme::with_icon(icons::SIGN_OUT, "Quit"))
-                        .clicked()
-                    {
+                    if ui.button(item(ui, icons::SIGN_OUT, "Quit")).clicked() {
                         self.request_and_go_ahead(ui.ctx(), Discard::Quit);
                     }
                 });
@@ -283,7 +276,8 @@ impl EditorApp {
                     let busy = self.viewport.is_dragging() || self.playing();
                     // "Undo Move Pad", so it's clear what will be undone.
                     let undo_label = self.history.undo_label().map(str::to_string);
-                    let undo = egui::Button::new(theme::with_icon(
+                    let undo = egui::Button::new(item(
+                        ui,
                         icons::ARROW_COUNTER_CLOCKWISE,
                         &match &undo_label {
                             Some(label) => format!("Undo {label}"),
@@ -298,7 +292,8 @@ impl EditorApp {
                         self.undo();
                     }
                     let redo_label = self.history.redo_label().map(str::to_string);
-                    let redo = egui::Button::new(theme::with_icon(
+                    let redo = egui::Button::new(item(
+                        ui,
                         icons::ARROW_CLOCKWISE,
                         &match &redo_label {
                             Some(label) => format!("Redo {label}"),
@@ -313,8 +308,10 @@ impl EditorApp {
                         self.redo();
                     }
                     ui.add_enabled_ui(!busy, |ui| {
-                        ui.menu_button(
-                            theme::with_icon(icons::CLOCK_COUNTER_CLOCKWISE, "Undo History"),
+                        crate::widgets::menu_button(
+                            ui,
+                            Some(icons::CLOCK_COUNTER_CLOCKWISE),
+                            "Undo History",
                             |ui| {
                                 if let Some(jump) = undo_history(ui, &self.history) {
                                     self.jump_in_history(jump);
@@ -334,15 +331,14 @@ impl EditorApp {
                     let editable = selected
                         .is_some_and(|id| tree::check_editable(&self.world, id).is_ok())
                         && !busy;
-                    let rename =
-                        egui::Button::new(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
-                            .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
+                    let rename = egui::Button::new(item(ui, icons::PENCIL_SIMPLE, "Rename"))
+                        .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
                     if ui.add_enabled(renamable, rename).clicked()
                         && let Some(id) = selected
                     {
                         self.explorer.start_rename(&self.world, id);
                     }
-                    let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
+                    let duplicate = egui::Button::new(item(ui, icons::COPY, "Duplicate"))
                         .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx()));
                     if ui.add_enabled(editable, duplicate).clicked() && selected.is_some() {
                         self.duplicate_selected();
@@ -350,39 +346,34 @@ impl EditorApp {
                     let deletable = selected
                         .is_some_and(|id| tree::check_delete(&self.world, id).is_ok())
                         && !busy;
-                    let delete = egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
+                    let delete = egui::Button::new(item(ui, icons::TRASH, "Delete"))
                         .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx()));
                     if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
                         self.delete_selected();
                     }
                     ui.separator();
-                    let search = egui::Button::new(theme::with_icon(
-                        icons::MAGNIFYING_GLASS,
-                        "Search Everything…",
-                    ))
-                    .shortcut_text(crate::shortcuts::Action::Search.menu_text(ui.ctx()));
+                    let search =
+                        egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Search Everything…"))
+                            .shortcut_text(crate::shortcuts::Action::Search.menu_text(ui.ctx()));
                     if ui.add(search).clicked() {
                         self.palette.toggle();
                     }
-                    let palette =
-                        egui::Button::new(theme::with_icon(icons::COMMAND, "Command Palette"))
-                            .shortcut_text(crate::shortcuts::Action::Palette.menu_text(ui.ctx()));
+                    let palette = egui::Button::new(item(ui, icons::COMMAND, "Command Palette"))
+                        .shortcut_text(crate::shortcuts::Action::Palette.menu_text(ui.ctx()));
                     if ui.add(palette).clicked() {
                         self.palette.toggle_commands();
                     }
-                    let quick = egui::Button::new(theme::with_icon(
-                        icons::FILE_MAGNIFYING_GLASS,
-                        "Quick Open…",
-                    ))
-                    .shortcut_text(crate::shortcuts::Action::QuickOpen.menu_text(ui.ctx()));
+                    let quick =
+                        egui::Button::new(item(ui, icons::FILE_MAGNIFYING_GLASS, "Quick Open…"))
+                            .shortcut_text(crate::shortcuts::Action::QuickOpen.menu_text(ui.ctx()));
                     if ui.add_enabled(self.project.is_some(), quick).clicked() {
                         self.palette.toggle();
                     }
-                    let find = egui::Button::new(theme::with_icon(
-                        icons::MAGNIFYING_GLASS,
-                        "Find in Scripts…",
-                    ))
-                    .shortcut_text(crate::shortcuts::Action::FindInScripts.menu_text(ui.ctx()));
+                    let find =
+                        egui::Button::new(item(ui, icons::MAGNIFYING_GLASS, "Find in Scripts…"))
+                            .shortcut_text(
+                                crate::shortcuts::Action::FindInScripts.menu_text(ui.ctx()),
+                            );
                     if ui.add_enabled(self.project.is_some(), find).clicked() {
                         self.find.show_and_focus();
                         self.search_scripts();
@@ -396,7 +387,7 @@ impl EditorApp {
                     for pane in Pane::CLOSABLE {
                         let item = egui::Button::selectable(
                             self.layout.is_open(pane),
-                            theme::with_icon(pane.icon(), pane.label()),
+                            item(ui, pane.icon(), pane.label()),
                         );
                         if ui
                             .add(item)
@@ -407,21 +398,18 @@ impl EditorApp {
                         }
                     }
                     if ui
-                        .button(theme::with_icon(
-                            icons::ARROW_COUNTER_CLOCKWISE,
-                            "Reset Layout",
-                        ))
+                        .button(item(ui, icons::ARROW_COUNTER_CLOCKWISE, "Reset Layout"))
                         .on_hover_text("Put every panel back where it starts.")
                         .clicked()
                     {
                         self.layout.reset();
                     }
-                    ui.menu_button(theme::with_icon(icons::LAYOUT, "Layout"), |ui| {
+                    crate::widgets::menu_button(ui, Some(icons::LAYOUT), "Layout", |ui| {
                         self.layout_menu(ui);
                     });
                     ui.separator();
                     if ui
-                        .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))
+                        .button(item(ui, icons::STAR, "New Ribbon Tab…"))
                         .on_hover_text("Make your own ribbon tab from any of the ribbon's groups.")
                         .clicked()
                     {
@@ -432,7 +420,7 @@ impl EditorApp {
                 ui.menu_button("Viewport", |ui| self.viewport_menu(ui));
                 ui.menu_button("Debug", |ui| {
                     if ui
-                        .button(theme::with_icon(icons::GAUGE, "Graphics Benchmark…"))
+                        .button(item(ui, icons::GAUGE, "Graphics Benchmark…"))
                         .on_hover_text(
                             "Measure how this computer draws the viewport and get recommended \
                          editor graphics settings. Changes nothing until you apply them.",
@@ -444,10 +432,8 @@ impl EditorApp {
                     // Only in debug builds (`cargo run`), never in a release.
                     if cfg!(debug_assertions) {
                         ui.separator();
-                        let panic = egui::Button::new(theme::with_icon(
-                            icons::WARNING,
-                            "Panic during Play",
-                        ));
+                        let panic =
+                            egui::Button::new(item(ui, icons::WARNING, "Panic during Play"));
                         if ui
                             .add_enabled(self.playing(), panic)
                             .on_hover_text(
@@ -468,7 +454,7 @@ impl EditorApp {
                             self.project.is_some(),
                             egui::Button::selectable(
                                 self.learn_open,
-                                theme::with_icon(icons::BOOK_OPEN, "Learn"),
+                                item(ui, icons::BOOK_OPEN, "Learn"),
                             ),
                         )
                         .on_hover_text("Tutorials and the API Reference, beside your project")
@@ -480,7 +466,7 @@ impl EditorApp {
                         self.learn_open = !self.learn_open;
                     }
                     if ui
-                        .button(theme::with_icon(icons::GIT_BRANCH, "Version Explorer"))
+                        .button(item(ui, icons::GIT_BRANCH, "Version Explorer"))
                         .on_hover_text(
                             "This build's version, the releases, features, known issues, \
                          and what changed between two versions",
@@ -490,18 +476,12 @@ impl EditorApp {
                         self.layout.open(Pane::VersionExplorer);
                     }
                     if ui
-                        .button(theme::with_icon(
-                            icons::ARROW_CIRCLE_UP,
-                            "Check for Updates…",
-                        ))
+                        .button(item(ui, icons::ARROW_CIRCLE_UP, "Check for Updates…"))
                         .clicked()
                     {
                         self.open_updates();
                     }
-                    if ui
-                        .button(theme::with_icon(icons::INFO, "About Axcenity"))
-                        .clicked()
-                    {
+                    if ui.button(item(ui, icons::INFO, "About Axcenity")).clicked() {
                         self.about_open = true;
                     }
                 });
@@ -560,7 +540,7 @@ impl EditorApp {
             MOVE_GUIDE_HINT,
         );
         ui.separator();
-        ui.menu_button(theme::with_icon(icons::EYE, "View Mode"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::EYE), "View Mode", |ui| {
             for mode in ViewMode::all() {
                 let item = egui::Button::selectable(self.view_mode == mode, mode.label());
                 if ui.add(item).on_hover_text(mode.hint()).clicked() {
@@ -573,7 +553,11 @@ impl EditorApp {
         self.overlay_items(ui);
         ui.separator();
         if ui
-            .button(theme::with_icon(icons::SLIDERS, "Viewport Settings…"))
+            .button(theme::menu_item(
+                ui.ctx(),
+                icons::SLIDERS,
+                "Viewport Settings…",
+            ))
             .on_hover_text("All of these, and the grid's strength, in Settings.")
             .clicked()
         {
@@ -586,9 +570,9 @@ impl EditorApp {
     /// this OS or another, and whether it shows the splash. `enabled` is
     /// false with no project open, or during Play.
     fn build_game_menu(&mut self, ui: &mut egui::Ui, enabled: bool) {
-        ui.menu_button(theme::with_icon(icons::FILE_ARROW_UP, "Build Game"), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::FILE_ARROW_UP), "Build Game", |ui| {
             if ui
-                .add_enabled(enabled, egui::Button::new("For this OS"))
+                .add_enabled(enabled, egui::Button::new(plain(ui, "For this OS")))
                 .clicked()
             {
                 self.export_game_with_dialog();
@@ -772,7 +756,11 @@ fn undo_history(ui: &mut egui::Ui, history: &crate::history::History) -> Option<
     }
     for (index, label) in undo.iter().enumerate().take(HISTORY_ROWS) {
         if ui
-            .button(theme::with_icon(icons::ARROW_COUNTER_CLOCKWISE, label))
+            .button(theme::menu_item(
+                ui.ctx(),
+                icons::ARROW_COUNTER_CLOCKWISE,
+                *label,
+            ))
             .on_hover_text("Click to undo this step and every step after it.")
             .clicked()
         {
@@ -783,4 +771,14 @@ fn undo_history(ui: &mut egui::Ui, history: &crate::history::History) -> Option<
         ui.weak(format!("and {} older", undo.len() - HISTORY_ROWS));
     }
     jump
+}
+
+/// A menu item with `icon` in the menu's icon column (`theme::menu_item`).
+fn item(ui: &egui::Ui, icon: &str, text: impl Into<String>) -> egui::Atoms<'static> {
+    theme::menu_item(ui.ctx(), icon, text)
+}
+
+/// A menu item without an icon, its label lined up with those that have one.
+fn plain(ui: &egui::Ui, text: impl Into<String>) -> egui::Atoms<'static> {
+    theme::menu_entry(ui.ctx(), None, text)
 }

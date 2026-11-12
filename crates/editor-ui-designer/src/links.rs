@@ -264,28 +264,33 @@ pub(super) fn links_section(
     let in_gui = animations_in(world, gui);
     if instance.class() == ClassName::TextButton && !in_gui.is_empty() {
         ui.add_enabled_ui(scene.editing, |ui| {
-            ui.menu_button(theme::with_icon(icons::PLAY, "Play on click"), |ui| {
-                for &(animation, object) in &in_gui {
-                    let label = format!(
-                        "{} · {}",
-                        world.get(object).map_or("", |i| i.name()),
-                        clip_name(world, animation)
-                    );
-                    let animator = crate::animatable::animator_of(world, object)
-                        .and_then(|animator| lua_path(world, animator));
-                    if ui.button(label).clicked()
-                        && let Some(path) = lua_path(world, animation)
-                        && let Some(animator) = animator
-                    {
-                        actions.push(DesignerAction::AddHandler {
-                            id,
-                            event: "Activated".to_owned(),
-                            body: Some(format!("{animator}:LoadAnimation({path}):Play()")),
-                        });
-                        ui.close();
+            axcenity_editor_kit::widgets::menu_button(
+                ui,
+                Some(icons::PLAY),
+                "Play on click",
+                |ui| {
+                    for &(animation, object) in &in_gui {
+                        let label = format!(
+                            "{} · {}",
+                            world.get(object).map_or("", |i| i.name()),
+                            clip_name(world, animation)
+                        );
+                        let animator = crate::animatable::animator_of(world, object)
+                            .and_then(|animator| lua_path(world, animator));
+                        if ui.button(label).clicked()
+                            && let Some(path) = lua_path(world, animation)
+                            && let Some(animator) = animator
+                        {
+                            actions.push(DesignerAction::AddHandler {
+                                id,
+                                event: "Activated".to_owned(),
+                                body: Some(format!("{animator}:LoadAnimation({path}):Play()")),
+                            });
+                            ui.close();
+                        }
                     }
-                }
-            })
+                },
+            )
             .response
             .on_hover_text("Play one of this ScreenGui's animations when the button is clicked");
         });

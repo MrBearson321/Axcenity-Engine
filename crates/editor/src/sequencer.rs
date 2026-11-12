@@ -1058,7 +1058,7 @@ fn add_menu(ui: &mut egui::Ui, doc: &mut SequenceDoc, scene: &SequencerScene) {
             .picked
             .as_ref()
             .map(|picked| binding_of(picked, doc.by_tag));
-        ui.menu_button(format!("{} Add section", icons::PLUS), |ui| {
+        crate::widgets::menu_button(ui, Some(icons::PLUS), "Add section", |ui| {
             let picked = binding.clone().unwrap_or_default();
             let hint = "Select what it binds in the Explorer first";
             if ui
@@ -1078,7 +1078,7 @@ fn add_menu(ui: &mut egui::Ui, doc: &mut SequenceDoc, scene: &SequencerScene) {
                 ui.close();
             }
             ui.add_enabled_ui(binding.is_some(), |ui| {
-                ui.menu_button("Animation", |ui| {
+                crate::widgets::menu_button(ui, None, "Animation", |ui| {
                     if scene.clips.is_empty() {
                         ui.weak("No clips in the project");
                     }
@@ -1112,7 +1112,7 @@ fn add_menu(ui: &mut egui::Ui, doc: &mut SequenceDoc, scene: &SequencerScene) {
                 doc.add(Row::Subtitle, String::new(), "");
                 ui.close();
             }
-            ui.menu_button("Level", |ui| {
+            crate::widgets::menu_button(ui, None, "Level", |ui| {
                 if scene.levels.is_empty() {
                     ui.weak("No other levels in the project");
                 }

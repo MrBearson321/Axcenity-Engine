@@ -184,7 +184,7 @@ impl EditorApp {
         let paused = self.paused();
         let can_play = self.project.is_some();
         match group {
-            RibbonGroup::Game => ribbon::group(ui, "Game", |ui| {
+            RibbonGroup::Game => ribbon::group_tinted(ui, "Game", Some(group.hue()), |ui| {
                 let palette = theme::palette(ui.ctx());
                 // Paused at a breakpoint, Play is Continue, as in Studio.
                 let (label, hover) = if paused {
@@ -218,10 +218,10 @@ impl EditorApp {
                     ))
                     .clicked();
             }),
-            RibbonGroup::Clients => ribbon::group(ui, "Clients", |ui| {
+            RibbonGroup::Clients => ribbon::group_tinted(ui, "Clients", Some(group.hue()), |ui| {
                 self.play_settings_controls(ui, playing);
             }),
-            RibbonGroup::Check => ribbon::group(ui, "Check", |ui| {
+            RibbonGroup::Check => ribbon::group_tinted(ui, "Check", Some(group.hue()), |ui| {
                 let button = RibbonButton::new(icons::MAGNIFYING_GLASS, "Check Assets");
                 clicks.check_assets = ui
                     .add_enabled(can_play, button)
@@ -233,92 +233,94 @@ impl EditorApp {
                     .clicked();
             }),
             RibbonGroup::Plugins => self.plugin_ribbon_groups(ui),
-            RibbonGroup::Tools => ribbon::group(ui, "Tools", |ui| {
+            RibbonGroup::Tools => ribbon::group_tinted(ui, "Tools", Some(group.hue()), |ui| {
                 self.tool_buttons(ui, &Tool::TRANSFORM);
             }),
-            RibbonGroup::Build => ribbon::group(ui, "Build", |ui| {
+            RibbonGroup::Build => ribbon::group_tinted(ui, "Build", Some(group.hue()), |ui| {
                 self.tool_buttons(ui, &Tool::BUILD);
             }),
-            RibbonGroup::Snapping => ribbon::group(ui, "Snapping", |ui| {
-                let snap = &mut self.snap;
-                let mut open_groups = false;
-                egui::Grid::new("snapping")
-                    .num_columns(4)
-                    .spacing([6.0, 4.0])
-                    .show(ui, |ui| {
-                        ui.checkbox(
-                            &mut snap.move_on,
-                            theme::with_icon(icons::GRID_FOUR, "Move"),
-                        )
-                        .on_hover_text("Move and scale in steps of this many studs.");
-                        ui.add_enabled(
-                            snap.move_on,
-                            egui::DragValue::new(&mut snap.move_step)
-                                .range(Snap::MIN_MOVE_STEP..=1000.0)
-                                .speed(0.05)
-                                .max_decimals(3)
-                                .suffix(" studs"),
-                        );
-                        ui.checkbox(
-                            &mut snap.surfaces,
-                            theme::with_icon(icons::MAGNET, "Surfaces"),
-                        )
-                        .on_hover_text(
-                            "Moved and resized parts snap flush against, or in line with, the \
-                             faces of parts near them.",
-                        );
-                        ui.checkbox(
-                            &mut snap.points,
-                            theme::with_icon(icons::CROSSHAIR, "Snap Points"),
-                        )
-                        .on_hover_text(
-                            "Show markers on the parts around a move, and click its corners, \
-                             edge and face middles and Attachments to theirs.",
-                        );
-                        ui.checkbox(
-                            &mut snap.join,
-                            theme::with_icon(icons::LINK_SIMPLE, "Join Surfaces"),
-                        )
-                        .on_hover_text(
-                            "When you let go of a part you moved, weld it to the parts it's \
-                             touching, so they move as one in the game.",
-                        );
-                        ui.end_row();
-                        ui.checkbox(
-                            &mut snap.rotate_on,
-                            theme::with_icon(icons::ANGLE, "Rotate"),
-                        )
-                        .on_hover_text("Rotate in steps of this many degrees.");
-                        ui.add_enabled(
-                            snap.rotate_on,
-                            egui::DragValue::new(&mut snap.rotate_step)
-                                .range(Snap::MIN_ROTATE_STEP..=180.0)
-                                .speed(0.5)
-                                .max_decimals(2)
-                                .suffix("°"),
-                        );
-                        ui.checkbox(
-                            &mut snap.collisions,
-                            theme::with_icon(icons::CUBE, "Collisions"),
-                        )
-                        .on_hover_text(
-                            "Moved, resized and turned parts stop at solid parts (CanCollide) \
-                             instead of going into them.",
-                        );
-                        open_groups = ui
-                            .button(theme::with_icon(icons::INTERSECT, "Collision Groups…"))
-                            .on_hover_text(
-                                "Name collision groups and choose which of them collide: parts \
-                                 in groups that don't pass through each other.",
+            RibbonGroup::Snapping => {
+                ribbon::group_tinted(ui, "Snapping", Some(group.hue()), |ui| {
+                    let snap = &mut self.snap;
+                    let mut open_groups = false;
+                    egui::Grid::new("snapping")
+                        .num_columns(4)
+                        .spacing([6.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.checkbox(
+                                &mut snap.move_on,
+                                theme::with_icon(icons::GRID_FOUR, "Move"),
                             )
-                            .clicked();
-                        ui.end_row();
-                    });
-                if open_groups {
-                    self.collision_groups.open = true;
-                }
-            }),
-            RibbonGroup::Parts => ribbon::group(ui, "Parts", |ui| {
+                            .on_hover_text("Move and scale in steps of this many studs.");
+                            ui.add_enabled(
+                                snap.move_on,
+                                egui::DragValue::new(&mut snap.move_step)
+                                    .range(Snap::MIN_MOVE_STEP..=1000.0)
+                                    .speed(0.05)
+                                    .max_decimals(3)
+                                    .suffix(" studs"),
+                            );
+                            ui.checkbox(
+                                &mut snap.surfaces,
+                                theme::with_icon(icons::MAGNET, "Surfaces"),
+                            )
+                            .on_hover_text(
+                                "Moved and resized parts snap flush against, or in line with, the \
+                             faces of parts near them.",
+                            );
+                            ui.checkbox(
+                                &mut snap.points,
+                                theme::with_icon(icons::CROSSHAIR, "Snap Points"),
+                            )
+                            .on_hover_text(
+                                "Show markers on the parts around a move, and click its corners, \
+                             edge and face middles and Attachments to theirs.",
+                            );
+                            ui.checkbox(
+                                &mut snap.join,
+                                theme::with_icon(icons::LINK_SIMPLE, "Join Surfaces"),
+                            )
+                            .on_hover_text(
+                                "When you let go of a part you moved, weld it to the parts it's \
+                             touching, so they move as one in the game.",
+                            );
+                            ui.end_row();
+                            ui.checkbox(
+                                &mut snap.rotate_on,
+                                theme::with_icon(icons::ANGLE, "Rotate"),
+                            )
+                            .on_hover_text("Rotate in steps of this many degrees.");
+                            ui.add_enabled(
+                                snap.rotate_on,
+                                egui::DragValue::new(&mut snap.rotate_step)
+                                    .range(Snap::MIN_ROTATE_STEP..=180.0)
+                                    .speed(0.5)
+                                    .max_decimals(2)
+                                    .suffix("°"),
+                            );
+                            ui.checkbox(
+                                &mut snap.collisions,
+                                theme::with_icon(icons::CUBE, "Collisions"),
+                            )
+                            .on_hover_text(
+                                "Moved, resized and turned parts stop at solid parts (CanCollide) \
+                             instead of going into them.",
+                            );
+                            open_groups = ui
+                                .button(theme::with_icon(icons::INTERSECT, "Collision Groups…"))
+                                .on_hover_text(
+                                    "Name collision groups and choose which of them collide: parts \
+                                 in groups that don't pass through each other.",
+                                )
+                                .clicked();
+                            ui.end_row();
+                        });
+                    if open_groups {
+                        self.collision_groups.open = true;
+                    }
+                })
+            }
+            RibbonGroup::Parts => ribbon::group_tinted(ui, "Parts", Some(group.hue()), |ui| {
                 for what in Insertable::PARTS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
@@ -331,7 +333,7 @@ impl EditorApp {
                     }
                 }
             }),
-            RibbonGroup::Effects => ribbon::group(ui, "Effects", |ui| {
+            RibbonGroup::Effects => ribbon::group_tinted(ui, "Effects", Some(group.hue()), |ui| {
                 insert_menu(
                     ui,
                     (icons::SPEAKER_HIGH, "Sound"),
@@ -360,128 +362,135 @@ impl EditorApp {
                     &mut clicks.insert,
                 );
             }),
-            RibbonGroup::Lights => ribbon::group(ui, "Lights & Sky", |ui| {
-                let button = ui
-                    .add_enabled(
-                        !playing,
-                        RibbonButton::new(icons::LIGHTBULB, "Light").dropdown(),
-                    )
-                    .on_hover_text("Insert a light or a probe, or bake the probes.")
-                    .on_disabled_hover_text("Press Stop to edit.");
-                egui::Popup::menu(&button).show(|ui| {
-                    insert_items(
-                        ui,
-                        &[&Insertable::LIGHTS, &Insertable::PROBES],
-                        &mut clicks.insert,
-                    );
-                    ui.separator();
-                    if ui
-                        .button(theme::with_icon(icons::CAMERA_ROTATE, "Bake Probes"))
-                        .on_hover_text(
-                            "Bake every LightProbeVolume and ReflectionProbe: the light around \
+            RibbonGroup::Lights => {
+                ribbon::group_tinted(ui, "Lights & Sky", Some(group.hue()), |ui| {
+                    let button = ui
+                        .add_enabled(
+                            !playing,
+                            RibbonButton::new(icons::LIGHTBULB, "Light").dropdown(),
+                        )
+                        .on_hover_text("Insert a light or a probe, or bake the probes.")
+                        .on_disabled_hover_text("Press Stop to edit.");
+                    egui::Popup::menu(&button).show(|ui| {
+                        insert_items(
+                            ui,
+                            &[&Insertable::LIGHTS, &Insertable::PROBES],
+                            &mut clicks.insert,
+                        );
+                        ui.separator();
+                        if ui
+                            .button(theme::with_icon(icons::CAMERA_ROTATE, "Bake Probes"))
+                            .on_hover_text(
+                                "Bake every LightProbeVolume and ReflectionProbe: the light around \
                              each probe is saved in assets/probes. Bake again after changing \
                              the world: an out-of-date volume has a warning in the Explorer.",
-                        )
-                        .clicked()
-                    {
-                        clicks.bake_probes = true;
-                    }
-                });
-                insert_menu(
-                    ui,
-                    (icons::CLOUD_SUN, "Sky"),
-                    "Insert an Atmosphere, Clouds, Weather, outlines or color correction.",
-                    &[&Insertable::SKY],
-                    playing,
-                    &mut clicks.insert,
-                );
-            }),
-            RibbonGroup::Gameplay => ribbon::group(ui, "Gameplay", |ui| {
-                insert_menu(
-                    ui,
-                    (icons::PERSON_SIMPLE, "Character"),
-                    "Insert a ready character, or the pieces of one: a Humanoid, a controller, \
+                            )
+                            .clicked()
+                        {
+                            clicks.bake_probes = true;
+                        }
+                    });
+                    insert_menu(
+                        ui,
+                        (icons::CLOUD_SUN, "Sky"),
+                        "Insert an Atmosphere, Clouds, Weather, outlines or color correction.",
+                        &[&Insertable::SKY],
+                        playing,
+                        &mut clicks.insert,
+                    );
+                })
+            }
+            RibbonGroup::Gameplay => {
+                ribbon::group_tinted(ui, "Gameplay", Some(group.hue()), |ui| {
+                    insert_menu(
+                        ui,
+                        (icons::PERSON_SIMPLE, "Character"),
+                        "Insert a ready character, or the pieces of one: a Humanoid, a controller, \
                      Health, Tools and an Inventory, or an agent that walks it.",
-                    &[
-                        &Insertable::HUMANOIDS,
-                        &Insertable::CHARACTERS,
-                        &Insertable::HEALTH,
-                        &Insertable::TOOLS,
-                        &Insertable::AGENTS,
-                    ],
-                    playing,
-                    &mut clicks.insert,
-                );
-                insert_menu(
-                    ui,
-                    (icons::HAND_POINTING, "Interact"),
-                    "Insert a Prompt, a Click Detector or a Seat.",
-                    &[&Insertable::INTERACTION, &Insertable::SEATS],
-                    playing,
-                    &mut clicks.insert,
-                );
-                insert_menu(
-                    ui,
-                    (icons::FLAG, "Spawn"),
-                    "Insert a SpawnLocation, a Team, a Checkpoint or a Camera viewpoint.",
-                    &[
-                        &Insertable::SPAWNING,
-                        &Insertable::CHECKPOINTS,
-                        &Insertable::CAMERAS,
-                    ],
-                    playing,
-                    &mut clicks.insert,
-                );
-                insert_menu(
-                    ui,
-                    (icons::CAR, "Vehicle"),
-                    "Insert a ready-to-drive car, a Vehicle Seat and Wheels to build one, or a \
+                        &[
+                            &Insertable::HUMANOIDS,
+                            &Insertable::CHARACTERS,
+                            &Insertable::HEALTH,
+                            &Insertable::TOOLS,
+                            &Insertable::AGENTS,
+                        ],
+                        playing,
+                        &mut clicks.insert,
+                    );
+                    insert_menu(
+                        ui,
+                        (icons::HAND_POINTING, "Interact"),
+                        "Insert a Prompt, a Click Detector or a Seat.",
+                        &[&Insertable::INTERACTION, &Insertable::SEATS],
+                        playing,
+                        &mut clicks.insert,
+                    );
+                    insert_menu(
+                        ui,
+                        (icons::FLAG, "Spawn"),
+                        "Insert a SpawnLocation, a Team, a Checkpoint or a Camera viewpoint.",
+                        &[
+                            &Insertable::SPAWNING,
+                            &Insertable::CHECKPOINTS,
+                            &Insertable::CAMERAS,
+                        ],
+                        playing,
+                        &mut clicks.insert,
+                    );
+                    insert_menu(
+                        ui,
+                        (icons::CAR, "Vehicle"),
+                        "Insert a ready-to-drive car, a Vehicle Seat and Wheels to build one, or a \
                      Spline and a Spline Follower that carries a part along it.",
-                    &[&Insertable::VEHICLES, &Insertable::SPLINES],
-                    playing,
-                    &mut clicks.insert,
-                );
-            }),
-            RibbonGroup::Solid => ribbon::group(ui, "Solid Modeling", |ui| {
-                use crate::app::solid::SolidAction;
-                let parts = self.solid_parts();
-                for action in SolidAction::ALL {
-                    let usable = action.usable(&self.world, &parts);
-                    let button = RibbonButton::new(action.icon(), action.label());
-                    if ui
-                        .add_enabled(!playing && usable, button)
-                        .on_hover_text(action.hover())
+                        &[&Insertable::VEHICLES, &Insertable::SPLINES],
+                        playing,
+                        &mut clicks.insert,
+                    );
+                })
+            }
+            RibbonGroup::Solid => {
+                ribbon::group_tinted(ui, "Solid Modeling", Some(group.hue()), |ui| {
+                    use crate::app::solid::SolidAction;
+                    let parts = self.solid_parts();
+                    for action in SolidAction::ALL {
+                        let usable = action.usable(&self.world, &parts);
+                        let button = RibbonButton::new(action.icon(), action.label());
+                        if ui
+                            .add_enabled(!playing && usable, button)
+                            .on_hover_text(action.hover())
+                            .on_disabled_hover_text(if playing {
+                                "Press Stop to edit."
+                            } else {
+                                action.needs()
+                            })
+                            .clicked()
+                        {
+                            clicks.solid = Some(action);
+                        }
+                    }
+                })
+            }
+            RibbonGroup::Constraints => {
+                ribbon::group_tinted(ui, "Constraints", Some(group.hue()), |ui| {
+                    let can_weld =
+                        !crate::constraints::weld_pairs(&self.world, &self.tool_parts()).is_empty();
+                    let button = RibbonButton::new(icons::LINK_SIMPLE, "Weld");
+                    clicks.weld = ui
+                        .add_enabled(!playing && can_weld, button)
+                        .on_hover_text(
+                            "Weld the selected parts to the largest of them, where they are now: \
+                         unanchored, they move as one body in the game.",
+                        )
                         .on_disabled_hover_text(if playing {
                             "Press Stop to edit."
                         } else {
-                            action.needs()
+                            "Select two or more parts to weld."
                         })
-                        .clicked()
-                    {
-                        clicks.solid = Some(action);
-                    }
-                }
-            }),
-            RibbonGroup::Constraints => ribbon::group(ui, "Constraints", |ui| {
-                let can_weld =
-                    !crate::constraints::weld_pairs(&self.world, &self.tool_parts()).is_empty();
-                let button = RibbonButton::new(icons::LINK_SIMPLE, "Weld");
-                clicks.weld = ui
-                    .add_enabled(!playing && can_weld, button)
-                    .on_hover_text(
-                        "Weld the selected parts to the largest of them, where they are now: \
-                         unanchored, they move as one body in the game.",
-                    )
-                    .on_disabled_hover_text(if playing {
-                        "Press Stop to edit."
-                    } else {
-                        "Select two or more parts to weld."
-                    })
-                    .clicked();
-                let active = self.constraint_tool.map(|tool| tool.class);
-                let icon = active.map_or(icons::DOOR_OPEN, theme::class_icon);
-                let button = RibbonButton::new(icon, "Constraint").selected(active.is_some());
-                let button = ui
+                        .clicked();
+                    let active = self.constraint_tool.map(|tool| tool.class);
+                    let icon = active.map_or(icons::DOOR_OPEN, theme::class_icon);
+                    let button = RibbonButton::new(icon, "Constraint").selected(active.is_some());
+                    let button = ui
                     .add_enabled(!playing, button)
                     .on_hover_text(
                         "Join two parts with a hinge, ball socket, slider, spring, rope or rod: \
@@ -491,36 +500,37 @@ impl EditorApp {
                          Attachments and the constraint are one undo step. Esc stops.",
                     )
                     .on_disabled_hover_text("Press Stop to edit.");
-                egui::Popup::menu(&button).show(|ui| {
-                    let groups = [&crate::constraints::JOINTS[..], &crate::constraints::MOVERS];
-                    for (i, classes) in groups.into_iter().enumerate() {
-                        if i > 0 {
-                            ui.separator();
-                        }
-                        for &class in classes {
-                            let label = format!("{} {}", theme::class_icon(class), class);
-                            if ui.selectable_label(active == Some(class), label).clicked() {
-                                clicks.constraint = Some(Some(class));
+                    egui::Popup::menu(&button).show(|ui| {
+                        let groups = [&crate::constraints::JOINTS[..], &crate::constraints::MOVERS];
+                        for (i, classes) in groups.into_iter().enumerate() {
+                            if i > 0 {
+                                ui.separator();
+                            }
+                            for &class in classes {
+                                let label = format!("{} {}", theme::class_icon(class), class);
+                                if ui.selectable_label(active == Some(class), label).clicked() {
+                                    clicks.constraint = Some(Some(class));
+                                }
                             }
                         }
+                        if active.is_some() && ui.button("Stop").clicked() {
+                            clicks.constraint = Some(None);
+                        }
+                    });
+                    for what in Insertable::CONSTRAINTS {
+                        let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                        if ui
+                            .add_enabled(!playing, button)
+                            .on_hover_text(insert_hint(what))
+                            .on_disabled_hover_text("Press Stop to edit.")
+                            .clicked()
+                        {
+                            clicks.insert = Some(what);
+                        }
                     }
-                    if active.is_some() && ui.button("Stop").clicked() {
-                        clicks.constraint = Some(None);
-                    }
-                });
-                for what in Insertable::CONSTRAINTS {
-                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
-                    if ui
-                        .add_enabled(!playing, button)
-                        .on_hover_text(insert_hint(what))
-                        .on_disabled_hover_text("Press Stop to edit.")
-                        .clicked()
-                    {
-                        clicks.insert = Some(what);
-                    }
-                }
-            }),
-            RibbonGroup::Import => ribbon::group(ui, "Models", |ui| {
+                })
+            }
+            RibbonGroup::Import => ribbon::group_tinted(ui, "Models", Some(group.hue()), |ui| {
                 let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import…");
                 clicks.import = ui
                     .add_enabled(!playing, button)
@@ -540,7 +550,7 @@ impl EditorApp {
                     self.layout.open(Pane::ModelStudio);
                 }
             }),
-            RibbonGroup::Ui => ribbon::group(ui, "UI", |ui| {
+            RibbonGroup::Ui => ribbon::group_tinted(ui, "UI", Some(group.hue()), |ui| {
                 let screen = Insertable::ScreenGui;
                 let button = RibbonButton::new(theme::insert_icon(screen), "Screen");
                 if ui
@@ -600,7 +610,7 @@ impl EditorApp {
                     .on_disabled_hover_text("Open a project, and press Stop to edit.")
                     .clicked();
             }),
-            RibbonGroup::Scripts => ribbon::group(ui, "Scripts", |ui| {
+            RibbonGroup::Scripts => ribbon::group_tinted(ui, "Scripts", Some(group.hue()), |ui| {
                 for class in explorer::SCRIPT_CLASSES {
                     let button = RibbonButton::new(theme::class_icon(class), class.as_str());
                     if ui
@@ -617,7 +627,7 @@ impl EditorApp {
                     }
                 }
             }),
-            RibbonGroup::Terrain => ribbon::group(ui, "Terrain", |ui| {
+            RibbonGroup::Terrain => ribbon::group_tinted(ui, "Terrain", Some(group.hue()), |ui| {
                 use crate::terrain_studio::TerrainTool;
                 let editor = RibbonButton::new(icons::MOUNTAINS, "Terrain")
                     .selected(self.layout.is_open(Pane::Terrain));
@@ -662,7 +672,7 @@ impl EditorApp {
                     }
                 });
             }),
-            RibbonGroup::Panels => ribbon::group(ui, "Panels", |ui| {
+            RibbonGroup::Panels => ribbon::group_tinted(ui, "Panels", Some(group.hue()), |ui| {
                 for pane in [Pane::Explorer, Pane::Properties] {
                     let button = RibbonButton::new(pane.icon(), pane.label())
                         .selected(self.layout.is_open(pane));
@@ -707,7 +717,7 @@ impl EditorApp {
                         }
                     });
             }),
-            RibbonGroup::Overlays => ribbon::group(ui, "View", |ui| {
+            RibbonGroup::Overlays => ribbon::group_tinted(ui, "View", Some(group.hue()), |ui| {
                 let cube =
                     RibbonButton::new(icons::CUBE_FOCUS, "View Cube").selected(self.view_cube);
                 if ui
@@ -848,7 +858,7 @@ impl EditorApp {
                 self.play_settings.clients = clients;
             });
             ui.horizontal(|ui| {
-                ui.menu_button(theme::with_icon(icons::WIFI_HIGH, "Network"), |ui| {
+                crate::widgets::menu_button(ui, Some(icons::WIFI_HIGH), "Network", |ui| {
                     let mut conditions = self.play_settings.conditions;
                     let mut latency = conditions.latency.as_secs_f64() * 1000.0;
                     let mut jitter = conditions.jitter.as_secs_f64() * 1000.0;

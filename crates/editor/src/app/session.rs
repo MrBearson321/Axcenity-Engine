@@ -1195,7 +1195,12 @@ impl EditorApp {
                 self.start
                     .new_project(axcenity_project::Template::Baseplate);
             }
-            Discard::CloseTab(path) => self.tabs.close(&path),
+            Discard::CloseTab(path) => {
+                if let Some(project) = &self.project {
+                    self.recent_tabs.closed(&project.folder, &path);
+                }
+                self.tabs.close(&path);
+            }
             Discard::OpenLevel(level) => {
                 if let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) {
                     self.begin_open_in_level(ctx, &folder, level);
