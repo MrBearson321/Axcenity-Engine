@@ -88,10 +88,10 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
+| 2026-11-12 | ADR-0021, ADR-0020, roadmap | Collaborate audit: live shared scripts, Tailscale setup, identity seam |
 | 2026-11-12 | Scripting, scene bridge, technical debt | Phase 6 file splits (`script/runtime/`, `scene/draw_list/`) |
 | 2026-11-11 | System inventory, dependencies, roadmap; ADR-0020 | Team Create design (#134), TC1 sync core (`collab`) and TC2 editor sync |
 | 2026-11-11 | Repository structure | `documentation/` became the user documentation and in-editor Learn and Documentation pages |
 | 2026-11-11 | Vault moved into the repo as `wiki/`; M12, format 5, G5/G7/G8, updater | Caught up with PRs #116–#130 |
-| 2026-11-11 | Roadmap, performance, physics, asset pipeline; new pages for gameplay systems, MCP, Toolbox, releases; ADR-0018, ADR-0019 | Caught up with PRs #65–#115 |
 
 Keep the five newest rows here; the full list is [Documentation history](Changelog/Documentation-History.md).

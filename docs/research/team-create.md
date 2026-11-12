@@ -2,6 +2,7 @@
 
 Section 8 of Paul's brief "Editor Usability, Core Features, Documentation & Collaboration Improvements" (2026-11-11), Phase 7. The brief asks for the architecture and synchronization model **before** any implementation. This is that proposal. **Approved 2026-11-11:** Paul accepted the recommended plan with the defaults D1–D5 (decision card). TC1 is under way.
 
+- **Next:** Paul's 2026-11-12 brief renames the feature **Collaborate** and changes three things (live shared scripts, Tailscale setup, no hosted service); the audit and plan C1–C12 are in [collaborate.md](collaborate.md), the decision in ADR-0021. Where they differ, those win.
 - **Status:** Approved (2026-11-11), with the recommended answer to every decision in [§14](#14-decisions-for-paul). The matching ADR is [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md) (Accepted).
 - **Date:** 2026-11-11
 - **Engine:** `main` at `1bdb77a` (PR #132)
