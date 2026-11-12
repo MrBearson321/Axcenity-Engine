@@ -1,5 +1,5 @@
-//! Scripts reloaded during Play, and Play edits kept at Stop (unified
-//! Phase 24).
+//! Scripts reloaded during Play (unified Phase 24, keeping their state
+//! since Phase 89), and Play edits kept at Stop.
 
 use std::time::{Duration, Instant};
 
@@ -141,6 +141,55 @@ fn a_script_changed_in_another_editor_during_play_drops_its_old_touched_handler_
         game.find_first_child(game.workspace(), "BlueBall")
             .is_none()
     );
+    drop(app);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn saving_a_script_during_play_keeps_its_state_like_s_and_box() {
+    // Phase 89: the Mover's part and its counter carry over; only the code
+    // changes, so there's still one Mover and the count goes on.
+    let folder = project_with_greeter("live-script-state");
+    let mover = "scripts/Mover.server.lua";
+    let counting = |word: &str| {
+        format!(
+            "local mover = Instance.new('Part')\n\
+             mover.Name = 'Mover'\n\
+             mover.Anchored = true\n\
+             mover.Parent = workspace\n\
+             local frames = 0\n\
+             game:GetService('RunService').Heartbeat:Connect(function()\n\
+                 frames += 1\n\
+                 if frames == 90 then print('{word} ' .. frames) end\n\
+             end)\n"
+        )
+    };
+    std::fs::write(folder.join(mover), counting("old")).unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    app.play();
+    play_for(&mut app, 1.0);
+    assert!(!printed(&app).iter().any(|line| line.starts_with("old")));
+
+    type_into(&mut app, mover, &counting("new"));
+    let from = printed(&app).len();
+    assert!(app.save());
+    play_for(&mut app, 1.0);
+    let after = since(&app, from);
+    assert!(
+        after.contains(&"Reloaded Mover.server.lua, kept frames and mover"),
+        "{after:?}"
+    );
+    // 60 frames before the save and 30 after: the count carried on.
+    assert!(after.contains(&"new 90"), "{after:?}");
+    let game = shown(&app.world, &app.play);
+    let movers = game
+        .get(game.workspace())
+        .unwrap()
+        .children()
+        .iter()
+        .filter(|&&id| game.get(id).is_some_and(|i| i.name() == "Mover"))
+        .count();
+    assert_eq!(movers, 1, "the part wasn't made again");
     drop(app);
     let _ = std::fs::remove_dir_all(&folder);
 }

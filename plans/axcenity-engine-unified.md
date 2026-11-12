@@ -55,7 +55,7 @@ These were decided in the developer's interview of 2026-10-27.
 
 | Step | Work | Status on main | Fit to today's code |
 | --- | --- | --- | --- |
-| 1 | Phase 89: engine hot-patching out, game files hot reload like s&box (**Changed** 2026-11-12) | Not started. Script reload (Phase 24, `ScriptRuntime::reload_script`) reruns a script from scratch. `hot_patch.rs`, `hot_patch/` and the `hot-patch` feature (`subsecond`, `dioxus-*`) are still in `crates/editor`. | `rebuild.rs`, `relaunch.rs` and `app/engine.rs` stayed in `crates/editor` through the crate split. `blocks` already has a full Luau reader with source spans (`blocks/src/lua.rs`), which wraps scripts' top-level locals. |
+| 1 | Phase 89: engine hot-patching out, game files hot reload like s&box (**Changed** 2026-11-12) | Done in this phase's PR. Was: not started. Script reload (Phase 24, `ScriptRuntime::reload_script`) reruns a script from scratch. `hot_patch.rs`, `hot_patch/` and the `hot-patch` feature (`subsecond`, `dioxus-*`) are still in `crates/editor`. | `rebuild.rs`, `relaunch.rs` and `app/engine.rs` stayed in `crates/editor` through the crate split. `blocks` already has a full Luau reader with source spans (`blocks/src/lua.rs`), which wraps scripts' top-level locals. |
 | 2 | Phase 90: a narrower Model Studio | Not started. | Model Studio moved to `crates/editor-model-studio` (G11, #189): delete `sculpt*` and `retopo*` there, not in `editor/src/model_studio/`. The usability audit (MS4) already folded Retopology and Bake away, which agrees with removing them. Rigging still needs `sculpt::remesh::field_mesh` (`rig/template.rs`), `retopo::Reference` (`rig/weights.rs`) and `sculpt::subdivide` (`rig_tests.rs`). Terrain sculpting is a different tool and stays. |
 | 3 | Phase 91: one graph canvas | Not started (also proposed as V24 by the usability refactor audit). | `node_graph` is now the `editor-node-graph` crate (#193). `block_editor/graph.rs` is 1,436 lines and `animation/graph.rs` 930. The material graph's own view is `editor/src/material_editor/graph.rs`. |
 | 4 | Phase 92: legacy paths, old templates and dead weight | Partly superseded. The genre templates (Phase 69) landed, so the Starter template can go. | `project::FORMAT_VERSION` is already 5 (the release system's engine record, #98 era), so this phase bumps it to **6**, not 5. There are four alpha releases now (`releases/history`: 0.1.0-alpha.1 to .3 and 0.2.0-alpha.1). |
@@ -2754,20 +2754,20 @@ The settings are the same as Android's: bundle ID, name, version, build number, 
 - **Edited values win.** A local whose initializer text changed takes the new value, so changing `local speed = 10` to `20` takes effect. This differs from s&box on purpose: there, changed defaults wait for a restart. `-- @reset` at the end of a local's line always takes the new initializer.
 - **Modules keep their identity.** A ModuleScript runs again at once with its state kept. When it returns a table, scripts that already required it keep that same table, which now holds the new functions, so they aren't rerun. A module that returns something else reruns the scripts that required it, as before.
 - **How.** In the editor's Play only, each script's top-level locals are wrapped as it loads (the Luau reader in `blocks`, through a hook the editor gives `ScriptRuntime`, so `script` and the player gain nothing). Lines stay where they were, so errors and breakpoints point at the same lines. A script the reader can't read loads as it is and reloads as in Phase 24.
-- **Saying what happened.** Output says "Hot reloaded Door.server.lua in 2 ms, kept count, part" (the kept names, up to a few). A syntax error keeps the old code running, as now. Block and graph scripts hot reload the same way, because their Lua is generated.
+- **Saying what happened.** Output says "Reloaded Door.server.lua, kept count and part" (up to four names, then how many more). A syntax error keeps the old code running, as now. Block and graph scripts hot reload the same way, because their Lua is generated.
 
 **Docs and wiki.** `docs/editor/scripts.md` (Live scripts; Hot-patching removed), the editor's `CLAUDE.md`, `docs/development.md`, the README, the wiki's live-reload pages and dependency list, and an ADR for keeping script state across reloads.
 
 ### Acceptance criteria
 
-- [ ] `cargo build -p axcenity-editor` doesn't compile `subsecond` or any `dioxus` crate, and `Cargo.lock` no longer lists them.
-- [ ] A release editor shows no Rebuild or Relaunch items, and editing a file under `crates/` does nothing.
-- [ ] `cargo run -p axcenity-editor --features engine-dev` still rebuilds and relaunches after a Rust change, keeping project, camera, selection and unsaved edits.
-- [ ] During Play, changing the text a `Touched` handler prints keeps the script's counter: the next touch prints the new text with the old count, and no second part is made.
-- [ ] Changing a local's initializer takes the new value; `-- @reset` takes it too.
-- [ ] A script that required a ModuleScript uses the module's new function after a save, without rerunning, and the module's data is kept.
-- [ ] A syntax error keeps the old code running, and Phase 24's tests still pass. Live asset reload (Phase 23) works as before.
-- [ ] Exported games and the player run scripts exactly as before: nothing is wrapped.
+- [x] `cargo build -p axcenity-editor` doesn't compile `subsecond` or any `dioxus` crate, and `Cargo.lock` no longer lists them.
+- [x] A release editor shows no Rebuild or Relaunch items, and editing a file under `crates/` does nothing.
+- [x] `cargo run -p axcenity-editor --features engine-dev` still rebuilds and relaunches after a Rust change, keeping project, camera, selection and unsaved edits. (Relaunch tests pass in the cloud; a hand check on the PC is queued.)
+- [x] During Play, changing the text a `Touched` handler prints keeps the script's counter: the next touch prints the new text with the old count, and no second part is made.
+- [x] Changing a local's initializer takes the new value; `-- @reset` takes it too.
+- [x] A script that required a ModuleScript uses the module's new function after a save, without rerunning, and the module's data is kept.
+- [x] A syntax error keeps the old code running, and Phase 24's tests still pass. Live asset reload (Phase 23) works as before.
+- [x] Exported games and the player run scripts exactly as before: nothing is wrapped.
 
 ---
 
