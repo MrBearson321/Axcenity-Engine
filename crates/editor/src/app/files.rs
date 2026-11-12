@@ -274,7 +274,8 @@ impl EditorApp {
                 }
                 self.repo_changed();
                 match project::record_version(&folder, "Save") {
-                    Ok(_) => {}
+                    Ok(true) => self.record_save_history(&folder),
+                    Ok(false) => {}
                     Err(err) => self
                         .output
                         .warning(format!("Saved, but could not keep a version: {err}")),

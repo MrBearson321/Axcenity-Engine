@@ -82,11 +82,20 @@ const NOT_SYNCED: &[&str] = &[
     "thumbnail.png",
 ];
 
+/// Each person's history (`team/history`, the teamwork crate's T4): in a
+/// session only the host writes it, and the project's repository carries
+/// it, so sharing it would only echo the host's own lines back.
+const HISTORY: &str = "team/history";
+
 /// True if `path` (relative, with `/`) is one of the session's files.
 pub fn is_synced(path: &str) -> bool {
     let first = path.split('/').next().unwrap_or("");
     let name = path.rsplit('/').next().unwrap_or("");
+    let history = path
+        .strip_prefix(HISTORY)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
     !NOT_SYNCED.contains(&first)
+        && !history
         && !matches!(name, "Thumbs.db" | "desktop.ini")
         && !path.split('/').any(|part| part.starts_with('.'))
         && !path.ends_with(".tmp")

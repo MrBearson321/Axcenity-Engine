@@ -280,21 +280,26 @@ pub struct Event {
 impl Event {
     /// "Paul moved it to Done".
     pub fn describe(&self, kind: Kind) -> String {
+        format!("{} {}", self.who, self.action(kind))
+    }
+
+    /// What was done, without who: "moved it to Done".
+    pub fn action(&self, kind: Kind) -> String {
         let who = &self.who;
         match &self.change {
-            Change::Created => format!("{who} created it"),
-            Change::Status { to, .. } => format!("{who} moved it to {}", to.name(kind)),
-            Change::Assigned { person } if person == who => format!("{who} took it"),
-            Change::Assigned { person } => format!("{who} assigned it to {person}"),
-            Change::Unassigned { person } if person == who => format!("{who} let it go"),
-            Change::Unassigned { person } => format!("{who} unassigned {person}"),
-            Change::Priority { to } => format!("{who} set the priority to {}", to.name()),
-            Change::Due { to: Some(date) } => format!("{who} set it due {date}"),
-            Change::Due { to: None } => format!("{who} took the due date off"),
-            Change::Renamed { from } => format!("{who} renamed it from “{from}”"),
-            Change::Severity { to } => format!("{who} set the severity to {}", to.name()),
-            Change::Goal { to: Some(goal) } => format!("{who} put it under “{goal}”"),
-            Change::Goal { to: None } => format!("{who} took it out of its goal"),
+            Change::Created => "created it".to_owned(),
+            Change::Status { to, .. } => format!("moved it to {}", to.name(kind)),
+            Change::Assigned { person } if person == who => "took it".to_owned(),
+            Change::Assigned { person } => format!("assigned it to {person}"),
+            Change::Unassigned { person } if person == who => "let it go".to_owned(),
+            Change::Unassigned { person } => format!("unassigned {person}"),
+            Change::Priority { to } => format!("set the priority to {}", to.name()),
+            Change::Due { to: Some(date) } => format!("set it due {date}"),
+            Change::Due { to: None } => "took the due date off".to_owned(),
+            Change::Renamed { from } => format!("renamed it from “{from}”"),
+            Change::Severity { to } => format!("set the severity to {}", to.name()),
+            Change::Goal { to: Some(goal) } => format!("put it under “{goal}”"),
+            Change::Goal { to: None } => "took it out of its goal".to_owned(),
         }
     }
 }
