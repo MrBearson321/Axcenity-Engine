@@ -822,7 +822,7 @@ impl EditorApp {
     /// bar's Viewport menu.
     pub(in crate::app) fn overlay_items(&mut self, ui: &mut egui::Ui) {
         let overlays = &mut self.overlays;
-        let items: [(&mut bool, &'static str, &'static str, &'static str); 10] = [
+        let items: [(&mut bool, &'static str, &'static str, &'static str); 11] = [
             (
                 &mut overlays.colliders,
                 icons::CUBE,
@@ -876,6 +876,12 @@ impl EditorApp {
                 icons::CROSSHAIR,
                 "Bodies",
                 "During Play, mark each moving part's (or welded group's) center of mass: yellow while it's simulated, blue with a z once it's asleep.",
+            ),
+            (
+                &mut overlays.streaming,
+                icons::BROADCAST,
+                "Streaming",
+                "With Workspace.StreamingEnabled on, show what streams around the camera, while editing too: each unit's box (green there at once, blue loading, grey kept if loaded), what's always there in orange, both radii, and how much a player standing here has.",
             ),
             (
                 &mut overlays.culling,

@@ -20,12 +20,13 @@ tags: [system/streaming, large-worlds]
 
 ```mermaid
 flowchart LR
-  P["core::streaming::Partition<br/>(split again when the Workspace's<br/>structure or the characters change)"] --> NS["net::streaming Streams<br/>per player: MinRadius now, out to TargetRadius<br/>nearest first, 4,000 Instances/s"]
+  P["core::streaming::Partition<br/>(split again when the Workspace's<br/>structure, the World or the characters change)"] --> NS["net::streaming Streams<br/>per player: MinRadius now, out to TargetRadius<br/>nearest first, 4,000 Instances/s"]
   P --> SS["scene::Streaming (host's screen)<br/>in range of the camera"]
   SS --> DL[build_draw_list leaves the rest out]
   SS --> GPU["GPU frees after KEEP_UNDRAWN_FRAMES;<br/>background uploads when back in range"]
   SS --> TC[terrain chunks built on a worker]
   SS --> PH[Physics::set_far_sleep]
+  P --> OV["editor Streaming overlay (R16)<br/>unit boxes by Reach, legend from<br/>Partition::summary"]
 ```
 
 ## Settings
@@ -40,9 +41,9 @@ flowchart LR
 
 ## Limitations
 
-- A flat Model with thousands of loose parts is one unit; big maps must be nested in Models or Folders to stream.
+- A flat Model with thousands of loose parts is one unit; big maps must be nested in Models or Folders to stream. The editor's Streaming overlay names a unit of more than 1,000 Instances.
 - A texture draws white until its background upload finishes.
-- Editing always shows everything; Play streams around the camera.
+- Editing always draws everything; Play streams around the camera. The Streaming overlay (R16) shows what would stream around the camera while editing: unit boxes by reach, always-there parts, radii and counts. There's still no region management or data layers (R16's other parts).
 - A change to the Workspace's tree still splits the whole partition again (about 12 ms for 51,000 parts in the container); ownership and physics catch up from the moves log instead.
 
 ## Related documentation

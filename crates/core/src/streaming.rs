@@ -80,7 +80,58 @@ impl Settings {
     pub fn unload_radius(&self) -> f32 {
         self.target_radius * UNLOAD_MARGIN
     }
+
+    /// Where something `distance` studs from a viewer stands.
+    pub fn reach(&self, distance: f32) -> Reach {
+        if distance <= self.min_radius {
+            Reach::Near
+        } else if distance <= self.target_radius {
+            Reach::Loads
+        } else if distance <= self.unload_radius() {
+            Reach::Kept
+        } else {
+            Reach::Out
+        }
+    }
 }
+
+/// Where a unit stands for a viewer, by its distance (R16, the editor's
+/// Streaming overlay).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    /// Within the minimum radius: there at once.
+    Near,
+    /// Within the target radius: loads, nearest first.
+    Loads,
+    /// Past the target but within the unload radius: stays if it was
+    /// loaded, and isn't loaded otherwise.
+    Kept,
+    /// Past the unload radius: not there.
+    Out,
+}
+
+/// What streaming keeps around one place, for the editor's Streaming
+/// overlay (R16): [`Partition::summary`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Summary {
+    /// Every unit, and the Instances in them.
+    pub units: usize,
+    pub members: usize,
+    /// The units within the target radius (the minimum's included), and
+    /// the Instances in them: what a player standing there has.
+    pub loaded_units: usize,
+    pub loaded_members: usize,
+    /// The units between the target and unload radii, kept if loaded.
+    pub kept_units: usize,
+    /// The Workspace's BaseParts in no unit, there wherever a player is.
+    pub always_there: usize,
+    /// The unit with the most Instances: its root and how many.
+    pub largest: Option<(InstanceId, usize)>,
+}
+
+/// A unit with more Instances than this is worth splitting: it loads and
+/// unloads all at once (a flat Model of loose parts is one unit).
+pub const LARGE_UNIT: usize = 1000;
 
 /// A piece of the world that loads and unloads whole.
 #[derive(Clone, Debug, PartialEq)]
@@ -104,6 +155,18 @@ pub struct Unit {
 }
 
 impl Unit {
+    /// The unit's box, as last measured: the smallest and largest corner.
+    /// Without a part to place it by, it's as big as the world (`f32::MAX`
+    /// each way), near everything.
+    pub fn bounds(&self) -> (Vector3, Vector3) {
+        (self.min, self.max)
+    }
+
+    /// Whether the box has a place: a unit with no parts doesn't.
+    pub fn is_placed(&self) -> bool {
+        self.max.x >= self.min.x && self.max.x < f32::MAX
+    }
+
     /// How far `point` is from the unit's box, 0 inside it.
     pub fn distance(&self, point: Vector3) -> f32 {
         let along = |value: f32, min: f32, max: f32| (min - value).max(value - max).max(0.0);
@@ -126,6 +189,9 @@ pub struct Partition {
     always: Vec<InstanceId>,
     /// The Workspace's structure version this was built from.
     structure: Option<u64>,
+    /// The World it was built from ([`World::identity`]): another World
+    /// (Play's copy, another project) can have the same version.
+    world: Option<u64>,
     /// The characters it was built with, which stream to everyone.
     characters: Vec<InstanceId>,
     /// The unit whose box is measured next.
@@ -153,8 +219,12 @@ impl Partition {
         // doesn't split a big world again.
         let version = world.structure_version_of(world.workspace());
         let characters = characters(world);
-        if self.structure != Some(version) || self.characters != characters {
+        if self.structure != Some(version)
+            || self.world != Some(world.identity())
+            || self.characters != characters
+        {
             self.structure = Some(version);
+            self.world = Some(world.identity());
             self.characters = characters;
             self.next_bounds = 0;
             self.rebuild(world);
@@ -216,6 +286,33 @@ impl Partition {
     /// Whether `id` loads and unloads with a unit.
     pub fn is_member(&self, id: InstanceId) -> bool {
         self.unit_of.contains_key(&id)
+    }
+
+    /// What streaming keeps around `point` with `settings`: how many units
+    /// and Instances there are, how many a player standing there has, and
+    /// the biggest unit.
+    pub fn summary(&self, settings: &Settings, point: Vector3) -> Summary {
+        let mut summary = Summary {
+            units: self.units.len(),
+            always_there: self.always.len(),
+            ..Summary::default()
+        };
+        for unit in &self.units {
+            let count = unit.members.len();
+            summary.members += count;
+            match settings.reach(unit.distance(point)) {
+                Reach::Near | Reach::Loads => {
+                    summary.loaded_units += 1;
+                    summary.loaded_members += count;
+                }
+                Reach::Kept => summary.kept_units += 1,
+                Reach::Out => {}
+            }
+            if summary.largest.is_none_or(|(_, most)| count > most) {
+                summary.largest = Some((unit.root, count));
+            }
+        }
+        summary
     }
 }
 
@@ -585,5 +682,73 @@ mod tests {
         };
         assert_eq!(unit.distance(Vector3::new(5.0, 5.0, 5.0)), 0.0);
         assert_eq!(unit.distance(Vector3::new(13.0, 5.0, 5.0)), 3.0);
+    }
+
+    #[test]
+    fn reach_steps_out_through_the_radii() {
+        let settings = Settings {
+            min_radius: 10.0,
+            target_radius: 100.0,
+        };
+        assert_eq!(settings.reach(0.0), Reach::Near);
+        assert_eq!(settings.reach(10.0), Reach::Near);
+        assert_eq!(settings.reach(50.0), Reach::Loads);
+        assert_eq!(settings.reach(120.0), Reach::Kept);
+        assert_eq!(settings.reach(125.0), Reach::Kept);
+        assert_eq!(settings.reach(126.0), Reach::Out);
+    }
+
+    #[test]
+    fn a_summary_counts_what_a_player_standing_there_has() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        part_at(&mut world, workspace, 0.0);
+        part_at(&mut world, workspace, 50.0);
+        part_at(&mut world, workspace, 115.0);
+        part_at(&mut world, workspace, 400.0);
+        let big = model_in(&mut world, workspace, "Default");
+        for _ in 0..5 {
+            part_at(&mut world, big, 1000.0);
+        }
+        let always = model_in(&mut world, workspace, "Persistent");
+        part_at(&mut world, always, 0.0);
+        let partition = Partition::new(&world);
+        let settings = Settings {
+            min_radius: 10.0,
+            target_radius: 100.0,
+        };
+        let summary = partition.summary(&settings, Vector3::default());
+        assert_eq!(summary.units, 5);
+        assert_eq!(summary.members, 4 + 5);
+        assert_eq!((summary.loaded_units, summary.loaded_members), (2, 2));
+        assert_eq!(summary.kept_units, 1);
+        assert_eq!(summary.always_there, 1);
+        assert_eq!(summary.largest, Some((big, 5)));
+        assert!(partition.units().iter().all(Unit::is_placed));
+        let (min, max) = partition.units()[0].bounds();
+        assert!(min.x < 0.0 && max.x > 0.0);
+    }
+
+    #[test]
+    fn another_world_with_the_same_version_is_split_again() {
+        let mut first = World::new();
+        let workspace = first.workspace();
+        part_at(&mut first, workspace, 0.0);
+        let mut partition = Partition::new(&first);
+        // One move into the Workspace each, so the same structure version:
+        // here a Model built outside it, holding the part.
+        let mut second = World::new();
+        let model = second.create(ClassName::Model).unwrap();
+        let part = second.create(ClassName::Part).unwrap();
+        second.set_parent(part, Some(model)).unwrap();
+        let workspace = second.workspace();
+        second.set_parent(model, Some(workspace)).unwrap();
+        assert_eq!(
+            first.structure_version_of(first.workspace()),
+            second.structure_version_of(workspace)
+        );
+        partition.refresh(&second);
+        assert_eq!(partition.unit_rooted_at(model), Some(0));
+        assert!(partition.units()[0].keeps_root);
     }
 }
