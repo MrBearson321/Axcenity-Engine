@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 
 use axcenity_core::InstanceId;
 use mlua::{
-    AppDataRefMut, Function, IntoLuaMulti, Lua, MetaMethod, UserData, UserDataFields,
+    AppDataRefMut, Function, IntoLuaMulti, Lua, MetaMethod, MultiValue, UserData, UserDataFields,
     UserDataMethods, Value,
 };
 
@@ -130,6 +130,8 @@ struct Handler {
     since: u64,
     /// The script that connected it (see `scheduler`).
     script: Option<InstanceId>,
+    /// Connected with `Once`: disconnected just before it first runs.
+    once: bool,
 }
 
 impl Connections {
@@ -145,6 +147,7 @@ impl Connections {
         callback: Function,
         since: u64,
         script: Option<InstanceId>,
+        once: bool,
     ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -153,6 +156,7 @@ impl Connections {
             callback,
             since,
             script,
+            once,
         });
         id
     }
@@ -257,31 +261,43 @@ pub fn fire_change(lua: &Lua, owner: Owner, event: Event, change: u64, args: imp
 fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoLuaMulti) {
     // Take a list first and let go of `Connections`, because a handler may
     // connect or disconnect handlers while it runs.
-    let handlers: Vec<(u64, Function, Option<InstanceId>)> = match lua.app_data_ref::<Connections>()
-    {
-        Some(connections) => match connections.handlers.get(&key) {
-            Some(handlers) => handlers
-                .iter()
-                .filter(|handler| change.is_none_or(|change| handler.since <= change))
-                .map(|handler| (handler.id, handler.callback.clone(), handler.script))
-                .collect(),
+    let handlers: Vec<(u64, Function, Option<InstanceId>, bool)> =
+        match lua.app_data_ref::<Connections>() {
+            Some(connections) => match connections.handlers.get(&key) {
+                Some(handlers) => handlers
+                    .iter()
+                    .filter(|handler| change.is_none_or(|change| handler.since <= change))
+                    .map(|handler| {
+                        (
+                            handler.id,
+                            handler.callback.clone(),
+                            handler.script,
+                            handler.once,
+                        )
+                    })
+                    .collect(),
+                None => return,
+            },
             None => return,
-        },
-        None => return,
-    };
+        };
     if handlers.is_empty() {
         return;
     }
     let Ok(args) = args.into_lua_multi(lua) else {
         return;
     };
-    for (id, callback, script) in handlers {
+    for (id, callback, script, once) in handlers {
         // An earlier handler may have disconnected this one.
         let connected = lua
             .app_data_ref::<Connections>()
             .is_some_and(|connections| connections.is_connected(key, id));
         if !connected {
             continue;
+        }
+        // A `Once` handler goes before it runs, so firing the event again
+        // from inside it doesn't run it twice.
+        if once && let Some(mut connections) = lua.app_data_mut::<Connections>() {
+            connections.disconnect(key, id);
         }
         crate::handler_threads::run(lua, callback, args.clone(), script);
     }
@@ -305,33 +321,24 @@ impl LuaSignal {
 }
 
 impl UserData for LuaSignal {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        // `signal:Wait()` pauses the script, which only Lua can do, so
+        // reading `Wait` gives the short Lua function in [`WAIT`] (a Rust
+        // method calling it couldn't yield).
+        fields.add_field_function_get("Wait", |lua, _| {
+            lua.app_data_ref::<SignalWait>()
+                .map(|wait| wait.0.clone())
+                .ok_or_else(|| mlua::Error::runtime("events aren't available"))
+        });
+    }
+
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("Connect", |lua, this, callback: Value| {
-            let Value::Function(callback) = callback else {
-                return Err(mlua::Error::runtime(format!(
-                    "Connect takes a function, not a {}",
-                    type_name(lua, &callback)
-                )));
-            };
-            let key = (this.owner, this.event);
-            // Scripts only run while the World is lent to Lua, so it's
-            // always there.
-            let (since, gone) = {
-                let world = instance::world(lua)?;
-                let gone = match this.owner {
-                    Owner::Instance(id) => !world.contains(id),
-                    Owner::Tween(id) => !tween::is_alive(lua, id),
-                    _ => false,
-                };
-                (world.next_change_number(), gone)
-            };
-            let script = scheduler::running_script(lua);
-            let mut connections = connections_mut(lua)?;
-            let id = connections.connect(key, callback, since, script);
-            if gone {
-                connections.connected_while_gone.push(this.owner);
-            }
-            Ok(LuaConnection { key, id })
+            connect(lua, this, "Connect", callback, false)
+        });
+        // Like Connect, but only for the next time the event fires.
+        methods.add_method("Once", |lua, this, callback: Value| {
+            connect(lua, this, "Once", callback, true)
         });
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {
             Ok(match this.event {
@@ -351,6 +358,95 @@ impl UserData for LuaSignal {
             })
         });
     }
+}
+
+/// Connects `callback` to `signal`, as `Connect` (or `Once`, when `once`).
+fn connect(
+    lua: &Lua,
+    signal: &LuaSignal,
+    method: &str,
+    callback: Value,
+    once: bool,
+) -> mlua::Result<LuaConnection> {
+    let Value::Function(callback) = callback else {
+        return Err(mlua::Error::runtime(format!(
+            "{method} takes a function, not a {}",
+            type_name(lua, &callback)
+        )));
+    };
+    let key = (signal.owner, signal.event);
+    // Scripts only run while the World is lent to Lua, so it's
+    // always there.
+    let (since, gone) = {
+        let world = instance::world(lua)?;
+        let gone = match signal.owner {
+            Owner::Instance(id) => !world.contains(id),
+            Owner::Tween(id) => !tween::is_alive(lua, id),
+            _ => false,
+        };
+        (world.next_change_number(), gone)
+    };
+    let script = scheduler::running_script(lua);
+    let mut connections = connections_mut(lua)?;
+    let id = connections.connect(key, callback, since, script, once);
+    if gone {
+        connections.connected_while_gone.push(signal.owner);
+    }
+    Ok(LuaConnection { key, id })
+}
+
+/// `signal:Wait()`: connects a handler with `Once` that resumes the waiting
+/// coroutine with the event's values, then yields it. The handler belongs
+/// to the script, so a script that stops while waiting is never resumed.
+/// `once` is Rust (see [`install`]): its handler resumes the coroutine as
+/// its own script, through the scheduler like any other.
+const WAIT: &str = r#"
+local running, yield, once, error = ...
+
+return function(signal)
+    local thread, is_main = running()
+    if is_main then
+        error("Wait can only pause a script", 2)
+    end
+    once(signal, thread)
+    return yield()
+end
+"#;
+
+/// The function behind `signal:Wait()`, made once per interpreter.
+struct SignalWait(Function);
+
+/// Makes `signal:Wait()` and keeps it in `lua`'s app data.
+pub fn install(lua: &Lua) -> mlua::Result<()> {
+    let coroutine: mlua::Table = lua.globals().raw_get("coroutine")?;
+    let once = lua.create_function(|lua, (signal, thread): (Value, mlua::Thread)| {
+        let signal = match &signal {
+            Value::UserData(data) => data.borrow::<LuaSignal>().map(|signal| *signal).ok(),
+            _ => None,
+        };
+        let Some(signal) = signal else {
+            return Err(mlua::Error::runtime(
+                "Wait is a method: write signal:Wait(), with a colon",
+            ));
+        };
+        crate::debugger::waiting(lua, &thread);
+        let script = scheduler::running_script(lua);
+        let resume = lua.create_function(move |lua, args: MultiValue| {
+            scheduler::resume_as(lua, &thread, args, script);
+            Ok(())
+        })?;
+        connect(lua, &signal, "Wait", Value::Function(resume), true)?;
+        Ok(())
+    })?;
+    let error: Function = lua.globals().raw_get("error")?;
+    let wait: Function = lua.load(WAIT).set_name("=[engine]").call((
+        coroutine.raw_get::<Function>("running")?,
+        coroutine.raw_get::<Function>("yield")?,
+        once,
+        error,
+    ))?;
+    lua.set_app_data(SignalWait(wait));
+    Ok(())
 }
 
 /// What `:Connect` returns, for disconnecting the handler later.

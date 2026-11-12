@@ -1099,87 +1099,119 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `"DataService"`, `"ConsoleService"` or
 /// `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
+    lua.create_function(
+        |lua, (_game, name): (mlua::Value, String)| match service(lua, &name)? {
+            Some(service) => Ok(service),
+            None => Err(mlua::Error::runtime(format!(
+                "there is no service named \"{name}\"; choose from {}",
+                service_names(lua)?.join(", ")
+            ))),
+        },
+    )
+}
+
+/// `game:FindService(name)`: like `GetService`, but nil for a name that
+/// isn't a service.
+pub fn find_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
-        if let Some(service) = crate::edit::extra_service(lua, &name) {
-            return Ok(service);
-        }
-        if let Some(service) = crate::system::service(lua, &name) {
-            return service;
-        }
-        match name.as_str() {
-            "UserInputService" => {
-                sides::check(lua, &name)?;
-                return LuaUserInputService.into_lua(lua);
-            }
-            "ContextActionService" => {
-                sides::check(lua, &name)?;
-                return LuaContextActionService.into_lua(lua);
-            }
-            "UserGameSettings" => {
-                sides::check(lua, &name)?;
-                return LuaUserGameSettings.into_lua(lua);
-            }
-            "RunService" => return LuaRunService.into_lua(lua),
-            "TweenService" => return LuaTweenService.into_lua(lua),
-            "CollectionService" => return LuaCollectionService.into_lua(lua),
-            "SaveService" => return LuaSaveService.into_lua(lua),
-            "LevelService" => return LuaLevelService.into_lua(lua),
-            "NetworkService" => return LuaNetworkService.into_lua(lua),
-            "ReplayService" => return LuaReplayService.into_lua(lua),
-            "LocalizationService" => return LuaLocalizationService.into_lua(lua),
-            "GuiService" => return LuaGuiService.into_lua(lua),
-            "HttpService" => return LuaHttpService.into_lua(lua),
-            "ContentProvider" => return LuaContentProvider.into_lua(lua),
-            "DataService" => return LuaDataService.into_lua(lua),
-            "ConsoleService" => return crate::console_service::LuaConsoleService.into_lua(lua),
-            "PhysicsService" => return crate::query::LuaPhysicsService.into_lua(lua),
-            "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
-            _ => {}
-        }
-        let world = world(lua)?;
-        let services: Vec<InstanceId> = world
-            .get(world.root())
-            .map(|game| game.children().to_vec())
-            .unwrap_or_default();
-        let found = services.iter().copied().find(|&id| {
-            world
-                .get(id)
-                .is_some_and(|service| service.class().as_str() == name)
-        });
-        match found {
-            Some(id) => LuaInstance(id).into_lua(lua),
-            None => {
-                let mut names: Vec<&str> = services
-                    .iter()
-                    .filter_map(|&id| world.get(id).map(|s| s.class().as_str()))
-                    .collect();
-                names.extend([
-                    "CollectionService",
-                    "ContentProvider",
-                    "ContextActionService",
-                    "DataService",
-                    "GuiService",
-                    "HttpService",
-                    "LevelService",
-                    "LocalizationService",
-                    "NetworkService",
-                    "PhysicsService",
-                    "ReplayService",
-                    "ReplicatedFirst",
-                    "RunService",
-                    "SaveService",
-                    "TweenService",
-                    "UserGameSettings",
-                    "UserInputService",
-                ]);
-                names.extend(crate::system::service_names(lua));
-                Err(mlua::Error::runtime(format!(
-                    "there is no service named \"{name}\"; choose from {}",
-                    names.join(", ")
-                )))
-            }
-        }
+        Ok(service(lua, &name)?.unwrap_or(mlua::Value::Nil))
     })
+}
+
+/// The engine's services that aren't Instances, by name.
+const ENGINE_SERVICES: [&str; 18] = [
+    "CollectionService",
+    "ConsoleService",
+    "ContentProvider",
+    "ContextActionService",
+    "DataService",
+    "GuiService",
+    "HttpService",
+    "LevelService",
+    "LocalizationService",
+    "NetworkService",
+    "PhysicsService",
+    "ReplayService",
+    "ReplicatedFirst",
+    "RunService",
+    "SaveService",
+    "TweenService",
+    "UserGameSettings",
+    "UserInputService",
+];
+
+/// Every name `GetService` takes on this side: the services in the game
+/// tree, the engine's and the game systems'.
+pub fn service_names(lua: &Lua) -> mlua::Result<Vec<String>> {
+    let world = world(lua)?;
+    let mut names: Vec<String> = world
+        .get(world.root())
+        .map(|game| game.children().to_vec())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|&id| world.get(id).map(|s| s.class().as_str().to_owned()))
+        .collect();
+    drop(world);
+    names.extend(ENGINE_SERVICES.iter().map(|name| (*name).to_owned()));
+    names.extend(
+        crate::system::service_names(lua)
+            .into_iter()
+            .map(|name| name.to_string()),
+    );
+    Ok(names)
+}
+
+/// The service called `name`, or `None` when there's none by that name.
+/// A LocalScript-only service asked for by a Script is still an error.
+fn service(lua: &Lua, name: &str) -> mlua::Result<Option<mlua::Value>> {
+    if let Some(service) = crate::edit::extra_service(lua, name) {
+        return Ok(Some(service));
+    }
+    if let Some(service) = crate::system::service(lua, name) {
+        return service.map(Some);
+    }
+    let engine = match name {
+        "UserInputService" => {
+            sides::check(lua, name)?;
+            LuaUserInputService.into_lua(lua)
+        }
+        "ContextActionService" => {
+            sides::check(lua, name)?;
+            LuaContextActionService.into_lua(lua)
+        }
+        "UserGameSettings" => {
+            sides::check(lua, name)?;
+            LuaUserGameSettings.into_lua(lua)
+        }
+        "RunService" => LuaRunService.into_lua(lua),
+        "TweenService" => LuaTweenService.into_lua(lua),
+        "CollectionService" => LuaCollectionService.into_lua(lua),
+        "SaveService" => LuaSaveService.into_lua(lua),
+        "LevelService" => LuaLevelService.into_lua(lua),
+        "NetworkService" => LuaNetworkService.into_lua(lua),
+        "ReplayService" => LuaReplayService.into_lua(lua),
+        "LocalizationService" => LuaLocalizationService.into_lua(lua),
+        "GuiService" => LuaGuiService.into_lua(lua),
+        "HttpService" => LuaHttpService.into_lua(lua),
+        "ContentProvider" => LuaContentProvider.into_lua(lua),
+        "DataService" => LuaDataService.into_lua(lua),
+        "ConsoleService" => crate::console_service::LuaConsoleService.into_lua(lua),
+        "PhysicsService" => crate::query::LuaPhysicsService.into_lua(lua),
+        "ReplicatedFirst" => LuaReplicatedFirst.into_lua(lua),
+        _ => {
+            let world = world(lua)?;
+            let found = world.get(world.root()).and_then(|game| {
+                game.children().iter().copied().find(|&id| {
+                    world
+                        .get(id)
+                        .is_some_and(|service| service.class().as_str() == name)
+                })
+            });
+            drop(world);
+            return found.map(|id| LuaInstance(id).into_lua(lua)).transpose();
+        }
+    };
+    engine.map(Some)
 }
 
 /// The error for `instance.Key` when `Key` is neither a property nor a child,
