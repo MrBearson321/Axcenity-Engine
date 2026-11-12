@@ -11,14 +11,16 @@
 // at `crate::theme`, `crate::widgets` and so on (roadmap G11).
 #[cfg(test)]
 use axcenity_editor_kit::snapshot;
-use axcenity_editor_kit::{color_palette, lua_syntax, responsive, screen, wheel, widgets};
+use axcenity_editor_kit::{
+    color_palette, css_syntax, lua_syntax, responsive, screen, wheel, widgets,
+};
 // Panel families in crates of their own, under their old module names.
 use axcenity_editor_benchmark as graphics_benchmark;
 use axcenity_editor_model_studio as model_studio;
 use axcenity_editor_node_graph as node_graph;
 use axcenity_editor_toolbox as toolbox_panel;
 // The viewport tools, shared with the studios, under their old module names.
-use axcenity_editor_tools::{gizmo, shortcuts, snapping};
+use axcenity_editor_tools::{gizmo, props, shortcuts, snapping, tree};
 
 mod angular;
 mod anim_import;
@@ -36,7 +38,6 @@ mod command_palette;
 mod console;
 mod constraints;
 mod cooking;
-mod css_syntax;
 mod data_table;
 mod dialog;
 mod dialogue_editor;
@@ -62,7 +63,6 @@ mod plugins;
 mod prefab_menu;
 mod profiler;
 mod properties;
-mod props;
 mod prototype;
 mod rebuild;
 mod relaunch;
@@ -82,7 +82,6 @@ mod terrain_studio;
 mod theme;
 mod thumbnail;
 mod toast;
-mod tree;
 #[cfg(test)]
 mod ui_cost_tests;
 mod ui_designer;

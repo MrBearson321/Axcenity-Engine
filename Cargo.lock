@@ -811,6 +811,7 @@ dependencies = [
  "axcenity-project",
  "axcenity-render",
  "axcenity-scene",
+ "axcenity-ui",
  "axcenity-workspace-hack",
  "eframe",
  "egui-phosphor",
@@ -871,8 +872,10 @@ version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
+ "axcenity-character",
  "axcenity-core",
  "axcenity-editor-kit",
+ "axcenity-project",
  "axcenity-render",
  "axcenity-scene",
  "axcenity-workspace-hack",

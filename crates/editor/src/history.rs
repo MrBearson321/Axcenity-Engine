@@ -61,12 +61,7 @@ use std::sync::Arc;
 use axcenity_core::{InstanceId, StringTable, TerrainData, TreeError, Value, World};
 use axcenity_terrain::brush::TerrainEdit;
 
-/// Something about an Instance that can be changed: its name or one property.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Field {
-    Name,
-    Property(&'static str),
-}
+pub use axcenity_editor_tools::edit::Field;
 
 /// Every field of an Instance with its value, as recorded before and after a change.
 pub type Snapshot = Vec<(Field, Value)>;

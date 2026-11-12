@@ -61,6 +61,7 @@ use crate::output::Output;
 use crate::responsive;
 use crate::theme::{self, AnimKind, icons};
 use crate::widgets;
+pub use axcenity_editor_tools::animatable::{animator_of, can_animate};
 use clip_editor::ClipDoc;
 use controller_editor::ControllerDoc;
 use object_preview::{ObjectPreview, PreviewEvent};
@@ -101,34 +102,6 @@ const PICKER_HEIGHT: f32 = 320.0;
 /// What a toolbar's preview-model combo box needs on its row.
 pub(crate) const MODEL_PICKER_ROOM: f32 = 200.0;
 
-/// Whether an Instance of `class` can be animated: given an Animator, and
-/// keyed by a clip.
-pub fn can_animate(class: ClassName) -> bool {
-    matches!(
-        class,
-        ClassName::Part
-            | ClassName::MeshPart
-            | ClassName::Seat
-            | ClassName::VehicleSeat
-            | ClassName::DamageZone
-            | ClassName::ReverbZone
-            | ClassName::Model
-            | ClassName::ScreenGui
-            | ClassName::Frame
-            | ClassName::TextLabel
-            | ClassName::TextButton
-            | ClassName::TextBox
-            | ClassName::ImageLabel
-            | ClassName::PageLayout
-            | ClassName::Table
-            | ClassName::ScrollingFrame
-            | ClassName::Slider
-            | ClassName::Toggle
-            | ClassName::Dropdown
-            | ClassName::ProgressBar
-    )
-}
-
 /// The object `id` stands for in the Animation tab: itself if it can
 /// animate, or the parent of an Animator or Animation (an Animation under
 /// an Animator stands for the Animator's parent).
@@ -152,20 +125,6 @@ pub fn animatable_of(world: &World, id: InstanceId) -> Option<InstanceId> {
 /// with no tracks yet.
 pub fn new_keyed_clip() -> axcenity_anim::ClipFile {
     property_editor::new_property_clip(1.5)
-}
-
-/// The first Animator in `object`.
-pub fn animator_of(world: &World, object: InstanceId) -> Option<InstanceId> {
-    world
-        .get(object)?
-        .children()
-        .iter()
-        .copied()
-        .find(|&child| {
-            world
-                .get(child)
-                .is_some_and(|c| c.class() == ClassName::Animator)
-        })
 }
 
 /// What the Animation tab follows: an object that can animate, and what
