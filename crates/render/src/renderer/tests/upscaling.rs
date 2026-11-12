@@ -1,6 +1,8 @@
 //! Upscaling (roadmap G9): below a render scale of 1 the finished picture is
 //! upscaled to the output with FSR 1-style EASU and RCAS (`upscale.wgsl`),
-//! which keeps edges closer to a full-size frame than stretching does.
+//! which keeps edges closer to a full-size frame than stretching does. With
+//! TAA on, TAA upscales instead (stage 2, `fs_taau`), from the jittered
+//! frames before, and only RCAS sharpens after it.
 
 use super::*;
 
@@ -145,14 +147,149 @@ fn flat_colors_come_through_upscaling_unchanged() {
     }
 }
 
+/// Draws `list` at `size` with `settings` for `frames` frames, and reads the
+/// last.
+fn after_frames(
+    (device, queue): (&wgpu::Device, &wgpu::Queue),
+    list: &DrawList,
+    size: (u32, u32),
+    settings: &GraphicsSettings,
+    frames: u32,
+) -> Vec<u8> {
+    let mut renderer = TextureRenderer::new(device, queue, size.0, size.1);
+    renderer.set_graphics(settings);
+    for _ in 0..frames {
+        renderer.render(list).unwrap();
+    }
+    renderer.read_pixels()
+}
+
+/// Stage 2: at half scale, TAA's upscale over a few dozen frames comes
+/// closer to the full-size TAA frame than the spatial upscale of one frame,
+/// and it keeps the block where it was.
+#[test]
+fn taa_upscales_half_scale_closer_to_full_size_than_the_spatial_upscale() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let gpu = (&device, &queue);
+    let list = tilted_block();
+    let size = (160, 96);
+    let taa = crate::AntiAliasing::Taa;
+    let full = reds(&after_frames(gpu, &list, size, &scaled(1.0, taa), 24));
+    let temporal = reds(&after_frames(gpu, &list, size, &scaled(0.5, taa), 48));
+    let spatial = reds(&after_frames(
+        gpu,
+        &list,
+        size,
+        &scaled(0.5, crate::AntiAliasing::Fxaa),
+        1,
+    ));
+    let (temporal_off, spatial_off) = (difference(&temporal, &full), difference(&spatial, &full));
+    assert!(
+        temporal_off < spatial_off,
+        "TAA's upscale is {temporal_off} from full size, the spatial one {spatial_off}"
+    );
+    let bright = |reds: &[u8]| reds.iter().filter(|&&red| red > 200).count();
+    let (a, b) = (bright(&full), bright(&temporal));
+    assert!(
+        a.abs_diff(b) * 20 < a,
+        "{a} bright pixels at full size, {b} upscaled by TAA"
+    );
+}
+
+/// Stage 2's targets: below 1 with TAA, TAA's history and its result are
+/// at the output's size, there's no spatial upscale target (only the
+/// sharpen), and bloom starts from the output's size. They go at full size.
+#[test]
+fn taa_upscales_with_output_sized_history_and_no_spatial_upscale() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let list = tilted_block();
+    let (width, height) = (96, 64);
+    let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+    for (scale, upscales) in [(0.5, true), (1.0, false), (0.75, true), (1.5, false)] {
+        renderer.set_graphics(&scaled(scale, crate::AntiAliasing::Taa));
+        renderer.render(&list).unwrap();
+        let targets = &renderer.scene.frame_targets;
+        let temporal = targets.temporal.as_ref().expect("TAA's targets");
+        assert_eq!(temporal.upscales(), upscales, "at {scale}");
+        assert_eq!(temporal.upscaled_view().is_some(), upscales, "at {scale}");
+        assert_eq!(targets.upscale.is_some(), upscales, "at {scale}");
+        if let Some(upscale) = &targets.upscale {
+            assert!(upscale.upscaled.is_none(), "TAA upscaled already");
+            assert_eq!(
+                targets.size,
+                (
+                    (width as f32 * scale) as u32,
+                    (height as f32 * scale) as u32
+                )
+            );
+        }
+        let first_bloom = targets.levels[0].texture().size();
+        let source = if upscales {
+            (width, height)
+        } else {
+            targets.size
+        };
+        assert_eq!(
+            (first_bloom.width, first_bloom.height),
+            (source.0 / 2, source.1 / 2),
+            "at {scale}"
+        );
+        let pixels = renderer.read_pixels();
+        let block = pixels.chunks(4).filter(|pixel| pixel[0] > 245).count();
+        let most = pixels.chunks(4).map(|pixel| pixel[0]).max();
+        assert!(
+            block > 200,
+            "at {scale}: the block is drawn ({block} pixels, the brightest {most:?})"
+        );
+    }
+}
+
+/// Stage 2: the middle of a flat block comes through TAA's upscale as it
+/// does at full size.
+#[test]
+fn flat_colors_come_through_taa_upscaling_unchanged() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let list = list_of(vec![big_block()]);
+    let draw = |scale| {
+        after_frames(
+            (&device, &queue),
+            &list,
+            (64, 64),
+            &scaled(scale, crate::AntiAliasing::Taa),
+            12,
+        )
+    };
+    let (full, upscaled) = (draw(1.0), draw(0.5));
+    let middle = |pixels: &[u8]| -> Vec<u8> {
+        (28..36)
+            .flat_map(|y| (28..36).map(move |x| (y * 64 + x) * 4))
+            .flat_map(|at| pixels[at..at + 3].to_vec())
+            .collect()
+    };
+    for (a, b) in middle(&full).iter().zip(middle(&upscaled)) {
+        assert!(a.abs_diff(b) <= 2, "{a} vs {b}");
+    }
+}
+
 /// GPU time of upscaling at 0.67 and 0.5 scale, for `docs/rendering/post.md`:
 /// `cargo test -p axcenity-render --release --lib -- --ignored
 /// bench_upscaling --nocapture` on a device with timestamps.
 ///
 /// For each output size it draws a field of blocks at full size, then at
 /// each scale twice: upscaled to the output, and at the smaller size
-/// itself. The upscaled frame less the small one is what EASU and RCAS
-/// cost; the full-size frame less the upscaled one is what the scale saves.
+/// itself. The upscaled frame less the small one is what the upscale
+/// costs; the full-size frame less the upscaled one is what the scale saves.
+/// It runs once with FXAA (EASU and RCAS) and once with TAA (TAA's own
+/// upscale at the output's size, then RCAS).
 #[test]
 #[ignore]
 fn bench_upscaling() {
@@ -189,9 +326,9 @@ fn bench_upscaling() {
     list.post.enabled = true;
     list.ambient.intensity = 0.3;
     // Median GPU frame and post-processing (which includes the upscale).
-    let measure = |size: (u32, u32), scale: f32| {
+    let measure = |size: (u32, u32), scale: f32, anti_aliasing: crate::AntiAliasing| {
         let mut renderer = TextureRenderer::new(&device, &queue, size.0, size.1);
-        renderer.set_graphics(&scaled(scale, crate::AntiAliasing::Fxaa));
+        renderer.set_graphics(&scaled(scale, anti_aliasing));
         let (mut frames, mut posts) = (Vec::new(), Vec::new());
         for frame in 0..230 {
             renderer.render(&list).unwrap();
@@ -212,31 +349,34 @@ fn bench_upscaling() {
         (median(&mut frames), median(&mut posts))
     };
     println!("{}", adapter.get_info().name);
-    println!(
-        "output     scale  frame ms  post ms  | same size native: frame  post | upscale cost  saved vs 1.0"
-    );
-    for size in [(1920, 1080), (2560, 1440), (3840, 2160)] {
-        let (full, full_post) = measure(size, 1.0);
+    // FXAA upscales with EASU; TAA upscales inside its own pass (stage 2).
+    for anti_aliasing in [crate::AntiAliasing::Fxaa, crate::AntiAliasing::Taa] {
         println!(
-            "{:>4}x{:<4}  1.00  {full:>8.3}  {full_post:>7.3}  |",
-            size.0, size.1
+            "{anti_aliasing:?}: output     scale  frame ms  post ms  | same size native: frame  post | upscale cost  saved vs 1.0"
         );
-        for scale in [0.67_f32, 0.5] {
-            let (frame, post) = measure(size, scale);
-            let small = (
-                (size.0 as f32 * scale).round() as u32,
-                (size.1 as f32 * scale).round() as u32,
-            );
-            let (native, native_post) = measure(small, 1.0);
+        for size in [(1920, 1080), (2560, 1440), (3840, 2160)] {
+            let (full, full_post) = measure(size, 1.0, anti_aliasing);
             println!(
-                "{:>4}x{:<4}  {scale:.2}  {frame:>8.3}  {post:>7.3}  | {:>4}x{:<4} {native:>6.3} {native_post:>6.3} | {:>11.3}  {:>11.3}",
-                size.0,
-                size.1,
-                small.0,
-                small.1,
-                frame - native,
-                full - frame,
+                "{:>4}x{:<4}  1.00  {full:>8.3}  {full_post:>7.3}  |",
+                size.0, size.1
             );
+            for scale in [0.67_f32, 0.5] {
+                let (frame, post) = measure(size, scale, anti_aliasing);
+                let small = (
+                    (size.0 as f32 * scale).round() as u32,
+                    (size.1 as f32 * scale).round() as u32,
+                );
+                let (native, native_post) = measure(small, 1.0, anti_aliasing);
+                println!(
+                    "{:>4}x{:<4}  {scale:.2}  {frame:>8.3}  {post:>7.3}  | {:>4}x{:<4} {native:>6.3} {native_post:>6.3} | {:>11.3}  {:>11.3}",
+                    size.0,
+                    size.1,
+                    small.0,
+                    small.1,
+                    frame - native,
+                    full - frame,
+                );
+            }
         }
     }
 }

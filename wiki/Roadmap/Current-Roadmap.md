@@ -71,7 +71,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; a coroutine the script made itself still can't pause |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats); history, peaks and budgets | **Done** (#125, #126; history, peaks and budgets #241) |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
-| G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA) not started |
+| G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA: output-sized history, more jitter places, then RCAS) in a PR, awaiting a 9070 XT bench |
 | G10 | Plugin API additions | Moved to the scripting thread (viewport drawing, property rows, importer hooks) |
 | G11 | Split the editor (L6) | In progress: `editor-kit` (#162), the Toolbox tab in `editor-toolbox` (#164), Graphics Benchmark in `editor-benchmark` (#166), the viewport tools in `editor-tools` and the Model Studio in `editor-model-studio` (#189; editor rebuild after an edit 35.5 → 32.5 s in the cloud), the node-graph editor in `editor-node-graph` and the UI Designer in `editor-ui-designer` (editor rebuild after an edit 30.7 s) |
 | G12 | Cooked-only games, read the pack in place | **Cooked-only done** (#243); read in place not planned (unpacking is 30–170 ms) |

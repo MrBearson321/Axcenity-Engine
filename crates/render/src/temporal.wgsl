@@ -12,6 +12,11 @@
 // differently (something uncovered) is dropped, so moving parts leave no
 // ghosts.
 //
+// Below 100% render scale TAA upscales too (`fs_taau`): drawn at the
+// output's size, each output pixel gathers the scene's jittered samples
+// near it, weighted by how near, and last frame's picture is read back by a
+// Catmull-Rom spline so it stays sharp.
+//
 // Motion blur streaks each pixel along the fastest motion near it (in tiles
 // of the screen), counting what's in front only as far as its own streak
 // reaches, so it spreads over what's behind it and a still surface stays
@@ -35,6 +40,11 @@ struct Temporal {
     blur: vec4<f32>,
     // x: the frame, for the noise.
     noise: vec4<f32>,
+    // Upscaling TAA: the output's width and height, and 1 over each.
+    output: vec4<f32>,
+    // x, y: this frame's jitter in the scene's pixels; z: 1 while TAA
+    // upscales.
+    jitter: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> temporal: Temporal;
@@ -134,6 +144,115 @@ fn fs_taa(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let past_weight = (1.0 - share) * blend_weight(past);
     let blended = (current * current_weight + past * past_weight) / max(current_weight + past_weight, 1e-6);
     // A NaN or infinity anywhere would stay in the history for good.
+    if any(blended != blended) || any(abs(blended) > vec3<f32>(65000.0)) {
+        return vec4<f32>(current, 1.0);
+    }
+    return vec4<f32>(blended, 1.0);
+}
+
+// How much one of the scene's samples counts for an output pixel `d` of
+// the scene's pixels from it: a Gaussian about as wide as a Lanczos 2
+// kernel's middle lobe (1 at the pixel, 0.61 half a pixel off, 0.14 a whole
+// pixel off).
+fn sample_weight(d: vec2<f32>) -> f32 {
+    return exp(-2.0 * dot(d, d));
+}
+
+fn history_texel(x: f32, y: f32) -> vec3<f32> {
+    return textureSampleLevel(history, history_sampler, vec2<f32>(x, y), 0.0).rgb;
+}
+
+// Last frame's picture at `uv`, through a Catmull-Rom spline over its
+// pixels in five bilinear reads (the corners' share is left out), so the
+// history doesn't soften a little more each frame as a bilinear read would.
+fn history_at(uv: vec2<f32>) -> vec3<f32> {
+    let place = uv * temporal.output.xy;
+    let center = floor(place - 0.5) + 0.5;
+    let f = place - center;
+    let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    let w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    let w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    let w3 = f * f * (-0.5 + 0.5 * f);
+    let w12 = w1 + w2;
+    let texel = temporal.output.zw;
+    let at0 = (center - 1.0) * texel;
+    let at3 = (center + 2.0) * texel;
+    let at12 = (center + w2 / w12) * texel;
+    let weights = array<f32, 5>(
+        w12.x * w0.y,
+        w0.x * w12.y,
+        w12.x * w12.y,
+        w3.x * w12.y,
+        w12.x * w3.y,
+    );
+    let color = history_texel(at12.x, at0.y) * weights[0]
+        + history_texel(at0.x, at12.y) * weights[1]
+        + history_texel(at12.x, at12.y) * weights[2]
+        + history_texel(at3.x, at12.y) * weights[3]
+        + history_texel(at12.x, at3.y) * weights[4];
+    let total = weights[0] + weights[1] + weights[2] + weights[3] + weights[4];
+    return max(color / max(total, 1e-6), vec3<f32>(0.0));
+}
+
+// TAA that upscales: drawn at the output's size, reading the scene (at its
+// own, smaller size) and last frame's output-sized picture.
+@fragment
+fn fs_taau(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let uv = position.xy * temporal.output.zw;
+    let last = vec2<i32>(temporal.size.xy) - 1;
+    // Where this output pixel is on the scene, in its pixels. The jitter
+    // moved the picture by `jitter` pixels, so the scene's pixel `i` shows
+    // what's at `i + 0.5 - jitter`; `base` is the pixel showing the place.
+    let jitter = temporal.jitter.xy;
+    let place = uv * temporal.size.xy;
+    let base = vec2<i32>(floor(place + jitter));
+    var sum = vec3<f32>(0.0);
+    var total = 0.0;
+    var nearest_weight = 0.0;
+    var low = vec3<f32>(1e9);
+    var high = vec3<f32>(-1e9);
+    var nearest = clamp(base, vec2<i32>(0), last);
+    var nearest_depth = 2.0;
+    for (var y = -1; y <= 1; y += 1) {
+        for (var x = -1; x <= 1; x += 1) {
+            let offset = vec2<i32>(x, y);
+            let at = clamp(base + offset, vec2<i32>(0), last);
+            let color = max(textureLoad(scene, at, 0).rgb, vec3<f32>(0.0));
+            let weight = sample_weight(vec2<f32>(base + offset) + 0.5 - jitter - place);
+            sum += color * weight;
+            total += weight;
+            nearest_weight = max(nearest_weight, weight);
+            let ycocg = to_ycocg(color);
+            low = min(low, ycocg);
+            high = max(high, ycocg);
+            let depth = textureLoad(depth_texture, at, 0);
+            if depth < nearest_depth {
+                nearest_depth = depth;
+                nearest = at;
+            }
+        }
+    }
+    let current = sum / max(total, 1e-6);
+    if temporal.settings.x == 0.0 {
+        return vec4<f32>(current, 1.0);
+    }
+    let moved = textureLoad(motion, nearest, 0).xy;
+    let was = uv - moved;
+    if any(was < vec2<f32>(0.0)) || any(was > vec2<f32>(1.0)) {
+        return vec4<f32>(current, 1.0);
+    }
+    let previous_pixel = clamp(vec2<i32>(was * temporal.size.xy), vec2<i32>(0), last);
+    let moved_before = textureLoad(previous_motion, previous_pixel, 0).xy;
+    let difference = length((moved - moved_before) * temporal.size.xy);
+    let kept = 1.0 - saturate((difference - 0.5) / 1.5);
+    let past = from_ycocg(clamp(to_ycocg(history_at(was)), low, high));
+    // Each output pixel has a sample of its own only now and then: this
+    // frame counts for more when one lands near it.
+    let fresh = temporal.settings.y * (0.25 + 0.75 * nearest_weight);
+    let share = mix(1.0, fresh, kept);
+    let current_weight = share * blend_weight(current);
+    let past_weight = (1.0 - share) * blend_weight(past);
+    let blended = (current * current_weight + past * past_weight) / max(current_weight + past_weight, 1e-6);
     if any(blended != blended) || any(abs(blended) > vec3<f32>(65000.0)) {
         return vec4<f32>(current, 1.0);
     }
