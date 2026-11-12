@@ -59,6 +59,7 @@ mod material_editor;
 mod material_graph;
 mod mixer;
 mod output;
+mod people_history;
 mod placing;
 mod play;
 mod plugins;
@@ -79,6 +80,7 @@ mod splines;
 mod start;
 mod surface;
 mod tags;
+mod team_board;
 mod terrain_studio;
 mod theme;
 mod thumbnail;
@@ -273,6 +275,7 @@ fn main() -> eframe::Result {
             app.set_window_icon(window_icon());
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
+            app.set_templates_folder(EditorApp::default_templates_folder());
             app.set_plugin_data(plugins::default_folder());
             app.cook_textures_in_background();
             // Read in the background, so the window shows at once.

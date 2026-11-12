@@ -115,6 +115,10 @@ pub enum Pane {
     /// (`app/team_panel.rs`). Starts closed; File > Share with Collaborate
     /// and the title bar chip open it.
     TeamCreate,
+    /// The project's shared tasks and who they're assigned to
+    /// (`team_board.rs`). Starts closed; Window > Team Board, the
+    /// Collaborate panel and Ctrl+K open it.
+    TeamBoard,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -125,7 +129,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 26] = [
+    pub const CLOSABLE: [Pane; 27] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -152,6 +156,7 @@ impl Pane {
         Pane::Inventory,
         Pane::VersionExplorer,
         Pane::TeamCreate,
+        Pane::TeamBoard,
     ];
 
     pub fn label(self) -> &'static str {
@@ -184,6 +189,7 @@ impl Pane {
             Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
             Pane::TeamCreate => "Collaborate",
+            Pane::TeamBoard => "Team Board",
             Pane::Script(_) => "Script",
             Pane::Plugin(_) => "Plugin",
         }
@@ -219,6 +225,7 @@ impl Pane {
             Pane::Inventory => icons::TRAY_ARROW_DOWN,
             Pane::VersionExplorer => icons::GIT_BRANCH,
             Pane::TeamCreate => icons::USERS_THREE,
+            Pane::TeamBoard => icons::KANBAN,
             Pane::Script(_) => icons::CODE,
             Pane::Plugin(_) => icons::PUZZLE_PIECE,
         }
@@ -339,7 +346,8 @@ impl Layout {
             | Pane::Material
             | Pane::Sequencer
             | Pane::ModelStudio
-            | Pane::ObjectViewer => Some(Pane::Scene),
+            | Pane::ObjectViewer
+            | Pane::TeamBoard => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain
             | Pane::Tags
@@ -769,6 +777,7 @@ mod tests {
                     | Pane::Inventory
                     | Pane::VersionExplorer
                     | Pane::TeamCreate
+                    | Pane::TeamBoard
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

@@ -381,6 +381,226 @@ fn settings_selection_destroy_and_the_mouse() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+#[test]
+fn drawings_stay_until_removed_and_the_host_hears_only_of_changes() {
+    let folder = temp_folder("draw");
+    let found = project_with_plugin(
+        &folder,
+        "draw",
+        MANIFEST,
+        "local line = plugin:DrawLine(Vector3.new(0, 0, 0), Vector3.new(0, 5, 0))\n\
+         plugin:DrawBox(CFrame.new(1, 2, 3) * CFrame.Angles(0, math.rad(90), 0), Vector3.new(2, -4, 6),\n\
+         \t{ Color = Color3.new(0, 1, 0), Thickness = 99 })\n\
+         plugin:DrawBox(Vector3.new(0, 1, 0), Vector3.new(1, 1, 1))\n\
+         plugin:DrawSphere(Vector3.new(0, 0, 0), -3)\n\
+         plugin:DrawText(Vector3.new(0, 4, 0), 'Spawn', { Thickness = 20 })\n\
+         print(tostring(line))\n\
+         print(pcall(plugin.DrawLine, plugin, Vector3.new(0, 0, 0), Vector3.new(0 / 0, 0, 0)))\n\
+         local button = plugin:CreateToolbar('Draw'):CreateButton('Clear')\n\
+         button.Click:Connect(function()\n\
+         \tline:SetColor(Color3.new(1, 0, 0))\n\
+         \tline:Remove()\n\
+         \tline:Remove()\n\
+         end)\n\
+         local all = plugin:CreateToolbar('Draw'):CreateButton('All')\n\
+         all.Click:Connect(function() plugin:ClearDrawings() end)\n\
+         local none = plugin:CreateToolbar('Draw'):CreateButton('None')\n\
+         none.Click:Connect(function() end)\n",
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed[0], "PluginDrawing");
+    assert!(printed[1].starts_with("false\t"), "{}", printed[1]);
+    assert!(printed[1].contains("finite"), "{}", printed[1]);
+
+    let drawings = plugin.take_drawings().unwrap();
+    assert_eq!(drawings.len(), 5);
+    assert_eq!(
+        drawings[0],
+        Drawing {
+            shape: Shape::Line {
+                from: Vector3::new(0.0, 0.0, 0.0),
+                to: Vector3::new(0.0, 5.0, 0.0),
+            },
+            color: DEFAULT_COLOR,
+            thickness: DEFAULT_THICKNESS,
+        }
+    );
+    let Shape::Box { cframe, size } = &drawings[1].shape else {
+        panic!("{:?}", drawings[1]);
+    };
+    assert_eq!(cframe.position, Vector3::new(1.0, 2.0, 3.0));
+    assert!((cframe.rotation[1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+    // Sizes and radii are lengths; widths are kept in range.
+    assert_eq!(*size, Vector3::new(2.0, 4.0, 6.0));
+    assert_eq!(drawings[1].color, axcenity_core::Color3::new(0.0, 1.0, 0.0));
+    assert_eq!(drawings[1].thickness, 32.0);
+    assert!(
+        matches!(&drawings[2].shape, Shape::Box { cframe, .. } if cframe.rotation == [0.0, 0.0, 0.0, 1.0])
+    );
+    assert!(matches!(
+        drawings[3].shape,
+        Shape::Sphere { radius: 3.0, .. }
+    ));
+    assert!(matches!(&drawings[4].shape, Shape::Text { text, .. } if text == "Spawn"));
+    assert_eq!(drawings[4].thickness, 20.0);
+    // Nothing new to draw until something changes.
+    assert_eq!(plugin.take_drawings(), None);
+
+    let button = |name: &str| {
+        plugin.toolbars()[0]
+            .buttons
+            .iter()
+            .find(|b| b.name == name)
+            .unwrap()
+            .id
+    };
+    plugin.click(&mut world, button("None"));
+    assert_eq!(plugin.take_drawings(), None);
+    plugin.click(&mut world, button("Clear"));
+    assert_eq!(plugin.take_drawings().unwrap().len(), 4);
+    plugin.click(&mut world, button("All"));
+    assert_eq!(plugin.take_drawings(), Some(Vec::new()));
+    plugin.click(&mut world, button("All"));
+    assert_eq!(plugin.take_drawings(), None);
+    assert!(errors(&plugin).is_empty(), "{:?}", errors(&plugin));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_handle_moves_where_it_is_dragged_and_fires_its_events() {
+    let folder = temp_folder("handles");
+    let found = project_with_plugin(
+        &folder,
+        "handles",
+        MANIFEST,
+        "local free = plugin:CreateHandle(Vector3.new(0, 1, 0))\n\
+         local slide = plugin:CreateHandle(Vector3.new(0, 0, 0), { Axis = Vector3.new(0, 2, 0), Size = 100, Color = Color3.new(0, 0, 1) })\n\
+         free.Dragged:Connect(function(at) print('dragged', at) end)\n\
+         free.DragEnded:Connect(function(at) print('ended', at, free.Position) end)\n\
+         slide.Dragged:Connect(function(at) slide.Position = at + Vector3.new(1, 0, 0) end)\n\
+         print(tostring(free), pcall(plugin.CreateHandle, plugin, Vector3.new(0, 0, 0), { Axis = Vector3.new(0, 0, 0) }))\n\
+         local button = plugin:CreateToolbar('H'):CreateButton('Remove')\n\
+         button.Click:Connect(function() free:Remove(); print(pcall(function() return free.Position end)) end)\n",
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert!(
+        printed[0].starts_with("PluginHandle\tfalse\t"),
+        "{}",
+        printed[0]
+    );
+    assert!(printed[0].contains("zero"), "{}", printed[0]);
+    let handles = plugin.take_handles().unwrap();
+    assert_eq!(handles.len(), 2);
+    assert_eq!(handles[0].axis, None);
+    assert_eq!(handles[0].size, DEFAULT_HANDLE_SIZE);
+    assert_eq!(handles[1].axis, Some(Vector3::new(0.0, 1.0, 0.0)));
+    assert_eq!(handles[1].size, 24.0);
+    assert_eq!(handles[1].color, axcenity_core::Color3::new(0.0, 0.0, 1.0));
+    assert_eq!(plugin.take_handles(), None);
+
+    let (free, slide) = (handles[0].id, handles[1].id);
+    plugin.drag_handle(&mut world, free, Vector3::new(2.0, 1.0, 0.0), false);
+    plugin.drag_handle(&mut world, free, Vector3::new(3.0, 1.0, 0.0), true);
+    // The plugin may move its handle itself in Dragged.
+    plugin.drag_handle(&mut world, slide, Vector3::new(0.0, 4.0, 0.0), false);
+    let handles = plugin.take_handles().unwrap();
+    assert_eq!(handles[0].position, Vector3::new(3.0, 1.0, 0.0));
+    assert_eq!(handles[1].position, Vector3::new(1.0, 4.0, 0.0));
+
+    plugin.click(&mut world, plugin.toolbars()[0].buttons[0].id);
+    assert_eq!(plugin.take_handles().unwrap().len(), 1);
+    // A removed handle can't be dragged, and nothing fires.
+    plugin.drag_handle(&mut world, free, Vector3::new(9.0, 9.0, 9.0), true);
+    assert_eq!(plugin.take_handles(), None);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(
+        printed[..2],
+        ["dragged\t2, 1, 0", "ended\t3, 1, 0\t3, 1, 0"]
+    );
+    assert!(
+        printed[2].starts_with("false\t") && printed[2].contains("removed"),
+        "{}",
+        printed[2]
+    );
+    assert_eq!(printed.len(), 3);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn properties_rows_are_declared_and_fire_when_used() {
+    let folder = temp_folder("rows");
+    let found = project_with_plugin(
+        &folder,
+        "rows",
+        MANIFEST,
+        "local speed = plugin:AddPropertyRow({ Attribute = 'Speed', Default = 16, Class = 'BasePart', Min = 0, Max = 50, Tooltip = 'How fast' })\n\
+         local spin = plugin:AddPropertyButton({ Label = 'Spin', Class = 'Part' })\n\
+         spin.Activated:Connect(function(part) part.Orientation = Vector3.new(0, 90, 0) print('spun', part.Name) end)\n\
+         speed.Changed:Connect(function(part, value) print('speed', part.Name, value) end)\n\
+         for _, bad in { { Attribute = 'Bad name', Default = 1 }, { Attribute = 'X' }, { Attribute = 'X', Default = 1, Class = 'Nope' },\n\
+         \t{ Attribute = 'X', Default = 1, Min = 5, Max = 1 }, { Attribute = 'X', Default = {} } } do\n\
+         \tprint(pcall(plugin.AddPropertyRow, plugin, bad))\n\
+         end\n\
+         print(pcall(plugin.AddPropertyButton, plugin, {}))\n\
+         local gone = plugin:AddPropertyRow({ Attribute = 'Gone', Default = true, Label = 'Gone' })\n\
+         gone:Remove()\n",
+    );
+    let mut world = World::new();
+    let crate_part = part(&mut world, "Crate", Vector3::new(0.0, 0.0, 0.0));
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed.len(), 6, "{printed:?}");
+    for (line, says) in printed.iter().zip([
+        "isn't an attribute name",
+        "needs a Default",
+        "isn't a class name",
+        "Min is more than Max",
+        "Default: an attribute can be",
+        "needs a Label",
+    ]) {
+        assert!(line.starts_with("false\t") && line.contains(says), "{line}");
+    }
+    let rows = plugin.take_rows().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0],
+        PropertyRow {
+            id: rows[0].id,
+            class: "BasePart".into(),
+            label: "Speed".into(),
+            tooltip: "How fast".into(),
+            kind: RowKind::Attribute {
+                name: "Speed".into(),
+                default: Value::Number(16.0),
+                min: Some(0.0),
+                max: Some(50.0),
+            },
+        }
+    );
+    assert!(rows[0].applies_to(ClassName::Part) && !rows[0].applies_to(ClassName::Model));
+    assert_eq!(
+        (rows[1].label.as_str(), &rows[1].kind),
+        ("Spin", &RowKind::Button)
+    );
+    assert_eq!(plugin.take_rows(), None);
+
+    plugin.activate_row(&mut world, rows[1].id, crate_part);
+    assert_eq!(
+        world.get(crate_part).unwrap().property("Orientation"),
+        Some(&Value::Vector3(Vector3::new(0.0, 90.0, 0.0)))
+    );
+    plugin.row_changed(&mut world, rows[0].id, crate_part, &Value::Number(20.0));
+    // A row that's gone does nothing.
+    plugin.activate_row(&mut world, 999, crate_part);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed, ["spun\tCrate", "speed\tCrate\t20"]);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// The luau-lsp file names every global, method, field and event the
 /// plugin API has.
 #[test]
@@ -419,6 +639,21 @@ fn the_definitions_name_the_whole_plugin_api() {
         "Hit: CFrame",
         "Target: Instance?",
         "Connected: boolean",
+        "function DrawLine(",
+        "function DrawBox(",
+        "function DrawSphere(",
+        "function DrawText(",
+        "function ClearDrawings(",
+        "function Remove(",
+        "function SetColor(",
+        "function CreateHandle(",
+        "Position: Vector3",
+        "Dragged: PluginSignal",
+        "DragEnded: PluginSignal",
+        "function AddPropertyRow(",
+        "function AddPropertyButton(",
+        "Activated: PluginSignal",
+        "Changed: PluginSignal",
     ];
     for name in names {
         assert!(
@@ -427,7 +662,12 @@ fn the_definitions_name_the_whole_plugin_api() {
         );
     }
     // Every method a plugin's Lua can call is in the file.
-    let api = include_str!("api.rs");
+    let api = [
+        include_str!("api.rs"),
+        include_str!("draw.rs"),
+        include_str!("rows.rs"),
+    ]
+    .concat();
     for line in api.lines() {
         let line = line.trim();
         for start in ["methods.add_method(\"", "fields.add_field_method_get(\""] {

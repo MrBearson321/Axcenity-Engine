@@ -7,28 +7,36 @@
 //!
 //! A [`Plugin`] doesn't know about undo or the editor's panels. The host
 //! calls it (a button's click, a new selection, the mouse, a frame), then
-//! reads what it made ([`Plugin::toolbars`], [`Plugin::widgets`]) and asked
+//! reads what it made ([`Plugin::toolbars`], [`Plugin::widgets`],
+//! [`Plugin::take_drawings`]) and asked
 //! for ([`Plugin::take_requests`]), and its output.
 
 mod api;
 pub mod bundle;
+mod draw;
 pub mod files;
 mod manifest;
+mod rows;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use axcenity_core::{InstanceId, RecordedChange, Vector3, World};
+use axcenity_core::{InstanceId, RecordedChange, Value, Vector3, World};
 use axcenity_script::{EditRuntime, OutputLine};
 use mlua::{IntoLuaMulti, MultiValue};
 
 pub use bundle::{
     Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
 };
+pub use draw::{
+    DEFAULT_COLOR, DEFAULT_HANDLE_SIZE, DEFAULT_THICKNESS, Drawing, Handle, MAX_DRAWINGS,
+    MAX_HANDLES, Shape,
+};
 pub use manifest::{
     ENTRY_FILE, Found, MANIFEST_FILE, Manifest, Origin, PLUGINS_FOLDER, Permission, find_plugins,
     plugin_files,
 };
+pub use rows::{MAX_ROWS, PropertyRow, RowKind};
 pub use serde_json::Value as Json;
 
 use api::{PluginState, SignalKey};
@@ -163,6 +171,9 @@ impl Plugin {
             mouse_active: false,
             modules: BTreeMap::new(),
             env: None,
+            drawings: Default::default(),
+            handles: Default::default(),
+            rows: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -205,6 +216,86 @@ impl Plugin {
         self.state()
             .map(|state| state.widgets.clone())
             .unwrap_or_default()
+    }
+
+    /// What it draws in the Scene View, when that changed since the last
+    /// call (drawings stay until the plugin removes them).
+    pub fn take_drawings(&self) -> Option<Vec<Drawing>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.drawings.changed)
+            .then(|| state.drawings.shapes.values().cloned().collect())
+    }
+
+    /// Its handles in the Scene View, when they changed since the last call.
+    pub fn take_handles(&self) -> Option<Vec<Handle>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.handles.changed)
+            .then(|| state.handles.handles.values().cloned().collect())
+    }
+
+    /// Its Properties rows, when they changed since the last call.
+    pub fn take_rows(&self) -> Option<Vec<PropertyRow>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.rows.changed).then(|| state.rows.rows.values().cloned().collect())
+    }
+
+    /// The Properties button row numbered `row` was clicked for
+    /// `instance`: fires its `Activated(instance)`.
+    pub fn activate_row(&self, world: &mut World, row: u64, instance: InstanceId) {
+        if self.has_row(row) && world.contains(instance) {
+            let instance = axcenity_script::LuaInstance(instance);
+            self.fire(world, SignalKey::RowActivated(row), instance);
+        }
+    }
+
+    /// The attribute row numbered `row` was edited on `instance` (the
+    /// editor already set the attribute): fires its `Changed(instance,
+    /// value)`.
+    pub fn row_changed(&self, world: &mut World, row: u64, instance: InstanceId, value: &Value) {
+        if !self.has_row(row) || !world.contains(instance) {
+            return;
+        }
+        let lua = self.runtime.lua();
+        let Ok(value) = axcenity_script::system::value_to_lua(lua, value) else {
+            return;
+        };
+        let instance = axcenity_script::LuaInstance(instance);
+        self.fire(world, SignalKey::RowChanged(row), (instance, value));
+    }
+
+    fn has_row(&self, row: u64) -> bool {
+        self.state()
+            .is_some_and(|state| state.rows.rows.contains_key(&row))
+    }
+
+    /// The user dragged the handle numbered `id` to `position`: moves it
+    /// and fires its `Dragged(position)`, or its `DragEnded(position)` when
+    /// the button was let go (`ended`).
+    pub fn drag_handle(&self, world: &mut World, id: u64, position: Vector3, ended: bool) {
+        let moved = match api::state(self.runtime.lua()) {
+            Ok(mut state) => {
+                let handles = &mut state.handles;
+                match handles.handles.get_mut(&id) {
+                    Some(handle) => {
+                        handle.position = position;
+                        handles.changed = true;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            Err(_) => false,
+        };
+        if !moved {
+            return;
+        }
+        let at = axcenity_script::system::LuaVector3(position);
+        let key = if ended {
+            SignalKey::HandleDragEnded(id)
+        } else {
+            SignalKey::HandleDragged(id)
+        };
+        self.fire(world, key, at);
     }
 
     /// Whether it took the Scene View's left button (`plugin:Activate(true)`).

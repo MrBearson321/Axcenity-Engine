@@ -253,3 +253,121 @@ fn asset_check_follows_an_id_and_reports_one_no_file_has() {
     assert_eq!(finding.kind, crate::FindingKind::MissingFile);
     assert!(finding.message.contains(&unknown), "{}", finding.message);
 }
+
+#[test]
+fn identical_files_are_found_and_the_shortest_path_is_kept() {
+    let folder = scratch("duplicates");
+    let image = "PNG-bytes-of-a-tree";
+    write(&folder, "assets/textures/tree.png", image);
+    write(&folder, "assets/textures/imported/tree (1).png", image);
+    write(&folder, "assets/textures/imported/tree (2).png", image);
+    // Same size, other bytes: not a copy.
+    write(&folder, "assets/textures/bush.png", "PNG-bytes-of-a-bush");
+    // Left out: empty stand-ins, sidecars, JSON assets and terrain data.
+    write(&folder, "assets/textures/a.png", "");
+    write(&folder, "assets/textures/b.png", "");
+    write(&folder, "assets/textures/tree.png.import.json", "{}");
+    write(&folder, "assets/textures/bush.png.import.json", "{}");
+    write(&folder, "assets/prefabs/A.prefab.json", "{}x");
+    write(&folder, "assets/prefabs/B.prefab.json", "{}x");
+    write(&folder, "assets/animations/A.anim.json", "{}x");
+    write(&folder, "assets/animations/B.anim.json", "{}x");
+    write(&folder, "assets/terrain/One/color.png", "same");
+    write(&folder, "assets/terrain/Two/color.png", "same");
+    let found = crate::find_duplicates(&folder);
+    assert_eq!(
+        found,
+        [crate::Duplicates {
+            keep: "assets/textures/tree.png".to_owned(),
+            copies: vec![
+                "assets/textures/imported/tree (1).png".to_owned(),
+                "assets/textures/imported/tree (2).png".to_owned(),
+            ],
+            bytes: image.len() as u64,
+        }]
+    );
+    // Asset Check lists each extra copy, offering Merge rather than Delete.
+    let report = crate::check_assets(&folder, &World::new());
+    let copies: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|f| f.kind == FindingKind::DuplicateFile)
+        .collect();
+    assert_eq!(copies.len(), 2, "{:?}", report.findings);
+    assert_eq!(copies[0].owner, "assets/textures/imported/tree (1).png");
+    assert_eq!(copies[0].path, "assets/textures/tree.png");
+    assert!(
+        copies[0].message.contains("19 bytes"),
+        "{}",
+        copies[0].message
+    );
+    assert!(!copies[0].can_delete() && !copies[0].can_point_elsewhere());
+}
+
+#[test]
+fn a_merge_points_every_reference_at_the_kept_file_and_deletes_the_copy() {
+    let (folder, mut world, look) = project("merge");
+    // `copy.png` is `wood.png` again, named by path from the material, the
+    // script and the prefab, and by its asset ID from the open world.
+    let copy = "assets/textures/copy.png";
+    write(&folder, copy, "png");
+    for file in [
+        "assets/materials/Plank.material.json",
+        "scripts/Sign.server.lua",
+        "assets/prefabs/Box.prefab.json",
+    ] {
+        let text = fs::read_to_string(folder.join(file)).unwrap();
+        fs::write(folder.join(file), text.replace(WOOD, copy)).unwrap();
+    }
+    axcenity_assets::give_asset_ids(&folder).unwrap();
+    let copy_id = axcenity_assets::read_asset_id(&folder, copy).unwrap();
+    let wood_id = axcenity_assets::read_asset_id(&folder, WOOD).unwrap();
+    world
+        .set_property(look, "ColorMap", Value::String(copy_id.to_string()))
+        .unwrap();
+    // A script naming the copy by ID gets the kept file's ID.
+    write(
+        &folder,
+        "scripts/Id.server.lua",
+        &format!("workspace.Crate.Look.ColorMap = \"{copy_id}\"\n"),
+    );
+
+    let plan = plan_merge(&folder, &world, None, copy, WOOD).unwrap();
+    assert_eq!(plan.properties.len(), 1);
+    assert_eq!(plan.properties[0].id, look);
+    assert_eq!(plan.properties[0].value, WOOD);
+    let after = |path: &str| {
+        plan.files
+            .iter()
+            .find(|w| w.path == path)
+            .unwrap_or_else(|| panic!("{path} isn't in the plan"))
+            .after
+            .clone()
+            .map(|bytes| String::from_utf8(bytes).unwrap())
+    };
+    for file in [
+        "assets/materials/Plank.material.json",
+        "scripts/Sign.server.lua",
+        "assets/prefabs/Box.prefab.json",
+    ] {
+        let text = after(file).unwrap();
+        // Only the path on its own: the script's longer `copy.pngx` stays.
+        assert!(
+            text.contains(WOOD) && !text.contains(&format!("{copy}\"")),
+            "{file}: {text}"
+        );
+    }
+    let script = after("scripts/Id.server.lua").unwrap();
+    assert!(script.contains(&wood_id.to_string()), "{script}");
+    // The copy and its sidecar go; the kept file stays as it is.
+    assert_eq!(after(copy), None);
+    assert_eq!(after(&axcenity_assets::import_path(copy)), None);
+    assert!(plan.files.iter().all(|w| w.path != WOOD));
+    // Nothing was written.
+    assert!(folder.join(copy).is_file());
+
+    // Files that differ aren't merged.
+    write(&folder, copy, "other");
+    let refused = plan_merge(&folder, &world, None, copy, WOOD).unwrap_err();
+    assert!(refused.contains("aren't the same"), "{refused}");
+}

@@ -290,3 +290,87 @@ fn a_block_script_inside_an_object_opens_and_saves_its_shared_file() {
     assert!(project.object_files[blocks].contains("opens"));
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn dragging_a_script_onto_an_object_attaches_it_and_undo_moves_it_back() {
+    let folder = copy_of_example("hello-object-scripts", "object-script-attach");
+    let mut app = EditorApp::new(Some(&folder));
+    let coins = app
+        .world
+        .find_first_child(app.world.server_script_service(), "coins")
+        .unwrap();
+    let door = app
+        .world
+        .find_first_child(app.world.workspace(), "FrontDoor")
+        .unwrap();
+    let old = "scripts/coins.server.lua";
+    let new = "objects/FrontDoor/coins.server.lua";
+    let source = std::fs::read_to_string(folder.join(old)).unwrap();
+    app.open_script(old, None);
+
+    // Dropped on the door in the Explorer: asked first, nothing moves yet.
+    app.act(Action::MoveInto {
+        id: coins,
+        parent: door,
+    });
+    assert_eq!(app.confirm_attach, Some((coins, door)));
+    assert!(folder.join(old).exists());
+    app.confirm_attach = None;
+    app.attach_script(coins, door);
+
+    let attached = script_in(&app, "FrontDoor", "coins");
+    assert_eq!(source_file(&app, attached).as_deref(), Some(new));
+    assert!(!folder.join(old).exists());
+    assert_eq!(std::fs::read_to_string(folder.join(new)).unwrap(), source);
+    assert!(app.project.as_ref().unwrap().scripts.is_empty());
+    assert!(!app.world.contains(coins), "no Script left in the service");
+    assert_eq!(app.tabs.active().unwrap().path, new, "the tab follows");
+
+    app.undo();
+    assert!(folder.join(old).exists());
+    assert!(!folder.join(new).exists());
+    let paths: Vec<String> = app
+        .project
+        .as_ref()
+        .unwrap()
+        .scripts
+        .iter()
+        .map(|script| script.path.clone())
+        .collect();
+    assert_eq!(paths, [old]);
+    assert!(app.world.contains(coins), "the service's Script is back");
+    assert!(app.world.find_first_child(door, "coins").is_none());
+    assert!(app.tabs.get(old).is_some());
+
+    app.redo();
+    assert!(!folder.join(old).exists());
+    assert!(folder.join(new).exists());
+    assert!(app.project.as_ref().unwrap().scripts.is_empty());
+    assert!(app.world.find_first_child(door, "coins").is_some());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn only_scripts_and_local_scripts_attach_and_only_to_saved_objects() {
+    let folder = copy_of_example("hello-object-scripts", "object-script-attach-refused");
+    let mut app = EditorApp::new(Some(&folder));
+    let world = &mut app.world;
+    let coins = world
+        .find_first_child(world.server_script_service(), "coins")
+        .unwrap();
+    let door = world
+        .find_first_child(world.workspace(), "FrontDoor")
+        .unwrap();
+    let module = project::add_script_instance(world, "scripts/Shared.module.lua");
+    assert!(tree::check_attach(world, coins, door).is_ok());
+    assert!(tree::check_attach(world, module, door).is_err());
+    assert!(tree::check_attach(world, coins, world.workspace()).is_err());
+    let lighting = world.lighting();
+    assert!(tree::check_attach(world, coins, lighting).is_err());
+    let open = world.find_first_child(door, "Open").unwrap();
+    assert!(
+        tree::check_attach(world, coins, open).is_err(),
+        "not into a script"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

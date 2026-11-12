@@ -25,6 +25,7 @@
 mod asset_fixes;
 mod asset_refs;
 mod assets;
+mod autorecover;
 mod behavior_trees;
 mod block_undo;
 mod branding;
@@ -47,6 +48,7 @@ mod find_in_scripts;
 mod floating;
 mod game_tests;
 mod graphics_benchmark;
+pub(crate) mod import_presets;
 mod input_settings;
 mod layouts;
 mod levels;
@@ -59,10 +61,12 @@ mod model_studio;
 mod native_menu;
 mod nav_overlay;
 mod open;
+mod people_history;
 mod plugins;
 mod prefabs;
 mod probes;
 mod project_upgrade;
+mod save_template;
 mod search;
 mod sequencer;
 mod session;
@@ -82,6 +86,7 @@ mod splines;
 mod tags;
 pub(crate) mod team;
 mod team_audit;
+mod team_board;
 mod team_chat;
 mod team_history;
 mod team_panel;
@@ -310,6 +315,9 @@ pub struct EditorApp {
     ui_warnings: Vec<String>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
+    /// Pause was pressed and Play hasn't paused since, so the pause it
+    /// makes says so in Output.
+    pause_pressed: bool,
     /// Turns keyboard events into key presses for LocalScripts during Play.
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
@@ -332,6 +340,8 @@ pub struct EditorApp {
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
     tags: crate::tags::TagsPanel,
+    /// The Team Board: the project's tasks (`app/team_board.rs`).
+    team_board: team_board::TeamBoard,
     /// Each script's uses of APIs from the other side, for the warning badges.
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
@@ -340,6 +350,9 @@ pub struct EditorApp {
     luau: luau_checks::LuauChecks,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
+    /// A script that is a file in its service, dragged onto an object,
+    /// while "Attach it?" is asked: the script and the object.
+    confirm_attach: Option<(InstanceId, InstanceId)>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
     confirm_sky: Option<String>,
     /// The Levels panel's typing and the level it acts on (`app/levels.rs`).
@@ -449,6 +462,13 @@ pub struct EditorApp {
     ribbon_tabs: RibbonTabs,
     /// View > Light Cones: show every light's reach in the viewport, not
     /// just the selected one's. Saved between runs.
+    /// AutoRecover's setting and snapshots (`app/autorecover.rs`).
+    autorecover: autorecover::AutoRecover,
+    /// Where Save as Template… writes and New Project lists the user's
+    /// templates (`app/save_template.rs`).
+    templates_folder: Option<PathBuf>,
+    /// Save as Template…, while it's open.
+    template_draft: Option<save_template::TemplateDraft>,
     light_cones: bool,
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
@@ -571,6 +591,7 @@ impl DockViewer<'_> {
                 .version_explorer
                 .show(ui, &axcenity_release::BuildInfo::current()),
             Pane::TeamCreate => self.app.team_create_pane(ui),
+            Pane::TeamBoard => self.app.team_board_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -770,6 +791,8 @@ const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
 const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
+const OVERLAY_CONTACTS_KEY: &str = "overlay contacts";
+const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -952,6 +975,7 @@ impl EditorApp {
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
+            pause_pressed: false,
             profiler: Profiler::default(),
             last_drawn: None,
             mixer: crate::mixer::Mixer::default(),
@@ -961,9 +985,11 @@ impl EditorApp {
             cooker: None,
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
+            team_board: Default::default(),
             tabs: ScriptTabs::default(),
             luau: Default::default(),
             confirm_delete: None,
+            confirm_attach: None,
             confirm_sky: None,
             levels_panel: Default::default(),
             play_from_start: false,
@@ -1014,6 +1040,9 @@ impl EditorApp {
             layout_name: None,
             pending_layout: None,
             ribbon_tabs: RibbonTabs::default(),
+            autorecover: Default::default(),
+            templates_folder: None,
+            template_draft: None,
             light_cones: false,
             view_cube: true,
             ai: Default::default(),
@@ -1083,6 +1112,9 @@ impl EditorApp {
                 self.start.set_nav(start::StartNav::from_text(&text));
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
+            if let Some(text) = storage.get_string(autorecover::AUTORECOVER_KEY) {
+                self.autorecover.read(&text);
+            }
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(team_panel::TEAM_CREATE_KEY) {
@@ -1112,6 +1144,9 @@ impl EditorApp {
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             self.overlays.constraints =
                 storage.get_string(OVERLAY_CONSTRAINTS_KEY).as_deref() == Some("on");
+            self.overlays.contacts =
+                storage.get_string(OVERLAY_CONTACTS_KEY).as_deref() == Some("on");
+            self.overlays.bodies = storage.get_string(OVERLAY_BODIES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
                 self.recent_tabs = welcome::RecentTabs::from_text(&text);
             }
@@ -1195,6 +1230,8 @@ impl eframe::App for EditorApp {
     /// Saves the look, the layout and the recent projects. eframe calls
     /// this now and then, and when the window closes.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // History lines still folding go to the project's files.
+        self.flush_history();
         storage.set_string(APPEARANCE_KEY, self.appearance.to_text());
         storage.set_string(updates::UPDATES_KEY, self.updates.to_text());
         let recent: Vec<String> = self
@@ -1208,6 +1245,7 @@ impl eframe::App for EditorApp {
         storage.set_string(start::StartNav::KEY, self.start.nav().to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
+        storage.set_string(autorecover::AUTORECOVER_KEY, self.autorecover.to_text());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
         let ai = if self.ai.allowed { "on" } else { "off" };
@@ -1245,6 +1283,11 @@ impl eframe::App for EditorApp {
             OVERLAY_CONSTRAINTS_KEY,
             flag(self.overlays.constraints).to_owned(),
         );
+        storage.set_string(
+            OVERLAY_CONTACTS_KEY,
+            flag(self.overlays.contacts).to_owned(),
+        );
+        storage.set_string(OVERLAY_BODIES_KEY, flag(self.overlays.bodies).to_owned());
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
         storage.set_string(
@@ -1380,7 +1423,8 @@ impl EditorApp {
             } else {
                 // Saved, or the changes were let go: a last upload to the
                 // project's repository, then a hosted session ends with
-                // nothing to recover.
+                // nothing to recover, and so does AutoRecover.
+                self.autorecover_done();
                 self.repo_close();
                 self.end_team_for_quit();
             }
@@ -1686,6 +1730,10 @@ impl EditorApp {
         if let Some(mouse) = output.plugin_mouse {
             self.plugin_mouse(mouse);
         }
+        if let Some(moved) = output.plugin_handle {
+            self.drag_plugin_handle(moved);
+            ctx.request_repaint();
+        }
         if self.constraint_tool.is_some()
             && (self.playing()
                 || ctx.input(|input| shortcuts::pressed(input, shortcuts::Action::PutToolDown)))
@@ -1796,7 +1844,11 @@ impl EditorApp {
         self.unsaved_changes_prompt(ctx);
         self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
+        self.attach_script_prompt(ctx);
         self.sky_prompt(ctx);
+        self.autorecover_prompt(ctx);
+        self.autorecover_frame();
+        self.save_template_dialog(ctx);
         self.import_dropped(ctx);
         self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);
@@ -1825,6 +1877,7 @@ impl EditorApp {
         self.join_requests_window(ctx);
         self.collab_setup_windows(ctx);
         self.repo_ui_frame(ctx);
+        self.team_board_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
@@ -1859,6 +1912,8 @@ mod asset_refs_tests;
 #[cfg(test)]
 mod attribute_tests;
 #[cfg(test)]
+mod autorecover_tests;
+#[cfg(test)]
 mod behavior_tree_tests;
 #[cfg(test)]
 mod block_undo_tests;
@@ -1892,6 +1947,8 @@ mod graphics_benchmark_tests;
 mod health_tests;
 #[cfg(test)]
 mod ik_tests;
+#[cfg(test)]
+mod import_preset_tests;
 #[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]
@@ -1973,6 +2030,8 @@ mod solid_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod strings_tests;
+#[cfg(test)]
+mod team_board_tests;
 #[cfg(test)]
 mod team_tests;
 #[cfg(test)]

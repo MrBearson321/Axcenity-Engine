@@ -771,6 +771,7 @@ dependencies = [
  "axcenity-scene",
  "axcenity-script",
  "axcenity-sim",
+ "axcenity-teamwork",
  "axcenity-terrain",
  "axcenity-testing",
  "axcenity-toolbox",
@@ -1218,6 +1219,16 @@ dependencies = [
  "axcenity-script",
  "axcenity-workspace-hack",
  "profiling",
+]
+
+[[package]]
+name = "axcenity-teamwork"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-workspace-hack",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

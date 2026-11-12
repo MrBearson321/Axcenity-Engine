@@ -28,11 +28,13 @@ pub(super) enum Overlay {
     NavMesh,
     AgentPaths,
     Constraints,
+    Contacts,
+    Bodies,
     Culling,
 }
 
 impl Overlay {
-    pub(super) const ALL: [Overlay; 8] = [
+    pub(super) const ALL: [Overlay; 10] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -40,6 +42,8 @@ impl Overlay {
         Overlay::NavMesh,
         Overlay::AgentPaths,
         Overlay::Constraints,
+        Overlay::Contacts,
+        Overlay::Bodies,
         Overlay::Culling,
     ];
 
@@ -52,6 +56,8 @@ impl Overlay {
             Overlay::NavMesh => "Nav Mesh",
             Overlay::AgentPaths => "Agent Paths",
             Overlay::Constraints => "Constraints",
+            Overlay::Contacts => "Contacts",
+            Overlay::Bodies => "Bodies",
             Overlay::Culling => "Culling",
         }
     }
@@ -65,6 +71,8 @@ impl Overlay {
             Overlay::NavMesh => &mut overlays.nav_mesh,
             Overlay::AgentPaths => &mut overlays.agent_paths,
             Overlay::Constraints => &mut overlays.constraints,
+            Overlay::Contacts => &mut overlays.contacts,
+            Overlay::Bodies => &mut overlays.bodies,
             Overlay::Culling => &mut overlays.culling,
         }
     }
@@ -134,11 +142,14 @@ pub(super) enum Command {
     SetUpCollaborate,
     SaveCheckpoint,
     BackUpProject,
+    SaveAsTemplate,
     Input,
     CloseProject,
     Import,
     /// `None`: for this OS.
     BuildGame(Option<ExportTarget>),
+    /// File ▸ Build Game's build profile, by name (R13).
+    BuildProfile(String),
     LoadingScreen(LoadingChoice),
     WaitForScript,
     /// File ▸ Build Game's Developer Console switch (Phase 71).
@@ -410,6 +421,14 @@ impl EditorApp {
             when(editing, not_editing),
         );
         add(
+            Command::SaveAsTemplate,
+            "Save as Template…",
+            "File",
+            &["template", "starter", "axtemplate", "new project"],
+            None,
+            when(editing, not_editing),
+        );
+        add(
             Command::Input,
             "Input…",
             "File",
@@ -456,6 +475,17 @@ impl EditorApp {
             );
         }
         if let Some(open) = &self.project {
+            let profiles = axcenity_project::BuildProfiles::read(&open.folder).unwrap_or_default();
+            for name in profiles.names() {
+                add(
+                    Command::BuildProfile(name.clone()),
+                    &format!("Build Profile: {name}"),
+                    "File › Build Game",
+                    &[&name],
+                    None,
+                    Ok(()),
+                );
+            }
             let mut choices = vec![
                 (LoadingChoice::Splash, "Axcenity splash".to_owned()),
                 (LoadingChoice::Nothing, "None".to_owned()),
@@ -1092,11 +1122,13 @@ impl EditorApp {
             Command::SetUpCollaborate => self.set_up_collaborate(),
             Command::SaveCheckpoint => self.version_history.open_for_checkpoint(),
             Command::BackUpProject => self.back_up_project(false),
+            Command::SaveAsTemplate => self.open_save_template(),
             Command::Input => self.input_settings.open = true,
             Command::CloseProject => self.request_and_go_ahead(ctx, Discard::CloseProject),
             Command::Import => self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER),
             Command::BuildGame(None) => self.export_game_with_dialog(),
             Command::BuildGame(Some(target)) => self.export_game_for_with_dialog(target),
+            Command::BuildProfile(name) => self.pick_build_profile(&name),
             Command::LoadingScreen(choice) => {
                 let Some(project) = &self.project else {
                     return;
@@ -1203,7 +1235,9 @@ impl EditorApp {
             Command::Play => {
                 if self.paused() {
                     self.continue_play();
-                } else if !playing && self.project.is_some() {
+                } else if playing {
+                    self.pause_play();
+                } else if self.project.is_some() {
                     self.play();
                 }
             }

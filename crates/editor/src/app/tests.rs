@@ -615,6 +615,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                             .version_explorer
                             .show(ui, &axcenity_release::BuildInfo::current()),
                         Pane::TeamCreate => app.team_create_pane(ui),
+                        Pane::TeamBoard => app.team_board_pane(ui),
                         Pane::Welcome => app.welcome_pane(ui),
                         Pane::Scene | Pane::Script(_) | Pane::Plugin(_) => {}
                     }

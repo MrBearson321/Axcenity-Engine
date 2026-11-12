@@ -52,6 +52,82 @@ declare extern type PluginMouse with
 	Move: PluginSignal
 end
 
+--- A shape a plugin drew in the Scene View. It stays until removed.
+declare extern type PluginDrawing with
+	--- Takes the drawing out of the Scene View.
+	function Remove(self): ()
+	--- Draws it in another colour.
+	function SetColor(self, color: Color3): ()
+end
+
+--- How a drawing looks.
+type DrawOptions = {
+	--- Its colour (left out: orange).
+	Color: Color3?,
+	--- Line width in points, 0.5 to 32 (left out: 2). For `DrawText`, the text size (left out: 14).
+	Thickness: number?,
+}
+
+--- A dot in the Scene View the user drags (`plugin:CreateHandle`).
+declare extern type PluginHandle with
+	--- Where it is. Setting it moves it (without firing Dragged).
+	Position: Vector3
+	--- Fires with the new position each time the user drags it.
+	Dragged: PluginSignal
+	--- Fires with the final position when the user lets go: a good place for `ChangeHistoryService:SetWaypoint`.
+	DragEnded: PluginSignal
+	--- Takes the handle out of the Scene View and disconnects its events.
+	function Remove(self): ()
+end
+
+--- How a handle looks and moves.
+type HandleOptions = {
+	--- Its colour (left out: orange).
+	Color: Color3?,
+	--- Its radius in points, 3 to 24 (left out: 7).
+	Size: number?,
+	--- A direction to slide along (left out: it moves in the plane facing the camera).
+	Axis: Vector3?,
+}
+
+--- A row a plugin added to the Properties panel.
+declare extern type PluginPropertyRow with
+	--- A button row: fires with the Instance when it's clicked.
+	Activated: PluginSignal
+	--- An attribute row: fires with the Instance and the new value after the user edits it there (the attribute is already set, as its own undo step).
+	Changed: PluginSignal
+	--- Takes the row out of the Properties panel and disconnects its events.
+	function Remove(self): ()
+end
+
+--- An attribute shown as a row of its own in the Properties panel.
+type PropertyRowInfo = {
+	--- The attribute it edits.
+	Attribute: string,
+	--- What it shows (and its type) while the attribute isn't set: a boolean, number, string, Vector3, Vector2, Color3, UDim2, CFrame or EnumItem.
+	Default: any,
+	--- It shows for Instances of this class (IsA), such as "BasePart" (left out: every Instance).
+	Class: string?,
+	--- Its name in the panel (left out: the attribute's name).
+	Label: string?,
+	--- Shown when the mouse is over its name.
+	Tooltip: string?,
+	--- For numbers: the smallest value (with Max, a slider).
+	Min: number?,
+	--- For numbers: the largest value.
+	Max: number?,
+}
+
+--- A button in the Properties panel.
+type PropertyButtonInfo = {
+	--- The button's text.
+	Label: string,
+	--- It shows for Instances of this class (IsA) (left out: every Instance).
+	Class: string?,
+	--- Shown when the mouse is over it.
+	Tooltip: string?,
+}
+
 --- What a dock widget starts with.
 type DockWidgetInfo = {
 	--- The tab's title (left out: the widget's id).
@@ -82,6 +158,22 @@ declare extern type Plugin with
 	function Deactivate(self): ()
 	--- Whether the plugin has the Scene View's left button.
 	function IsActivated(self): boolean
+	--- Draws a line in the Scene View, over the scene, until it's removed. At most 10000 drawings at once.
+	function DrawLine(self, from: Vector3, to: Vector3, options: DrawOptions?): PluginDrawing
+	--- Draws the edges of a box `size` across, centred on `at` (a CFrame turns it; a Vector3 keeps it lined up with the world).
+	function DrawBox(self, at: CFrame | Vector3, size: Vector3, options: DrawOptions?): PluginDrawing
+	--- Draws a sphere as three rings round `center`.
+	function DrawSphere(self, center: Vector3, radius: number, options: DrawOptions?): PluginDrawing
+	--- Draws a label at `position`, the same size however far away (up to 200 characters).
+	function DrawText(self, position: Vector3, text: string, options: DrawOptions?): PluginDrawing
+	--- Removes everything the plugin drew.
+	function ClearDrawings(self): ()
+	--- Shows an attribute of the selected Instance as a row of its own in the Properties panel, under the plugin's name. Editing it there sets the attribute as an undo step. At most 64 rows.
+	function AddPropertyRow(self, info: PropertyRowInfo): PluginPropertyRow
+	--- A button in the Properties panel, under the plugin's name, for the selected Instance.
+	function AddPropertyButton(self, info: PropertyButtonInfo): PluginPropertyRow
+	--- A handle at `position` the user can drag in the Scene View while editing; the Move snap applies. At most 256 at once.
+	function CreateHandle(self, position: Vector3, options: HandleOptions?): PluginHandle
 end
 
 --- What's selected in the editor.

@@ -47,13 +47,16 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Engine version, `--version`, release entries in `releases/`, or `axcenity-release` | [project/releases.md](project/releases.md); the design of the updater and Version Explorer: [research/release-system/README.md](research/release-system/README.md) |
 | Data tables, the Data Table tab, or `DataService` | [project/data-tables.md](project/data-tables.md) |
 | Dialogues, quests, `DialogueService`, `QuestService`, the Dialogue tab | [scripting/api-dialogue.md](scripting/api-dialogue.md) |
-| New Project's genre templates (`templates/`) | [project/templates.md](project/templates.md) |
+| AutoRecover (Settings > Saving, `.axcenity/autorecover/`, the Recover unsaved work? prompt) | [project/autorecover.md](project/autorecover.md) |
+| New Project's genre templates (`templates/`) and your own (`.axtemplate`, Save as Template…) | [project/templates.md](project/templates.md) |
 | Game tests (`tests/*.spec.lua`), the Tests panel, `axcenity-test` | [project/game-tests.md](project/game-tests.md) |
 | Editor plugins (`plugins/`, the plugin API, the Plugins panel) | [editor/plugins.md](editor/plugins.md) |
 | Team Create (real-time collaboration): the proposed architecture, sync model, identity and phases TC0–TC8 | [research/team-create.md](research/team-create.md) |
 | Collaborate (Team Create's new name, brief of 2026-11-12): audit of what exists, Tailscale setup, live shared scripts, identity seam, phases C1–C12 | [research/collaborate.md](research/collaborate.md) |
 | Collaborate accounts (C12, document only): how a future Django account manager would plug in (tokens bound to device keys, linking members, ownership, the website's API, threat model) | [research/collaborate-accounts.md](research/collaborate-accounts.md) |
 | Collaborate 2.0 (brief of 2026-11-12): persistent projects without a fixed host, Git/GitHub sync and checkpoints, automatic host election and handoff, phases P0–P7 | [research/collaborate-persistent.md](research/collaborate-persistent.md) |
+| Teamwork (Paul's request of 2026-11-12): the shared Team Board of tasks and assignments, bug tracking, goals, and each person's history, phases T1–T4 | [research/teamwork.md](research/teamwork.md) |
+| The Team Board tab: `team/board/` files, sharing, the panel and item window | [editor/team-board.md](editor/team-board.md) |
 | The cohesion pass (brief of 2026-11-12): audit of the editor's design system, documents and saving, scripting IRs, previews, physics, Collaborate security and game branding, phases CP1–CP9 | [research/cohesion-pass.md](research/cohesion-pass.md) |
 | The MCP server for AI clients (`axcenity-editor --mcp`, its tools, connecting Claude Code, Cursor or Codex) | [editor/mcp.md](editor/mcp.md) |
 | Setting up an AI assistant with a project (user guide: `--mcp --check`, client configs, profiles, local models, troubleshooting) | [mcp/README.md](mcp/README.md) |

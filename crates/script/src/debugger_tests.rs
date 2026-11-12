@@ -274,3 +274,239 @@ fn the_watchdog_still_stops_endless_loops_with_the_debugger_on() {
         "{output:?}"
     );
 }
+
+fn rule(line: usize, rule: BreakpointRule) -> BreakpointRules {
+    BreakpointRules::from([(("scripts/test.server.lua".to_owned(), line), rule)])
+}
+
+#[test]
+fn a_conditional_breakpoint_pauses_only_where_its_condition_is_true() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[2]);
+    runtime.set_breakpoint_rules(&rule(
+        2,
+        BreakpointRule {
+            condition: Some("i % 3 == 0".to_owned()),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "for i = 1, 7 do\n  print(i)\nend",
+    );
+    assert_eq!(local(&runtime.pause().unwrap(), "i"), "3");
+    assert_eq!(lines(&mut runtime), ["1", "2"]);
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(local(&runtime.pause().unwrap(), "i"), "6");
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(runtime.pause(), None);
+    assert_eq!(lines(&mut runtime), ["3", "4", "5", "6", "7"]);
+}
+
+#[test]
+fn a_condition_that_fails_pauses_and_says_why() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[2]);
+    runtime.set_breakpoint_rules(&rule(
+        2,
+        BreakpointRule {
+            condition: Some("missing.field".to_owned()),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local x = 1\nprint(x)",
+    );
+    assert!(runtime.pause().is_some());
+    let output = lines(&mut runtime);
+    assert!(
+        output[0]
+            .starts_with("error: scripts/test.server.lua:2: the breakpoint's condition failed"),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn a_hit_count_lets_the_first_passes_run_on() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[2]);
+    runtime.set_breakpoint_rules(&rule(
+        2,
+        BreakpointRule {
+            hit_count: Some(4),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "for i = 1, 5 do\n  print(i)\nend",
+    );
+    assert_eq!(local(&runtime.pause().unwrap(), "i"), "4");
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(
+        local(&runtime.pause().unwrap(), "i"),
+        "5",
+        "from the 4th on"
+    );
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(lines(&mut runtime), ["1", "2", "3", "4", "5"]);
+}
+
+#[test]
+fn a_logpoint_writes_to_output_and_never_pauses() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[3]);
+    runtime.set_breakpoint_rules(&rule(
+        3,
+        BreakpointRule {
+            log: Some("i is {i}, name {name}, {{braces}}, {nope.x}".to_owned()),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local name = 'door'\nfor i = 1, 2 do\n  print(i)\nend",
+    );
+    assert_eq!(runtime.pause(), None);
+    let output = lines(&mut runtime);
+    assert_eq!(output.len(), 4, "{output:?}");
+    assert!(
+        output[0].starts_with("scripts/test.server.lua:3: i is 1, name door, {braces}, {error: "),
+        "{output:?}"
+    );
+    assert_eq!(output[1], "1");
+    assert!(output[2].starts_with("scripts/test.server.lua:3: i is 2"));
+    assert_eq!(output[3], "2");
+}
+
+#[test]
+fn a_logpoint_in_a_long_loop_doesnt_nest() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[2]);
+    runtime.set_breakpoint_rules(&rule(
+        2,
+        BreakpointRule {
+            log: Some("{i}".to_owned()),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local total = 0\nfor i = 1, 5000 do total += i end\nprint(total)",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output.last().map(String::as_str), Some("12502500"));
+}
+
+#[test]
+fn a_step_onto_a_ruled_breakpoint_still_pauses() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[1, 2]);
+    runtime.set_breakpoint_rules(&rule(
+        2,
+        BreakpointRule {
+            condition: Some("false".to_owned()),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local a = 1\nlocal b = 2\nprint(a + b)",
+    );
+    assert_eq!(runtime.pause().unwrap().line, 1);
+    runtime.resume_from_pause(&mut world, Resume::StepOver);
+    assert_eq!(runtime.pause().unwrap().line, 2, "the step goes there");
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(lines(&mut runtime), ["3"]);
+}
+
+#[test]
+fn pause_stops_at_the_next_line_a_script_runs() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[]);
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local n = 0\nwhile true do\n  n += 1\n  task.wait()\nend",
+    );
+    assert_eq!(runtime.pause(), None);
+    runtime.request_pause(true);
+    assert!(runtime.pause_requested());
+    runtime.step(&mut world, 1.0 / 60.0);
+    let pause = runtime.pause().expect("paused by the request");
+    assert!(!pause.breakpoint);
+    assert!(!runtime.pause_requested());
+    assert_eq!(local(&pause, "n"), "1");
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(runtime.pause(), None);
+    runtime.step(&mut world, 1.0 / 60.0);
+    assert_eq!(runtime.pause(), None, "asked once");
+}
+
+#[test]
+fn tables_in_locals_can_be_expanded() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[2]);
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local t = {10, 20, door = {open = true}, [true] = 'yes'}\nprint(t)",
+    );
+    let pause = runtime.pause().unwrap();
+    let t = pause.frames[0]
+        .locals
+        .iter()
+        .find(|local| local.name == "t")
+        .unwrap();
+    let field = |name: &str| t.fields.iter().find(|field| field.name == name).unwrap();
+    assert_eq!(field("[1]").value, "10");
+    assert_eq!(field("[2]").value, "20");
+    assert_eq!(field("[true]").value, "\"yes\"");
+    let door = field("door");
+    assert_eq!(door.fields.len(), 1);
+    assert_eq!(door.fields[0].name, "open");
+    assert_eq!(door.fields[0].value, "true");
+}
+
+#[test]
+fn the_watchdog_still_stops_an_endless_loop_with_a_logpoint_in_it() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[3]);
+    runtime.set_watchdog_limit(Duration::from_millis(100));
+    runtime.set_breakpoint_rules(&rule(
+        3,
+        BreakpointRule {
+            condition: Some("n % 100000 == 0".to_owned()),
+            log: Some("n = {n}".to_owned()),
+            ..Default::default()
+        },
+    ));
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local n = 0\nwhile true do\n  n += 1\nend",
+    );
+    let output = lines(&mut runtime);
+    assert!(
+        output
+            .last()
+            .is_some_and(|line| line.contains("without pausing, so it was stopped")),
+        "{output:?}"
+    );
+}

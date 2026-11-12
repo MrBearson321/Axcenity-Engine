@@ -38,12 +38,15 @@ const SETTLE: Duration = Duration::from_millis(100);
 
 /// The folder of the files [`Watched::Assets`] covers.
 const ASSETS_FOLDER: &str = "assets";
+/// The folder of the project's teamwork files (the Team Board), which
+/// [`Watched::Everything`] covers too.
+const TEAM_FOLDER: &str = "team";
 
 /// Which of the project's files a [`Watcher`] looks at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Watched {
     /// The world file, every script and stylesheet, and every file under
-    /// `assets/`: the editor.
+    /// `assets/` and `team/`: the editor.
     Everything,
     /// Every file under `assets/`: `axcenity-player --watch`.
     Assets,
@@ -79,6 +82,9 @@ fn watched_paths(folder: &Path, watched: Watched) -> Vec<String> {
             &mut ignored,
         );
         paths.extend(find_stylesheets(folder, &mut ignored));
+        // The Team Board's items, which a Collaborate session or a Git
+        // pull can change (`axcenity-teamwork`).
+        find_files(&folder.join(TEAM_FOLDER), TEAM_FOLDER, &mut paths);
     }
     find_files(&folder.join(ASSETS_FOLDER), ASSETS_FOLDER, &mut paths);
     paths

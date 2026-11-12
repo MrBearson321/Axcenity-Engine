@@ -5,6 +5,11 @@
 //! `axcenity-editor --build-game <project> <folder> [--target os]` does the
 //! same from a terminal, so a packaged editor can be checked on each OS
 //! without opening a window (`scripts/check-packages.py`).
+//!
+//! A build follows a build profile (roadmap R13, `project::BuildProfile`):
+//! Release unless another is picked (`--profile <name>`), runs Asset Check
+//! first, and writes a build report beside the game
+//! (`project::BuildReport`).
 
 use std::ffi::OsString;
 use std::fs;
@@ -12,7 +17,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
+use axcenity_core::World;
 use axcenity_project as project;
+use project::{BuildProfile, BuildReport};
 
 mod icons;
 
@@ -49,7 +56,7 @@ impl ExportTarget {
         }
     }
 
-    fn from_name(name: &str) -> Option<ExportTarget> {
+    pub fn from_name(name: &str) -> Option<ExportTarget> {
         [Self::Windows, Self::MacOS, Self::Linux]
             .into_iter()
             .find(|target| target.directory() == name)
@@ -112,6 +119,52 @@ pub struct BuiltGame {
     /// What's wrong with the project's branding: the build uses Axcenity's
     /// pictures in its place.
     pub notes: Vec<String>,
+    /// What was built and how (R13), also written beside the game.
+    pub report: BuildReport,
+    /// Where the text report was written.
+    pub report_path: PathBuf,
+}
+
+/// The build profile a build uses (R13), by name and as its settings, and
+/// the world to run Asset Check on (the editor's; `None` reads the
+/// project's from its files).
+pub struct Profile<'a> {
+    pub name: &'a str,
+    pub settings: &'a BuildProfile,
+    pub world: Option<&'a World>,
+}
+
+/// Asset Check's problems that a build reports (R13): missing files, bad
+/// references, broken dependencies and files that won't import, leaving
+/// out unused or duplicate files and what the project ignores. One line
+/// each.
+pub fn asset_problems(folder: &Path, world: Option<&World>) -> Vec<String> {
+    let loaded;
+    let world = match world {
+        Some(world) => world,
+        None => match project::load(folder) {
+            Ok(project) => {
+                loaded = project.world;
+                &loaded
+            }
+            Err(err) => return vec![format!("the project didn't load to be checked: {err}")],
+        },
+    };
+    let ignored = project::read_ignored(folder);
+    project::check_assets(folder, world)
+        .findings
+        .into_iter()
+        .filter(|finding| {
+            matches!(
+                finding.kind,
+                project::FindingKind::MissingFile
+                    | project::FindingKind::InvalidReference
+                    | project::FindingKind::BrokenDependency
+                    | project::FindingKind::ImportFailure
+            ) && !ignored.contains(&finding.ignore_key())
+        })
+        .map(|finding| format!("{}: {}", finding.owner, finding.message))
+        .collect()
 }
 
 /// Built on Windows for macOS or Linux, the copied player can't be marked
@@ -193,6 +246,7 @@ fn asset_credits(folder: &Path) -> Result<Option<String>, String> {
 /// with `LICENSES.txt` (and `CREDITS.txt` when Toolbox assets need
 /// crediting). With `archive`,
 /// also writes those files as `AxcenityPlayer-<os>.zip` in `destination`.
+#[cfg(test)]
 pub fn build_game(
     folder: &Path,
     destination: &Path,
@@ -200,6 +254,27 @@ pub fn build_game(
     player: &Path,
     archive: bool,
 ) -> Result<BuiltGame, String> {
+    let release = BuildProfile::default();
+    let profile = Profile {
+        name: project::RELEASE_PROFILE,
+        settings: &release,
+        world: None,
+    };
+    build_game_with(folder, destination, target, player, archive, &profile)
+}
+
+/// [`build_game`] with a build profile (R13): its packing options, Asset
+/// Check first (stopping on problems if the profile says so), and a report
+/// written beside the game.
+pub fn build_game_with(
+    folder: &Path,
+    destination: &Path,
+    target: ExportTarget,
+    player: &Path,
+    archive: bool,
+    profile: &Profile,
+) -> Result<BuiltGame, String> {
+    let started = std::time::Instant::now();
     if !player.is_file() {
         return Err(format!(
             "the player binary `{}` is missing. Build `axcenity-player` for {} and put it {}.",
@@ -208,14 +283,38 @@ pub fn build_game(
             target.player_place()
         ));
     }
+    // Missing dependencies are said before packing (R13).
+    let problems = asset_problems(folder, profile.world);
+    if profile.settings.stop_on_problems && !problems.is_empty() {
+        const LISTED: usize = 5;
+        let mut listed = problems[..problems.len().min(LISTED)].join("; ");
+        if problems.len() > LISTED {
+            listed.push_str(&format!("; and {} more", problems.len() - LISTED));
+        }
+        return Err(format!(
+            "Asset Check found {} problem{} and the {} profile stops on them: {listed}",
+            problems.len(),
+            if problems.len() == 1 { "" } else { "s" },
+            profile.name,
+        ));
+    }
     // Textures the background cooking hasn't reached yet are cooked now,
     // so the game ships every texture ready for the GPU.
     let report = axcenity_cook::cook_project(folder, &AtomicBool::new(false), |_, _| {});
-    // Texture sources with a cooked copy are left out (G12): the game uses
-    // the copies, which is about half the size of shipping both.
-    let options = project::PackOptions { cooked_only: true };
-    let game = project::pack_game_with(folder, options)
+    // Texture sources with a cooked copy are left out (G12) unless the
+    // profile keeps them: the game uses the copies, which is about half
+    // the size of shipping both.
+    let (game, packed) = project::pack_game_reporting(folder, profile.settings.pack_options())
         .map_err(|err| format!("could not pack the project: {err}"))?;
+    let mut build_report = BuildReport::new(
+        folder,
+        profile.name,
+        profile.settings,
+        target.directory(),
+        &game,
+        &packed,
+    );
+    drop(packed);
     // The game's name and icon (CW8.2); a bad icon is said and left out, so
     // the build uses Axcenity's.
     let manifest = project::read_manifest(folder);
@@ -350,6 +449,23 @@ pub fn build_game(
     } else {
         None
     };
+    build_report.engine_version = env!("CARGO_PKG_VERSION").to_owned();
+    build_report.problems = problems;
+    build_report.uncooked = report
+        .failed
+        .iter()
+        .map(|(path, reason)| format!("{path}: {reason}"))
+        .collect();
+    build_report.notes = notes.clone();
+    if let Some(reason) = &unsigned {
+        build_report
+            .notes
+            .push(format!("The app isn't signed (codesign: {reason})."));
+    }
+    build_report.seconds = started.elapsed().as_secs_f64();
+    build_report
+        .write(destination)
+        .map_err(|err| format!("could not write the build report: {err}"))?;
     Ok(BuiltGame {
         run: if target == ExportTarget::MacOS {
             app
@@ -361,6 +477,8 @@ pub fn build_game(
         archive,
         unsigned,
         notes,
+        report: build_report,
+        report_path: destination.join(project::BUILD_REPORT_TEXT_FILE),
     })
 }
 
@@ -422,33 +540,61 @@ fn write_archive(root: &Path, files: &[(PathBuf, bool)], path: &Path) -> io::Res
     Ok(())
 }
 
-/// `axcenity-editor --build-game <project> <folder> [--target os]`, with
-/// the arguments after the flag. Prints what it did; returns whether it
-/// built the game.
+/// `axcenity-editor --build-game <project> <folder> [--target os]
+/// [--profile name]`, with the arguments after the flag. Prints what it
+/// did; returns whether it built the game. The profile's target is used
+/// unless `--target` names one.
 pub fn build_from_command_line(mut args: impl Iterator<Item = OsString>) -> bool {
     let usage = format!(
-        "usage: axcenity-editor {BUILD_FLAG} <project folder> <output folder> [--target windows|macos|linux]"
+        "usage: axcenity-editor {BUILD_FLAG} <project folder> <output folder> \
+         [--target windows|macos|linux] [--profile <name>]"
     );
     let (Some(folder), Some(destination)) = (args.next(), args.next()) else {
         eprintln!("{usage}");
         return false;
     };
-    let target = match (args.next(), args.next()) {
-        (None, _) => ExportTarget::current(),
-        (Some(flag), Some(name)) if flag == "--target" => {
-            match name.to_str().and_then(ExportTarget::from_name) {
-                Some(target) => target,
+    let (mut target, mut profile_name) = (None, project::RELEASE_PROFILE.to_owned());
+    while let Some(flag) = args.next() {
+        let Some(value) = args.next() else {
+            eprintln!("{usage}");
+            return false;
+        };
+        let value = value.to_string_lossy().into_owned();
+        match flag.to_str() {
+            Some("--target") => match ExportTarget::from_name(&value) {
+                Some(named) => target = Some(named),
                 None => {
-                    eprintln!("unknown target {}\n{usage}", name.to_string_lossy());
+                    eprintln!("unknown target {value}\n{usage}");
                     return false;
                 }
+            },
+            Some("--profile") => profile_name = value,
+            _ => {
+                eprintln!("{usage}");
+                return false;
             }
         }
-        _ => {
-            eprintln!("{usage}");
+    }
+    let folder_path = PathBuf::from(&folder);
+    let settings = match project::BuildProfiles::read(&folder_path) {
+        Ok(profiles) => match profiles.get(&profile_name) {
+            Some(settings) => settings,
+            None => {
+                eprintln!(
+                    "there's no build profile called {profile_name} (there are: {})",
+                    profiles.names().join(", ")
+                );
+                return false;
+            }
+        },
+        Err(err) => {
+            eprintln!("could not read {}: {err}", project::BUILD_PROFILES_FILE);
             return false;
         }
     };
+    let target = target
+        .or_else(|| settings.target.as_deref().and_then(ExportTarget::from_name))
+        .unwrap_or_else(ExportTarget::current);
     let player = match std::env::current_exe() {
         Ok(editor) => target.player_beside(&editor),
         Err(err) => {
@@ -457,14 +603,23 @@ pub fn build_from_command_line(mut args: impl Iterator<Item = OsString>) -> bool
         }
     };
     let (folder, destination) = (PathBuf::from(folder), PathBuf::from(destination));
-    match build_game(
+    let profile = Profile {
+        name: &profile_name,
+        settings: &settings,
+        world: None,
+    };
+    match build_game_with(
         &folder,
         &destination,
         target,
         &player,
         needs_archive(target),
+        &profile,
     ) {
         Ok(built) => {
+            for problem in &built.report.problems {
+                println!("Asset Check: {problem}");
+            }
             if built.cooked > 0 {
                 println!("cooked {} textures", built.cooked);
             }
@@ -485,6 +640,11 @@ pub fn build_from_command_line(mut args: impl Iterator<Item = OsString>) -> bool
             for note in &built.notes {
                 println!("{note} The build uses Axcenity's in its place.");
             }
+            println!(
+                "{} profile; report at {}",
+                profile_name,
+                built.report_path.display()
+            );
             true
         }
         Err(err) => {
@@ -587,6 +747,91 @@ mod tests {
         assert!(mean < 3.0, "decoded pixels are close to the source: {mean}");
     }
 
+    /// R13: a profile's settings reach the game, the report names what went
+    /// in, and a profile that stops on problems refuses a project Asset
+    /// Check finds broken.
+    #[test]
+    fn a_profile_shapes_the_build_writes_a_report_and_can_stop_on_problems() {
+        let scratch = Scratch::new("profile");
+        let project = scratch.root.join("project");
+        let (_, development) = project::built_in_profiles()
+            .into_iter()
+            .find(|(name, _)| *name == "Development")
+            .unwrap();
+        let built = build_game_with(
+            &project,
+            &scratch.root.join("out"),
+            ExportTarget::Linux,
+            &scratch.root.join("player"),
+            false,
+            &Profile {
+                name: "Development",
+                settings: &development,
+                world: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(built.report.profile, "Development");
+        // The scratch copy leaves out the terrain's data folder, which
+        // Asset Check reports; that one is the baseline.
+        let baseline = built.report.problems.len();
+        assert!(built.report.files > 0);
+        assert_eq!(
+            built.report_path,
+            scratch.out(project::BUILD_REPORT_TEXT_FILE)
+        );
+        assert!(
+            fs::read_to_string(&built.report_path)
+                .unwrap()
+                .contains("Development")
+        );
+        let written: serde_json::Value =
+            serde_json::from_slice(&fs::read(scratch.out(project::BUILD_REPORT_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(written["profile"], "Development");
+        let unpacked = scratch.root.join("unpacked");
+        project::unpack_game(&fs::read(scratch.out("game.axgame")).unwrap(), &unpacked).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(unpacked.join("axcenity.json")).unwrap()).unwrap();
+        assert_eq!(manifest["developer_console"], true);
+
+        // A model that won't import: reported, and a stopping profile refuses.
+        fs::create_dir_all(project.join("assets/models")).unwrap();
+        fs::write(project.join("assets/models/broken.glb"), b"not a glb").unwrap();
+        let built = scratch.build(ExportTarget::Linux, false);
+        assert_eq!(
+            built.report.problems.len(),
+            baseline + 1,
+            "{:?}",
+            built.report.problems
+        );
+        let stopping = project::BuildProfile {
+            stop_on_problems: true,
+            ..project::BuildProfile::default()
+        };
+        let refused = build_game_with(
+            &project,
+            &scratch.root.join("out-stopped"),
+            ExportTarget::Linux,
+            &scratch.root.join("player"),
+            false,
+            &Profile {
+                name: "Strict",
+                settings: &stopping,
+                world: None,
+            },
+        )
+        .unwrap_err();
+        assert!(refused.contains("broken.glb"), "{refused}");
+        assert!(
+            !scratch
+                .root
+                .join("out-stopped")
+                .join("game.axgame")
+                .exists()
+        );
+    }
+
     /// How much G12 saves on the bigger examples. Cooks a copy of each, so
     /// it's slow; run by hand:
     /// `cargo test -p axcenity-editor --release cooked_only_sizes -- --ignored --nocapture`
@@ -610,7 +855,10 @@ mod tests {
             copy(&example(name), &folder);
             axcenity_cook::cook_project(&folder, &AtomicBool::new(false), |_, _| {});
             let whole = project::pack_game(&folder).unwrap().len();
-            let options = project::PackOptions { cooked_only: true };
+            let options = project::PackOptions {
+                cooked_only: true,
+                ..project::PackOptions::default()
+            };
             let cooked_only = project::pack_game_with(&folder, options).unwrap().len();
             let mb = |bytes: usize| bytes as f64 / 1_048_576.0;
             println!(

@@ -14,9 +14,9 @@
 //! Play stops at them (see `play.rs`). While Play is paused, the paused line
 //! has an arrow and its own background.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
-use axcenity_script::{Breakpoints, Pause};
+use axcenity_script::{BreakpointRule, BreakpointRules, Breakpoints, Pause};
 
 use axcenity_core::{ClassName, World};
 use axcenity_project::{is_stylesheet, script_name};
@@ -169,6 +169,12 @@ pub struct ScriptTabs {
     pub warnings: HashMap<String, Vec<SideWarning>>,
     /// Every breakpoint, by script path, open or not.
     breakpoints: Breakpoints,
+    /// Breakpoints' conditions, hit counts and log messages, by path and
+    /// line; only for breakpoints that are set.
+    rules: BreakpointRules,
+    /// The breakpoint whose rule is being edited (right-click on its line
+    /// number): path, line, and the boxes' text.
+    editing_rule: Option<RuleDraft>,
     /// Set when a breakpoint is added or removed, until the app takes it.
     breakpoints_changed: bool,
     /// Where Play is paused, if it is. The app sets it.
@@ -322,6 +328,59 @@ impl ScriptTabs {
             self.breakpoints.insert(to.to_string(), lines);
             self.breakpoints_changed = true;
         }
+        let moved: Vec<_> = self
+            .rules
+            .keys()
+            .filter(|(path, _)| path == from)
+            .cloned()
+            .collect();
+        for (path, line) in moved {
+            if let Some(rule) = self.rules.remove(&(path, line)) {
+                self.rules.insert((to.to_string(), line), rule);
+            }
+        }
+    }
+
+    /// Every breakpoint's condition, hit count and log message.
+    pub fn breakpoint_rules(&self) -> &BreakpointRules {
+        &self.rules
+    }
+
+    /// Sets the rule of the breakpoint at `line` of `path`, setting the
+    /// breakpoint too; a plain rule leaves a plain breakpoint.
+    pub fn set_breakpoint_rule(&mut self, path: &str, line: usize, rule: BreakpointRule) {
+        self.breakpoints
+            .entry(path.to_string())
+            .or_default()
+            .insert(line);
+        let at = (path.to_string(), line);
+        if rule.is_plain() {
+            self.rules.remove(&at);
+        } else {
+            self.rules.insert(at, rule);
+        }
+        self.breakpoints_changed = true;
+    }
+
+    /// How each breakpoint of `path` looks in the gutter.
+    fn marks(
+        breakpoints: &Breakpoints,
+        rules: &BreakpointRules,
+        path: &str,
+    ) -> BTreeMap<usize, Mark> {
+        breakpoints
+            .get(path)
+            .into_iter()
+            .flatten()
+            .map(|&line| {
+                let mark = match rules.get(&(path.to_string(), line)) {
+                    Some(rule) if rule.log.is_some() => Mark::Log,
+                    Some(_) => Mark::Conditional,
+                    None => Mark::Plain,
+                };
+                (line, mark)
+            })
+            .collect()
     }
 
     pub fn breakpoints(&self) -> &Breakpoints {
@@ -334,6 +393,8 @@ impl ScriptTabs {
         let lines = self.breakpoints.entry(path.to_string()).or_default();
         if !lines.remove(&line) {
             lines.insert(line);
+        } else {
+            self.rules.remove(&(path.to_string(), line));
         }
         if lines.is_empty() {
             self.breakpoints.remove(path);
@@ -453,13 +514,220 @@ impl ScriptTabs {
             .as_ref()
             .filter(|pause| pause.path == tab.path)
             .map(|pause| pause.line);
-        let lines = self.breakpoints.get(&tab.path).cloned().unwrap_or_default();
-        if let Some(line) = code_editor(ui, tab, &lines, paused_line, world) {
-            let path = tab.path.clone();
-            self.toggle_breakpoint(&path, line);
+        let path = tab.path.clone();
+        let marks = Self::marks(&self.breakpoints, &self.rules, &path);
+        match code_editor(ui, tab, &marks, paused_line, world) {
+            Some(GutterClick::Toggle(line)) => self.toggle_breakpoint(&path, line),
+            Some(GutterClick::Edit(line)) => {
+                let rule = self
+                    .rules
+                    .get(&(path.clone(), line))
+                    .cloned()
+                    .unwrap_or_default();
+                self.editing_rule = Some(RuleDraft::new(path.clone(), line, &rule));
+            }
+            None => {}
+        }
+        // Drawn by the tab it belongs to, so it's drawn once a frame.
+        if self
+            .editing_rule
+            .as_ref()
+            .is_some_and(|draft| draft.path == path)
+        {
+            self.rule_window(ui.ctx());
+        }
+    }
+
+    /// The window editing a breakpoint's condition, hit count and log
+    /// message, while one is open.
+    fn rule_window(&mut self, ctx: &egui::Context) {
+        let Some(draft) = &mut self.editing_rule else {
+            return;
+        };
+        let file = draft
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&draft.path)
+            .to_owned();
+        let title = format!("Breakpoint on {file}:{}", draft.line);
+        let (mut action, dismissed) =
+            crate::dialog::modal(ctx, "breakpoint rule", crate::dialog::WIDTH, |ui| {
+                rule_form(ui, &title, draft)
+            });
+        if dismissed {
+            action = Some(RuleAction::Cancel);
+        }
+        match action {
+            Some(RuleAction::Save) => {
+                let draft = self.editing_rule.take().expect("open above");
+                match draft.rule() {
+                    Ok(rule) => self.set_breakpoint_rule(&draft.path, draft.line, rule),
+                    Err(error) => {
+                        self.editing_rule = Some(RuleDraft {
+                            error: Some(error),
+                            ..draft
+                        });
+                    }
+                }
+            }
+            Some(RuleAction::Remove) => {
+                let draft = self.editing_rule.take().expect("open above");
+                let set = self
+                    .breakpoints
+                    .get(&draft.path)
+                    .is_some_and(|lines| lines.contains(&draft.line));
+                if set {
+                    self.toggle_breakpoint(&draft.path, draft.line);
+                }
+            }
+            Some(RuleAction::Cancel) => self.editing_rule = None,
+            None => {}
         }
     }
 }
+
+/// How a breakpoint looks beside its line number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    /// Always pauses: a red dot.
+    Plain,
+    /// Has a condition or hit count: a red dot with a light middle.
+    Conditional,
+    /// A logpoint, which never pauses: a red diamond.
+    Log,
+}
+
+/// What a click on the line numbers asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GutterClick {
+    /// Set or clear the breakpoint (a click).
+    Toggle(usize),
+    /// Edit the breakpoint's condition, hit count or log message (a
+    /// right-click).
+    Edit(usize),
+}
+
+/// A breakpoint rule as typed in its window.
+#[derive(Clone, Debug, Default)]
+struct RuleDraft {
+    path: String,
+    line: usize,
+    condition: String,
+    hit_count: String,
+    log: String,
+    /// Why Save didn't take it, shown under the boxes.
+    error: Option<String>,
+}
+
+impl RuleDraft {
+    fn new(path: String, line: usize, rule: &BreakpointRule) -> Self {
+        Self {
+            path,
+            line,
+            condition: rule.condition.clone().unwrap_or_default(),
+            hit_count: rule.hit_count.map(|n| n.to_string()).unwrap_or_default(),
+            log: rule.log.clone().unwrap_or_default(),
+            error: None,
+        }
+    }
+
+    /// The rule the boxes describe: empty boxes are left out.
+    fn rule(&self) -> Result<BreakpointRule, String> {
+        let text = |text: &str| Some(text.trim().to_owned()).filter(|text| !text.is_empty());
+        let hit_count = match text(&self.hit_count) {
+            None => None,
+            Some(count) => Some(
+                count
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|&count| count >= 1)
+                    .ok_or("The hit count is a whole number, 1 or more.")?,
+            ),
+        };
+        if let Some(condition) = text(&self.condition)
+            && axcenity_script::syntax_error("condition", &format!("return ({condition}\n)"))
+                .is_some()
+        {
+            return Err("The condition isn't a Lua expression.".to_owned());
+        }
+        Ok(BreakpointRule {
+            condition: text(&self.condition),
+            hit_count,
+            log: text(&self.log),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuleAction {
+    Save,
+    Remove,
+    Cancel,
+}
+
+/// The rule window's boxes and buttons.
+fn rule_form(ui: &mut egui::Ui, title: &str, draft: &mut RuleDraft) -> Option<RuleAction> {
+    use crate::dialog::{self, Button, Enter, Kind, Tone};
+    let palette = theme::palette(ui.ctx());
+    dialog::header(
+        ui,
+        icons::BUG,
+        Tone::Question,
+        title,
+        Some("Leave a box empty to leave it out. A breakpoint with none of them always pauses."),
+    );
+    let field = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str, help: &str| {
+        ui.label(label);
+        ui.add(
+            dialog::text_field(text)
+                .hint_text(hint)
+                .font(egui::TextStyle::Monospace),
+        );
+        ui.weak(help);
+        ui.add_space(6.0);
+    };
+    field(
+        ui,
+        "Condition",
+        &mut draft.condition,
+        "health < 10",
+        "A Lua expression, read with this line's variables. Play pauses only when it's true.",
+    );
+    field(
+        ui,
+        "Hit count",
+        &mut draft.hit_count,
+        "3",
+        "Pause only from this pass on, counting passes where the condition is true.",
+    );
+    field(
+        ui,
+        "Log message",
+        &mut draft.log,
+        "health is {health}",
+        "Write this to Output instead of pausing. {expression} is replaced by its value.",
+    );
+    if let Some(error) = &draft.error {
+        ui.colored_label(palette.error, error);
+    }
+    match dialog::buttons(
+        ui,
+        &[
+            Button::new(icons::TRASH, "Remove Breakpoint", Kind::Plain),
+            Button::cancel(),
+            Button::new(icons::CHECK, "Save", Kind::Main),
+        ],
+        Enter::Main,
+    ) {
+        Some(0) => Some(RuleAction::Remove),
+        Some(1) => Some(RuleAction::Cancel),
+        Some(_) => Some(RuleAction::Save),
+        None => None,
+    }
+}
+
+impl ScriptTabs {}
 
 /// How a Script or LocalScript is shown and edited.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,14 +836,15 @@ pub fn editor_id(path: &str) -> egui::Id {
 
 /// The text box with the code, colored, with line numbers down the left,
 /// the `breakpoints` beside them, and the line Play is paused on marked.
-/// Returns the line whose number was clicked, to set or clear its breakpoint.
+/// Returns the line whose number was clicked (to set or clear its
+/// breakpoint) or right-clicked (to edit its rule).
 fn code_editor(
     ui: &mut egui::Ui,
     tab: &mut ScriptTab,
-    breakpoints: &BTreeSet<usize>,
+    breakpoints: &BTreeMap<usize, Mark>,
     paused_line: Option<usize>,
     world: &World,
-) -> Option<usize> {
+) -> Option<GutterClick> {
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let id = editor_id(&tab.path);
     // `split` counts an empty last line after a final newline, which is
@@ -1043,15 +1312,16 @@ fn color_swatches(
 }
 
 /// The line numbers, one row per line, with a red dot on each breakpoint
-/// and an arrow on the paused line. Clicking a row returns its line;
-/// hovering one shows a faint dot where a click would put one.
+/// and an arrow on the paused line. Clicking a row returns its line,
+/// right-clicking it asks to edit its breakpoint's rule; hovering one shows a
+/// faint dot where a click would put one.
 fn gutter(
     ui: &mut egui::Ui,
     font: &egui::FontId,
     lines: usize,
-    breakpoints: &BTreeSet<usize>,
+    breakpoints: &BTreeMap<usize, Mark>,
     paused_line: Option<usize>,
-) -> Option<usize> {
+) -> Option<GutterClick> {
     let palette = theme::palette(ui.ctx());
     let (row, digit) = ui.fonts_mut(|fonts| (fonts.row_height(font), fonts.glyph_width(font, '0')));
     let numbers = digit * lines.to_string().len() as f32;
@@ -1059,17 +1329,27 @@ fn gutter(
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let response = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Click to set or clear a breakpoint: Play pauses before that line runs.");
+        .on_hover_text(
+            "Click to set or clear a breakpoint: Play pauses before that line runs. \
+             Right-click for a condition, a hit count or a log message.",
+        );
     let line_at = |y: f32| {
         let line = ((y - rect.top()) / row).floor() as usize + 1;
         (1..=lines).contains(&line).then_some(line)
     };
     let hovered = response.hover_pos().and_then(|pos| line_at(pos.y));
-    let clicked = response
-        .clicked()
-        .then(|| response.interact_pointer_pos())
-        .flatten()
-        .and_then(|pos| line_at(pos.y));
+    let at = || {
+        response
+            .interact_pointer_pos()
+            .and_then(|pos| line_at(pos.y))
+    };
+    let clicked = if response.clicked() {
+        at().map(GutterClick::Toggle)
+    } else if response.secondary_clicked() {
+        at().map(GutterClick::Edit)
+    } else {
+        None
+    };
 
     // Only the rows on screen are painted, so long scripts stay quick.
     let painter = ui.painter();
@@ -1087,8 +1367,30 @@ fn gutter(
                 egui::FontId::proportional(row),
                 palette.warning,
             );
-        } else if breakpoints.contains(&line) {
-            painter.circle_filled(dot, row * 0.28, palette.error);
+        } else if let Some(mark) = breakpoints.get(&line) {
+            let radius = row * 0.28;
+            match mark {
+                Mark::Plain => {
+                    painter.circle_filled(dot, radius, palette.error);
+                }
+                Mark::Conditional => {
+                    painter.circle_filled(dot, radius, palette.error);
+                    painter.circle_filled(dot, radius * 0.4, egui::Color32::WHITE);
+                }
+                Mark::Log => {
+                    let r = radius * 1.15;
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![
+                            dot + egui::vec2(0.0, -r),
+                            dot + egui::vec2(r, 0.0),
+                            dot + egui::vec2(0.0, r),
+                            dot + egui::vec2(-r, 0.0),
+                        ],
+                        palette.error,
+                        egui::Stroke::NONE,
+                    ));
+                }
+            }
         } else if hovered == Some(line) {
             painter.circle_filled(dot, row * 0.28, palette.error.gamma_multiply(0.35));
         }
@@ -1270,6 +1572,72 @@ mod tests {
             tabs.breakpoints().is_empty(),
             "no empty entries left behind"
         );
+    }
+
+    #[test]
+    fn breakpoint_rules_follow_their_breakpoint() {
+        let mut tabs = ScriptTabs::default();
+        let a = "scripts/a.server.lua";
+        let rule = BreakpointRule {
+            condition: Some("i > 3".to_owned()),
+            ..Default::default()
+        };
+        tabs.set_breakpoint_rule(a, 4, rule.clone());
+        assert!(tabs.take_breakpoints_changed());
+        assert!(
+            tabs.breakpoints()[a].contains(&4),
+            "setting a rule sets the breakpoint"
+        );
+        assert_eq!(
+            ScriptTabs::marks(tabs.breakpoints(), tabs.breakpoint_rules(), a)[&4],
+            Mark::Conditional
+        );
+        tabs.rename(a, "scripts/b.server.lua");
+        assert_eq!(
+            tabs.breakpoint_rules()
+                .get(&("scripts/b.server.lua".to_owned(), 4)),
+            Some(&rule)
+        );
+        tabs.toggle_breakpoint("scripts/b.server.lua", 4);
+        assert!(
+            tabs.breakpoint_rules().is_empty(),
+            "cleared with its breakpoint"
+        );
+        // A plain rule is a plain breakpoint.
+        tabs.set_breakpoint_rule(a, 2, BreakpointRule::default());
+        assert!(tabs.breakpoint_rules().is_empty());
+        assert_eq!(
+            ScriptTabs::marks(tabs.breakpoints(), tabs.breakpoint_rules(), a)[&2],
+            Mark::Plain
+        );
+    }
+
+    #[test]
+    fn a_rule_is_read_from_its_boxes() {
+        let draft = |condition: &str, hit_count: &str, log: &str| RuleDraft {
+            path: "scripts/a.server.lua".to_owned(),
+            line: 1,
+            condition: condition.to_owned(),
+            hit_count: hit_count.to_owned(),
+            log: log.to_owned(),
+            error: None,
+        };
+        assert_eq!(
+            draft(" health < 10 ", "3", "").rule(),
+            Ok(BreakpointRule {
+                condition: Some("health < 10".to_owned()),
+                hit_count: Some(3),
+                log: None,
+            })
+        );
+        assert_eq!(
+            draft("", "", "hp {health}").rule().map(|rule| rule.log),
+            Ok(Some("hp {health}".to_owned()))
+        );
+        assert!(draft("", "0", "").rule().is_err());
+        assert!(draft("", "two", "").rule().is_err());
+        assert!(draft("health <", "", "").rule().is_err());
+        assert!(draft("", "", "").rule().unwrap().is_plain());
     }
 
     #[test]

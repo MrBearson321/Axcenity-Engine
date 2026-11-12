@@ -34,9 +34,11 @@ mod asset_fix;
 mod asset_refs;
 mod backup;
 pub mod branding;
+mod build_profiles;
 mod collaborate_file;
 mod compat;
 mod default_sky;
+mod duplicates;
 mod levels;
 pub mod memory_budget;
 mod migrate;
@@ -47,6 +49,7 @@ mod object_scripts;
 mod package;
 mod packed;
 mod prefabs;
+mod recovery;
 mod starter_character;
 mod terrain_files;
 mod validate;
@@ -61,6 +64,7 @@ mod strings;
 mod stylesheets;
 mod templates;
 mod ui_graphs;
+mod user_templates;
 
 pub use collision_groups::{
     COLLISION_GROUPS_FILE, parse_collision_groups, save_collision_groups, write_collision_groups,
@@ -69,11 +73,21 @@ pub use default_sky::{
     DEFAULT_SKY, DEFAULT_SKY_CLOCK_TIME, DEFAULT_SKY_LATITUDE, DEFAULT_SKY_PATH, add_default_sky,
 };
 pub use input_map::{INPUT_FILE, load_input_map, parse_input_map, save_input_map, write_input_map};
+pub use recovery::{
+    RECOVERY_FOLDER, RECOVERY_STALE_AFTER, Recovered, RecoveryInfo, RecoverySnapshot,
+    discard_recovery, left_behind_recovery, load_recovered, recovery_info, touch_recovery,
+    write_recovery,
+};
 pub use scripts::*;
 pub use strings::{STRINGS_FILE, parse_strings, save_strings, write_strings};
 pub use stylesheets::*;
 pub use templates::*;
 pub use ui_graphs::*;
+pub use user_templates::{
+    TEMPLATE_EXTENSION, TemplateError, TemplateInfo, UserTemplate,
+    create_project_from_template_file, list_templates, read_template, save_template,
+    template_file_name,
+};
 
 #[cfg(test)]
 use axcenity_blocks_runtime::{Block, BlockKind};
@@ -90,15 +104,22 @@ pub use asset_fix::{
     moved_suggestion, plan_fix, read_ignored, suggestion, write_ignored,
 };
 pub use asset_refs::{
-    RefPlace, Reference, find_references, is_model_part, plan_rename, plan_switch, unused_assets,
+    RefPlace, Reference, find_references, is_model_part, plan_merge, plan_rename, plan_switch,
+    unused_assets,
 };
 pub use backup::{
     BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,
+};
+pub use build_profiles::{
+    BUILD_PROFILES_FILE, BUILD_REPORT_FILE, BUILD_REPORT_TEXT_FILE, BuildProfile, BuildProfiles,
+    BuildReport, LARGEST_LISTED, RELEASE_PROFILE, ReportFile, ReportGroup, TARGET_NAMES,
+    built_in_profiles, report_group, size_text as file_size_text,
 };
 pub use collaborate_file::{
     COLLABORATE_FILE, CollaborateFile, RepositoryLink, load_collaborate_file, save_collaborate_file,
 };
 pub use compat::{Compatibility, compatibility};
+pub use duplicates::{Duplicates, find_duplicates};
 pub use levels::{
     DEFAULT_START_LEVEL, FileChange, LEVEL_SUFFIX, LEVELS_FOLDER, check_level_name,
     copy_workspace_into, keep_level_file, level_file, level_names, level_path, load_levels,
@@ -114,7 +135,10 @@ pub use package::{
     package_contents, package_contents_with_scripts, package_scripts, plan_import, read_package,
     script_tables, without_scripts, write_package,
 };
-pub use packed::{PackError, PackOptions, pack_game, pack_game_with, unpack_game};
+pub use packed::{
+    PackError, PackOptions, PackReport, PackedEntry, pack_game, pack_game_reporting,
+    pack_game_with, unpack_game,
+};
 pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};
 pub use starter_character::load_starter_character;
 pub use terrain_files::{
@@ -524,6 +548,17 @@ pub(crate) fn load_project(
     level: Option<&str>,
     progress: &mut dyn FnMut(LoadStep),
 ) -> Result<Project, LoadError> {
+    load_project_with(folder, level, None, progress)
+}
+
+/// [`load_project`], with `recovered` (an AutoRecover snapshot's world,
+/// already holding `level`'s Workspace) in place of the saved world.
+pub(crate) fn load_project_with(
+    folder: &Path,
+    level: Option<&str>,
+    recovered: Option<World>,
+    progress: &mut dyn FnMut(LoadStep),
+) -> Result<Project, LoadError> {
     progress(LoadStep::Manifest);
     let manifest_path = folder.join(MANIFEST_FILE);
     let manifest_text = read(&manifest_path)?;
@@ -589,7 +624,8 @@ pub(crate) fn load_project(
         .map_or((None, None), |u| (Some(u.from), Some(u.backup.clone())));
 
     progress(LoadStep::World);
-    let (mut world, mut world_loaded) = match load_world(folder) {
+    let has_recovered = recovered.is_some();
+    let (mut world, mut world_loaded) = match recovered.map_or_else(|| load_world(folder), Ok) {
         Ok(world) => (world, true),
         // The upgrade left a world this engine can't read: put the files
         // back as they were rather than open an empty Workspace over them.
@@ -603,8 +639,8 @@ pub(crate) fn load_project(
         }
     };
     // A level other than the start level: its Workspace, before terrains,
-    // scripts and UI graphs look in it.
-    if let Some(name) = level {
+    // scripts and UI graphs look in it. A recovered world has it already.
+    if let Some(name) = level.filter(|_| !has_recovered) {
         let opened = std::fs::read_to_string(folder.join(levels::level_path(name)))
             .map_err(|source| LoadError::Read {
                 path: folder.join(levels::level_path(name)),
