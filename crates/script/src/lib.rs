@@ -148,6 +148,7 @@ pub use network::{LanGame, NetworkRequest};
 pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use replay::{MAX_BUFFER_SECONDS, ReplayRequest};
+pub use sandbox::{SyntaxError, find_syntax_error};
 pub use sequence::sound_actions as sequence_sound_actions;
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use spec::{FoundTest, TestReport, TestRequest};
