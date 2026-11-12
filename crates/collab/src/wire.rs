@@ -734,8 +734,11 @@ enum WireToClient {
 pub struct WireMembers {
     version: u64,
     next_member: u32,
-    members: Vec<(u32, PublicKey, String, [u8; 3], Role, Option<String>)>,
+    members: Vec<WireMember>,
 }
+
+/// One member on the wire: ID, key, name, colour, role, account.
+type WireMember = (u32, PublicKey, String, [u8; 3], Role, Option<String>);
 
 impl From<&MembersList> for WireMembers {
     fn from(list: &MembersList) -> WireMembers {

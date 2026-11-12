@@ -40,12 +40,13 @@ pub fn project_id(file_id: Option<&str>, cert: &Fingerprint, folder: &Path) -> S
     }
 }
 
-/// True for a usable project ID: 8 to 64 of `0-9a-z-`.
+/// True for a usable project ID: 8 to 64 of `0-9a-z` (it names folders
+/// on every member's computer).
 pub fn is_project_id(id: &str) -> bool {
     (8..=64).contains(&id.len())
         && id
             .chars()
-            .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase() || c == '-')
+            .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
 }
 
 /// The project's members as the host last had them: who may join, as
@@ -172,7 +173,10 @@ impl SessionState {
 /// name, or a LAN address, with the port) and its host certificate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostCard {
-    pub member: MemberId,
+    /// Which member's computer it is, when known (a member who joined
+    /// knows the host's address, not yet who it is).
+    #[serde(default)]
+    pub member: Option<MemberId>,
     /// `host:port`.
     pub address: String,
     pub cert: Fingerprint,
@@ -364,7 +368,7 @@ mod tests {
         let mut castle = ProjectRecord::new("0123456789abcdef", "Castle", "/a");
         castle.members = Some(list(1));
         castle.hosts.push(HostCard {
-            member: MemberId(2),
+            member: Some(MemberId(2)),
             address: "sam-pc.tail1234.ts.net:47810".into(),
             cert: Fingerprint([5; 32]),
         });

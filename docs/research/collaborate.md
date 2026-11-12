@@ -328,6 +328,7 @@ Per-member budgets for each kind are in [§6.1](#61-security-review-c10); the li
 | **Version history (C9)** | `Checkpoint(label)` → `Checkpoints(list)` to everyone; `Restore(id)` (Owner); `HistoryNotice(text)` | Host order; a restore is one transaction for everyone | The host's `.axcenity/teamcreate/history`, file contents by hash | Save-checkpoint capability; restore is Owner only | Label 120 characters; 100 listed. Wire format 6 |
 | Membership | `RoleChanged`, `Ended` | Host order | Members file in the host's data folder | Owner only for roles, removal, ending | — |
 | **Audit log (C10)** | `AuditLog` → `AuditLog(entries)` | On request | The host's last 500 in memory, all in `<members file>.audit.jsonl` in its data folder | Owner only | Wire format 7 |
+| **Members list (Collaborate 2.0 P3)** | `Members(MembersList)` | On joining, and to everyone who may host when it changes (its `version`) | Each member's project record in their Collaborate data folder (`records/<id>.json`) | Sent only to Editors and the Owner, never a Viewer | Wire format 8 ([collaborate-persistent.md](collaborate-persistent.md) §8.3) |
 
 ### 9.3 Identifiers, duplicates and recovery
 
