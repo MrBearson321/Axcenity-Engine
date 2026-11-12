@@ -7,8 +7,8 @@
 use axcenity_mcp::{Args, Class, Code, Kind, Outcome, Param, Profile, ToolError, ToolSpec};
 
 use super::refs::quoted;
-use super::{Host, LIMIT};
-use crate::toolbox_panel::agent::{kind_named, search_assets};
+use super::{Host, LIMIT, after};
+use crate::toolbox_panel::agent::{Hits, kind_named, search_assets};
 
 pub const SPEC: ToolSpec = ToolSpec {
     name: "toolbox_search",
@@ -42,16 +42,33 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
     let kind_name = args.str("kind").unwrap_or("texture");
     let kind = kind_named(kind_name).expect("the schema lists only these");
     let page = args.u64("page").unwrap_or(1).clamp(1, 1000) as u32;
+    let source = args
+        .str("source")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    let http = host.session.toolbox_http();
+    after(
+        host,
+        args,
+        move || search_assets(&*http, kind, &query, source.as_deref(), page),
+        answer,
+    )
+}
+
+/// The results, a line each.
+fn answer(_: &mut Host, args: &Args, found: Result<Hits, String>) -> Outcome {
+    let found = found.map_err(|why| network_error("the search failed", why))?;
+    let query = args.str("query").unwrap_or_default().trim();
+    let kind_name = args.str("kind").unwrap_or("texture");
+    let page = args.u64("page").unwrap_or(1).clamp(1, 1000);
     let limit = args.limit(DEFAULT_LIMIT, 24);
-    let source = args.str("source").map(str::trim).filter(|s| !s.is_empty());
-    let found = search_assets(host.session.toolbox_http(), kind, &query, source, page)
-        .map_err(|why| network_error("the search failed", why))?;
     let total = found.hits.len();
     let shown = total.min(limit);
     let mut out = format!(
         "{shown} of {total} {kind_name} result{} for {}{}",
         if total == 1 { "" } else { "s" },
-        quoted(&query),
+        quoted(query),
         if found.more {
             format!(" (page {page}; more on page {})", page + 1)
         } else if page > 1 {

@@ -17,9 +17,10 @@
 //! confirm token in `edit` mode, the session's first write keeps a version
 //! of the project first, and every call is a line of `.axcenity/mcp-log.jsonl`.
 
+use std::any::Any;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axcenity_mcp::{
@@ -150,9 +151,48 @@ pub(super) struct Session {
     pub png: Option<Vec<u8>>,
     /// Where the Toolbox tools download from: the network, or a test's
     /// fixed answers.
-    pub toolbox_http: Option<Box<dyn axcenity_toolbox::http::Http>>,
+    pub toolbox_http: Option<Arc<dyn axcenity_toolbox::http::Http>>,
     /// The central asset directory, when not the user's own (tests).
     pub asset_dir: Option<PathBuf>,
+    /// Whether slow work (downloads) may go on while the editor does: in
+    /// the open editor, so its window doesn't freeze ([`after`]).
+    pub off_thread: bool,
+    /// The slow half of the last call, left for the open editor to run.
+    pub later: Option<Later>,
+}
+
+/// What a call left to finish: `work` runs on a thread of its own while
+/// the editor goes on, then `finish` runs on the editor with what it made,
+/// and that is the call's answer (`live.rs`).
+pub(super) struct Later {
+    pub work: Box<dyn FnOnce() -> Box<dyn Any + Send> + Send>,
+    pub finish: Finish,
+}
+
+pub(super) type Finish = Box<dyn FnOnce(&mut Host, &Args, Box<dyn Any + Send>) -> Outcome>;
+
+/// Runs `work`, which mustn't touch the editor (a download), then
+/// `finish` with what it made. A server without a window does both now;
+/// the open editor runs `work` on its own thread and `finish` once it's
+/// done, so the window doesn't freeze, and answers the call then.
+pub(super) fn after<T: Send + 'static>(
+    host: &mut Host,
+    args: &Args,
+    work: impl FnOnce() -> T + Send + 'static,
+    finish: fn(&mut Host, &Args, T) -> Outcome,
+) -> Outcome {
+    if !host.session.off_thread {
+        let made = work();
+        return finish(host, args, made);
+    }
+    host.session.later = Some(Later {
+        work: Box::new(move || Box::new(work()) as Box<dyn Any + Send>),
+        finish: Box::new(move |host, args, made| {
+            let made = made.downcast::<T>().expect("work makes what finish takes");
+            finish(host, args, *made)
+        }),
+    });
+    Ok("working in the background".to_owned())
 }
 
 impl Session {
@@ -173,6 +213,8 @@ impl Session {
             png: None,
             toolbox_http: None,
             asset_dir: None,
+            off_thread: false,
+            later: None,
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -184,12 +226,14 @@ impl Session {
 impl Session {
     /// What the Toolbox tools fetch through: the network (a client made the
     /// first time, with the tab's longest wait), unless a test set its own.
-    pub fn toolbox_http(&mut self) -> &dyn axcenity_toolbox::http::Http {
-        let http = self.toolbox_http.get_or_insert_with(|| {
-            let client = axcenity_toolbox::http::Client::new(Duration::from_secs(15 * 60));
-            Box::new(client)
-        });
-        &**http
+    pub fn toolbox_http(&mut self) -> Arc<dyn axcenity_toolbox::http::Http> {
+        self.toolbox_http
+            .get_or_insert_with(|| {
+                Arc::new(axcenity_toolbox::http::Client::new(Duration::from_secs(
+                    15 * 60,
+                )))
+            })
+            .clone()
     }
 }
 
@@ -394,6 +438,38 @@ pub(super) fn run(host: &mut Host, tool: &ToolSpec, args: &Args, client: Option<
     // Whatever changed between calls wasn't this client.
     host.changes.take(&mut host.app.world, None);
     let outcome = call(host, tool, args);
+    host.changes
+        .take(&mut host.app.world, Some(host.session.me));
+    log(host, tool, args, &outcome);
+    outcome
+}
+
+/// Finishes a call whose slow half (`Later::work`) is done, as [`run`]
+/// runs one: refused if the game started playing meanwhile, logged.
+pub(super) fn run_finish(
+    host: &mut Host,
+    tool: &ToolSpec,
+    args: &Args,
+    finish: Finish,
+    made: Box<dyn Any + Send>,
+) -> Outcome {
+    host.session.last_undo = None;
+    host.session.png = None;
+    host.changes.take(&mut host.app.world, None);
+    let outcome = if tool.class != Class::Read && host.app.playing() {
+        Err(
+            ToolError::new(Code::Busy, "the game started playing in the editor")
+                .with_fix("stop Play in the editor, then call again: what was downloaded is kept"),
+        )
+    } else {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| finish(host, args, made)))
+            .unwrap_or_else(|_| {
+                Err(ToolError::internal(format!(
+                    "the engine failed finishing {}",
+                    tool.name
+                )))
+            })
+    };
     host.changes
         .take(&mut host.app.world, Some(host.session.me));
     log(host, tool, args, &outcome);

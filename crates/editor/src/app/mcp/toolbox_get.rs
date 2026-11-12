@@ -15,12 +15,12 @@ use axcenity_toolbox::directory;
 
 use super::super::custom_materials::free_stem;
 use super::super::files::{asset_files, files_made_since};
-use super::Host;
 use super::asset_import::{move_to, new_roots};
 use super::ops::checkpoint;
 use super::refs::{label, quoted, resolve};
 use super::toolbox_search::network_error;
-use crate::toolbox_panel::agent::get_asset;
+use super::{Host, after};
+use crate::toolbox_panel::agent::{Fetched, fetch_asset, install_asset};
 use crate::toolbox_panel::install::{self, Installed};
 
 pub const SPEC: ToolSpec = ToolSpec {
@@ -44,19 +44,28 @@ pub const SPEC: ToolSpec = ToolSpec {
 };
 
 pub fn call(host: &mut Host, args: &Args) -> Outcome {
-    let Some(folder) = host
-        .app
-        .project
-        .as_ref()
-        .map(|project| project.folder.clone())
-    else {
+    if host.app.project.is_none() {
         return Err(ToolError::not_found("no project is open"));
-    };
+    }
     let key = args.str("key").unwrap_or_default().trim().to_owned();
-    let parent = args
-        .str("parent")
+    // Checked now, so a wrong parent doesn't wait for the download.
+    args.str("parent")
         .map(|text| resolve(&host.app.world, text))
         .transpose()?;
+    let assets = asset_dir(host)?;
+    let http = host.session.toolbox_http();
+    let resolution = args.str("resolution").unwrap_or("1K").to_owned();
+    let format = args.str("format").unwrap_or_default().to_owned();
+    after(
+        host,
+        args,
+        move || fetch_asset(&*http, &assets, &key, &resolution, &format),
+        install,
+    )
+}
+
+/// The central asset directory: a test's, else the user's.
+fn asset_dir(host: &Host) -> Result<std::path::PathBuf, ToolError> {
     let Some(assets) = host.session.asset_dir.clone().or_else(directory::locate) else {
         return Err(ToolError::new(
             Code::Unsupported,
@@ -67,17 +76,30 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             directory::ENV
         )));
     };
+    Ok(assets)
+}
+
+/// Installs what [`fetch_asset`] got (on the editor, quick): one undo step.
+fn install(host: &mut Host, args: &Args, fetched: Result<Fetched, String>) -> Outcome {
+    let fetched = fetched.map_err(|why| network_error("could not get it", why))?;
+    let Some(folder) = host
+        .app
+        .project
+        .as_ref()
+        .map(|project| project.folder.clone())
+    else {
+        return Err(ToolError::not_found("no project is open"));
+    };
+    // Again: the tree may have changed while it downloaded.
+    let parent = args
+        .str("parent")
+        .map(|text| resolve(&host.app.world, text))
+        .transpose()?;
+    let assets = asset_dir(host)?;
     checkpoint(host, &folder);
     let before = asset_files(&folder);
-    let got = get_asset(
-        host.session.toolbox_http(),
-        &assets,
-        &folder,
-        &key,
-        args.str("resolution").unwrap_or("1K"),
-        args.str("format").unwrap_or_default(),
-    )
-    .map_err(|why| network_error("could not get it", why))?;
+    let got = install_asset(&assets, &folder, &fetched)
+        .map_err(|why| network_error("could not install it", why))?;
     let undo = format!("AI ({}): Get {}", host.session.client, got.name);
     let app = &mut host.app;
     let mut out = format!("got {} ({}, {})", got.name, got.package, got.license);

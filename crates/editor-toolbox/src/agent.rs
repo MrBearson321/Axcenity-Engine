@@ -113,12 +113,8 @@ pub struct Got {
 }
 
 /// Gets the asset `key` ("provider:id", from [`search_assets`]) into
-/// `project` the way the tab's Get does, at `resolution` and `format`
-/// (such as "2K" and "JPG"; an empty format is the kind's first, as the
-/// tab's menu lists them) or the nearest the asset has: into the asset
-/// directory `assets` first (once), then a texture set, sky or sound into
-/// the project. A model only reaches the asset directory; the caller
-/// imports it.
+/// `project` the way the tab's Get does: [`fetch_asset`], then
+/// [`install_asset`].
 pub fn get_asset(
     http: &dyn Http,
     assets: &Path,
@@ -127,6 +123,33 @@ pub fn get_asset(
     resolution: &str,
     format: &str,
 ) -> Result<Got, String> {
+    let fetched = fetch_asset(http, assets, key, resolution, format)?;
+    install_asset(assets, project, &fetched)
+}
+
+/// A package [`fetch_asset`] put in the asset directory, for
+/// [`install_asset`].
+#[derive(Clone)]
+pub struct Fetched {
+    source: &'static dyn AssetSource,
+    record: AssetRecord,
+    variant: Variant,
+    notes: String,
+}
+
+/// The network half of Get, which may take a while and touches no
+/// project: looks up the asset `key`'s full record, picks its package at
+/// `resolution` and `format` (such as "2K" and "JPG"; an empty format is
+/// the kind's first, as the tab's menu lists them) or the nearest it has,
+/// and fetches it into the asset directory `assets` (verified, recorded
+/// with its source and licence) unless it's there already.
+pub fn fetch_asset(
+    http: &dyn Http,
+    assets: &Path,
+    key: &str,
+    resolution: &str,
+    format: &str,
+) -> Result<Fetched, String> {
     let Some((provider, id)) = key.split_once(':') else {
         return Err(format!(
             "\"{key}\" isn't an asset key; keys look like \"ambientcg:Ground054\""
@@ -153,9 +176,54 @@ pub fn get_asset(
         .ok_or_else(|| format!("{} has no {} the engine reads", listing.name, rules.noun))?;
     let notes = choice.notes.join(" ");
     let variant = needed_maps(choice.variant);
+    if !folder_id(&listing.record.id) {
+        return Err("the asset id is not a file name".to_owned());
+    }
+    let dir = AssetDirectory::open(assets).map_err(|err| err.to_string())?;
+    let db = Database::open(&dir.database_path()).map_err(|err| err.to_string())?;
+    let fetcher = Fetcher {
+        http,
+        dir: &dir,
+        db: &db,
+    };
     let cancel = AtomicBool::new(false);
-    let record = &listing.record;
-    let installed = match download(http, source, assets, project, record, &variant, &cancel)? {
+    let extract = rules.extract;
+    fetcher
+        .fetch_variant(source.info(), &listing.record, &variant, extract, &cancel)
+        .map_err(|err| err.to_string())?;
+    Ok(Fetched {
+        source,
+        record: listing.record,
+        variant,
+        notes,
+    })
+}
+
+/// Answers nothing: an install from the asset directory never needs the
+/// network.
+struct Offline;
+
+impl Http for Offline {
+    fn fetch(&self, _: &str, _: u64, _: &mut dyn std::io::Write) -> Result<u64, SourceError> {
+        Err(SourceError::Refused(
+            "the package isn't in the asset directory any more; get it again",
+        ))
+    }
+}
+
+/// The project half of Get, quick and without the network: installs a
+/// package [`fetch_asset`] got into `project` as the tab does (a texture
+/// set, sky or sound; a model only names its file in the asset directory,
+/// for the caller to import) and records the install.
+pub fn install_asset(assets: &Path, project: &Path, fetched: &Fetched) -> Result<Got, String> {
+    let Fetched {
+        source,
+        record,
+        variant,
+        notes,
+    } = fetched;
+    let cancel = AtomicBool::new(false);
+    let installed = match download(&Offline, *source, assets, project, record, variant, &cancel)? {
         DownloadResult::Saved { installed, .. } => installed,
         DownloadResult::Cancelled => return Err("the download was cancelled".to_owned()),
     };
@@ -167,7 +235,7 @@ pub fn get_asset(
         license: license::display(&record.license, &record.license_version),
         credit: license::needs_credit(code)
             .then(|| license::credit_line(record, source.info().name)),
-        notes,
+        notes: notes.clone(),
     })
 }
 
