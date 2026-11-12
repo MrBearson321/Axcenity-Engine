@@ -60,7 +60,7 @@ A profile decides which tools the assistant sees. Each tool's description costs 
 
 - **Use a model with native tool calling.** Examples are Qwen 2.5 or later, Llama 3.1 or later, and Ministral. Models without it often send broken calls. In Jan and LM Studio, turn tool use on for the model.
 - **Give it enough context.** Ollama defaults to 4k tokens of context on GPUs under 24 GB, which is too small even for `lite`. Set `num_ctx` to 32k or more.
-- **Pick a model that did well here.** On the `lite` profile, 7 everyday tasks × 3 runs each (LM Studio, 32k context, temperature 0.2), November 2026: Qwen3 8B passed 21 of 21, gpt-oss-20b 19 of 21, and Llama 3.1 8B 6 of 21. Llama's misses were its own: it guessed IDs, used Z as up, and LM Studio rejected some of its tool calls.
+- **Pick a model that did well here.** On the `lite` profile, 7 everyday tasks × 3 runs each (LM Studio, 32k context, temperature 0.2), November 2026: Qwen3 8B passed 21 of 21, gpt-oss-20b 19 of 21, and Llama 3.1 8B 6 of 21. Llama's misses were its own: it guessed IDs, used Z as up, left out names, and LM Studio rejected about half of its tool calls as malformed.
 - **Start with the prompts.** Many clients show the server's prompts as commands, so a small model gets a fixed recipe instead of having to plan:
   - **`axcenity_build`** asks what to build, then looks, plans sizes, builds, checks and saves.
   - **`axcenity_fix`** runs the checks and a short Play, fixes what they find, and checks again.
