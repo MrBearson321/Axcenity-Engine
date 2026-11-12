@@ -400,13 +400,20 @@ pub(super) fn graphics_page(
     } else {
         "Real-time GI: off (light probe volumes keep their bakes)"
     });
-    ui.label(if effective.ray_queries {
+    ui.label(if !effective.ray_queries {
+        "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available".to_owned()
+    } else if effective.ray_traced_shadows == RayTracedShadows::Off {
         format!(
             "Ray tracing: available, up to {} studs (no ray traced effects on)",
             effective.ray_tracing_distance.round()
         )
     } else {
-        "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available".to_owned()
+        format!(
+            "Ray traced shadows: {} ({} rays a pixel for soft shadows), up to {} studs",
+            effective.ray_traced_shadows.label(),
+            effective.ray_traced_shadows.rays(),
+            effective.ray_tracing_distance.round()
+        )
     });
     ui.label(match effective.cloud_quality.steps() {
         (0, _) => "Clouds: Low, a flat sheet".to_owned(),
@@ -532,6 +539,33 @@ fn ray_tracing_section(
                         );
                     }
                 }
+            });
+            ui.end_row();
+
+            found_label(ui, "Ray traced shadows");
+            let label = |shadows: Option<RayTracedShadows>| match shadows {
+                Some(shadows) => shadows.label().to_owned(),
+                None => format!("Preset ({})", preset.ray_traced_shadows().label()),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced shadows")
+                    .selected_text(label(settings.ray_traced_shadows))
+                    .show_ui(ui, |ui| {
+                        for choice in std::iter::once(None).chain(RayTracedShadows::ALL.map(Some)) {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_shadows,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "The sun's shadows traced as rays: exact up close, with no shadow map \
+                         blur or gaps. Low, Medium and High trace 1, 2 or 4 rays a pixel where \
+                         the world's ShadowSoftness makes shadows soft; past the ray tracing \
+                         distance the shadow maps take over. Needs Hardware ray tracing on.",
+                    );
             });
             ui.end_row();
         });

@@ -393,6 +393,52 @@ impl DepthOfFieldQuality {
     }
 }
 
+/// Hardware ray traced sun shadows (`docs/rendering/ray-tracing.md`):
+/// rays toward the sun from each solid pixel, in place of the shadow maps
+/// near the camera. Needs a GPU that can ray trace. Ordered from cheapest
+/// to dearest. The world's `ShadowSoftness` still sets how soft they are;
+/// more rays make soft edges smoother.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum RayTracedShadows {
+    /// The shadow maps alone.
+    Off,
+    /// One ray per pixel, soft edges smoothed.
+    Low,
+    /// Two rays per pixel.
+    Medium,
+    /// Four rays per pixel.
+    High,
+}
+
+impl RayTracedShadows {
+    pub const ALL: [RayTracedShadows; 4] = [
+        RayTracedShadows::Off,
+        RayTracedShadows::Low,
+        RayTracedShadows::Medium,
+        RayTracedShadows::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RayTracedShadows::Off => "Off",
+            RayTracedShadows::Low => "Low",
+            RayTracedShadows::Medium => "Medium",
+            RayTracedShadows::High => "High",
+        }
+    }
+
+    /// Rays per pixel: 0 when off. Hard shadows (a world's `ShadowSoftness`
+    /// of 0) need only one, whatever this says.
+    pub fn rays(self) -> u32 {
+        match self {
+            RayTracedShadows::Off => 0,
+            RayTracedShadows::Low => 1,
+            RayTracedShadows::Medium => 2,
+            RayTracedShadows::High => 4,
+        }
+    }
+}
+
 /// How a `MotionBlurEffect` streaks what moves across the view. Ordered
 /// from cheapest to dearest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -549,6 +595,10 @@ pub struct GraphicsSettings {
     /// a ray traced effect is on (`docs/rendering/ray-tracing.md`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_tracing_distance: Option<f32>,
+    /// Hardware ray traced sun shadows, on a GPU that can ray trace. Off at
+    /// every preset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_traced_shadows: Option<RayTracedShadows>,
     /// Whether the GPU is opened with hardware ray tracing at the next
     /// start: off unless turned on (at every preset), since opening it
     /// changes the device even while no ray traced effect is on. Read once,
@@ -774,6 +824,11 @@ impl GraphicsSettings {
             })
     }
 
+    /// Hardware ray traced sun shadows: the override, or Off (every preset).
+    pub fn ray_traced_shadows(&self) -> RayTracedShadows {
+        self.ray_traced_shadows.unwrap_or(RayTracedShadows::Off)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -852,6 +907,18 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
+        // Ray traced effects need hardware ray queries.
+        let ray_traced_shadows = if capabilities.ray_queries {
+            self.ray_traced_shadows()
+        } else {
+            RayTracedShadows::Off
+        };
+        if ray_traced_shadows != self.ray_traced_shadows() {
+            notes.push(
+                "Ray traced shadows are off: Hardware ray tracing is off or this GPU can't ray trace. The shadow maps are used."
+                    .to_owned(),
+            );
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -883,6 +950,7 @@ impl GraphicsSettings {
             decals: self.quality.decal_limits(),
             ray_queries: capabilities.ray_queries,
             ray_tracing_distance: self.ray_tracing_distance(),
+            ray_traced_shadows,
             notes,
         }
     }
@@ -975,6 +1043,8 @@ pub struct EffectiveGraphics {
     pub ray_queries: bool,
     /// How far from the camera ray traced effects see, in studs.
     pub ray_tracing_distance: f32,
+    /// Ray traced sun shadows (Off on a GPU without ray queries).
+    pub ray_traced_shadows: RayTracedShadows,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1398,6 +1468,7 @@ mod tests {
             sharpen: Some(true),
             motion_blur: Some(MotionBlurQuality::Low),
             ray_tracing_distance: Some(600.0),
+            ray_traced_shadows: Some(RayTracedShadows::Medium),
             ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -1658,6 +1729,37 @@ mod tests {
     }
 
     #[test]
+    fn ray_traced_shadows_are_off_at_every_preset_and_without_ray_queries() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            assert_eq!(preset.ray_traced_shadows(), RayTracedShadows::Off);
+        }
+        let asked = GraphicsSettings {
+            ray_traced_shadows: Some(RayTracedShadows::Medium),
+            ..GraphicsSettings::default()
+        };
+        let gpu = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        let effective = asked.effective(&gpu);
+        assert_eq!(effective.ray_traced_shadows, RayTracedShadows::Medium);
+        assert!(effective.notes.is_empty(), "{:?}", effective.notes);
+        let without = asked.effective(&Capabilities::default());
+        assert_eq!(without.ray_traced_shadows, RayTracedShadows::Off);
+        assert!(
+            without
+                .notes
+                .iter()
+                .any(|note| note.contains("can't ray trace"))
+        );
+        assert_eq!(
+            RayTracedShadows::ALL.map(RayTracedShadows::rays),
+            [0, 1, 2, 4]
+        );
+    }
+
+    #[test]
     fn effective_never_raises_a_setting() {
         let capabilities = [
             Capabilities::default(),
@@ -1715,6 +1817,7 @@ mod tests {
                         sharpen: post,
                         motion_blur: Some(MotionBlurQuality::Low),
                         ray_tracing_distance: None,
+                        ray_traced_shadows: Some(RayTracedShadows::High),
                         ray_tracing: post,
                     };
                     for capabilities in &capabilities {
@@ -1726,6 +1829,7 @@ mod tests {
                         assert_eq!(effective.texture_quality, settings.texture_quality());
                         assert_eq!(effective.texture_budget, 200 << 20);
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
+                        assert!(effective.ray_traced_shadows <= settings.ray_traced_shadows());
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
@@ -1749,6 +1853,9 @@ mod tests {
                                 + usize::from(effective.realtime_gi != settings.realtime_gi())
                                 + usize::from(
                                     effective.volumetric_fog != settings.volumetric_fog(),
+                                )
+                                + usize::from(
+                                    effective.ray_traced_shadows != settings.ray_traced_shadows(),
                                 );
                         assert_eq!(effective.notes.len(), lowered);
                     }

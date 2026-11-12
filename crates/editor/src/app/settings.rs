@@ -14,7 +14,7 @@ use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
     GraphicsSettings, MotionBlurQuality, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE,
-    ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
+    RayTracedShadows, ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// The file beside eframe's saved settings that says whether the GPU is

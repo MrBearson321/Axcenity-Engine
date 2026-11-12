@@ -258,3 +258,9 @@ The choices of `Enum.StreamingState`.
 
 Items: `StreamedIn`, `StreamedOut`
 
+## Enum.RayTracedShadows
+
+The choices of `Enum.RayTracedShadows`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+

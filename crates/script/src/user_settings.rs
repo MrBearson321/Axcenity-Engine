@@ -15,8 +15,8 @@
 
 use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, ReflectionQuality,
-    ShadowQuality, TextureQuality,
+    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, RayTracedShadows,
+    ReflectionQuality, ShadowQuality, TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -81,6 +81,10 @@ pub(crate) fn motion_blur_quality_names() -> Vec<&'static str> {
     MotionBlurQuality::ALL
         .map(MotionBlurQuality::label)
         .to_vec()
+}
+
+pub(crate) fn ray_traced_shadows_names() -> Vec<&'static str> {
+    RayTracedShadows::ALL.map(RayTracedShadows::label).to_vec()
 }
 
 /// `mode`'s item name in `Enum.AntiAliasing`. Its label ("MSAA 4×") isn't a
@@ -435,6 +439,23 @@ impl UserData for LuaUserGameSettings {
                 value,
             )?;
             change(lua, |settings, _| settings.motion_blur = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("RayTracedShadows", |lua, _| {
+            let name = settings(lua).ray_traced_shadows().label();
+            Ok(item(EnumType::RayTracedShadows, name))
+        });
+        fields.add_field_method_set("RayTracedShadows", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "RayTracedShadows",
+                EnumType::RayTracedShadows,
+                &RayTracedShadows::ALL,
+                RayTracedShadows::label,
+                value,
+            )?;
+            change(lua, |settings, _| settings.ray_traced_shadows = chosen);
             Ok(())
         });
 
