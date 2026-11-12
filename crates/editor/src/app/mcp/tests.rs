@@ -2674,3 +2674,166 @@ fn view_capture_draws_the_scene_as_a_png_from_the_camera_an_object_or_a_point() 
     let history = ok(host, "history", json!({}));
     assert!(history.starts_with("0 steps to undo"), "{history}");
 }
+
+#[test]
+fn data_edit_lists_shows_creates_and_changes_tables_as_undo_steps() {
+    let mut opened = open("hello-data", "mcp-data");
+    let project = opened.folder.clone();
+    let host = &mut opened.app;
+    let list = ok(host, "data_edit", json!({}));
+    assert!(
+        list.starts_with("2 tables\nammo · 2 rows · Name string, Count integer\nweapons · "),
+        "{list}"
+    );
+    assert!(
+        list.contains("Kind enum:Melee,Ranged, Ammo row:ammo"),
+        "{list}"
+    );
+    let shown = ok(
+        host,
+        "data_edit",
+        json!({"action": "show", "table": "weapons", "keys": ["sword", "axe"]}),
+    );
+    assert!(
+        shown.contains("\nsword {\"Ammo\":\"\",\"Damage\":"),
+        "{shown}"
+    );
+    assert!(shown.ends_with("\nno rows axe"), "{shown}");
+
+    // A cell changed: saved at once, and what the game reads.
+    let changed = ok(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "rows": {"sword": {"Damage": 99}}}),
+    );
+    assert!(
+        changed.starts_with("changed assets/data/weapons.data.json: changed sword"),
+        "{changed}"
+    );
+    assert!(
+        changed.ends_with("undo \"AI (test): Table weapons\""),
+        "{changed}"
+    );
+    let damage = |host: &Headless| {
+        let table = host.app.assets.data_table("weapons").unwrap();
+        let column = table.column("Damage").unwrap().clone();
+        table.row("sword").unwrap().cell(&column)
+    };
+    assert_eq!(damage(host), axcenity_assets::Cell::Number(99.0));
+    let file = std::fs::read_to_string(project.join("assets/data/weapons.data.json")).unwrap();
+    assert!(file.contains("\"Damage\": 99"), "{file}");
+
+    // Wrong values are refused before anything is written, saying where.
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "rows": {"sword": {"Damage": "lots"}}}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    assert!(
+        wrong.message.contains("row `sword`'s `Damage` must be"),
+        "{wrong}"
+    );
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "rows": {"sword": {"Speed": 3}}}),
+    )
+    .unwrap_err();
+    assert!(
+        wrong
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("columns: Damage, Range"),
+        "{wrong}"
+    );
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "columns": {"Speed": "float"}}),
+    )
+    .unwrap_err();
+    assert!(
+        wrong.fix.as_deref().unwrap().starts_with("types: number"),
+        "{wrong}"
+    );
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "show", "table": "../world"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+
+    // A new table with a column, a reference and a row; then a row and a
+    // column taken away.
+    let made = ok(
+        host,
+        "data_edit",
+        json!({"action": "create", "table": "loot", "columns": {"Chance": "number", "Item": "row:weapons", "Rare": "boolean"}, "rows": {"gem": {"Chance": 0.5, "Item": "sword"}, "coin": {}}}),
+    );
+    assert!(
+        made.starts_with("created assets/data/loot.data.json · scripts read it with DataService:GetTable(\"loot\")"),
+        "{made}"
+    );
+    assert!(
+        made.contains("\n2 rows · columns: Chance number, Item row:weapons, Rare boolean"),
+        "{made}"
+    );
+    let again = call(
+        host,
+        "data_edit",
+        json!({"action": "create", "table": "loot"}),
+    )
+    .unwrap_err();
+    assert!(
+        again.fix.as_deref().unwrap().contains("action set"),
+        "{again}"
+    );
+    ok(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "loot", "rows": {"coin": null}, "columns": {"Rare": null}}),
+    );
+    let loot = ok(
+        host,
+        "data_edit",
+        json!({"action": "show", "table": "loot"}),
+    );
+    assert_eq!(
+        loot,
+        "loot · 1 rows · columns: Chance number, Item row:weapons\ngem {\"Chance\":0.5,\"Item\":\"sword\"}"
+    );
+    // Undo goes back a step at a time: the row and column, then the table.
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(
+        ok(
+            host,
+            "data_edit",
+            json!({"action": "show", "table": "loot"})
+        )
+        .contains("\ncoin ")
+    );
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join("assets/data/loot.data.json").exists());
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(damage(host), axcenity_assets::Cell::Number(10.0));
+
+    // A table with unsaved changes in the Data Table tab is left alone.
+    let path = "assets/data/ammo.data.json";
+    host.app.data_tables.open(&project, path).unwrap();
+    host.app
+        .data_tables
+        .edit(crate::data_table::TableEdit::AddRow)
+        .unwrap();
+    let locked = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "ammo", "rows": {"arrows": {"Count": 1}}}),
+    )
+    .unwrap_err();
+    assert_eq!(locked.code, Code::Locked, "{locked}");
+    assert!(ok(host, "data_edit", json!({})).contains("unsaved changes in the Data Table tab"));
+}
