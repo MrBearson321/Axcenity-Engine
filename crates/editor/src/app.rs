@@ -66,7 +66,7 @@ mod project_upgrade;
 mod search;
 mod sequencer;
 mod session;
-mod settings;
+pub(crate) mod settings;
 
 mod collab_conflicts;
 mod collab_handoff;
@@ -1254,6 +1254,7 @@ impl eframe::App for EditorApp {
         if let Ok(text) = serde_json::to_string(&self.graphics) {
             storage.set_string(GRAPHICS_KEY, text);
         }
+        settings::remember_ray_tracing(self.graphics.ray_tracing());
         if let Some(text) = self.benchmark.saved() {
             storage.set_string(crate::graphics_benchmark::REPORT_KEY, text);
         }

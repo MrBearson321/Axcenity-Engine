@@ -33,6 +33,7 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Depth of field (samples per pixel) | Off | Low (16) | High (32) | High |
 | Vignette, film grain, chromatic aberration, sharpen (each its own switch) | off | on | on | on |
 | Motion blur (samples per pixel) | Off | Low (8) | High (16) | High |
+| Hardware ray tracing (the GPU opened with ray queries at the next start, [ray-tracing.md](ray-tracing.md)) | off | off | off | off |
 | Ray tracing distance (50 to 5,000 studs; used only on a GPU that can ray trace, by a ray traced effect) | 150 studs | 250 | 400 | 800 |
 | Projected decals (follow the preset; no override) | none | 128 within 150 studs | 512 within 300 | 1024 within 600 |
 
