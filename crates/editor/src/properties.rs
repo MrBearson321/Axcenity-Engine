@@ -405,10 +405,12 @@ pub fn show(
 mod files;
 mod groups;
 mod many;
+mod plugin_rows;
 mod values;
 #[cfg(test)]
 pub use many::shared_names;
 pub use many::{count_name, show_many};
+pub use plugin_rows::{PluginRows, RowAction, plugin_sections};
 
 use files::*;
 use groups::*;
@@ -645,6 +647,8 @@ fn section_titled(
         "Attributes" => icons::LIST_BULLETS,
         "Tags" => icons::TAG,
         ADVANCED => icons::SLIDERS_HORIZONTAL,
+        // A plugin's rows (`plugin_rows.rs`).
+        plugin if plugin.starts_with("plugin:") => icons::PUZZLE_PIECE,
         _ => icons::DOTS_THREE_OUTLINE,
     };
     // Every section's names take the same width (from the panel's), so the
