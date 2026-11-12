@@ -209,6 +209,11 @@ pub struct Take {
     pub frame_rate: f32,
     /// One per bone it moves.
     pub tracks: Vec<Track>,
+    /// The skeleton in its file: the bones its tracks move and every bone
+    /// above them, parents first, where they rest (shared by the file's
+    /// takes). Retargeting (G16) reads it to play the take on a skeleton
+    /// with other names, rest poses and proportions. Empty when unknown.
+    pub skeleton: std::sync::Arc<Vec<Bone>>,
 }
 
 impl Take {

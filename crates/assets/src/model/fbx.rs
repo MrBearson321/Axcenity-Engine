@@ -272,6 +272,8 @@ fn takes(scene: &ufbx::Scene) -> Vec<Take> {
         DEFAULT_FRAME_RATE
     };
     let mut takes = Vec::new();
+    // The nodes some take moves, for the skeleton every take shares.
+    let mut moved = HashSet::new();
     for stack in &scene.anim_stacks {
         let opts = ufbx::BakeOpts {
             // Keys from 0 seconds, wherever the take starts in the file.
@@ -288,6 +290,7 @@ fn takes(scene: &ufbx::Scene) -> Vec<Take> {
             let Some(scene_node) = scene.nodes.get(node.typed_id as usize) else {
                 continue;
             };
+            moved.insert(node.typed_id);
             for key in node.translation_keys.iter().chain(&node.scale_keys) {
                 end = end.max(key.time);
             }
@@ -328,9 +331,47 @@ fn takes(scene: &ufbx::Scene) -> Vec<Take> {
             duration: duration as f32,
             frame_rate: fps as f32,
             tracks,
+            skeleton: Default::default(),
         });
     }
+    let skeleton = std::sync::Arc::new(take_skeleton(scene, &moved));
+    for take in &mut takes {
+        take.skeleton = skeleton.clone();
+    }
     takes
+}
+
+/// The nodes `moved` names, the file's limb (bone) nodes and every node
+/// above them, parents first, where they rest: the skeleton a file's takes
+/// animate.
+fn take_skeleton(scene: &ufbx::Scene, moved: &HashSet<u32>) -> Vec<Bone> {
+    // Bones the takes leave still still shape the body (retargeting measures
+    // it), so every limb node counts too.
+    let limbs = scene
+        .nodes
+        .iter()
+        .filter(|node| node.bone.is_some())
+        .map(|node| node.element.typed_id);
+    let mut wanted = HashSet::new();
+    for id in moved.iter().copied().chain(limbs) {
+        let mut node = scene.nodes.get(id as usize).map(|node| &**node);
+        while let Some(current) = node {
+            if !wanted.insert(current.element.typed_id) {
+                break;
+            }
+            node = current.parent.as_deref();
+        }
+    }
+    let mut bones = Vec::new();
+    add_bones(
+        &scene.root_node,
+        None,
+        0,
+        &wanted,
+        &mut bones,
+        &mut HashMap::new(),
+    );
+    bones
 }
 
 /// The typed IDs of the nodes some take really moves. Empty for a file
