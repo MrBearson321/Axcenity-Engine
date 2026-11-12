@@ -43,7 +43,7 @@ Play (F5) autosaves if needed, clones the World (every `InstanceId` stays valid)
 
 ## Plugins
 
-Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin folders, project-only file access, and an API (`plugin`, toolbars, dock widgets, `Selection`, `ChangeHistoryService`, mouse, settings) run in `script`'s long-lived `EditRuntime` against the edit world. Creators scaffold, pack and share plugins as `.axcenity-plugin` zips (`plugins::bundle`); the Plugins panel and Toolbox **Packs ▸ Import plugin…** install them. Undo, the ribbon and dock tabs are the editor's (`app/plugins.rs`). Keep `definitions/axcenity-plugin.d.luau` in step with `api.rs` (a test checks). The player must never depend on `plugins`.
+Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin folders, project-only file access, and an API (`plugin`, toolbars, dock widgets, `Selection`, `ChangeHistoryService`, mouse, settings, retained viewport drawing and drag handles in `draw.rs`, Properties rows in `rows.rs`) run in `script`'s long-lived `EditRuntime` against the edit world. Creators scaffold, pack and share plugins as `.axcenity-plugin` zips (`plugins::bundle`); the Plugins panel and Toolbox **Packs ▸ Import plugin…** install them. Undo, the ribbon and dock tabs are the editor's (`app/plugins.rs`). Keep `definitions/axcenity-plugin.d.luau` in step with `api.rs` (a test checks). The player must never depend on `plugins`.
 
 ## Recent additions (2026-11-11)
 
@@ -70,6 +70,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 | Asset Check and fixes | `asset_check.rs`, `app/asset_fixes.rs` over `project::check_assets`, `plan_fix`; duplicate files (R12) `project::find_duplicates`, Merge `project::plan_merge` |
 | Engine rebuild and relaunch (debug, source tree, `engine-dev` feature; engine hot-patching removed in Phase 89) | `rebuild.rs`, `relaunch.rs`, `app/engine.rs` |
 | Build Game, `--build-game`, `--cook` | `build_game.rs`, `cooking.rs` |
+| Build profiles (R13: menu, picked profile, report in Output) | `app/files/export.rs`, `app/chrome/menus.rs` (`build_profile_menu`), `app/native_menu.rs` |
 | Visual-debug overlays, debug views (`debug-views` feature of `render`) | `viewport/overlays.rs`, `viewport/view_mode.rs` |
 | Steady frames on VRR displays | `EditorApp::keep_frames_steady` ([Hardware notes](../Performance/Hardware-Notes.md)) |
 

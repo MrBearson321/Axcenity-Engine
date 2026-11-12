@@ -127,6 +127,7 @@ mod tests {
             sharpen: None,
             motion_blur: Some(MotionBlurQuality::High),
             ray_tracing_distance: Some(1000.0),
+            ray_tracing: Some(true),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

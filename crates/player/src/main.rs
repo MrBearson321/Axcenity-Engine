@@ -290,6 +290,8 @@ fn main() -> Result<()> {
         .and_then(graphics::load)
         .unwrap_or_else(|| GraphicsSettings::default_for(&unknown_gpu));
     scripts.set_graphics(&saved_graphics, &unknown_gpu);
+    // The GPU is opened with hardware ray tracing only if it's turned on.
+    axcenity_render::adapters::want_ray_tracing(saved_graphics.ray_tracing());
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::with_ground(axcenity_character::foot_ground);

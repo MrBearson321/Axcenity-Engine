@@ -1,5 +1,6 @@
-//! Teamwork: the project's shared board of tasks and who they're assigned
-//! to (`docs/research/teamwork.md`).
+//! Teamwork: the project's shared board of tasks, bugs and goals and who
+//! they're assigned to, and each person's history of changes
+//! (`docs/research/teamwork.md`).
 //!
 //! Everything here is plain files inside the project (`team/`), so nothing
 //! new travels between computers: a Collaborate session's mirror shares a
@@ -8,13 +9,15 @@
 //! checkpoints list as participants.
 
 pub mod board;
+pub mod history;
 pub mod item;
 pub mod time;
 
 #[cfg(test)]
 mod tests;
 
-pub use board::{Board, Copies, Filter, Loaded, Whose};
+pub use board::{Board, Copies, Filter, Loaded, Progress, Whose};
+pub use history::{Entry, History, Recorder, What};
 pub use item::{
     BugInfo, Change, Check, Comment, Event, Item, Kind, Link, Priority, Severity, Status,
 };

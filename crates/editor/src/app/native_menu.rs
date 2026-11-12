@@ -415,6 +415,20 @@ impl EditorApp {
             return items;
         };
         let ready = self.loading.is_none();
+        // Build profiles (R13), the picked one ticked.
+        let profiles = axcenity_project::BuildProfiles::read(&project.folder).unwrap_or_default();
+        let picked = files::picked_profile(&project.folder);
+        items.heading("Build Profile");
+        for name in profiles.names() {
+            let on = name == picked;
+            items.check(
+                name.clone(),
+                MenuAction::Command(Command::BuildProfile(name)),
+                ready,
+                on,
+            );
+        }
+        items.separator();
         let loading = &project.loading_screen;
         let current = match loading.screen_gui.as_str() {
             "" if project.show_splash => LoadingChoice::Splash,

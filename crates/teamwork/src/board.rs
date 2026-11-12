@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::item::{Item, Kind, Status, same_person};
+use crate::item::{Item, Kind, Priority, Severity, Status, same_person};
 use crate::time::Date;
 use crate::{BOARD_FOLDER, is_id};
 
@@ -62,6 +62,15 @@ pub fn is_board_path(path: &str) -> bool {
     path.strip_prefix(BOARD_FOLDER)
         .and_then(|rest| rest.strip_prefix('/'))
         .is_some_and(|name| !name.contains('/') && item_of(name).is_some())
+}
+
+/// The ID of the item whose own file `path` is (not a copy's).
+pub fn item_id(path: &str) -> Option<String> {
+    let name = path.strip_prefix(BOARD_FOLDER)?.strip_prefix('/')?;
+    match item_of(name)? {
+        (id, false) if !name.contains('/') => Some(id.to_owned()),
+        _ => None,
+    }
 }
 
 fn read_item(path: &Path) -> Result<Item, String> {
@@ -189,17 +198,7 @@ impl Board {
     /// last), then newest.
     pub fn filtered<'a>(&'a self, filter: &Filter) -> Vec<&'a Item> {
         let mut items: Vec<&Item> = self.items.values().filter(|i| filter.lets(i)).collect();
-        let key = |i: &&'a Item| {
-            (
-                i.status,
-                i.priority,
-                i.severity(),
-                i.due.map_or(i64::MAX, Date::days),
-                std::cmp::Reverse(i.created_at),
-                &i.id,
-            )
-        };
-        items.sort_by(|a, b| key(a).cmp(&key(b)));
+        items.sort_by(|a, b| order(a).cmp(&order(b)));
         items
     }
 
@@ -259,13 +258,71 @@ impl Board {
     /// How many unfinished items are assigned to `person`, and how many of
     /// those are overdue on `today`.
     pub fn open_for(&self, person: &str, today: Date) -> (usize, usize) {
-        let mine = self
-            .items
-            .values()
-            .filter(|i| !i.status.is_finished() && i.is_assigned(person));
+        let mine = self.my_work(person).into_iter();
         mine.fold((0, 0), |(open, late), i| {
             (open + 1, late + usize::from(i.is_overdue(today)))
         })
+    }
+
+    /// The goals (T3): unfinished first, then by target date and title.
+    pub fn goals(&self) -> Vec<&Item> {
+        let mut goals: Vec<&Item> = self
+            .items
+            .values()
+            .filter(|i| i.kind == Kind::Goal)
+            .collect();
+        goals.sort_by_key(|g| {
+            (
+                g.status.is_finished(),
+                g.due.map_or(i64::MAX, Date::days),
+                g.title.to_lowercase(),
+                g.id.clone(),
+            )
+        });
+        goals
+    }
+
+    /// The tasks and bugs under goal `id`, in board order.
+    pub fn in_goal(&self, id: &str) -> Vec<&Item> {
+        let mut items: Vec<&Item> = self
+            .items
+            .values()
+            .filter(|i| i.goal.as_deref() == Some(id))
+            .collect();
+        items.sort_by(|a, b| order(a).cmp(&order(b)));
+        items
+    }
+
+    /// How far goal `id` has come.
+    pub fn progress(&self, id: &str, today: Date) -> Progress {
+        self.in_goal(id)
+            .into_iter()
+            .fold(Progress::default(), |mut p, item| {
+                p.total += 1;
+                p.done += usize::from(item.status.is_finished());
+                p.overdue += usize::from(item.is_overdue(today));
+                p
+            })
+    }
+
+    /// What's on `person`'s plate: their unfinished tasks and bugs, soonest
+    /// due first (no date last), then by priority and severity.
+    pub fn my_work(&self, person: &str) -> Vec<&Item> {
+        let mut items: Vec<&Item> = self
+            .items
+            .values()
+            .filter(|i| i.kind != Kind::Goal && !i.status.is_finished() && i.is_assigned(person))
+            .collect();
+        items.sort_by_key(|i| {
+            (
+                i.due.map_or(i64::MAX, Date::days),
+                i.priority,
+                i.severity(),
+                std::cmp::Reverse(i.created_at),
+                i.id.clone(),
+            )
+        });
+        items
     }
 }
 
@@ -328,6 +385,47 @@ impl Filter {
         )
         .to_lowercase();
         words.iter().all(|w| haystack.contains(w.as_str()))
+    }
+}
+
+/// The board's order: status, priority, severity, due date, newest.
+fn order(
+    i: &Item,
+) -> (
+    Status,
+    Priority,
+    Severity,
+    i64,
+    std::cmp::Reverse<u64>,
+    &str,
+) {
+    (
+        i.status,
+        i.priority,
+        i.severity(),
+        i.due.map_or(i64::MAX, Date::days),
+        std::cmp::Reverse(i.created_at),
+        &i.id,
+    )
+}
+
+/// How many of a goal's items are finished, of how many, and how many are
+/// overdue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Progress {
+    pub done: usize,
+    pub total: usize,
+    pub overdue: usize,
+}
+
+impl Progress {
+    /// From 0 to 1; 0 for a goal with nothing in it.
+    pub fn fraction(self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.done as f32 / self.total as f32
+        }
     }
 }
 

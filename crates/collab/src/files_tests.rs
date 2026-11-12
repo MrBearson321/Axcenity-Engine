@@ -330,7 +330,10 @@ fn conflict_copies_keep_the_script_from_loading() {
         "a.conflict-sam-2.txt"
     );
     assert!(files::is_synced("scripts/a.lua"));
+    assert!(files::is_synced("team/board/abcdefghjk.json"));
+    assert!(files::is_synced("team/historyless.txt"));
     for not in [
+        "team/history/sam/2026-11.pc.jsonl",
         ".axcenity/cache",
         "levels/two.world.json",
         "world.json",

@@ -309,3 +309,160 @@ fn a_bug_reports_what_happened_and_sorts_by_severity() {
     );
     std::fs::remove_dir_all(root).ok();
 }
+
+#[test]
+fn a_goals_progress_is_its_items_and_my_work_comes_soonest_first() {
+    let root = temp("goals");
+    let (mut board, _) = Board::load(&root, Copies::Merge);
+    let today = Date::parse("2026-11-12").unwrap();
+    let mut alpha = Item::new(Kind::Goal, "Alpha build", "Paul", 10);
+    alpha.set_due(Some(today.add_days(14)), "Paul", 11);
+    assert_eq!(Status::Done.name(Kind::Goal), "Reached");
+
+    let mut door = Item::new(Kind::Task, "Door opens", "Paul", 20);
+    door.set_goal(Some(&alpha), "Paul", 21);
+    assert_eq!(door.goal.as_deref(), Some(alpha.id.as_str()));
+    assert_eq!(
+        door.events[1].describe(Kind::Task),
+        "Paul put it under “Alpha build”"
+    );
+    door.set_goal(Some(&alpha), "Paul", 22);
+    assert_eq!(door.events.len(), 2, "no change, no event");
+    door.assign("Sam", "Paul", 23);
+    door.set_due(Some(today.add_days(3)), "Paul", 24);
+
+    let mut crash = Item::bug_from_error("Crash on Play", "", "Sam", 30);
+    crash.set_goal(Some(&alpha), "Sam", 31);
+    crash.assign("Sam", "Sam", 32);
+    crash.set_due(Some(today.add_days(-1)), "Sam", 33);
+    let mut menu = Item::new(Kind::Task, "Main menu", "Paul", 40);
+    menu.set_goal(Some(&alpha), "Paul", 41);
+    menu.set_status(Status::Done, "Paul", 42);
+    let mut later = Item::new(Kind::Task, "Polish", "Sam", 50);
+    later.assign("Sam", "Sam", 51);
+
+    // Goals don't nest, and only goals hold things.
+    let mut beta = Item::new(Kind::Goal, "Beta", "Paul", 60);
+    beta.set_goal(Some(&alpha), "Paul", 61);
+    assert_eq!(beta.goal, None);
+    let mut stray = Item::new(Kind::Task, "Stray", "Paul", 70);
+    stray.set_goal(Some(&door), "Paul", 71);
+    assert_eq!(stray.goal, None);
+
+    for item in [&alpha, &door, &crash, &menu, &later, &beta] {
+        board.save(&root, (*item).clone()).unwrap();
+    }
+    let (board, _) = Board::load(&root, Copies::Merge);
+    assert_eq!(board.get(&door.id), Some(&door));
+    let progress = board.progress(&alpha.id, today);
+    assert_eq!(
+        progress,
+        Progress {
+            done: 1,
+            total: 3,
+            overdue: 1
+        }
+    );
+    assert!((progress.fraction() - 1.0 / 3.0).abs() < 1e-6);
+    assert_eq!(board.progress(&beta.id, today).fraction(), 0.0);
+    let goals: Vec<&str> = board.goals().iter().map(|g| g.title.as_str()).collect();
+    assert_eq!(goals, ["Alpha build", "Beta"]);
+    let titles =
+        |items: Vec<&Item>| -> Vec<String> { items.iter().map(|i| i.title.clone()).collect() };
+    assert_eq!(
+        titles(board.in_goal(&alpha.id)),
+        ["Crash on Play", "Door opens", "Main menu"]
+    );
+    assert_eq!(
+        titles(board.my_work("sam")),
+        ["Crash on Play", "Door opens", "Polish"]
+    );
+    assert_eq!(board.open_for("Sam", today), (3, 1));
+
+    // Taken out of the goal, it no longer counts.
+    door.set_goal(None, "Sam", 80);
+    assert_eq!(
+        door.events.last().unwrap().describe(Kind::Task),
+        "Sam took it out of its goal"
+    );
+    let text = serde_json::to_string_pretty(&door).unwrap();
+    assert!(!text.contains("\"goal\": \""), "{text}");
+}
+
+#[test]
+fn each_persons_history_is_kept_per_computer_and_read_back_by_day() {
+    use crate::history::{self, Entry, History, Recorder, What};
+    let root = temp("history");
+    let day = 1_794_441_600; // 2026-11-12 00:00 UTC
+    assert_eq!(Date::of(day), Date::parse("2026-11-12").unwrap());
+    assert_eq!(history::person_folder("Paul J."), "paul-j");
+    assert_eq!(history::person_folder("  "), "someone");
+    assert_eq!(
+        history::file_for("Paul J.", day, "AB12-CD34"),
+        "team/history/paul-j/2026-11.ab12-cd34.jsonl"
+    );
+    assert!(history::is_history_path("team/history/sam/2026-11.x.jsonl"));
+    assert!(!history::is_history_path("team/historyx"));
+    assert!(!history::is_history_path("team/board/a.json"));
+
+    // A drag sends the same change many times: one line, counted.
+    let mut recorder = Recorder::default();
+    let block = Link::Instance("Workspace.Block".into());
+    for second in 0..5 {
+        recorder.note(
+            Entry::new(day + 10 + second, "Sam", What::Edit, "Move Block")
+                .with_links([block.clone()]),
+        );
+    }
+    recorder.note(Entry::new(day + 12, "Paul", What::Edit, "Move Block"));
+    assert!(recorder.take(day + 20, false).is_empty(), "still folding");
+    let written = recorder.take(day + 100, false);
+    assert_eq!(written.len(), 2);
+    assert_eq!(written[0].who, "Sam");
+    assert_eq!(written[0].count, 5);
+    assert_eq!(written[0].links, std::slice::from_ref(&block));
+    assert!(recorder.is_empty());
+    history::append(&root, "pc", &written).unwrap();
+
+    // Another computer's lines for Sam, the next day, in a file of its own.
+    let mut task = Item::new(Kind::Task, "Door opens", "Sam", day + 86_400);
+    let made = history::board_entry(None, &task, "Sam", day + 86_400);
+    assert_eq!(made.text, "Created task “Door opens”");
+    let before = task.clone();
+    task.set_status(Status::Done, "Sam", day + 86_460);
+    let moved = history::board_entry(Some(&before), &task, "Sam", day + 86_460);
+    assert_eq!(moved.text, "“Door opens”: moved it to Done");
+    assert_eq!(moved.item.as_deref(), Some(task.id.as_str()));
+    let saved = Entry::new(day + 86_500, "sam", What::Save, "Saved 2 changes").with_details([
+        "Moved Part \"Block\" in Workspace".to_owned(),
+        "Edited scripts/door.server.lua".to_owned(),
+    ]);
+    history::append(&root, "laptop", &[made, moved, saved.clone()]).unwrap();
+    assert!(root.join("team/history/sam/2026-11.laptop.jsonl").exists());
+    assert!(root.join("team/history/sam/2026-11.pc.jsonl").exists());
+    std::fs::write(
+        root.join("team/history/sam/2026-11.broken.jsonl"),
+        "{not json\n",
+    )
+    .unwrap();
+
+    let read = History::load(&root);
+    assert_eq!(read.problems.len(), 1, "{:?}", read.problems);
+    assert_eq!(read.people(), ["Sam", "Paul"]);
+    let days = read.days("SAM", None);
+    assert_eq!(days.len(), 2);
+    assert_eq!(days[0].0, Date::parse("2026-11-13").unwrap());
+    assert_eq!(days[0].1[0], &saved);
+    assert_eq!(days[1].1[0].count, 5);
+    assert_eq!(read.of("Sam", Some(What::Board)).len(), 2);
+    assert_eq!(read.changes_since("Sam", day + 86_400), 3);
+    assert_eq!(read.changes_since("Sam", 0), 8);
+
+    // A copied file doesn't count twice.
+    std::fs::copy(
+        root.join("team/history/sam/2026-11.pc.jsonl"),
+        root.join("team/history/sam/2026-11.pc-copy.jsonl"),
+    )
+    .unwrap();
+    assert_eq!(History::load(&root).changes_since("Sam", 0), 8);
+}

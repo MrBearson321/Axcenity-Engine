@@ -59,6 +59,7 @@ mod material_editor;
 mod material_graph;
 mod mixer;
 mod output;
+mod people_history;
 mod placing;
 mod play;
 mod plugins;
@@ -135,8 +136,9 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
         // Cooked textures go up as BC7 where the GPU reads it.
         descriptor.required_features |= adapter.features()
             & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_BC);
-        // Hardware ray tracing where the GPU has it, for the optional ray
-        // traced effects (`axcenity_render::adapters::with_ray_queries`).
+        // Hardware ray tracing, if Settings > Graphics turned it on and the
+        // GPU has it (`axcenity_render::adapters::with_ray_queries`).
+        axcenity_render::adapters::want_ray_tracing(app::settings::saved_ray_tracing());
         axcenity_render::adapters::with_ray_queries(adapter, &mut descriptor);
         descriptor
     });

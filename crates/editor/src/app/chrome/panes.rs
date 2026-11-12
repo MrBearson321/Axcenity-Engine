@@ -115,6 +115,13 @@ impl EditorApp {
             return;
         }
         let mut style_edit = None;
+        let mut row_action = None;
+        // Plugins only run while editing.
+        let plugin_rows = if editing {
+            self.plugins.property_rows()
+        } else {
+            Vec::new()
+        };
         // What this editor is dragging, for the others (C6).
         if !ui.input(|input| input.pointer.any_down()) {
             self.team_panel.editing_field = None;
@@ -124,7 +131,11 @@ impl EditorApp {
             if editing {
                 style_edit = style_panel::show(ui, world, selected, stylesheets);
             }
+            if let Some(instance) = selected.and_then(|id| world.get(id)) {
+                row_action = properties::plugin_sections(ui, instance, &plugin_rows, None);
+            }
         });
+        drop(plugin_rows);
         // Other panels may already be drawn this frame, so draw again to
         // show the change everywhere.
         if let (Some(id), Some(edit)) = (selected, edit) {
@@ -138,6 +149,10 @@ impl EditorApp {
         }
         if let (Some(id), Some(edit)) = (selected, style_edit) {
             self.apply_style(id, edit);
+            ui.ctx().request_repaint();
+        }
+        if let (Some(id), Some(action)) = (selected, row_action) {
+            self.plugin_row_action(id, action);
             ui.ctx().request_repaint();
         }
     }
@@ -992,6 +1007,28 @@ impl EditorApp {
             .iter()
             .any(|entry| entry.running.is_some())
             .then(|| self.plugin_has_mouse());
+        // Plugins only run while editing, so their drawings go in Play.
+        let plugin_drawings: Vec<&axcenity_plugins::Drawing> = if self.playing() {
+            Vec::new()
+        } else {
+            self.plugins
+                .entries
+                .iter()
+                .filter(|entry| entry.running.is_some())
+                .flat_map(|entry| &entry.drawings)
+                .collect()
+        };
+        let plugin_handles: Vec<(usize, &axcenity_plugins::Handle)> = if self.playing() {
+            Vec::new()
+        } else {
+            self.plugins
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.running.is_some())
+                .flat_map(|(index, entry)| entry.handles.iter().map(move |h| (index, h)))
+                .collect()
+        };
         let mut console = self.dev_console_items();
         let emits = std::mem::take(&mut self.pending_emits);
         let debug_rays = self
@@ -1088,6 +1125,8 @@ impl EditorApp {
                                 .map(|tool| tool.first.map(|first| first.point)),
                             spline_editing,
                             plugin_mouse,
+                            plugin_drawings,
+                            plugin_handles,
                             play_camera: match sequence.and_then(|p| p.camera) {
                                 Some(shot) => Some(crate::viewport::PlayCamera {
                                     shown: axcenity_script::CameraView {

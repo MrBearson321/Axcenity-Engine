@@ -1,6 +1,7 @@
 //! The globals a plugin's code gets on top of a script's: `plugin`,
 //! `Selection` and `ChangeHistoryService` (also from `game:GetService`),
-//! and a `require` that loads the plugin's own Lua files.
+//! and a `require` that loads the plugin's own Lua files. Viewport drawing
+//! is `draw.rs`.
 //!
 //! What the plugin makes (toolbars, dock widgets) and asks for (a new
 //! selection, waypoints) is kept in [`PluginState`], in Lua's app data,
@@ -15,7 +16,7 @@ use mlua::{
 };
 use serde_json::Value as Json;
 
-use crate::{DockWidget, MouseState, Request, Toolbar, ToolbarButton, Waypoint, files};
+use crate::{DockWidget, MouseState, Request, Toolbar, ToolbarButton, Waypoint, draw, files, rows};
 
 /// An event of the plugin API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -30,6 +31,13 @@ pub(crate) enum SignalKey {
     Move,
     /// `plugin.Deactivation`: another plugin or tool took the mouse.
     Deactivation,
+    /// A handle's `Dragged` and `DragEnded`, by the handle's number.
+    HandleDragged(u64),
+    HandleDragEnded(u64),
+    /// A Properties row's `Activated` (a button) and `Changed` (an
+    /// attribute row edited), by the row's number.
+    RowActivated(u64),
+    RowChanged(u64),
 }
 
 /// A handler connected to a plugin event.
@@ -67,6 +75,12 @@ pub(crate) struct PluginState {
     pub(crate) modules: BTreeMap<String, Value>,
     /// The plugin's environment, for `CFrame.new` and modules.
     pub(crate) env: Option<Table>,
+    /// What it drew in the Scene View (`plugin:DrawLine` and the rest).
+    pub(crate) drawings: crate::draw::Drawings,
+    /// Its handles in the Scene View (`plugin:CreateHandle`).
+    pub(crate) handles: crate::draw::Handles,
+    /// Its rows in the Properties panel (`plugin:AddPropertyRow`).
+    pub(crate) rows: crate::rows::Rows,
 }
 
 pub(crate) fn state(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, PluginState>> {
@@ -201,6 +215,18 @@ impl UserData for LuaPlugin {
             Ok(())
         });
         methods.add_method("IsActivated", |lua, _, ()| Ok(state(lua)?.mouse_active));
+        methods.add_method("DrawLine", |lua, _, args| draw::line(lua, args));
+        methods.add_method("DrawBox", |lua, _, args| draw::boxed(lua, args));
+        methods.add_method("DrawSphere", |lua, _, args| draw::sphere(lua, args));
+        methods.add_method("DrawText", |lua, _, args| draw::text(lua, args));
+        methods.add_method("ClearDrawings", |lua, _, ()| draw::clear(lua, ()));
+        methods.add_method("CreateHandle", |lua, _, args| draw::handle(lua, args));
+        methods.add_method("AddPropertyRow", |lua, _, info| {
+            rows::attribute_row(lua, info)
+        });
+        methods.add_method("AddPropertyButton", |lua, _, info| {
+            rows::button_row(lua, info)
+        });
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("Plugin"));
     }
 }
@@ -391,7 +417,7 @@ impl UserData for LuaMouse {
 }
 
 /// One of the plugin API's events.
-struct LuaSignal(SignalKey);
+pub(crate) struct LuaSignal(pub(crate) SignalKey);
 
 impl UserData for LuaSignal {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

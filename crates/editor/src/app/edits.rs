@@ -1279,6 +1279,8 @@ impl EditorApp {
             self.output
                 .error(format!("Could not restore a project file: {err}"));
         }
+        // A script attached to an object, or put back in its service.
+        self.follow_service_script_files(&files);
         // Scripts inside objects' files (G2): their code as the file now is.
         for file in &files {
             if self.is_object_file(&file.path) {

@@ -3,7 +3,8 @@
 //! editor's history, which MeshParts using it reload at once. A model with
 //! modifiers (Phase 57) saves its sidecar too, and opens from it. Painted
 //! maps (Phase 59) save as PNGs in `textures/` beside it, and their layers
-//! in its sidecar folder.
+//! in its sidecar folder. Bake (Phase 61) writes its maps there too, as a
+//! step of its own.
 
 use std::sync::Arc;
 
@@ -48,6 +49,9 @@ impl EditorApp {
                     self.save_model_studio();
                 }
                 StudioAction::BrushImage(path) => self.load_brush_image(&path),
+                StudioAction::Bake => {
+                    self.bake_model_studio();
+                }
             }
         }
     }
@@ -245,6 +249,45 @@ impl EditorApp {
             });
         }
         Some(changes)
+    }
+
+    /// Bakes the Studio's reference onto its active object (a step of the
+    /// Studio's undo) and writes the maps as PNGs beside the model (a step
+    /// of the editor's history). Returns the files written.
+    pub(in crate::app) fn bake_model_studio(&mut self) -> Option<Vec<String>> {
+        let (folder, path) = self.model_studio_path()?;
+        let settings = self.model_studio.bake.settings.clone();
+        let doc = self.model_studio.doc.as_mut()?;
+        let report = match doc.bake(&path, &settings) {
+            Ok(report) => report,
+            Err(why) => {
+                self.output.error(format!("Could not bake: {why}"));
+                self.model_studio.bake.status = Some(why);
+                return None;
+            }
+        };
+        let name = doc.model.objects[doc.active].name.clone();
+        let files: Vec<(String, Option<Vec<u8>>)> = report
+            .files
+            .iter()
+            .map(|(file, png)| (file.clone(), Some(png.clone())))
+            .collect();
+        let changes = self.write_studio_files(&folder, &files)?;
+        self.history
+            .record_blobs(&mut self.world, format!("Bake {name}"), changes);
+        for (file, _) in &files {
+            self.asset_file_changed(file);
+        }
+        self.asset_browser.refresh();
+        for warning in report.warnings() {
+            self.output.warning(format!("Bake {name}: {warning}"));
+        }
+        self.output.info(format!(
+            "Baked {} maps onto {name}. Save the model to keep them on it.",
+            files.len()
+        ));
+        self.model_studio.bake_done(&report);
+        Some(files.into_iter().map(|(file, _)| file).collect())
     }
 
     /// Reads the project image at `path` as the Model Studio's brush image.

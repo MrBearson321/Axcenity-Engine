@@ -20,23 +20,28 @@ pub enum Kind {
     Task,
     /// Something that's wrong (T2), with [`BugInfo`].
     Bug,
+    /// A milestone (T3): tasks and bugs belong to it through
+    /// [`Item::goal`], its progress is theirs, its due date is the target.
+    Goal,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 2] = [Kind::Task, Kind::Bug];
+    pub const ALL: [Kind; 3] = [Kind::Task, Kind::Bug, Kind::Goal];
 
     pub fn name(self) -> &'static str {
         match self {
             Kind::Task => "Task",
             Kind::Bug => "Bug",
+            Kind::Goal => "Goal",
         }
     }
 
-    /// "tasks", "bugs".
+    /// "tasks", "bugs", "goals".
     pub fn plural(self) -> &'static str {
         match self {
             Kind::Task => "tasks",
             Kind::Bug => "bugs",
+            Kind::Goal => "goals",
         }
     }
 }
@@ -79,6 +84,11 @@ impl Status {
             (Kind::Bug, Status::InReview) => "Fix in review",
             (Kind::Bug, Status::Done) => "Fixed",
             (Kind::Bug, Status::Closed) => "Won't fix",
+            (Kind::Goal, Status::Todo) => "Planned",
+            (Kind::Goal, Status::InProgress) => "Under way",
+            (Kind::Goal, Status::InReview) => "Wrapping up",
+            (Kind::Goal, Status::Done) => "Reached",
+            (Kind::Goal, Status::Closed) => "Dropped",
         }
     }
 
@@ -229,13 +239,32 @@ pub struct Comment {
 #[serde(rename_all = "snake_case", tag = "what")]
 pub enum Change {
     Created,
-    Status { from: Status, to: Status },
-    Assigned { person: String },
-    Unassigned { person: String },
-    Priority { to: Priority },
-    Due { to: Option<Date> },
-    Renamed { from: String },
-    Severity { to: Severity },
+    Status {
+        from: Status,
+        to: Status,
+    },
+    Assigned {
+        person: String,
+    },
+    Unassigned {
+        person: String,
+    },
+    Priority {
+        to: Priority,
+    },
+    Due {
+        to: Option<Date>,
+    },
+    Renamed {
+        from: String,
+    },
+    Severity {
+        to: Severity,
+    },
+    /// Put under a goal (by its title then), or taken out of one.
+    Goal {
+        to: Option<String>,
+    },
 }
 
 /// A change, who made it and when.
@@ -251,19 +280,26 @@ pub struct Event {
 impl Event {
     /// "Paul moved it to Done".
     pub fn describe(&self, kind: Kind) -> String {
+        format!("{} {}", self.who, self.action(kind))
+    }
+
+    /// What was done, without who: "moved it to Done".
+    pub fn action(&self, kind: Kind) -> String {
         let who = &self.who;
         match &self.change {
-            Change::Created => format!("{who} created it"),
-            Change::Status { to, .. } => format!("{who} moved it to {}", to.name(kind)),
-            Change::Assigned { person } if person == who => format!("{who} took it"),
-            Change::Assigned { person } => format!("{who} assigned it to {person}"),
-            Change::Unassigned { person } if person == who => format!("{who} let it go"),
-            Change::Unassigned { person } => format!("{who} unassigned {person}"),
-            Change::Priority { to } => format!("{who} set the priority to {}", to.name()),
-            Change::Due { to: Some(date) } => format!("{who} set it due {date}"),
-            Change::Due { to: None } => format!("{who} took the due date off"),
-            Change::Renamed { from } => format!("{who} renamed it from “{from}”"),
-            Change::Severity { to } => format!("{who} set the severity to {}", to.name()),
+            Change::Created => "created it".to_owned(),
+            Change::Status { to, .. } => format!("moved it to {}", to.name(kind)),
+            Change::Assigned { person } if person == who => "took it".to_owned(),
+            Change::Assigned { person } => format!("assigned it to {person}"),
+            Change::Unassigned { person } if person == who => "let it go".to_owned(),
+            Change::Unassigned { person } => format!("unassigned {person}"),
+            Change::Priority { to } => format!("set the priority to {}", to.name()),
+            Change::Due { to: Some(date) } => format!("set it due {date}"),
+            Change::Due { to: None } => "took the due date off".to_owned(),
+            Change::Renamed { from } => format!("renamed it from “{from}”"),
+            Change::Severity { to } => format!("set the severity to {}", to.name()),
+            Change::Goal { to: Some(goal) } => format!("put it under “{goal}”"),
+            Change::Goal { to: None } => "took it out of its goal".to_owned(),
         }
     }
 }
@@ -285,8 +321,12 @@ pub struct Item {
     pub assignees: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
+    /// When it's due; a goal's target date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due: Option<Date>,
+    /// The goal (its ID) this task or bug counts toward (T3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<Link>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -333,6 +373,7 @@ impl Item {
             assignees: Vec::new(),
             labels: Vec::new(),
             due: None,
+            goal: None,
             links: Vec::new(),
             checklist: Vec::new(),
             comments: Vec::new(),
@@ -413,6 +454,21 @@ impl Item {
         if self.priority != priority {
             self.priority = priority;
             self.record(who, now, Change::Priority { to: priority });
+        }
+    }
+
+    /// Puts it under `goal` (`None` takes it out). A goal can't belong to
+    /// a goal, nor anything to itself.
+    pub fn set_goal(&mut self, goal: Option<&Item>, who: &str, now: u64) {
+        if self.kind == Kind::Goal || goal.is_some_and(|g| g.kind != Kind::Goal || g.id == self.id)
+        {
+            return;
+        }
+        let id = goal.map(|g| g.id.clone());
+        if self.goal != id {
+            self.goal = id;
+            let to = goal.map(|g| g.title.clone());
+            self.record(who, now, Change::Goal { to });
         }
     }
 

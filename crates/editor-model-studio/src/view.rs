@@ -16,6 +16,10 @@
 //! Studio paints with the left button (`paint.rs`). While a stroke paints,
 //! only the drawn model's materials are put in again, not its meshes.
 //!
+//! In Sculpt mode (Phase 60) it doesn't either, and draws the active
+//! object as the sculpt's chunks (`sculpt.rs`), with the other objects as
+//! a model of their own and no overlay.
+//!
 //! In Rig, Weights and Pose mode (Phase 62) the Studio picks bones and
 //! paints weights itself (`rig.rs`); Weights and Pose mode hand the view a
 //! skinned model to draw ([`View::use_model`]).
@@ -62,6 +66,8 @@ pub struct Frame<'a> {
     pub cursor: Vec3,
     /// The uv channel to draw a checker on, if any.
     pub checker: Option<usize>,
+    /// While sculpting: what to draw in place of the active object.
+    pub sculpt: Option<Vec<axcenity_render::DrawItem>>,
 }
 
 /// What the tools draw over the view: the 3D cursor, a tool's lines and
@@ -124,9 +130,9 @@ pub struct View {
     /// The MeshPart that draws the model, whose pose the handles drag.
     part: InstanceId,
     assets: Assets,
-    /// The revision of the meshes drawn, 0 for none, and the checker's
-    /// channel it was drawn with.
-    shown: (u64, Option<usize>),
+    /// The revision of the meshes drawn, 0 for none, the checker's
+    /// channel it was drawn with, and the object left out (sculpted).
+    shown: (u64, Option<usize>, Option<usize>),
     /// The paint revision drawn, and the model drawn with the object and
     /// material slot of each primitive.
     painted: u64,
@@ -164,7 +170,7 @@ impl Default for View {
             world,
             part,
             assets: Assets::default(),
-            shown: (0, None),
+            shown: (0, None, None),
             painted: 0,
             drawn: None,
             aspect: 1.0,
@@ -188,7 +194,7 @@ impl View {
 
     /// Points the camera at `doc`'s model, and draws it afresh.
     pub fn frame_doc(&mut self, doc: &StudioDoc) {
-        self.shown = (0, None);
+        self.shown = (0, None, None);
         self.drag = None;
         self.moving = None;
         self.box_start = None;
@@ -253,19 +259,20 @@ impl View {
             None if self.handed.is_some() => {
                 self.handed = None;
                 // Draw the document's model afresh.
-                self.shown = (0, None);
+                self.shown = (0, None, None);
             }
             None => {}
         }
     }
 
     /// Puts the model's current meshes in the view's world, with the
-    /// checker on `checker`'s uv channel if it's on.
-    fn refresh(&mut self, doc: &StudioDoc, checker: Option<usize>) {
+    /// checker on `checker`'s uv channel if it's on, and without object
+    /// `skip` (drawn by the Studio while it's sculpted).
+    fn refresh(&mut self, doc: &StudioDoc, checker: Option<usize>, skip: Option<usize>) {
         if self.handed.is_some() {
             return;
         }
-        if self.shown == (doc.revision, checker) {
+        if self.shown == (doc.revision, checker, skip) {
             if self.painted == doc.paint_revision || checker.is_some() {
                 return;
             }
@@ -282,11 +289,15 @@ impl View {
             }
             return;
         }
-        self.shown = (doc.revision, checker);
+        self.shown = (doc.revision, checker, skip);
         self.painted = doc.paint_revision;
-        let model = match checker {
-            Some(channel) => doc.model.to_model_on(channel).map(with_checker),
-            None => doc.model.to_model_slots(0).map(|(model, slots)| {
+        let model = match (checker, skip) {
+            (_, Some(skip)) => {
+                self.drawn = None;
+                doc.model.to_model_except(skip)
+            }
+            (Some(channel), None) => doc.model.to_model_on(channel).map(with_checker),
+            (None, None) => doc.model.to_model_slots(0).map(|(model, slots)| {
                 self.drawn = Some((model.with_materials(|_| None), slots));
                 model
             }),
@@ -338,7 +349,8 @@ impl View {
         let rect = frame.rect;
         let response = frame.response;
         self.aspect = rect.width() / rect.height().max(1.0);
-        self.refresh(doc, frame.checker);
+        let skip = frame.sculpt.as_ref().map(|_| doc.active);
+        self.refresh(doc, frame.checker, skip);
         self.orbit(ui, response);
         let screen = Screen::new(self.camera(), rect);
         let mut event = Event {
@@ -385,14 +397,18 @@ impl View {
         }
 
         if let Some(render_state) = render_state {
-            let list = axcenity_scene::build_draw_list(&self.world, &self.assets, self.camera());
+            let mut list =
+                axcenity_scene::build_draw_list(&self.world, &self.assets, self.camera());
+            if let Some(items) = &frame.sculpt {
+                list.items.extend(items.iter().cloned());
+            }
             self.canvas.paint(ui, rect, render_state, &list);
         } else {
             ui.painter()
                 .rect_filled(rect, 0.0, theme::palette(ui.ctx()).inset);
         }
         let painter = ui.painter_at(rect);
-        // Rigging shows bones in place of the overlay.
+        // A sculpt's many faces would bury it in lines; rigging shows bones.
         if matches!(doc.mode, Mode::Object | Mode::Edit | Mode::Paint) {
             paint_overlay(
                 &painter,
@@ -421,6 +437,7 @@ impl View {
             (Some(modal), _) => modal.describe(),
             (None, Mode::Object) => "Click an object · Tab: Edit mode · G R S: move, turn, scale · right-drag: turn view".to_owned(),
             (None, Mode::Paint) => "Drag: paint · Ctrl-click: Clone's source · [ ]: radius · X: draw or erase · right-drag: turn view · Tab: Object mode".to_owned(),
+            (None, Mode::Sculpt) => "Drag: sculpt · Ctrl: the other way · Shift: smooth · [ ]: radius · right-drag: turn view · Tab: Object mode".to_owned(),
             (None, Mode::Armature) => "Click a bone · E: extrude · G: move · X: delete · right-drag: turn view · Tab: Object mode".to_owned(),
             (None, Mode::Weights) => "Drag: paint the picked bone's weights · Ctrl-click: pick a bone · [ ]: radius · Tab: Object mode".to_owned(),
             (None, Mode::Pose) => "Click a bone · R: turn it · the pose isn't saved · Tab: Object mode".to_owned(),
@@ -558,12 +575,15 @@ impl View {
         let ray = screen.ray(at);
         let extend = modifiers.shift;
         match doc.mode {
-            Mode::Object | Mode::Paint | Mode::Armature | Mode::Weights | Mode::Pose => {
-                ViewAction::PickObject {
-                    object: pick_object(doc, ray),
-                    extend,
-                }
-            }
+            Mode::Object
+            | Mode::Paint
+            | Mode::Sculpt
+            | Mode::Armature
+            | Mode::Weights
+            | Mode::Pose => ViewAction::PickObject {
+                object: pick_object(doc, ray),
+                extend,
+            },
             Mode::Edit => {
                 let Some(mesh) = doc.mesh() else {
                     return ViewAction::None;

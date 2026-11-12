@@ -14,7 +14,7 @@ tags: [system/mesh-edit, csg, modeling]
 # Mesh editing and CSG
 
 > [!summary]
-> `mesh_edit` is the engine's CPU geometry library (19.3k lines): **plane cuts** that close their holes (ear clipping, flat-face refill), **Voronoi fracture** pieces, **BSP booleans** for solid modeling (Union, Negate, Intersect, Separate → `UnionOperation`), and everything the **Model Studio** edits (half-edge `EditMesh`, modeling operations, modifiers, UV unwrapping with its own LSCM solver, texture painting, rigging and weights; sculpting, retopology and baking were removed in Phase 90 for Blender's). It writes `.glb`. Runtime users: `physics` (shattering Fractures' pre-generated pieces) and `script` (`UnionAsync` on a worker, default `csg` feature). **Implemented.**
+> `mesh_edit` is the engine's CPU geometry library (22.7k lines): **plane cuts** that close their holes (ear clipping, flat-face refill), **Voronoi fracture** pieces, **BSP booleans** for solid modeling (Union, Negate, Intersect, Separate → `UnionOperation`), and everything the **Model Studio** edits (half-edge `EditMesh`, modeling operations, modifiers, UV unwrapping with its own LSCM solver, texture painting, sculpting with a BVH, baking onto a Make Low Poly copy, rigging and weights; Phase 90 removed sculpting, retopology and baking, and R15 brought sculpting and baking back, leaving retopology by hand to Blender). It writes `.glb`. Runtime users: `physics` (shattering Fractures' pre-generated pieces) and `script` (`UnionAsync` on a worker, default `csg` feature). **Implemented.**
 
 ## Flows
 

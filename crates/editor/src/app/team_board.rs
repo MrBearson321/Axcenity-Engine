@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use axcenity_collab::Capability;
-use axcenity_teamwork::{Board, Copies, Item, Kind, Link, time};
+use axcenity_teamwork::{Board, Copies, Item, Kind, Link, history, time};
 use eframe::egui;
 
 use super::EditorApp;
@@ -28,6 +28,8 @@ pub(crate) struct TeamBoard {
     /// Items already assigned to this computer's person when last looked,
     /// so a new assignment says so once.
     assigned: Option<BTreeSet<String>>,
+    /// Each person's history and the People window (T4).
+    pub(crate) history: super::people_history::PeopleHistory,
 }
 
 impl TeamBoard {
@@ -209,6 +211,7 @@ impl EditorApp {
     /// Each frame: reads the board again if a file changed, and draws the
     /// open item's window.
     pub(in crate::app) fn team_board_frame(&mut self, ctx: &egui::Context) {
+        self.people_frame(ctx);
         if self.team_board.stale || self.team_board.panel.open.is_some() {
             self.load_board();
         }
@@ -258,12 +261,16 @@ impl EditorApp {
             return;
         };
         let root = root.clone();
+        // History lines for what this does (T4), written once it's saved.
+        let mut lines = Vec::new();
+        let now = time::now();
         let result = match action {
             BoardAction::Create { kind, title } if writable => {
-                let item = Item::new(kind, &title, &me, time::now());
+                let item = Item::new(kind, &title, &me, now);
                 if item.title.is_empty() {
                     return;
                 }
+                lines.push(history::board_entry(None, &item, &me, now));
                 let opened = item.clone();
                 let result = board.save(&root, item);
                 if result.is_ok() {
@@ -271,8 +278,40 @@ impl EditorApp {
                 }
                 result
             }
-            BoardAction::Save(item) if writable => board.save(&root, *item),
-            BoardAction::Delete(id) if writable => board.delete(&root, &id),
+            BoardAction::AddToGoal { goal, title } if writable => {
+                let mut item = Item::new(Kind::Task, &title, &me, now);
+                if item.title.is_empty() {
+                    return;
+                }
+                item.set_goal(board.get(&goal), &me, now);
+                lines.push(history::board_entry(None, &item, &me, now));
+                board.save(&root, item)
+            }
+            BoardAction::Save(item) if writable => {
+                if board.get(&item.id) != Some(&*item) {
+                    lines.push(history::board_entry(board.get(&item.id), &item, &me, now));
+                }
+                board.save(&root, *item)
+            }
+            BoardAction::Delete(id) if writable => {
+                if let Some(item) = board.get(&id) {
+                    lines.push(history::board_deleted(item, &me, now));
+                }
+                // A goal's tasks and bugs stay, out of the goal.
+                let freed: Vec<Item> = board
+                    .in_goal(&id)
+                    .into_iter()
+                    .map(|item| {
+                        let mut item = item.clone();
+                        item.set_goal(None, &me, now);
+                        item
+                    })
+                    .collect();
+                freed
+                    .into_iter()
+                    .try_for_each(|item| board.save(&root, item))
+                    .and_then(|()| board.delete(&root, &id))
+            }
             BoardAction::SelectInstance(path) => {
                 match crate::console::resolve_path(&self.world, &path) {
                     Some(id) => self.select_many(vec![id]),
@@ -302,13 +341,16 @@ impl EditorApp {
             }
             // A Viewer can look but not change.
             BoardAction::Create { .. }
+            | BoardAction::AddToGoal { .. }
             | BoardAction::Save(_)
             | BoardAction::Delete(_)
             | BoardAction::ReportLastError => return,
         };
-        if let Err(error) = result {
-            self.output
-                .error(format!("Team Board: couldn't save the board: {error}"));
+        match result {
+            Ok(()) => self.record_own_history(lines),
+            Err(error) => self
+                .output
+                .error(format!("Team Board: couldn't save the board: {error}")),
         }
         self.notice_new_assignments();
     }
@@ -350,6 +392,13 @@ impl EditorApp {
                 palette.text_weak
             }));
             show = ui.small_button("Open").clicked();
+            if ui
+                .small_button("People")
+                .on_hover_text("Everything each person changed")
+                .clicked()
+            {
+                self.team_board.panel.people = true;
+            }
         });
         if show {
             self.layout.open(crate::layout::Pane::TeamBoard);
@@ -389,6 +438,7 @@ impl EditorApp {
             Ok(()) => {
                 self.team_board.panel.open_item(&opened);
                 self.layout.open(crate::layout::Pane::TeamBoard);
+                self.record_board_history(None, &opened);
             }
             Err(error) => self
                 .output

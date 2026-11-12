@@ -59,6 +59,25 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
     return out;
 }
 
+// The most light a 16-bit float holds (the scene's and bloom's format).
+const MOST_LIGHT: f32 = 65504.0;
+// The most light one pixel gives bloom. Far above anything a world draws on
+// purpose (a sun disc is tens), it keeps bloom's levels, which add up, from
+// passing MOST_LIGHT.
+const MOST_BLOOM: f32 = 2048.0;
+
+// `color` as the post passes read it: a pixel that isn't a number (0 / 0 or
+// infinity × 0 upstream) is black, and one brighter than 16 bits hold (or
+// infinite) is the most they hold. Without this, one such pixel turns into
+// a square as bloom blurs it level by level. NaN is found from its bits
+// (all exponent bits set, some mantissa bits set): a `color != color` test
+// can be optimized away.
+fn finite_light(color: vec3<f32>, most: f32) -> vec3<f32> {
+    let bits = bitcast<vec3<u32>>(color) & vec3<u32>(0x7fffffffu);
+    let not_a_number = bits > vec3<u32>(0x7f800000u);
+    return select(clamp(color, vec3<f32>(0.0), vec3<f32>(most)), vec3<f32>(0.0), not_a_number);
+}
+
 // The average of a 4x4 block of pixels around `uv` (four bilinear samples).
 fn blur_4x4(uv: vec2<f32>, offset: f32) -> array<vec3<f32>, 4> {
     let texel = 1.0 / vec2<f32>(textureDimensions(source));
@@ -70,10 +89,13 @@ fn blur_4x4(uv: vec2<f32>, offset: f32) -> array<vec3<f32>, 4> {
     return taps;
 }
 
-// Keeps only the light brighter than the threshold, in its own color.
-fn bright_part(color: vec3<f32>) -> vec3<f32> {
+// Keeps only the light brighter than the threshold, in its own color, at
+// most MOST_BLOOM.
+fn bright_part(input: vec3<f32>) -> vec3<f32> {
+    let color = finite_light(input, MOST_LIGHT);
     let peak = max(color.r, max(color.g, color.b));
-    return color * (max(peak - post.values.x, 0.0) / max(peak, 0.0001));
+    let bright = max(peak - post.values.x, 0.0);
+    return color * (min(bright, MOST_BLOOM) / max(peak, 0.0001));
 }
 
 // Scene to the first, half-size bloom level, keeping the bright parts.
@@ -88,14 +110,14 @@ fn fs_prefilter(in: VertexOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_downsample(in: VertexOut) -> @location(0) vec4<f32> {
     let taps = blur_4x4(in.uv, 1.0);
-    return vec4<f32>((taps[0] + taps[1] + taps[2] + taps[3]) * 0.25, 1.0);
+    return vec4<f32>(finite_light((taps[0] + taps[1] + taps[2] + taps[3]) * 0.25, MOST_LIGHT), 1.0);
 }
 
 // A bloom level, blown up and added to the bigger one (the pipeline adds).
 @fragment
 fn fs_upsample(in: VertexOut) -> @location(0) vec4<f32> {
     let taps = blur_4x4(in.uv, 0.5);
-    return vec4<f32>((taps[0] + taps[1] + taps[2] + taps[3]) * 0.25, 1.0);
+    return vec4<f32>(finite_light((taps[0] + taps[1] + taps[2] + taps[3]) * 0.25, MOST_LIGHT), 1.0);
 }
 
 // The tone mapping curves. Each must match its copy in tone_mapping.rs.
@@ -160,7 +182,7 @@ fn tone_map(color: vec3<f32>) -> vec3<f32> {
 }
 
 fn scene_at(uv: vec2<f32>) -> vec3<f32> {
-    return textureSampleLevel(source, linear_sampler, uv, 0.0).rgb;
+    return finite_light(textureSampleLevel(source, linear_sampler, uv, 0.0).rgb, MOST_LIGHT);
 }
 
 // The scene at `uv` through the lens: red and blue parted toward the
@@ -218,7 +240,7 @@ fn lens_finish(input: vec3<f32>, uv: vec2<f32>, pixel: vec2<f32>) -> vec3<f32> {
 fn fs_composite(in: VertexOut) -> @location(0) vec4<f32> {
     var color = through_lens(in.uv);
     if post.flags.x > 0.5 {
-        color += textureSampleLevel(bloom, linear_sampler, in.uv, 0.0).rgb * post.values.y;
+        color += finite_light(textureSampleLevel(bloom, linear_sampler, in.uv, 0.0).rgb, MOST_LIGHT) * post.values.y;
     }
     color *= post.values.z;
     if post.flags.y > 0.5 {

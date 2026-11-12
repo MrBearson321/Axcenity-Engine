@@ -60,6 +60,8 @@ impl EditorApp {
                 // Teamwork files; anything else there is the team's own.
                 if axcenity_teamwork::board::is_board_path(path) {
                     self.board_file_changed();
+                } else if axcenity_teamwork::history::is_history_path(path) {
+                    self.team_board.history.stale = true;
                 }
             } else if project::is_asset_path(path) {
                 self.asset_file_changed(path);
