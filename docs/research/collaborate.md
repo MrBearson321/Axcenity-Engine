@@ -241,6 +241,8 @@ Every way in was reviewed against the roles: the TCP listener, the handshake, an
 | `Checkpoint` | Save-checkpoint (Editors, Owner) | 3, then one every 10 s | Each writes the World to disk: an Editor could fill the host's disk | Fixed (budget). Saved checkpoints aren't pruned: accepted, the Owner decides |
 | `Restore` | Owner | 2, then one every 5 s | — | Fixed (budget) |
 | `AuditLog` (new) | Owner | — | — | — |
+| `HostCard` (Collaborate 2.0 P4) | Editors and the Owner (`Role::may_host`) | 5, then one every 5 s | Each changes the successor list, which goes to everyone; the address is trimmed, one word, at most 260 bytes | Fixed (budget) |
+| `Tail` (Collaborate 2.0 P4) | Only a member a recovering host asked (`SendTail`), once | 3, then one every 10 s; the member's answer holds at most 16 MiB, oldest first (`client::TAIL_BYTES`) | Replayed without role checks (the old host accepted them), so only from a member asked, only entries continuing the host's own count, and only while recovering | Fixed |
 
 **Before signing in** (`socket.rs`, `session.rs`):
 
@@ -328,6 +330,8 @@ Per-member budgets for each kind are in [§6.1](#61-security-review-c10); the li
 | **Version history (C9)** | `Checkpoint(label)` → `Checkpoints(list)` to everyone; `Restore(id)` (Owner); `HistoryNotice(text)` | Host order; a restore is one transaction for everyone | The host's `.axcenity/teamcreate/history`, file contents by hash | Save-checkpoint capability; restore is Owner only | Label 120 characters; 100 listed. Wire format 6 |
 | Membership | `RoleChanged`, `Ended` | Host order | Members file in the host's data folder | Owner only for roles, removal, ending | — |
 | **Audit log (C10)** | `AuditLog` → `AuditLog(entries)` | On request | The host's last 500 in memory, all in `<members file>.audit.jsonl` in its data folder | Owner only | Wire format 7 |
+| **Members list (Collaborate 2.0 P3)** | `Members(MembersList)` | On joining, and to everyone who may host when it changes (its `version`) | Each member's project record in their Collaborate data folder (`records/<id>.json`) | Sent only to Editors and the Owner, never a Viewer | Wire format 8 ([collaborate-persistent.md](collaborate-persistent.md) §8.3) |
+| **Host handoff (Collaborate 2.0 P4)** | `HostCard { address, cert }` up; `Successors { hosts, next_id }` to everyone when the list changes; `HandingOff { to, last_seq }` when the host leaves; `SendTail { after }` → `Tail(entries)` while a new host recovers | Host order; a recovering host replays tails in the old host's order, then the edits it held | Each member's last 2,000 accepted transactions of the current epoch, in memory | Cards from members who may host; tails only when asked | 8 successors. Wire format 9 ([collaborate-persistent.md](collaborate-persistent.md) §8.4) |
 
 ### 9.3 Identifiers, duplicates and recovery
 
@@ -354,7 +358,7 @@ Per-member budgets for each kind are in [§6.1](#61-security-review-c10); the li
 
 Measured on S10k (10,388 Instances, 200 scripts); the tables and how to run them are in [benchmarks](../benchmarks.md#collaborate-on-s10k-c11).
 
-- **Packing.** A packed message starts with `FORMAT | 0x80` (format 8), then one zstd frame that must state its size. The receiver unpacks only up to its limit (`TO_HOST_MOST` 32 MiB, `TO_CLIENT_MOST` 1 GiB), so a small packed message can't fill its memory (`wire_fuzz_tests.rs` feeds it a bomb, a frame without a size and garbage). S10k's join message goes from 953 KiB to 82 KiB, for about 1 ms of packing.
+- **Packing.** A packed message starts with `FORMAT | 0x80` (format 10), then one zstd frame that must state its size. The receiver unpacks only up to its limit (`TO_HOST_MOST` 32 MiB, `TO_CLIENT_MOST` 1 GiB), so a small packed message can't fill its memory (`wire_fuzz_tests.rs` feeds it a bomb, a frame without a size and garbage). S10k's join message goes from 953 KiB to 82 KiB, for about 1 ms of packing.
 - **Joining.** On one computer a member joins S10k in about 0.3 s and opens it as its project in 0.35 s more. The open took 5.9 s before C11 because loading any `world.json` was quadratic in a parent's children (each Instance looked up its prefab segment among all its siblings); now that lookup happens only inside prefab copies, and S10k loads in 0.19 s instead of 5.7.
 - **Idle.** An idle session adds a mean of about 50 µs a frame to the hosting editor and 35 µs to a member (medians 15 and 3 µs); the goal was under 0.1 ms. Most of it is the folder check every 0.5 s (`Mirror::sync`, about 1 ms on S10k's 209 files), which finds saves made outside the editor. If a much bigger project makes that check show, it can move to a worker or follow the editor's file watcher.
 - **Not built, by measurement.** Snapshot streaming (S10k's World is 82 KiB packed, about 70 ms at 10 Mbit/s) and more presence coalescing (four busy members are 19 KiB a second; editors already send at most 10 a second and only changes, and the host drops repeats). Both stay options for much bigger worlds or sessions.

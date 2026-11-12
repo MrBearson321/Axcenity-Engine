@@ -809,3 +809,51 @@ fn a_replayed_sign_in_is_refused() {
     let reason = refusal(gate.receive(&proof, &mut access, access::now()));
     assert!(reason.contains("key didn't match"), "{reason}");
 }
+
+#[test]
+fn whoever_may_host_keeps_the_members_list_and_a_viewer_never_gets_it() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, cert) = host(&owner_id, None);
+    let mut owner = Member::owner(&hosting, &cert, owner_id);
+    let invite = hosting.lock().invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+    let mut sam = Member::invited(&invite, "Sam");
+    let invite = hosting.lock().invite(Role::Viewer, INVITE_LIFETIME_SECONDS);
+    let mut kim = Member::invited(&invite, "Kim");
+    converge(&hosting, &mut [&mut owner, &mut sam, &mut kim]);
+    let newest = hosting.lock().access().version();
+    until(
+        &mut [&mut owner, &mut sam, &mut kim],
+        "the members list",
+        |m| {
+            m[..2].iter().all(|m| {
+                m.client()
+                    .members_list()
+                    .is_some_and(|list| list.version == newest && list.members.len() == 3)
+            })
+        },
+    );
+    assert!(
+        kim.client().members_list().is_none(),
+        "a Viewer never hosts"
+    );
+    let list = sam.client().members_list().unwrap().clone();
+    assert_eq!(list.owner().map(|m| m.name.as_str()), Some("Paul"));
+
+    // A change reaches them again; a Viewer made an Editor gets it too.
+    let kim_id = kim.client().member();
+    hosting.lock().set_role(kim_id, Role::Editor);
+    until(
+        &mut [&mut owner, &mut sam, &mut kim],
+        "the changed list",
+        |m| {
+            m.iter().all(|m| {
+                m.client()
+                    .members_list()
+                    .is_some_and(|list| list.member(kim_id).is_some_and(|k| k.role == Role::Editor))
+            })
+        },
+    );
+    // Another computer could host with it: same members, roles and Owner.
+    let access = Access::from_list(sam.client().members_list().unwrap());
+    assert_eq!(access.members(), hosting.lock().access().members());
+}

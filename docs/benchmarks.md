@@ -602,7 +602,7 @@ cargo test -p axcenity-collab --release --lib perf_tests -- --ignored --nocaptur
 cargo test -p axcenity-editor --release --bin axcenity-editor idle_session -- --ignored --nocapture
 ```
 
-**Joining.** The join message (the session's World) is 953 KiB in postcard. Messages of 16 KiB or more are now packed with zstd at level 1 when that saves at least an eighth (`wire.rs`, format 8): S10k's goes as 82 KiB (9%), packed in about 1 ms and unpacked in 0.6 ms, against 24 ms to encode and 43 ms to decode the message itself. Level 3 gave 99 KiB and level 9 70 KiB in 9 ms, so level 1 stays. The 200 scripts' 65 KiB pack to 1 KiB. Unpacking is bounded: a packed frame must state its size, and nothing over the receiver's limit (32 MiB to the host, 1 GiB to a member) is unpacked.
+**Joining.** The join message (the session's World) is 953 KiB in postcard. Messages of 16 KiB or more are now packed with zstd at level 1 when that saves at least an eighth (`wire.rs`, a flag on the format byte): S10k's goes as 82 KiB (9%), packed in about 1 ms and unpacked in 0.6 ms, against 24 ms to encode and 43 ms to decode the message itself. Level 3 gave 99 KiB and level 9 70 KiB in 9 ms, so level 1 stays. The 200 scripts' 65 KiB pack to 1 KiB. Unpacking is bounded: a packed frame must state its size, and nothing over the receiver's limit (32 MiB to the host, 1 GiB to a member) is unpacked.
 
 | Step, two editors over real sockets on this computer | Time |
 |---|---|

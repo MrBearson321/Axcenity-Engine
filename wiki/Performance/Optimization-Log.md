@@ -70,7 +70,7 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 | **Before → after** | `project::load` of S10k 5.66 → 0.19 s release, ~30 → 0.8 s debug; a member's open of S10k 5.9 → 0.35 s; join message 953 → 82 KiB (1 ms to pack). Idle `team_frame` mean 48–57 µs host, 34–36 µs member |
 | **Method** | Ignored tests `collab::perf_tests` and `editor::team_tests::idle_session_cost_on_s10k`, release, 300 frames 16 ms apart |
 | **Hardware** | Container |
-| **Trade-offs** | A new dependency (zstd, BSD-3); the wire format went to 8. Snapshot streaming and more presence coalescing were measured as not needed at S10k's size |
+| **Trade-offs** | A new dependency (zstd, BSD-3); the wire format number went up. Snapshot streaming and more presence coalescing were measured as not needed at S10k's size |
 | **Detail** | `docs/benchmarks.md`, "Collaborate on S10k (C11)"; `docs/research/collaborate.md` §9.6 |
 
 ### DirectX 12 startup (2026-11-11)

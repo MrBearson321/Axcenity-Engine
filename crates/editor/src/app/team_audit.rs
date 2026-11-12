@@ -25,6 +25,7 @@ fn kind_word(kind: AuditKind) -> &'static str {
         AuditKind::Restored => "Restored",
         AuditKind::Denied => "Not allowed",
         AuditKind::Limited => "Too much",
+        AuditKind::Handoff => "New host",
     }
 }
 

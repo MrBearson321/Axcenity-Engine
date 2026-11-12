@@ -18,7 +18,10 @@ use crate::op::Op;
 use crate::presence::{self, ChatLine, Collaborator, Presence, Profile};
 use crate::role::{Capability, Role};
 
+mod handoff;
 mod history;
+
+pub use handoff::RECOVERY_WAIT;
 
 /// How many applied transactions the host keeps to catch a reconnecting
 /// member up; one further behind gets a fresh snapshot instead.
@@ -80,6 +83,10 @@ struct Member {
     /// When each kind of trouble they caused was last written down, so a
     /// flood is one line a minute in the audit log.
     noted: BTreeMap<&'static str, Instant>,
+    /// How to reach their computer if it hosts (Collaborate 2.0, P4).
+    card: Option<crate::project::HostCard>,
+    /// When they last joined, in the host's count of joins.
+    since: u64,
 }
 
 /// How often the same trouble from one member goes in the audit log.
@@ -125,6 +132,8 @@ pub struct Host {
     closing: Vec<MemberId>,
     /// Each limited kind's budget ([`limits::budget`]; tests use others).
     budgets: limits::Budgets,
+    /// Successors, leaving and recovering (Collaborate 2.0, P4).
+    handoff: handoff::State,
 }
 
 /// A live document the host keeps.
@@ -181,6 +190,7 @@ impl Host {
             audit: Audit::default(),
             closing: Vec::new(),
             budgets: limits::budget,
+            handoff: handoff::State::default(),
         }
     }
 
@@ -308,6 +318,7 @@ impl Host {
         if self.locks.len() != before {
             out.extend(self.locks_to_everyone());
         }
+        out.extend(self.recovery_tick(now));
         out
     }
 
@@ -380,6 +391,8 @@ impl Host {
                 fetching: VecDeque::new(),
                 fetch_head: None,
                 noted: BTreeMap::new(),
+                card: None,
+                since: 0,
             },
         );
     }
@@ -410,6 +423,10 @@ impl Host {
         if self.locks.len() != before {
             out.extend(self.locks_to_everyone());
         }
+        if self.handoff_backup_is(member) {
+            out.extend(self.set_backup(None));
+        }
+        out.extend(self.successors_if_changed());
         out
     }
 
@@ -458,6 +475,7 @@ impl Host {
             });
         }
         out.extend(self.roster_to_everyone());
+        out.extend(self.successors_if_changed());
         out
     }
 
@@ -481,7 +499,9 @@ impl Host {
                 lock.away_since = Some(now);
             }
         }
-        self.roster_to_everyone()
+        let mut out = self.roster_to_everyone();
+        out.extend(self.successors_if_changed());
+        out
     }
 
     /// Handles one message from `member`. Messages from someone who isn't
@@ -502,6 +522,8 @@ impl Host {
             ToHost::Chat(_) => Some(Kind::Chat),
             ToHost::Checkpoint(_) => Some(Kind::Checkpoint),
             ToHost::Restore(_) => Some(Kind::Restore),
+            ToHost::HostCard { .. } => Some(Kind::HostCard),
+            ToHost::Tail(_) => Some(Kind::Tail),
             _ => None,
         };
         if let Some(kind) = kind
@@ -530,6 +552,11 @@ impl Host {
                     // Not joined yet, or a resend of one already handled.
                     return Vec::new();
                 }
+                // Leaving, or gathering a lost host's transactions first.
+                if self.hold(member, &transaction) {
+                    return Vec::new();
+                }
+                let m = self.members.get_mut(&member).expect("checked above");
                 m.last_client_seq = transaction.client_seq;
                 let role = m.role;
                 if let Err(reason) = self.check_files(member, role, &transaction.ops) {
@@ -707,6 +734,8 @@ impl Host {
                     message: ToClient::Ids(block),
                 }]
             }
+            ToHost::HostCard { address, cert } => self.receive_card(member, address, cert),
+            ToHost::Tail(entries) => self.receive_tail(member, entries),
             ToHost::AuditLog => {
                 let m = &self.members[&member];
                 if !m.connected {
@@ -767,7 +796,13 @@ impl Host {
                 lock.away_since = None;
             }
         }
+        // "Connected longest" counts from this connection's first hello
+        // (a resync on the same connection doesn't start it again).
+        if !self.members[&member].connected {
+            self.note_join(member);
+        }
         let mut out = self.catch_up(member, have);
+        out.extend(self.ask_for_tail(member, have));
         out.push(Outgoing {
             to: member,
             message: ToClient::Locks(self.locks()),
@@ -787,6 +822,7 @@ impl Host {
                 message: ToClient::Checkpoints(list),
             });
         }
+        out.extend(self.successors_to(member));
         for (&other, m) in &self.members {
             if other != member && m.connected && m.presence != Presence::default() {
                 out.push(Outgoing {

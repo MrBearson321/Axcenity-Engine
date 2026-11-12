@@ -142,12 +142,24 @@ fn every_message(net: &Net, part: axcenity_core::InstanceId) -> Vec<ToHost> {
         ToHost::Checkpoint("mine".into()),
         ToHost::Restore(checkpoint),
         ToHost::AuditLog,
+        ToHost::HostCard {
+            address: "10.0.0.9:47810".into(),
+            cert: crate::identity::Fingerprint([3; 32]),
+        },
+        // A tail nobody asked for, which would rename the part.
+        ToHost::Tail(vec![crate::message::TailEntry {
+            seq: 1,
+            author: member(1),
+            client_seq: 1,
+            label: "Rename".into(),
+            ops: vec![rename(part, "FromTail")],
+        }]),
     ];
     // Every kind is here: a new one fails to compile until it's added.
     let mut kinds: Vec<&str> = messages.iter().map(name).collect();
     kinds.sort_unstable();
     kinds.dedup();
-    assert_eq!(kinds.len(), 14);
+    assert_eq!(kinds.len(), 16);
     messages
 }
 
@@ -167,6 +179,8 @@ fn name(message: &ToHost) -> &'static str {
         ToHost::Checkpoint(_) => "Checkpoint",
         ToHost::Restore(_) => "Restore",
         ToHost::AuditLog => "AuditLog",
+        ToHost::HostCard { .. } => "HostCard",
+        ToHost::Tail(_) => "Tail",
     }
 }
 
@@ -194,7 +208,11 @@ fn a_viewer_changes_nothing_with_any_message() {
                 o.to == viewer
                     || matches!(
                         o.message,
-                        ToClient::Roster(_) | ToClient::Presence { .. } | ToClient::Chat(_)
+                        ToClient::Roster(_)
+                            | ToClient::Presence { .. }
+                            | ToClient::Chat(_)
+                            // Who's online changed: so may who hosts next.
+                            | ToClient::Successors { .. }
                     ),
                 "a Viewer's {what} sent {:?} to someone else",
                 o.message

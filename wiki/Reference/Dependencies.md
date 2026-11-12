@@ -41,7 +41,6 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | MCP (editor only) | `rmcp` 3.9 (server, stdio), `tokio` 1.53 (rt, sync, io) | mcp | MIT/Apache | Never in the player or server |
 | Toolbox (editor only) | `rusqlite` 0.41 (bundled SQLite), `md-5` 0.11 | toolbox | MIT | `metadata.db` |
 | Release and updates | `semver` 1, `sha2` 0.11, `toml` 1, `minisign-verify` 0.2, `tar` 0.4, `flate2` 1 | release, updater | MIT/Apache | `release` is light (player and server link it); `updater` only the editor and its own binary |
-| Dev only | `subsecond`, `dioxus-devtools`, `dioxus-cli-config` 0.7 | editor `hot-patch` feature | MIT/Apache | Off by default; nothing else can turn it on |
 
 ## Rules
 
