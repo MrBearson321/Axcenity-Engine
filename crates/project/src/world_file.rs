@@ -36,7 +36,9 @@
 //! something in it.
 //!
 //! `Locked` and `BlueprintTexture` are only written when on, so a Folder
-//! that's never been locked still has no `properties` at all.
+//! that's never been locked still has no `properties` at all. A part's
+//! `LinearDrag`, `AngularDrag` and `RollingFriction` are only written when
+//! they aren't their defaults.
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
@@ -90,6 +92,14 @@ const PLAIN_FORMAT_VERSION: u32 = 1;
 const SCRIPTS_FORMAT_VERSION: u32 = 2;
 /// Editor-only switches that are off nearly everywhere.
 const WRITTEN_ONLY_WHEN_ON: [&str; 2] = ["Locked", "BlueprintTexture"];
+/// Parts' drag and rolling friction (cohesion pass CW6.2), at their
+/// defaults nearly everywhere: written only when changed, so worlds saved
+/// before them are saved the same.
+const WRITTEN_ONLY_WHEN_CHANGED: [(&str, f64); 3] = [
+    ("LinearDrag", 0.0),
+    ("AngularDrag", axcenity_core::DEFAULT_ANGULAR_DRAG),
+    ("RollingFriction", 0.0),
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorldError {
@@ -974,6 +984,11 @@ fn write_instance(
         .filter(|(name, value)| !defaults.iter().any(|(n, v)| n == name && v == *value))
         .filter(|(name, value)| {
             !(WRITTEN_ONLY_WHEN_ON.contains(name) && **value == Value::Bool(false))
+        })
+        .filter(|(name, value)| {
+            !WRITTEN_ONLY_WHEN_CHANGED
+                .iter()
+                .any(|(n, default)| n == name && **value == Value::Number(*default))
         })
         .map(|(name, value)| {
             let json = match value {

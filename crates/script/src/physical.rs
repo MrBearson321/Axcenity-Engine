@@ -6,6 +6,13 @@
 //! Fracture's `Shatter(point, force)` (Phase 42), which the host hands to
 //! physics before its next step.
 //!
+//! `ApplyForce(force, seconds?)` and `ApplyTorque(torque, seconds?)`
+//! (cohesion pass CW6.2) are an impulse of the force times the time it
+//! acts, one physics step (1/60 s) if left out: pass Heartbeat's time to
+//! push steadily from a script, or use a VectorForce or Torque. A part's
+//! read-only `AssemblyLinearMomentum` is its assembly's mass times its
+//! velocity.
+//!
 //! An impulse doesn't reach physics directly: it changes the part's
 //! `AssemblyLinearVelocity` and `AssemblyAngularVelocity` by the impulse
 //! over the part's mass (and inertia), and physics, which compares each
@@ -14,7 +21,7 @@
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Material, PhysicalProperties, Value, Vector3, World};
-use axcenity_physics::{Mass, assembly};
+use axcenity_physics::{Mass, STEP_SECONDS, assembly};
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods};
 
 use crate::instance::{LuaInstance, destroyed, world, world_mut};
@@ -157,6 +164,22 @@ fn add_velocity(lua: &Lua, id: InstanceId, name: &str, change: Vector3) -> mlua:
         .map_err(mlua::Error::runtime)
 }
 
+/// How long `ApplyForce` or `ApplyTorque` acts: one step if left out.
+fn acting_time(seconds: Option<f64>, call: &str) -> mlua::Result<f64> {
+    let seconds = seconds.unwrap_or(STEP_SECONDS);
+    if !seconds.is_finite() || seconds < 0.0 {
+        return Err(mlua::Error::runtime(format!(
+            "{call} needs a time of 0 seconds or more"
+        )));
+    }
+    Ok(seconds)
+}
+
+fn scaled(v: Vector3, by: f64) -> Vector3 {
+    let by = by as f32;
+    Vector3::new(v.x * by, v.y * by, v.z * by)
+}
+
 fn vector_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<Vector3> {
     LuaVector3::from_lua(value.clone(), lua)
         .map(|v| v.0)
@@ -201,6 +224,24 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
             let spin = mass(lua, this.0)?.spin_change(impulse);
             add_velocity(lua, this.0, "AssemblyAngularVelocity", spin)
         })?;
+    let apply_force = lua.create_function(
+        |lua, (this, force, seconds): (LuaInstance, mlua::Value, Option<f64>)| {
+            let call = "ApplyForce(force, seconds)";
+            let force = vector_arg(lua, force, call)?;
+            let seconds = acting_time(seconds, call)?;
+            let change = mass(lua, this.0)?.velocity_change(scaled(force, seconds));
+            add_velocity(lua, this.0, "AssemblyLinearVelocity", change)
+        },
+    )?;
+    let apply_torque = lua.create_function(
+        |lua, (this, torque, seconds): (LuaInstance, mlua::Value, Option<f64>)| {
+            let call = "ApplyTorque(torque, seconds)";
+            let torque = vector_arg(lua, torque, call)?;
+            let seconds = acting_time(seconds, call)?;
+            let spin = mass(lua, this.0)?.spin_change(scaled(torque, seconds));
+            add_velocity(lua, this.0, "AssemblyAngularVelocity", spin)
+        },
+    )?;
     let get_mass =
         lua.create_function(|lua, this: LuaInstance| Ok(f32_to_lua(part_mass(lua, this.0)?.mass)))?;
     let get_connected =
@@ -277,6 +318,8 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
         methods.push((class, "ApplyImpulse", apply_impulse.clone()));
         methods.push((class, "ApplyImpulseAtPosition", apply_at.clone()));
         methods.push((class, "ApplyAngularImpulse", apply_angular.clone()));
+        methods.push((class, "ApplyForce", apply_force.clone()));
+        methods.push((class, "ApplyTorque", apply_torque.clone()));
         methods.push((class, "GetMass", get_mass.clone()));
         methods.push((class, "GetConnectedParts", get_connected.clone()));
         methods.push((class, "GetRootPart", get_root.clone()));
@@ -285,10 +328,12 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
 }
 
 /// The read-only fields worked out from a part: `AssemblyMass`,
-/// `AssemblyCenterOfMass` and `CurrentPhysicalProperties`.
-pub const COMPUTED: [&str; 3] = [
+/// `AssemblyCenterOfMass`, `AssemblyLinearMomentum` and
+/// `CurrentPhysicalProperties`.
+pub const COMPUTED: [&str; 4] = [
     "AssemblyMass",
     "AssemblyCenterOfMass",
+    "AssemblyLinearMomentum",
     "CurrentPhysicalProperties",
 ];
 
@@ -303,6 +348,16 @@ pub fn computed(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<Option<mlu
         // it's Massless, as a root part does.
         "AssemblyMass" => f32_to_lua(mass(lua, id)?.mass).into_lua(lua)?,
         "AssemblyCenterOfMass" => LuaVector3(mass(lua, id)?.center).into_lua(lua)?,
+        "AssemblyLinearMomentum" => {
+            let velocity = {
+                let world = world(lua)?;
+                let part = world.get(id).ok_or_else(destroyed)?;
+                part.property("AssemblyLinearVelocity")
+                    .and_then(Value::as_vector3)
+                    .unwrap_or_default()
+            };
+            LuaVector3(scaled(velocity, f64::from(mass(lua, id)?.mass))).into_lua(lua)?
+        }
         _ => LuaPhysicalProperties(current(lua, id)?).into_lua(lua)?,
     };
     Ok(Some(value))

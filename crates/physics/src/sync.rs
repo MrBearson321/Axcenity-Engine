@@ -17,8 +17,8 @@ use rapier3d::prelude::{Collider, QueryFilter, RigidBodyBuilder, RigidBodyHandle
 
 use crate::shapes::{self, Form};
 use crate::{
-    ANGULAR_DAMPING, Body, PartState, Physics, assembly, fracture, joints, material, movers,
-    part_collider, to_vec3, vehicles,
+    Body, PartState, Physics, assembly, fracture, joints, material, movers, part_collider, to_vec3,
+    vehicles,
 };
 
 /// Extra solver iterations for a ragdoll's bodies, so a long chain of
@@ -351,6 +351,9 @@ impl Physics {
         // What it was touching where it was, then what it touches now.
         self.wake_touching(part.body);
         self.apply_change(&mut part, state, weightless);
+        if part.root && part.seen.drag.rolling > 0.0 {
+            self.rolling_parts.insert(id);
+        }
         self.wake_overlapping(part.body);
         moved.insert(part.body);
         self.owners.insert(part.collider, id, part.seen.can_touch);
@@ -514,16 +517,19 @@ impl Physics {
         let root_pose = root_state.pose();
         let ragdolled = members.iter().any(|id| self.ragdoll_bodies.contains(id));
         let extra_iterations = if ragdolled { RAGDOLL_ITERATIONS } else { 0 };
-        let body = RigidBodyBuilder::new(body_type)
+        let mut body = RigidBodyBuilder::new(body_type)
             .pose(root_pose)
             // Continuous collision detection: fast parts can't skip through
             // thin ones between two steps.
             .ccd_enabled(true)
-            .angular_damping(ANGULAR_DAMPING)
             .additional_solver_iterations(extra_iterations)
             .linvel(to_vec3(velocity))
             .angvel(to_vec3(spin))
             .build();
+        root_state.drag.apply(&mut body);
+        if root_state.drag.rolling > 0.0 {
+            self.rolling_parts.insert(root);
+        }
         let body = self.rapier.bodies.insert(body);
         // Written back even if it never wakes: an anchored one's parts
         // read zero velocities from now on.
@@ -635,6 +641,9 @@ impl Physics {
         };
         if old.anchored != state.anchored {
             body.set_body_type(state.body_type(), true);
+        }
+        if part.root && old.drag != state.drag {
+            state.drag.apply(body);
         }
         let moved = old.position != state.position || old.orientation != state.orientation;
         if moved {

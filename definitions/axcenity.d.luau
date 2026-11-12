@@ -1634,6 +1634,12 @@ declare extern type Part extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
 	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
@@ -1642,6 +1648,8 @@ declare extern type Part extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -1677,6 +1685,10 @@ declare extern type Part extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -1717,6 +1729,12 @@ declare extern type MeshPart extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
 	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
@@ -1725,6 +1743,8 @@ declare extern type MeshPart extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -1760,6 +1780,10 @@ declare extern type MeshPart extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -1804,6 +1828,12 @@ declare extern type UnionOperation extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
 	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
@@ -1812,6 +1842,8 @@ declare extern type UnionOperation extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -1847,6 +1879,10 @@ declare extern type UnionOperation extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -1903,6 +1939,12 @@ declare extern type NegateOperation extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
 	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
@@ -1911,6 +1953,8 @@ declare extern type NegateOperation extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -1946,6 +1990,10 @@ declare extern type NegateOperation extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -2002,6 +2050,12 @@ declare extern type Seat extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- The character controller sitting on the seat, or nil. Read-only: `seat:Sit(controller)` sits one, and `controller.Sit = false` stands it up.
 	Occupant: Instance?
 	--- If true, characters that touch the seat don't sit on it. `seat:Sit(controller)` still works.
@@ -2016,6 +2070,8 @@ declare extern type Seat extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -2053,6 +2109,10 @@ declare extern type Seat extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -2109,6 +2169,12 @@ declare extern type VehicleSeat extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- The character controller sitting on the seat, or nil. Read-only: `seat:Sit(controller)` sits one, and `controller.Sit = false` stands it up.
 	Occupant: Instance?
 	--- If true, characters that touch the seat don't sit on it. `seat:Sit(controller)` still works.
@@ -2137,6 +2203,8 @@ declare extern type VehicleSeat extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -2174,6 +2242,10 @@ declare extern type VehicleSeat extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -2230,6 +2302,12 @@ declare extern type DamageZone extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.
 	DamagePerSecond: number
 	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
@@ -2240,6 +2318,8 @@ declare extern type DamageZone extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -2275,6 +2355,10 @@ declare extern type DamageZone extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -2331,6 +2415,12 @@ declare extern type ReverbZone extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- The room it sounds like (`Enum.ReverbType`): Room (the default), StoneRoom, Hallway, Cave, ConcertHall, Arena or SewerPipe.
 	ReverbType: EnumReverbType | "Room" | "StoneRoom" | "Hallway" | "Cave" | "ConcertHall" | "Arena" | "SewerPipe"
 	--- Seconds the reverb takes to blend in when the camera comes in, and out when it leaves. 1 by default.
@@ -2343,6 +2433,8 @@ declare extern type ReverbZone extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -2378,6 +2470,10 @@ declare extern type ReverbZone extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -2434,6 +2530,12 @@ declare extern type SpawnLocation extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- If false, nobody spawns here.
 	Enabled: boolean
 	--- If true, any player can spawn here: neutral players, and players whose team has no enabled SpawnLocation of its own. If false, only players on the Team of its TeamColor.
@@ -2450,6 +2552,8 @@ declare extern type SpawnLocation extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -2485,6 +2589,10 @@ declare extern type SpawnLocation extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end
@@ -3776,6 +3884,12 @@ declare extern type GraphicsVolume extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+	LinearDrag: number
+	--- Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+	AngularDrag: number
+	--- Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+	RollingFriction: number
 	--- If false, it changes nothing.
 	Enabled: boolean
 	--- Studs outside its faces over which its look fades in as the camera comes closer, and out as it leaves (5 by default). Inside it, the look is whole. 0 switches it on at the faces.
@@ -3790,6 +3904,8 @@ declare extern type GraphicsVolume extends Instance with
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
+	--- Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
+	AssemblyLinearMomentum: Vector3
 	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -3825,6 +3941,10 @@ declare extern type GraphicsVolume extends Instance with
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
 	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
 	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+	function ApplyForce(self, force: Vector3, seconds: number?): ()
+	--- Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
+	function ApplyTorque(self, torque: Vector3, seconds: number?): ()
 	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
 	function GetMass(self): number
 end

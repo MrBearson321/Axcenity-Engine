@@ -214,6 +214,30 @@ VehicleSeat.AssemblyAngularVelocity: Vector3
 
 How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 
+#### LinearDrag
+
+```luau
+VehicleSeat.LinearDrag: number
+```
+
+Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.
+
+#### AngularDrag
+
+```luau
+VehicleSeat.AngularDrag: number
+```
+
+Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.
+
+#### RollingFriction
+
+```luau
+VehicleSeat.RollingFriction: number
+```
+
+Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.
+
 #### Occupant
 
 ```luau
@@ -325,6 +349,14 @@ VehicleSeat.AssemblyCenterOfMass: Vector3
 ```
 
 Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+
+#### AssemblyLinearMomentum
+
+```luau
+VehicleSeat.AssemblyLinearMomentum: Vector3
+```
+
+Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.
 
 #### CurrentPhysicalProperties
 
@@ -473,6 +505,22 @@ VehicleSeat:ApplyAngularImpulse(impulse: Vector3): ()
 ```
 
 Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+
+#### ApplyForce
+
+```luau
+VehicleSeat:ApplyForce(force: Vector3, seconds: number?): ()
+```
+
+Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.
+
+#### ApplyTorque
+
+```luau
+VehicleSeat:ApplyTorque(torque: Vector3, seconds: number?): ()
+```
+
+Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.
 
 #### GetMass
 

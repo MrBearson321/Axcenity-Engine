@@ -54,8 +54,10 @@
 //! [`debug_colliders`] read the world the same way the simulation does,
 //! without stepping it or writing back.
 
+mod api;
 pub mod assembly;
 mod blend;
+mod drag;
 mod fracture;
 pub mod joints;
 mod mass;
@@ -70,6 +72,7 @@ mod sync;
 pub mod threads;
 mod vehicles;
 
+pub use api::{GRAVITY, STEP_SECONDS, SyncStats, WIND_DRAG, gravity};
 pub use blend::{Blend, interpolates};
 pub use mass::Mass;
 pub use query::{
@@ -95,13 +98,6 @@ use rapier3d::prelude::{
 };
 use shapes::{Fidelity, Form};
 
-/// How long one physics step is: physics always runs at 60 steps a second.
-pub const STEP_SECONDS: f64 = 1.0 / 60.0;
-
-/// Downward pull in studs per second squared (about 1 stud = 0.28 m): the
-/// default of the Workspace's `Gravity`, which [`gravity`] reads.
-pub const GRAVITY: f32 = 196.2;
-
 /// How far, in studs, two touching colliders may move against each other
 /// before rapier works out their contact points again instead of keeping
 /// last step's (rapier's default is 0.05). Kept points carry their impulses
@@ -119,16 +115,6 @@ const MAX_STEPS_PER_FRAME: u32 = 10;
 /// A frame that is this close to a whole number of steps counts as reaching
 /// it, so rounding in summed frame times (1/144 + 1/144 + …) never costs a step.
 const STEP_TOLERANCE: f64 = 1e-6;
-
-/// How quickly spinning slows down by itself. rapier has no rolling
-/// resistance, so without this a ball on flat ground would roll forever.
-const ANGULAR_DAMPING: f32 = 0.5;
-
-/// How hard the wind pushes: the force on a part is this times its average
-/// face area times how much faster the wind moves than the part. With
-/// density 1, a 50 studs/s wind blows a thin 2×0.2×2 sheet along the
-/// ground, while a 4×1×2 block stays put there and only drifts in the air.
-pub const WIND_DRAG: f32 = 2.0;
 
 /// How many steps in a row two parts must be apart before touching again
 /// counts as a new touch. Parts resting on each other can lose and regain
@@ -209,20 +195,9 @@ pub struct Physics {
     stats: SyncStats,
     /// Where moving parts are drawn between steps (see [`blend`]).
     blending: blend::Blending,
-}
-
-/// How much the last [`Physics::step`] read from the world to catch up, for
-/// tests and profiling.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SyncStats {
-    /// How many parts' properties were read.
-    pub parts_read: usize,
-    /// How many bodies were built, one per assembly.
-    pub bodies_built: usize,
-    /// True if all of the Workspace was read again.
-    pub full_sync: bool,
-    /// How many parts the write-back looked at.
-    pub parts_written: usize,
+    /// Root parts whose `RollingFriction` was above 0 when synced (see
+    /// `drag`); ones that no longer are drop out lazily.
+    rolling_parts: BTreeSet<InstanceId>,
 }
 
 /// How a body moved before a step: its velocities and center of mass.
@@ -309,6 +284,9 @@ pub(crate) struct PartState {
     can_touch: bool,
     /// False: scripts' queries pass it by (`CanQuery`).
     pub(crate) can_query: bool,
+    /// Its drag and rolling friction, which its body takes if it's the
+    /// assembly's root.
+    drag: drag::Drag,
 }
 
 /// A part's collision group as bits: its own, and every group it collides
@@ -416,6 +394,7 @@ impl PartState {
             groups: Groups::of(world, group),
             can_touch: flag("CanTouch"),
             can_query: flag("CanQuery"),
+            drag: drag::Drag::read(instance),
         };
         // A NaN or infinite velocity is ignored, not simulated.
         let placed = [state.size, state.position, state.orientation]
@@ -471,6 +450,7 @@ impl PartState {
             groups: Groups::of(world, axcenity_core::DEFAULT_GROUP),
             can_touch: true,
             can_query: true,
+            drag: drag::Drag::DEFAULT,
         };
         [state.size, state.position]
             .iter()
@@ -563,6 +543,7 @@ impl Physics {
             assets_generation: 0,
             stats: SyncStats::default(),
             blending: blend::Blending::default(),
+            rolling_parts: BTreeSet::new(),
         }
     }
 
@@ -664,6 +645,7 @@ impl Physics {
                 self.remember_before_last_step(&wheels);
             }
             self.blow(wind);
+            self.roll();
             joints::drive(&mut self.rapier, &mut self.joints);
             // After the wind, which `blow` adds once the forces are reset.
             movers::apply(
@@ -1182,18 +1164,6 @@ fn global_wind(world: &World) -> Vec3 {
         .unwrap_or(Vec3::ZERO)
 }
 
-/// The Workspace's `Gravity` in studs a second squared, or [`GRAVITY`] if
-/// it isn't a finite number. The character controllers fall by it too.
-pub fn gravity(world: &World) -> f32 {
-    world
-        .get(world.workspace())
-        .and_then(|workspace| workspace.property("Gravity"))
-        .and_then(Value::as_number)
-        .map(|gravity| gravity as f32)
-        .filter(|gravity| gravity.is_finite())
-        .unwrap_or(GRAVITY)
-}
-
 fn finite(v: Vector3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
@@ -1247,3 +1217,6 @@ mod fracture_tests;
 
 #[cfg(test)]
 mod blend_tests;
+
+#[cfg(test)]
+mod property_tests;

@@ -658,6 +658,18 @@ Container, release, `--bench 600`, medians in ms (two runs after, within 10% of 
 
 The worst frame is a teleport: the tick after `RequestStreamAroundAsync` sends up to a second's budget of Instances (`INSTANCES_PER_SECOND`) at once, about 14 ms of `replicate::create` here. The container is about 2.5 times slower than the reference desktop, so the server frame should be near 2 ms there; Phase 80's criterion is ticked from the desktop's numbers.
 
+### Physics properties (cohesion pass CP6)
+
+`step_cost` (`physics/src/property_tests.rs`; `cargo test -p axcenity-physics --release step_cost -- --ignored --nocapture`) drops 1,000, 5,000 or 10,000 blocks in a grid onto a floor and times 240 steps after 60 to settle in. Main (`1a2ac6e`, with the bench copied in) and the branch adding `LinearDrag`, `AngularDrag` and `RollingFriction` were built into one target folder, copied out and run alternately on the cloud container (4 vCPUs), seven rounds; medians of the runs' step medians in milliseconds, ranges in brackets:
+
+| Bodies | main | branch | change |
+|---|---|---|---|
+| 1,000 | 1.18 [1.05–1.69] | 1.33 [1.14–1.83] | +13% |
+| 5,000 | 5.10 [4.10–5.81] | 5.37 [5.15–6.01] | +5% |
+| 10,000 | 10.56 [9.65–15.17] | 10.99 [10.12–17.11] | +4% |
+
+The branch does no new work per step in these scenes (no part has rolling friction, so `Physics::roll` returns at once; drag is set when a body is built), and the ranges overlap almost entirely, so this is within the container's noise; a part's state is 12 bytes bigger. Recheck on the desktop.
+
 ### Calibrating against the rendering baseline
 
 The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.

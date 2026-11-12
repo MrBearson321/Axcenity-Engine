@@ -210,3 +210,60 @@ fn setting_velocity_throws_a_part_and_gravity_reads_from_the_workspace() {
     assert!(velocity.y.abs() < 1e-3, "{velocity:?}");
     assert!((vector(&world, part, "Position").z - 6.0).abs() < 0.3);
 }
+
+#[test]
+fn apply_force_pushes_for_one_step_or_the_time_given() {
+    // A 2×2×2 Plastic block weighs 8.
+    let (mut world, part, mut physics) = floating("Box", Vector3::new(2.0, 2.0, 2.0));
+    run(
+        &mut world,
+        "workspace.Box:ApplyForce(Vector3.new(480, 0, 0))",
+    );
+    physics.step(&mut world, STEP);
+    // 480 for 1/60 s is an impulse of 8: 1 stud a second.
+    let velocity = vector(&world, part, "AssemblyLinearVelocity");
+    assert!((velocity.x - 1.0).abs() < 1e-3, "{velocity:?}");
+
+    let (mut world, part, mut physics) = floating("Box", Vector3::new(2.0, 2.0, 2.0));
+    run(
+        &mut world,
+        "workspace.Box:ApplyForce(Vector3.new(16, 0, 0), 2)",
+    );
+    physics.step(&mut world, STEP);
+    let velocity = vector(&world, part, "AssemblyLinearVelocity");
+    assert!((velocity.x - 4.0).abs() < 1e-3, "{velocity:?}");
+
+    let (_, lines) = run(
+        &mut world,
+        "print(pcall(function() workspace.Box:ApplyForce(Vector3.new(1, 0, 0), -1) end))",
+    );
+    assert!(lines[0].contains("0 seconds or more"), "{lines:?}");
+}
+
+#[test]
+fn apply_torque_spins_through_inertia() {
+    let (mut world, part, mut physics) = floating("Box", Vector3::new(1.0, 1.0, 1.0));
+    // A unit cube's inertia is 1/6: a torque of 60 for one step spins it
+    // at 6 radians a second.
+    run(
+        &mut world,
+        "workspace.Box:ApplyTorque(Vector3.new(0, 60, 0))",
+    );
+    physics.step(&mut world, STEP);
+    let spin = vector(&world, part, "AssemblyAngularVelocity");
+    assert!((spin.y - 6.0).abs() < 0.1, "{spin:?}");
+}
+
+#[test]
+fn linear_momentum_is_mass_times_velocity() {
+    let (mut world, part, _) = floating("Box", Vector3::new(2.0, 2.0, 2.0));
+    world
+        .set_property(
+            part,
+            "AssemblyLinearVelocity",
+            Value::Vector3(Vector3::new(3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let (_, lines) = run(&mut world, "print(workspace.Box.AssemblyLinearMomentum)");
+    assert_eq!(lines, ["24, 0, 0"]);
+}
