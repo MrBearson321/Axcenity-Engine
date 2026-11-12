@@ -235,7 +235,7 @@ fn instances_destroyed_since_come_back_at_new_ids_with_what_points_at_them() {
     let mut next = 5000;
     let mut fresh = || {
         next += 1;
-        axcenity_core::InstanceId::from_bits(next)
+        Some(axcenity_core::InstanceId::from_bits(next))
     };
     let restore = restore_ops(
         &now,

@@ -119,6 +119,7 @@ revoke                       revokes every invite not used yet
 role <member> <editor|viewer|owner>
                              changes a member's role
 remove <member>              takes a member out of the project
+audit [count]                the newest lines of the audit log (20 unless said)
 save                         writes the project's World now
 quit                         saves, tells everyone the session ended, and stops";
 
@@ -340,6 +341,14 @@ impl Server {
                     Reply::say(format!("Took member {} out of the project.", member.0))
                 }
             },
+            ["audit", rest @ ..] => match rest {
+                [] => Reply::say(self.audit(20)),
+                [count] => match count.parse() {
+                    Ok(count) => Reply::say(self.audit(count)),
+                    Err(_) => Reply::say(format!("`{count}` isn't a number of lines")),
+                },
+                _ => Reply::say("Use `audit` or `audit <count>`."),
+            },
             ["save"] => Reply::say(match self.save() {
                 Ok(Some(text)) => text,
                 Ok(None) => "Nothing changed since the last save.".to_owned(),
@@ -378,6 +387,31 @@ impl Server {
             self.port,
             session.address(),
         )
+    }
+
+    /// The newest `count` lines of the audit log, oldest first.
+    fn audit(&self, count: usize) -> String {
+        let log = self.hosting().lock().host().audit_log();
+        if log.is_empty() {
+            return "Nothing in the audit log yet.".to_owned();
+        }
+        let skip = log.len().saturating_sub(count);
+        log[skip..]
+            .iter()
+            .map(|entry| {
+                let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(entry.at);
+                let ago = std::time::SystemTime::now()
+                    .duration_since(when)
+                    .map_or(0, |d| d.as_secs());
+                format!(
+                    "{:>6}s ago  {:<8} {}",
+                    ago,
+                    format!("{:?}", entry.kind),
+                    entry.text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn members(&self) -> String {

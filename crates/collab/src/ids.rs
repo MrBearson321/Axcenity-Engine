@@ -38,16 +38,33 @@ impl IdAllocator {
         Self { next: first }
     }
 
-    pub fn block(&mut self) -> IdBlock {
+    /// The next block; `None` once the indices a World can hold (2^31)
+    /// are used up, which takes two million blocks.
+    pub fn block(&mut self) -> Option<IdBlock> {
+        let next = self
+            .next
+            .checked_add(BLOCK_SIZE)
+            .filter(|&n| n <= 1 << 31)?;
         let block = IdBlock {
             start: self.next,
             len: BLOCK_SIZE,
         };
-        self.next = self
-            .next
-            .checked_add(BLOCK_SIZE)
-            .filter(|&next| next < 1 << 31)
-            .expect("Collaborate ran out of IDs (over 2 billion)");
-        block
+        self.next = next;
+        Some(block)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_out_of_ids_is_none_not_a_crash() {
+        let mut ids = IdAllocator::new((1 << 31) - 2 * BLOCK_SIZE);
+        assert!(ids.block().is_some());
+        let last = ids.block().unwrap();
+        assert_eq!(last.start + last.len, 1 << 31);
+        assert_eq!(ids.block(), None);
+        assert_eq!(ids.block(), None);
     }
 }

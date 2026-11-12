@@ -7,7 +7,7 @@
 //! The hosting editor joins its own session like anyone else, over the
 //! loopback address, so there's one code path for every member.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
@@ -18,9 +18,11 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::access::{self, Access, Invite, Member};
+use crate::audit::{self, AuditKind};
 use crate::handshake::{Gate, GateStep, Knock, KnockStep, Versions};
 use crate::host::Host;
-use crate::identity::{Fingerprint, Identity};
+use crate::identity::{Fingerprint, IdentityProvider};
+use crate::limits;
 use crate::message::{MemberId, ToClient, ToHost};
 use crate::presence::Profile;
 use crate::role::Role;
@@ -54,7 +56,12 @@ pub struct HostSession {
     address: String,
     /// The session's name, carried by invites (C4).
     name: Option<String>,
-    gates: HashMap<ConnId, Gate>,
+    /// Connections partway through the handshake, with where they're from
+    /// and when they opened.
+    gates: HashMap<ConnId, (Gate, IpAddr, Instant)>,
+    /// When each address last failed handshakes, within
+    /// [`limits::FAILURES_WINDOW`].
+    failures: HashMap<IpAddr, VecDeque<Instant>>,
     members: HashMap<ConnId, MemberId>,
     conns: HashMap<MemberId, ConnId>,
     /// Each connection's messages in the current second (rate limit).
@@ -90,6 +97,9 @@ impl HostSession {
             };
             let _ = host.set_profile(member.id, profile);
         }
+        if let Some(path) = &access_path {
+            host.keep_audit_in(audit::file_beside(path));
+        }
         let listener = Listener::bind(bind, cert)?;
         let port = listener.address().port();
         let address = address.unwrap_or_else(|| {
@@ -106,6 +116,7 @@ impl HostSession {
             address,
             name: None,
             gates: HashMap::new(),
+            failures: HashMap::new(),
             members: HashMap::new(),
             conns: HashMap::new(),
             rates: HashMap::new(),
@@ -171,6 +182,14 @@ impl HostSession {
     pub fn invite(&mut self, role: Role, lifetime: u64) -> Invite {
         let secret = self.access.invite(role, lifetime, access::now());
         self.save_access();
+        self.host.record(
+            AuditKind::Invite,
+            None,
+            format!(
+                "Made an invite for a new {role:?}, working once for {} days",
+                lifetime.div_ceil(24 * 60 * 60)
+            ),
+        );
         Invite {
             host: self.address.clone(),
             cert: self.cert,
@@ -183,6 +202,8 @@ impl HostSession {
     pub fn revoke_invites(&mut self) {
         self.access.revoke_invites();
         self.save_access();
+        self.host
+            .record(AuditKind::Invite, None, "Revoked the invites not used yet");
     }
 
     /// Changes a member's role, at once if they're connected.
@@ -221,6 +242,7 @@ impl HostSession {
     /// Lets the host's clock move on (document locks of members who left
     /// end after a while).
     fn tick(&mut self) {
+        self.close_slow_knockers();
         let out = self.host.tick(std::time::Instant::now());
         self.route(out);
     }
@@ -264,9 +286,14 @@ impl HostSession {
 
     fn handle(&mut self, event: NetEvent) {
         match event {
-            NetEvent::Opened(conn) => {
-                self.gates
-                    .insert(conn, Gate::new(self.cert, self.versions.clone()));
+            NetEvent::Opened(conn, ip) => {
+                if self.gates.len() >= limits::KNOCKING_MOST {
+                    log::warn!("Collaborate: too many joiners at once; one was closed");
+                    self.listener.close(conn);
+                    return;
+                }
+                let gate = Gate::new(self.cert, self.versions.clone());
+                self.gates.insert(conn, (gate, ip, Instant::now()));
             }
             NetEvent::Message(conn, bytes) => {
                 if !self.within_rate(conn) {
@@ -279,13 +306,19 @@ impl HostSession {
                         Ok(message) => {
                             let out = self.host.receive(member, message);
                             self.route(out);
+                            for member in self.host.take_closing() {
+                                if let Some(&conn) = self.conns.get(&member) {
+                                    self.listener.close(conn);
+                                }
+                            }
                         }
                         Err(error) => {
                             log::warn!("Collaborate: member {} sent {error}", member.0);
                             self.listener.close(conn);
                         }
                     }
-                } else if let Some(gate) = self.gates.get_mut(&conn) {
+                } else if let Some((gate, ip, _)) = self.gates.get_mut(&conn) {
+                    let ip = *ip;
                     match gate.receive(&bytes, &mut self.access, access::now()) {
                         GateStep::Reply(reply) => self.listener.send(conn, reply),
                         GateStep::Admit { member, reply } => {
@@ -298,6 +331,12 @@ impl HostSession {
                             self.gates.remove(&conn);
                             self.listener.send(conn, reply);
                             self.listener.close(conn);
+                            self.host_mut().record(
+                                AuditKind::Refused,
+                                None,
+                                format!("Turned away a joiner from {ip}: {reason}"),
+                            );
+                            self.failed(ip);
                         }
                     }
                 }
@@ -322,6 +361,57 @@ impl HostSession {
                     log::info!("Collaborate: {name} left (or their connection dropped)");
                 }
             }
+        }
+    }
+
+    /// Counts a failed handshake from `ip`; past [`limits::FAILURES_MOST`]
+    /// in [`limits::FAILURES_WINDOW`], its new connections are closed as
+    /// they open until the window has passed.
+    fn failed(&mut self, ip: IpAddr) {
+        let now = Instant::now();
+        let times = self.failures.entry(ip).or_default();
+        times.push_back(now);
+        while times
+            .front()
+            .is_some_and(|&at| now.duration_since(at) >= limits::FAILURES_WINDOW)
+        {
+            times.pop_front();
+        }
+        if times.len() as u32 >= limits::FAILURES_MOST {
+            times.clear();
+            self.listener.turn_away(ip, now + limits::FAILURES_WINDOW);
+            log::warn!("Collaborate: {ip} failed to join too often; it's turned away for a while");
+            self.host.record(
+                AuditKind::Refused,
+                None,
+                format!(
+                    "{ip} failed to join {} times in a minute: turned away for a minute",
+                    limits::FAILURES_MOST
+                ),
+            );
+        }
+        // Addresses quiet for a window are forgotten.
+        self.failures.retain(|_, times| {
+            times
+                .back()
+                .is_some_and(|&at| now.duration_since(at) < limits::FAILURES_WINDOW)
+        });
+    }
+
+    /// Closes connections that haven't finished the handshake in
+    /// [`limits::KNOCK_TIME`].
+    fn close_slow_knockers(&mut self) {
+        let now = Instant::now();
+        let slow: Vec<ConnId> = self
+            .gates
+            .iter()
+            .filter(|(_, (_, _, opened))| now.duration_since(*opened) >= limits::KNOCK_TIME)
+            .map(|(&conn, _)| conn)
+            .collect();
+        for conn in slow {
+            log::info!("Collaborate: a joiner took too long to sign in; closed");
+            self.gates.remove(&conn);
+            self.listener.close(conn);
         }
     }
 
@@ -388,6 +478,16 @@ impl HostSession {
             member.name,
             member.key.fingerprint().short(),
             member.role
+        );
+        self.host.record(
+            AuditKind::Joined,
+            Some(member.id),
+            format!(
+                "{} (key {}) joined as {:?}",
+                member.name,
+                member.key.fingerprint().short(),
+                member.role
+            ),
         );
     }
 
@@ -479,7 +579,7 @@ pub struct Remote {
     cert: Fingerprint,
     /// The invite's secret, until it has let us in once.
     invite: Option<[u8; 16]>,
-    identity: Arc<Identity>,
+    identity: Arc<dyn IdentityProvider>,
     versions: Versions,
     state: State,
     /// Failed tries in a row, for the wait before the next.
@@ -494,7 +594,7 @@ impl Remote {
         host: impl Into<String>,
         cert: Fingerprint,
         invite: Option<[u8; 16]>,
-        identity: Arc<Identity>,
+        identity: Arc<dyn IdentityProvider>,
     ) -> Remote {
         Remote {
             host: host.into(),
@@ -510,7 +610,7 @@ impl Remote {
     }
 
     /// Joins through an invite link.
-    pub fn join_invite(invite: &Invite, identity: Arc<Identity>) -> Remote {
+    pub fn join_invite(invite: &Invite, identity: Arc<dyn IdentityProvider>) -> Remote {
         Remote::join(
             invite.host.clone(),
             invite.cert,
@@ -580,8 +680,12 @@ impl Remote {
         match event {
             LinkEvent::Opened => {
                 if let State::Knocking { link, knock } = &mut self.state {
-                    let (new, hello) =
-                        Knock::new(&self.identity, self.cert, self.invite, &self.versions);
+                    let (new, hello) = Knock::new(
+                        self.identity.as_ref(),
+                        self.cert,
+                        self.invite,
+                        &self.versions,
+                    );
                     link.send(hello);
                     *knock = Some(new);
                 }
@@ -590,7 +694,7 @@ impl Remote {
                 State::Knocking {
                     link,
                     knock: Some(knock),
-                } => match knock.receive(&bytes, &self.identity) {
+                } => match knock.receive(&bytes, self.identity.as_ref()) {
                     KnockStep::Reply(reply) => link.send(reply),
                     KnockStep::Admitted { member, role } => {
                         let State::Knocking { link, .. } =

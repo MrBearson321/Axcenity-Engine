@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1) and its two-machine test over Tailscale passed (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built and were used for a real session (§5.4, §5.6). C5's fixes and checkpoints are built (§5.5). C6's field-being-dragged bar is built and passed with two people over Tailscale (§5.6). C7's live scripts and stylesheets are built and passed a two-machine typing test ([§4.1](#41-built-c7)). C8's chat and others' cursors in script tabs are built (§5.7). C9's host checkpoints and restores are built (§5.8). C10 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1) and its two-machine test over Tailscale passed (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built and were used for a real session (§5.4, §5.6). C5's fixes and checkpoints are built (§5.5). C6's field-being-dragged bar is built and passed with two people over Tailscale (§5.6). C7's live scripts and stylesheets are built and passed a two-machine typing test ([§4.1](#41-built-c7)). C8's chat and others' cursors in script tabs are built (§5.7). C9's host checkpoints and restores are built (§5.8). C10's identity seam, per-message budgets, handshake limits and audit log are built and its security review is [§6.1](#61-security-review-c10). C11 onwards follow the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -214,11 +214,65 @@ Scene sync itself was built in TC2–TC6 and needed no change. **Built:** the fi
 
 Today: an `Identity` (name, colour, Ed25519 key) per machine, a members file on the host mapping public keys to roles, and invites that bind a new key to a role. Tailscale adds a *network* identity (the tailnet login) that is shown but never grants anything; the brief's "being on the tailnet doesn't mean you can edit" is already how the host works.
 
-Seams to add (no new service, no placeholder backend):
+Seams (built in C10; no new service, no placeholder backend):
 
-- `IdentityProvider`: makes and loads the local identity and signs the handshake challenge. One implementation now (`DeviceKeys`). A later `AxcenityAccount` provider would sign in through the website (OpenID Connect with short-lived tokens the host verifies against the site's published keys).
-- **Members keyed by a principal, not a key.** The members file gains an optional `account` field next to the key, unused now. A future account can then claim existing device-key memberships (the host asks the Owner to confirm), so ownership, roles and the journal's attribution carry over; one account may own several device keys and a device key may be linked to no account, so the mapping is many-to-one, never assumed one-to-one with Tailscale logins.
+- `IdentityProvider` (`identity.rs`): the name and colour others see, the public key the host knows the member by, and signing. The handshake's `Knock` and `Remote` take any provider (`Arc<dyn IdentityProvider>`), so the host's checks don't change with the kind. One implementation now, `DeviceKeys` (the `Identity` this computer makes and saves). A later `AxcenityAccount` provider would sign in through the website (OpenID Connect with short-lived tokens the host verifies against the site's published keys).
+- **Members keyed by a principal, not a key.** The members file has an optional `account` field next to the key (`access::Member::account`), written only when set and set by nothing yet; older files read as before. A future account can then claim existing device-key memberships (the host asks the Owner to confirm), so ownership, roles and the journal's attribution carry over; one account may own several device keys and a device key may be linked to no account, so the mapping is many-to-one, never assumed one-to-one with Tailscale logins.
 - **Versioned integration points** listed in C12's document (sign-in, token refresh, profile, invite by account name, project ownership) with the website's API version in each call. Nothing calls them until the website exists.
+
+### 6.1 Security review (C10)
+
+Every way in was reviewed against the roles: the TCP listener, the handshake, and each `ToHost` message's handler in `host.rs`. Each finding is fixed or accepted below; the tests are `security_tests.rs`, `wire_fuzz_tests.rs` and two in `net_tests.rs`.
+
+**Budgets** (`limits.rs`). The connection's 1,000 messages a second stays. Inside it, each kind that makes the host send a lot back, write to disk or use up something shared has a token bucket per member (a burst, then a steady rate). Over a budget, what's over is dropped, written once a minute in the log and the audit log, and the member's other kinds carry on. A dropped hello would leave the member waiting forever, so a hello over budget closes the connection instead, and the member reconnects after its back-off. Checkpoints and restores over budget get a notice ("asked for too often"). Downloads aren't dropped either: they wait in a queue for the budget, served by `Host::tick`.
+
+| Message | Who may | Budget (burst, then per second) | Finding | |
+|---|---|---|---|---|
+| `Hello` | Any member | 20, then 1; over it the connection closes | Every hello with no `Have` sent the whole World and handed out a new ID block, without limit: a member could make the host send snapshots as fast as it liked and run the session out of IDs | Fixed |
+| `Submit` | Per op: edit-world, edit-scripts or edit-assets | The connection's | Each is checked in full (capability per op, locks, uploads present, all or nothing, re-sends dropped). Dropping one would leave a copy out of step, and a member re-sends every unconfirmed edit at once after a reconnect, so there's no budget of its own | Accepted |
+| `NeedIds` | Was anyone, Viewers too; now edit-world | 50, then 20 | No role check and no limit, and `IdAllocator::block` panicked once 2^31 indices were handed out (about 2 million blocks): any member could crash the host in about 35 minutes. Now it returns `None`: a Welcome then carries no block, and a restore says the session is out of IDs | Fixed |
+| `Presence` | Any member | 60, then 30 | Each goes to everyone; the client sends at most 10 a second | Fixed (budget) |
+| `Upload` | Edit-scripts or edit-assets for the path kind | The connection's; at most 4 files partway at once | Any number of uploads could be left partway, each up to 1 GiB in memory | Fixed |
+| `Fetch` | Any member (Viewers need files) | 2 GiB, then 128 MiB a second, in bytes; at most 100,000 files waiting | Asking for the biggest file again and again made the host queue gigabytes a second for one member | Fixed |
+| `Lock`, `Unlock` | Edit capability for the path | 100, then 20 | Each change goes to everyone | Fixed (budget) |
+| `DocOpen` | Any member, live paths only | 500, then 20 (every open tab again after a reconnect) | Each answer can be a whole document | Fixed (budget) |
+| `DocUpdate` | Edit-scripts (edit-assets for `.css`) | The connection's | Same reasoning as `Submit`; refusals now go in the audit log | Accepted |
+| `Chat` | Any member | 5, then 5 | Already limited in C8; now through the same budgets | — |
+| `Checkpoint` | Save-checkpoint (Editors, Owner) | 3, then one every 10 s | Each writes the World to disk: an Editor could fill the host's disk | Fixed (budget). Saved checkpoints aren't pruned: accepted, the Owner decides |
+| `Restore` | Owner | 2, then one every 5 s | — | Fixed (budget) |
+| `AuditLog` (new) | Owner | — | — | — |
+
+**Before signing in** (`socket.rs`, `session.rs`):
+
+- **Connections:** each one had a thread and no cap, and a connection that never said hello kept its place forever (the host's pings kept it alive). Now there are at most 256 connections, at most 64 partway through the handshake, and each has 10 s to sign in. Fixed.
+- **Guessing invites:** an invite secret is 128 random bits, kept only as its SHA-256, so it can't be guessed. Even so, an address that fails 10 handshakes in a minute is now turned away for a minute, before any TLS work, and the audit log says so. Many addresses could still keep the 64 handshake places busy for 10 s at a time: that delays joining, it doesn't let anyone in. Over Tailscale only the tailnet (and machines it's shared with) can reach the port anyway. Accepted.
+- **Replays:** each connection's challenge is a fresh 32-byte random value, and the signature covers it and the host certificate's fingerprint. A recorded proof doesn't work again on the same connection, on a new one, or at another host, and a used invite doesn't work for someone else (`a_replayed_sign_in_is_refused`). As designed in TC3; now tested.
+- **Names:** a joiner's name could hold line breaks and control characters, which could put a fake line in the log or the audit log ("Eve⏎Paul joined as Owner"). Now each name is one line of at most 64 characters (`access::tidy_name`). Fixed.
+- **Removed members:** their connection closes, their locks go, and the host ignores anything still on its way from them (`someone_taken_out_of_the_project_is_ignored` sends every message kind). As built; now tested.
+- **Bad bytes:** the session decoders (postcard) and the handshake's JSON are fuzzed with random bytes and with real messages changed, cut short, lengthened and given huge lengths. Each test run does 20,000 rounds, and 1,000,000 ran once (`AXCENITY_FUZZ_ROUNDS`). Nothing panicked or allocated without bound; bad bytes are an error and close the connection. No fuzzing tool is needed (development policy).
+
+**Viewers:** `a_viewer_changes_nothing_with_any_message` sends one of every `ToHost` kind (the test fails to compile when a new kind isn't in it) as a Viewer. It checks that the World, the files, the locks, the live documents, the transaction number and the checkpoints are all unchanged, and that nothing goes to anyone else but roster, presence and chat. Everything they asked for and may not have is in the audit log.
+
+**Audit log** (`audit.rs`). The host writes down:
+- joins and handshakes it refused, with the address;
+- invites made and revoked;
+- role changes and removals;
+- restores;
+- members refused for their role, or for going over a budget (once a minute per member and kind).
+
+It keeps the newest 500 entries. It also appends each one to `<members file>.audit.jsonl` in the host's data folder (never the project's), readable only by its user where the OS allows, and moves the file to `.old` past 1 MiB. The Owner reads it:
+- in the Collaborate panel's **Audit log** section, asked for when the section first shows and on Refresh (`ToHost::AuditLog`, wire format 7);
+- with the server's `audit [count]` command.
+
+The log is the host's own account: members can't check it.
+
+**Accepted, not changed:**
+- An Editor's transaction can be up to 32 MiB and is applied on the host's thread, so a hostile Editor can slow the session. Editors are trusted to edit, and removing them stops it.
+- Uploaded files that no transaction uses stay in the host's `.axcenity/teamcreate/files` until the session ends.
+- A device key can't be revoked apart from removing the member.
+- On Windows, the members file, keys and audit log rely on the user profile's permissions.
+
+**Never tripped in normal use:** the collab and collab-server test suites, and the editor's Collaborate tests (two editors over real sockets: joining, editing, imports, typing in scripts together, chat, restores), were run with any budget trip made a panic. Only the tests that flood on purpose tripped one. The busiest honest case seen is a member reconnecting seven times in a row in the bad-network convergence test, well inside the hello budget.
 
 ## 7. Other gaps found
 
@@ -259,6 +313,8 @@ The session protocol as built by TC3–TC6, with the messages C3–C9 add. One r
 
 ### 9.2 Messages by content
 
+Per-member budgets for each kind are in [§6.1](#61-security-review-c10); the limits below are sizes.
+
 | Content | Messages | Order and delivery | Kept | Checked by the host | Limits |
 |---|---|---|---|---|---|
 | Scene, components, properties, terrain, string cells | `Submit(Transaction)` → `Accepted { seq, … }` / `Rejected { client_seq, reason }` | Host sequence numbers; clients apply strictly in order and resync on a gap | Journal, then snapshot | Capability per op, classes, property types, tree rules, all-or-nothing | 32 MiB a message, 1,000 messages a second per connection |
@@ -271,6 +327,7 @@ The session protocol as built by TC3–TC6, with the messages C3–C9 add. One r
 | **Chat (C8)** | `Chat { text }` → `Chat { member, at, text }`; `ChatHistory` to a joiner | Host order | The host's last 200 messages, in memory only (never in the project or the journal) | Any member, Viewers included | 2,000 characters, 5 a second per member |
 | **Version history (C9)** | `Checkpoint(label)` → `Checkpoints(list)` to everyone; `Restore(id)` (Owner); `HistoryNotice(text)` | Host order; a restore is one transaction for everyone | The host's `.axcenity/teamcreate/history`, file contents by hash | Save-checkpoint capability; restore is Owner only | Label 120 characters; 100 listed. Wire format 6 |
 | Membership | `RoleChanged`, `Ended` | Host order | Members file in the host's data folder | Owner only for roles, removal, ending | — |
+| **Audit log (C10)** | `AuditLog` → `AuditLog(entries)` | On request | The host's last 500 in memory, all in `<members file>.audit.jsonl` in its data folder | Owner only | Wire format 7 |
 
 ### 9.3 Identifiers, duplicates and recovery
 

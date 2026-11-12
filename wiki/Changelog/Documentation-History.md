@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | System inventory, roadmap | Collaborate C10: `IdentityProvider` seam, per-member budgets for each message kind and handshake limits (`crates/collab/src/limits.rs`), the host's audit log (`audit.rs`), security review in `docs/research/collaborate.md` §6.1 | Claude |
 | 2026-11-12 | ADR-0023, ADR index, editor architecture, dependencies, configuration, coding standards, roadmap | Unified Phase 89: engine hot-patching removed (`engine-dev` feature for rebuild and relaunch); saved scripts keep their top-level locals across a reload in Play | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate 2.0 P1: `crates/repo` (git runner, GitHub device sign-in, credentials in Git's store, linking), `collaborate.json` | Claude |
 | 2026-11-12 | ADR-0022, ADR index, system inventory, roadmap | Collaborate 2.0 design (P0): host handoff by deterministic successor, members list replicated, persistent project ID, optional Git remote (`docs/research/collaborate-persistent.md`) | Claude |

@@ -60,5 +60,6 @@ Over Tailscale, the other person's computer has to be able to reach yours:
 | **this invite was already used** or **has expired** | Ask the host for a new link. |
 | Tailscale says **waiting for approval** | Your Tailscale network's admin approves new computers. Ask them, or use your own account. |
 | Joined, but you can't change anything | You joined as a viewer. The host can make you an Editor in the **Collaborate** panel. |
+| **Can't reach …** after several tries with wrong or old links | The host turns an address away for a minute after ten failed joins in a minute. Wait a minute, then use a fresh link. |
 
 When it still doesn't work, the **Output** panel on both computers says what Collaborate tried. Tailscale's own app shows whether the other computer is online.

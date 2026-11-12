@@ -29,6 +29,8 @@ pub(crate) struct Net {
     /// convergence test can check it exercised both.
     pub snapshots: usize,
     pub catch_ups: usize,
+    /// A live document's state as a test last kept it.
+    pub script_state: Vec<u8>,
 }
 
 pub(crate) fn member(i: usize) -> MemberId {
@@ -55,6 +57,7 @@ impl Net {
             connected: vec![false; roles.len()],
             snapshots: 0,
             catch_ups: 0,
+            script_state: Vec::new(),
         };
         for i in 0..roles.len() {
             net.connect(i);
@@ -236,6 +239,9 @@ impl Net {
         let message = wire::decode_to_host(&wire::encode_to_host(&message)).expect("reads back");
         let out = self.host.receive(member(i), message);
         self.route(out);
+        for closed in self.host.take_closing() {
+            self.disconnect((closed.0 - 1) as usize);
+        }
         true
     }
 
