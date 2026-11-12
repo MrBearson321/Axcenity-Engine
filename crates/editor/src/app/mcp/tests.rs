@@ -343,6 +343,12 @@ fn every_tool_is_short_flat_and_in_budget() {
         instructions <= 150,
         "instructions take ~{instructions} tokens"
     );
+    // The full profile names the Toolbox tools up front.
+    let full = super::setup(Profile::Full, None).instructions;
+    assert!(full.contains("toolbox_search, then toolbox_get"), "{full}");
+    assert!(estimate_tokens(&full) <= 175, "{full}");
+    let standard = super::setup(Profile::Standard, None).instructions;
+    assert!(!standard.contains("toolbox"), "{standard}");
     // Budgets from docs/research/mcp/tool-inventory.md.
     for (profile, budget) in [
         (Profile::Lite, 2100),
@@ -2687,7 +2693,7 @@ fn toolbox_search_and_get_bring_an_asset_in_as_one_undo_step() {
     let host = &mut opened.app;
     // Never the network: ambientCG's answers from memory.
     host.session.toolbox_http = Some(Box::new(
-        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(),
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(true),
     ));
     host.session.asset_dir = Some(assets.clone());
     let found = ok(host, "toolbox_search", json!({"query": "fabric"}));
@@ -2741,7 +2747,16 @@ fn toolbox_search_and_get_bring_an_asset_in_as_one_undo_step() {
     assert!(!project.join(&material).exists(), "{got}");
     ok(host, "history", json!({"action": "redo"}));
     assert!(project.join(set).is_file() && project.join(&material).is_file());
-    // The package stays in the asset directory: a second get downloads nothing.
-    host.session.toolbox_http = Some(Box::new(axcenity_toolbox::http::Fixture::default()));
+    // Got again: from the asset directory (nothing fetched), and the same
+    // material, not a second one.
+    host.session.toolbox_http = Some(Box::new(
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(false),
+    ));
+    let again = ok(host, "toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+    assert!(again.contains(&format!("material {material} ·")), "{again}");
+    let materials = std::fs::read_dir(project.join("assets/materials"))
+        .unwrap()
+        .count();
+    assert_eq!(materials, 1, "{again}");
     let _ = std::fs::remove_dir_all(&assets);
 }

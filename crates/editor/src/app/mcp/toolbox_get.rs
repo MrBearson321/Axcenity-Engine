@@ -87,6 +87,7 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             out.push_str(&format!(": texture set {path}"));
             // As Make material does, so the client can assign it at once.
             if let Some(material) = material_from(&folder, path, name) {
+                // Got again: the set and its material are already there.
                 out.push_str(&format!(
                     ", material {material} · use it with material_edit {{\"action\":\"assign\",\"path\":\"{material}\",\"ids\":[...]}}"
                 ));
@@ -172,14 +173,23 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
 }
 
 /// Writes a material file from the texture set at `set`, named after it,
-/// and returns its path; `None` when the set can't be read.
+/// and returns its path; `None` when the set can't be read. A material
+/// already made from the set (the asset got again) is used instead.
 fn material_from(folder: &std::path::Path, set: &str, name: &str) -> Option<String> {
     let texture_set = read_texture_set(&folder.join(set)).ok()?;
     let material = install::material_from_set(&texture_set);
+    let text = material_json(&material);
+    let made = axcenity_project::list_project_files(folder)
+        .into_iter()
+        .filter(|path| axcenity_assets::is_material_file(path))
+        .find(|path| std::fs::read_to_string(folder.join(path)).is_ok_and(|known| known == text));
+    if made.is_some() {
+        return made;
+    }
     let path = format!(
         "{MATERIALS_FOLDER}/{}{MATERIAL_SUFFIX}",
         free_stem(folder, name)
     );
-    axcenity_project::write_script(folder, &path, &material_json(&material)).ok()?;
+    axcenity_project::write_script(folder, &path, &text).ok()?;
     Some(path)
 }

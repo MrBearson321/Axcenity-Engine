@@ -214,8 +214,9 @@ pub mod testing {
     use super::*;
 
     /// ambientCG with one material, Fabric086 ("fabric" finds it), as
-    /// 1K and 2K JPG zips of a colour and a normal map.
-    pub fn fabric_on_ambientcg() -> Fixture {
+    /// 1K and 2K JPG zips of a colour and a normal map; without its
+    /// `files`, only the search and the record answer.
+    pub fn fabric_on_ambientcg(files: bool) -> Fixture {
         let asset = r#"{"id": "Fabric086", "title": "Fabric 086", "type": "material",
             "url": "https://ambientcg.com/a/Fabric086", "tags": ["fabric"],
             "maps": ["Color", "NormalGL"],
@@ -229,7 +230,7 @@ pub mod testing {
         let mut http = Fixture::default()
             .with(&search_url(&query, "material"), answer.clone())
             .with(&record_url("Fabric086"), answer);
-        for size in ["1K", "2K"] {
+        for size in ["1K", "2K"].into_iter().filter(|_| files) {
             http = http.with(
                 &format!("https://ambientcg.com/get?file=Fabric086_{size}-JPG.zip"),
                 maps_zip(size),
@@ -285,7 +286,7 @@ mod tests {
     fn search_and_get_go_through_the_tabs_paths() {
         let temp = std::env::temp_dir().join(format!("axcenity-agent-get-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp);
-        let http = testing::fabric_on_ambientcg();
+        let http = testing::fabric_on_ambientcg(true);
 
         // Every source is asked; Poly Haven's failure is named, ambientCG's answer kept.
         let found = search_assets(&http, Kind::Texture, "fabric", None, 1).unwrap();

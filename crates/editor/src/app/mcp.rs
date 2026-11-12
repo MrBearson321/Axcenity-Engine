@@ -98,6 +98,11 @@ Each edit is one undo step (see history). Deletes and saves preview first; \
 call again with the confirm token. Object edits stay in memory until \
 project_save; script_write saves its file at once.";
 
+/// Added for the full profile: hosts that load tools by name (Claude
+/// Code) otherwise never think to look for these.
+const TOOLBOX_INSTRUCTIONS: &str = " Free textures, skies, models and sounds \
+online: toolbox_search, then toolbox_get.";
+
 /// The editor and the calling session: what every tool gets. Borrowed,
 /// so the open editor can lend itself for one call ([`live`]); a server
 /// without a window owns them in a [`Headless`].
@@ -365,7 +370,11 @@ pub(super) fn tools_for(profile: Profile) -> Vec<&'static ToolSpec> {
 pub(super) fn setup(profile: Profile, waker: Option<Waker>) -> Setup {
     Setup {
         version: TOOLKIT_VERSION.to_owned(),
-        instructions: INSTRUCTIONS.to_owned(),
+        instructions: if profile.shows(Profile::Full) {
+            format!("{INSTRUCTIONS}{TOOLBOX_INSTRUCTIONS}")
+        } else {
+            INSTRUCTIONS.to_owned()
+        },
         tools: tools_for(profile),
         prompts: prompts::PROMPTS.to_vec(),
         resources: prompts::RESOURCES.to_vec(),
