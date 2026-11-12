@@ -576,7 +576,7 @@ Do not immediately attempt a complete Lumen or SDFGI equivalent.
 ## 6.4 Visual effects editor
 
 **Priority:** Medium
-**Status:** Missing (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`); there is no node-based or curve-based effect authoring.
+**Status:** Missing (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`); there is no node-based or curve-based effect authoring. Design and stages R17.1–R17.5: [vfx-editor.md](vfx-editor.md).
 
 Develop a unified authoring experience around existing CPU and GPU particle systems.
 
@@ -1154,7 +1154,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
 | 15 | Advanced Model Studio workflows | New (R15) | Partial | Bring sculpting and baking back (Paul's decision, section 2.1) |
 | 16 | Large-world rendering and authoring | New (R16) | Partial | Streaming diagnostics in the editor |
-| 17 | Visual effects editor | New (R17) | Missing | Design, then curves and an effect asset |
+| 17 | Visual effects editor | New (R17) | Missing; design in [vfx-editor.md](vfx-editor.md) | R17.1 curves, then spawn shapes, the effect editor and asset |
 | 18 | Global illumination improvements | New (R18) | Partial | Measure and document options |
 | 19 | Online services architecture | New (R19) | Missing | Design document only |
 | 20 | Platform expansion | New (R20) | Deferred | Research document only |
