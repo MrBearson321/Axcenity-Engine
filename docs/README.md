@@ -46,6 +46,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Engine version, `--version`, release entries in `releases/`, or `axcenity-release` | [project/releases.md](project/releases.md); the design of the updater and Version Explorer: [research/release-system/README.md](research/release-system/README.md) |
 | Data tables, the Data Table tab, or `DataService` | [project/data-tables.md](project/data-tables.md) |
 | Dialogues, quests, `DialogueService`, `QuestService`, the Dialogue tab | [scripting/api-dialogue.md](scripting/api-dialogue.md) |
+| AutoRecover (Settings > Saving, `.axcenity/autorecover/`, the Recover unsaved work? prompt) | [project/autorecover.md](project/autorecover.md) |
 | New Project's genre templates (`templates/`) | [project/templates.md](project/templates.md) |
 | Game tests (`tests/*.spec.lua`), the Tests panel, `axcenity-test` | [project/game-tests.md](project/game-tests.md) |
 | Editor plugins (`plugins/`, the plugin API, the Plugins panel) | [editor/plugins.md](editor/plugins.md) |
