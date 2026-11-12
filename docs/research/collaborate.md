@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1); the PC side of its two-machine test passed over Tailscale and the Mac's join is next (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built (§5.4). C5's fixes and checkpoints are built (§5.5). C6 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1); the PC side of its two-machine test passed over Tailscale and the Mac's join is next (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built (§5.4). C5's fixes and checkpoints are built (§5.5). C6's field-being-dragged bar is built; its runs over Tailscale wait for the two machines (§5.6). C7 onwards follow the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -171,6 +171,12 @@ The invite names the host by its MagicDNS name (falling back to its `100.x` addr
 **Join time** (`join_time_of_ten_thousand_parts`, run by hand, release, cloud container): two members join a 10,000-Part World in 156 ms in-process; the join message is 205 KiB. Over Tailscale between Paul's PC and Mac the transfer adds the link's time; Paul's own projects are measured in the two-machine test.
 
 **Left:** the two-machine cut test over Tailscale (C6 re-runs the convergence tests there). Recovery files stay in `.axcenity/teamcreate` inside the project folder, which never syncs or exports; moving them to the editor's data folder would change where TC6 recovery looks and wasn't needed.
+
+### 5.6 Real-time scene collaboration (C6)
+
+Scene sync itself was built in TC2–TC6 and needed no change. **Built:** the field-being-dragged bar left from TC4. While a Properties field is dragged, the editor puts its name in its presence's `editing` (already in the wire format, so no format change); the others' Properties show "▍ Paul is changing Transparency" in that member's colour, under "Also selected by", for the Instance they both have selected. It clears when the pointer is released. Tested in `team_tests::what_one_editor_selects_shows_in_the_others_session`.
+
+**Left for the two machines:** the convergence and editor tests over Tailscale between Paul's PC and Mac, a 15-minute scripted session, and the added frame cost of 3 members dragging on S10k (`--bench` on the PC).
 
 ## 6. Identity, authorization and the Django account manager (C10, C12)
 
