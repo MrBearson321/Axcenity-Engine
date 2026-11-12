@@ -102,16 +102,73 @@ impl EditorApp {
         else {
             return;
         };
-        if project::is_block_script(&path) {
-            self.output.info(format!(
-                "`{path}` is a block script: block scripts inside objects can't be \
-                 edited in the editor yet. Its copies still run it."
-            ));
-            return;
-        }
-        if self.object_file_source(&path).is_some() {
+        if self.object_file_source(&path).is_some()
+            && (!project::is_block_script(&path) || self.open_object_blocks(&path))
+        {
             self.open_script(&path, None);
         }
+    }
+
+    /// Makes sure the block file of scripts inside objects at `path` has
+    /// its blocks document, for its Blocks tab: read now if it hasn't one.
+    /// False, with the reason in Output, if the file can't be read.
+    pub(in crate::app) fn open_object_blocks(&mut self, path: &str) -> bool {
+        let Some(project) = &self.project else {
+            return false;
+        };
+        if project
+            .block_scripts
+            .iter()
+            .any(|document| document.path == path)
+        {
+            return true;
+        }
+        match project::read_block_script(&project.folder, path) {
+            Ok(script) => {
+                self.add_object_blocks(path, script);
+                true
+            }
+            Err(err) => {
+                self.output
+                    .error(format!("Can't open `{path}`: {}", chain(&err)));
+                false
+            }
+        }
+    }
+
+    /// Adds the blocks document for the block file of scripts inside
+    /// objects at `path`, standing for its first copy.
+    pub(in crate::app) fn add_object_blocks(
+        &mut self,
+        path: &str,
+        script: axcenity_blocks::BlockScript,
+    ) {
+        let instance = self
+            .world
+            .descendants(self.world.root())
+            .into_iter()
+            .find(|id| {
+                self.world
+                    .get(*id)
+                    .and_then(|instance| instance.source_file())
+                    == Some(path)
+            })
+            .unwrap_or_else(|| self.world.root());
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        axcenity_blocks::reserve_block_ids(&script);
+        project
+            .block_scripts
+            .retain(|document| document.path != path);
+        project.block_scripts.push(BlockDocument {
+            instance,
+            path: path.to_owned(),
+            script: script.clone(),
+            saved: script,
+            highlighted: None,
+            undo: Default::default(),
+        });
     }
 
     /// The code in the file at `path`, which a script inside an object
@@ -407,6 +464,9 @@ impl EditorApp {
             .find(|script| script.path == path)
             .map(|script| script.instance)
         else {
+            if self.is_object_file(path) {
+                self.switch_object_script(path, graph);
+            }
             return;
         };
         let to_blocks = !project::is_block_script(path);
@@ -519,6 +579,107 @@ impl EditorApp {
             (true, false) => "Blocks",
             (true, true) => "Graph",
         };
+        self.output
+            .info(format!("Switched {name} to {mode} (`{new_path}`)."));
+    }
+
+    /// Switches the code of scripts inside objects at `path` (G2) between
+    /// Code and Blocks, as `switch_script_mode` does a script's file, but
+    /// like Rename or Move…: every copy and prefab is pointed at the new
+    /// file, as one undo step.
+    fn switch_object_script(&mut self, path: &str, graph: bool) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let folder = project.folder.clone();
+        let level = project.level.clone();
+        let name = project::script_name(path).to_owned();
+        let to_blocks = !project::is_block_script(path);
+        let (content, remember) = if to_blocks {
+            let Some(source) = self
+                .tabs
+                .get(path)
+                .map(|tab| tab.text.clone())
+                .or_else(|| self.object_file_source(path))
+            else {
+                return;
+            };
+            let remembered = self
+                .project
+                .as_ref()
+                .and_then(|project| project.remembered_blocks.get(path))
+                .filter(|(code, _)| *code == source)
+                .map(|(_, blocks)| blocks.clone());
+            let mut blocks = match remembered.map_or_else(|| from_lua(&source), Ok) {
+                Ok(blocks) => axcenity_blocks::refine(&blocks).unwrap_or(blocks),
+                Err(err) => {
+                    self.output.error(format!(
+                        "Can't show {name} as blocks: {err}. Fix the code first, then switch."
+                    ));
+                    return;
+                }
+            };
+            blocks.graph.shown = graph;
+            if let Err(err) = translate(&blocks) {
+                self.output
+                    .error(format!("Can't show {name} as blocks: {err}."));
+                return;
+            }
+            let text = serde_json::to_string_pretty(&blocks).unwrap_or_default();
+            (text, None)
+        } else {
+            let blocks = self
+                .project
+                .as_ref()
+                .and_then(|project| {
+                    project
+                        .block_scripts
+                        .iter()
+                        .find(|document| document.path == path)
+                })
+                .map(|document| Ok(document.script.clone()))
+                .unwrap_or_else(|| {
+                    project::read_block_script(&folder, path).map_err(|err| chain(&err))
+                });
+            let source = match blocks
+                .clone()
+                .and_then(|blocks| translate(&blocks).map_err(|err| err.to_string()))
+            {
+                Ok(translation) => translation.source,
+                Err(err) => {
+                    self.output
+                        .error(format!("Can't switch {name} to Code: {err}."));
+                    return;
+                }
+            };
+            (source.clone(), blocks.ok().map(|blocks| (source, blocks)))
+        };
+        let plan = match project::plan_switch(
+            &folder,
+            &self.world,
+            level.as_deref(),
+            path,
+            content.into_bytes(),
+        ) {
+            Ok(plan) => plan,
+            Err(err) => {
+                self.output
+                    .error(format!("Could not switch {name}: {err}."));
+                return;
+            }
+        };
+        let Some(new_path) = project::switched_script_path(path) else {
+            return;
+        };
+        if let (Some(project), Some(remember)) = (&mut self.project, remember) {
+            project.remembered_blocks.insert(new_path.clone(), remember);
+        }
+        let mode = match (to_blocks, graph) {
+            (false, _) => "Code",
+            (true, false) => "Blocks",
+            (true, true) => "Graph",
+        };
+        self.apply_move_plan(plan, format!("Switch {name} to {mode}"));
         self.output
             .info(format!("Switched {name} to {mode} (`{new_path}`)."));
     }

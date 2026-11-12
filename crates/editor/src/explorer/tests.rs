@@ -606,3 +606,77 @@ fn rows_are_kept_until_the_tree_or_the_open_branches_change() {
     let at = order.iter().position(|id| *id == added).unwrap();
     assert_eq!(order[at + 1], parts[0], "moved to the front of the folder");
 }
+
+/// Double-clicks the row of `id`, one press and release after another.
+fn double_click_row(
+    ctx: &egui::Context,
+    explorer: &mut Explorer,
+    world: &World,
+    id: InstanceId,
+) -> Vec<ExplorerOutput> {
+    // Long enough after the clicks before that these aren't a third and
+    // a fourth (egui counts up to three within twice the double-click time).
+    for _ in 0..60 {
+        frame(ctx, explorer, world, Vec::new());
+    }
+    let at = center_of(explorer, id);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    [
+        vec![egui::Event::PointerMoved(at)],
+        vec![button(true)],
+        vec![button(false)],
+        vec![button(true)],
+        vec![button(false)],
+    ]
+    .into_iter()
+    .map(|events| frame(ctx, explorer, world, events))
+    .collect()
+}
+
+/// A double-click opens what has an editor (a script) and shows a part
+/// in the scene; a Folder or a service only opens or closes in the tree.
+#[test]
+fn double_clicking_a_row_asks_to_open_what_has_somewhere_to_open() {
+    let world = demo_world();
+    let ctx = crate::theme::test_context();
+    let mut explorer = Explorer::new(&world);
+    explorer.toggle(world.server_script_service());
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    let pad = world
+        .find_first_descendant(world.server_script_service(), "pad")
+        .unwrap();
+    let part = world
+        .get(world.workspace())
+        .unwrap()
+        .children()
+        .iter()
+        .copied()
+        .find(|&id| world.get(id).unwrap().class().is_base_part())
+        .unwrap();
+    assert_eq!(opens_with(&world, pad), Opens::Script);
+    assert_eq!(opens_with(&world, part), Opens::View);
+    assert_eq!(opens_with(&world, world.workspace()), Opens::Nothing);
+
+    for id in [pad, part] {
+        let opened: Vec<_> = double_click_row(&ctx, &mut explorer, &world, id)
+            .into_iter()
+            .filter_map(|output| output.open)
+            .collect();
+        assert_eq!(opened, [id]);
+    }
+    let rows = outline(&explorer, &world).len();
+    let opened: Vec<_> = double_click_row(&ctx, &mut explorer, &world, world.workspace())
+        .into_iter()
+        .filter_map(|output| output.open)
+        .collect();
+    assert!(opened.is_empty());
+    assert!(
+        outline(&explorer, &world).len() < rows,
+        "the Workspace closed"
+    );
+}

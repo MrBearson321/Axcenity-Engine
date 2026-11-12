@@ -946,6 +946,23 @@ impl Viewport {
         self.camera = FlyCamera::looking_at(position, target);
     }
 
+    /// Swings the camera round to look at a box around `center` reaching
+    /// `radius` from it, from the way it looks now, close enough that the
+    /// box fills about half the view (Explorer double-click). `now` is
+    /// egui's clock; at once when `seconds` is 0 (reduced motion).
+    pub fn frame(&mut self, center: Vec3, radius: f32, now: f64, seconds: f32) {
+        let forward = self.camera.forward();
+        let distance = (radius.max(0.5) * 2.5).max(4.0);
+        let mut to = FlyCamera::looking_at(center - forward * distance, center);
+        to.set_speed(self.camera.speed());
+        if seconds > 0.0 {
+            self.swing = Some(view_cube::Swing::new(self.camera, to, now, seconds));
+        } else {
+            self.swing = None;
+            self.camera = to;
+        }
+    }
+
     /// What the part being moved has done so far, while one is.
     fn drag_report(&self) -> Option<&crate::snapping::points::DragReport> {
         match self.drag.as_ref()? {

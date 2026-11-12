@@ -278,6 +278,49 @@ fn renaming_an_object_file_points_its_scripts_at_the_new_name() {
     let _ = fs::remove_dir_all(&folder);
 }
 
+/// Code ↔ Blocks for a script inside an object replaces its file with the
+/// given content at the other ending and points every reference at it.
+#[test]
+fn switching_an_object_file_moves_it_to_the_other_ending_with_new_content() {
+    let folder = door_project("object-scripts-switch");
+    let project = load(&folder).unwrap();
+    let world = &project.world;
+    let blocks = "objects/Door/Open.server.blocks.json";
+    let plan = plan_switch(&folder, world, None, OPEN, b"{}".to_vec()).unwrap();
+    let moved = plan
+        .files
+        .iter()
+        .find(|write| write.path == blocks)
+        .expect("the block file is made");
+    assert_eq!(moved.after.as_deref(), Some(&b"{}"[..]));
+    assert!(
+        plan.files
+            .iter()
+            .any(|write| write.path == OPEN && write.after.is_none())
+    );
+    let prefab = plan
+        .files
+        .iter()
+        .find(|write| write.path == "assets/prefabs/Door.prefab.json")
+        .expect("the prefab names it");
+    let text = String::from_utf8(prefab.after.clone().unwrap()).unwrap();
+    assert!(text.contains(blocks), "{text}");
+
+    // Only Scripts and LocalScripts in objects/, and never over a file.
+    let module = plan_switch(
+        &folder,
+        world,
+        None,
+        "objects/Lamp/Colors.module.lua",
+        vec![],
+    );
+    assert!(module.unwrap_err().contains("only Scripts"));
+    fs::write(folder.join(blocks), "{}").unwrap();
+    let taken = plan_switch(&folder, world, None, OPEN, vec![]);
+    assert!(taken.unwrap_err().contains("is taken"));
+    let _ = fs::remove_dir_all(&folder);
+}
+
 #[test]
 fn asset_check_finds_missing_misplaced_and_unused_object_files() {
     let folder = door_project("object-scripts-check");

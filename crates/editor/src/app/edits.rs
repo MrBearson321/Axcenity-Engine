@@ -1278,6 +1278,18 @@ impl EditorApp {
         // Scripts inside objects' files (G2): their code as the file now is.
         for file in &files {
             if self.is_object_file(&file.path) {
+                if axcenity_project::is_block_script(&file.path) {
+                    // Its Lua is what its blocks translate to.
+                    if let Some(text) = &file.after {
+                        if let Some(project) = &mut self.project {
+                            project.object_files.entry(file.path.clone()).or_default();
+                        }
+                        self.take_script_text(&file.path, text);
+                    } else if let Some(project) = &mut self.project {
+                        project.object_files.remove(&file.path);
+                    }
+                    continue;
+                }
                 if let Some(project) = &mut self.project {
                     match &file.after {
                         Some(text) => {

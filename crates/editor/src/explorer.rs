@@ -232,7 +232,7 @@ pub struct ExplorerOutput {
     /// A right-click on a row that is already selected should keep the others.
     pub keep_group: bool,
     pub action: Option<Action>,
-    /// A Script to open in a tab: its row was double-clicked, or Open was
+    /// What to open (see [`opens_with`]): its row was double-clicked, or Open was
     /// picked in its menu. Works during Play too.
     pub open: Option<InstanceId>,
     /// The selection the arrow keys moved to, the last one primary; it
@@ -703,8 +703,16 @@ impl Explorer {
                     if let Some(class) = class {
                         ui.label(class);
                     }
-                    if row.has_children && label.double_clicked() {
-                        toggled = Some(row.id);
+                    // A double-click opens what has an editor of its own;
+                    // a container also opens or closes in the tree.
+                    if label.double_clicked() {
+                        let opens = opens_with(world, row.id);
+                        if row.has_children && !opens.is_editor() {
+                            toggled = Some(row.id);
+                        }
+                        if opens != Opens::Nothing {
+                            output.open = Some(row.id);
+                        }
                     }
                     if let Some(text) = warning {
                         ui.colored_label(ui.visuals().warn_fg_color, icons::WARNING)
@@ -713,9 +721,6 @@ impl Explorer {
                     if world.is_locked(row.id) {
                         ui.weak(icons::LOCK)
                             .on_hover_text("Locked: the viewport can't select or change it.");
-                    }
-                    if row.class.is_script() && label.double_clicked() {
-                        output.open = Some(row.id);
                     }
 
                     if !editable {
@@ -1095,6 +1100,88 @@ impl RowCommand {
             RowCommand::SetLocked(on) => Some(Action::SetLocked(id, on)),
         }
     }
+}
+
+/// What double-clicking an Instance's row opens (CW3.2): one rule for the
+/// Explorer and the app, which opens it (`EditorApp::open_instance`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Opens {
+    /// A Script, LocalScript or ModuleScript: its code in a tab (one tab
+    /// per file, shown again if it's open).
+    Script,
+    /// A ScreenGui or anything in one: the UI Designer, showing it.
+    UiDesigner,
+    /// An Animation: its clip (this path) in the Animation tab.
+    Clip(String),
+    /// An Animator with a state machine: it in the Animation tab.
+    StateMachine,
+    /// Something in the scene: selected and framed in the viewport.
+    View,
+    /// Nothing of its own, such as a Folder or a service.
+    Nothing,
+}
+
+impl Opens {
+    /// Whether it opens a tab of its own (rather than showing in the scene).
+    pub(crate) fn is_editor(&self) -> bool {
+        !matches!(self, Opens::View | Opens::Nothing)
+    }
+}
+
+/// What double-clicking `id`'s row opens.
+pub(crate) fn opens_with(world: &World, id: InstanceId) -> Opens {
+    let Some(instance) = world.get(id) else {
+        return Opens::Nothing;
+    };
+    let class = instance.class();
+    let text = |name: &str| {
+        instance
+            .property(name)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
+    if class.is_script() {
+        return Opens::Script;
+    }
+    // A service only opens or closes: its rows are what to open.
+    if class.is_service() {
+        return Opens::Nothing;
+    }
+    if crate::ui_designer::screen_gui_of(world, Some(id)).is_some() {
+        return Opens::UiDesigner;
+    }
+    match class {
+        ClassName::Animation => return text("Clip").map_or(Opens::Nothing, Opens::Clip),
+        ClassName::Animator if text("StateMachine").is_some() => return Opens::StateMachine,
+        _ => {}
+    }
+    if scene_bounds(world, id).is_some() {
+        Opens::View
+    } else {
+        Opens::Nothing
+    }
+}
+
+/// The box around `id` and everything in it that's drawn as a part, as
+/// its middle and how far its corners reach from it; `None` if there's
+/// no part.
+pub(crate) fn scene_bounds(
+    world: &World,
+    id: InstanceId,
+) -> Option<(axcenity_render::glam::Vec3, f32)> {
+    let mut low = axcenity_render::glam::Vec3::splat(f32::INFINITY);
+    let mut high = axcenity_render::glam::Vec3::splat(f32::NEG_INFINITY);
+    for part in std::iter::once(id).chain(world.descendants(id)) {
+        for (a, b) in axcenity_scene::part_box_edges(world, part)
+            .into_iter()
+            .flatten()
+        {
+            low = low.min(a).min(b);
+            high = high.max(a).max(b);
+        }
+    }
+    (low.x <= high.x).then(|| ((low + high) / 2.0, (high - low).length() / 2.0))
 }
 
 /// The right-click menu of `id`'s row: Open (for scripts) or Animate (for

@@ -448,7 +448,7 @@ impl EditorApp {
 
     /// Writes the script tab for `path` to its file. If the file had been
     /// deleted elsewhere, this brings it back, and its Script with it.
-    fn write_tab(&mut self, path: &str) -> bool {
+    pub(in crate::app) fn write_tab(&mut self, path: &str) -> bool {
         if project::is_block_script(path) {
             return self.write_block_tab(path);
         }
@@ -540,10 +540,13 @@ impl EditorApp {
                 .error(format!("Could not save `{path}`: {}", chain(&err)));
             return false;
         }
-        let missing_instance = self
-            .project
-            .as_ref()
-            .is_some_and(|project| project.scripts.iter().all(|file| file.path != path));
+        // Scripts inside objects take their code from the world's copies.
+        let object = self.is_object_file(path);
+        let missing_instance = !object
+            && self
+                .project
+                .as_ref()
+                .is_some_and(|project| project.scripts.iter().all(|file| file.path != path));
         let instance =
             missing_instance.then(|| project::add_script_instance(&mut self.world, path));
         if let Some(project) = &mut self.project {
@@ -570,6 +573,11 @@ impl EditorApp {
             }
             if let Some(file) = project.scripts.iter_mut().find(|file| file.path == path) {
                 file.source = translation.source.clone();
+            }
+            if object {
+                project
+                    .object_files
+                    .insert(path.to_owned(), translation.source.clone());
             }
         }
         if missing_instance {

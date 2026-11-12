@@ -3,6 +3,8 @@
 
 use super::tests::{copy_of_example, play_for, printed};
 use super::*;
+use crate::scripts::ScriptView;
+use axcenity_project as project;
 
 const DOOR: &str = "objects/Door/Open.server.lua";
 
@@ -193,5 +195,98 @@ fn find_in_scripts_and_quick_open_include_the_code_of_scripts_inside_objects() {
     ));
     app.run_search_target(&ctx, target);
     assert_eq!(app.tabs.active_path(), Some(DOOR));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Code ↔ Blocks for a script inside an object (CF11): its shared file is
+/// replaced by one with the other ending, every copy and the prefab point
+/// at it, its tab follows, and each switch is one undo step.
+#[test]
+fn switching_a_shared_file_to_blocks_and_back_points_every_copy_at_it() {
+    let folder = copy_of_example("hello-object-scripts", "object-script-switch");
+    let mut app = EditorApp::new(Some(&folder));
+    let back = script_in(&app, "BackDoor", "Open");
+    let front = script_in(&app, "FrontDoor", "Open");
+    app.open_script_instance(back);
+    let original = std::fs::read_to_string(folder.join(DOOR)).unwrap();
+    let blocks = "objects/Door/Open.server.blocks.json";
+
+    app.switch_script_view(DOOR, ScriptView::Blocks);
+    let state = |app: &EditorApp, path: &str| {
+        for copy in [back, front] {
+            assert_eq!(source_file(app, copy).as_deref(), Some(path));
+        }
+        let other = project::switched_script_path(path).unwrap();
+        assert!(folder.join(path).exists() && !folder.join(&other).exists());
+        let prefab =
+            std::fs::read_to_string(folder.join("assets/prefabs/Door.prefab.json")).unwrap();
+        assert!(prefab.contains(path), "{prefab}");
+        let project = app.project.as_ref().unwrap();
+        assert!(project.object_files[path].contains("opens"));
+        assert!(!project.object_files.contains_key(&other));
+        assert_eq!(app.tabs.active().unwrap().path, path, "its tab follows it");
+        let documents: Vec<&str> = project
+            .block_scripts
+            .iter()
+            .map(|document| document.path.as_str())
+            .collect();
+        let expected: &[&str] = if project::is_block_script(path) {
+            &[blocks]
+        } else {
+            &[]
+        };
+        assert_eq!(documents, expected);
+        assert_eq!(project.scripts.len(), 1, "no Script of its own");
+    };
+    state(&app, blocks);
+
+    app.switch_script_view(blocks, ScriptView::Code);
+    state(&app, DOOR);
+
+    app.undo();
+    state(&app, blocks);
+    app.undo();
+    state(&app, DOOR);
+    assert_eq!(
+        std::fs::read_to_string(folder.join(DOOR)).unwrap(),
+        original
+    );
+    assert_eq!(app.tabs.active().unwrap().text, original);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// A block script inside an object opens in a Blocks tab from any copy,
+/// and saving it rewrites the shared file, not a new script.
+#[test]
+fn a_block_script_inside_an_object_opens_and_saves_its_shared_file() {
+    let folder = copy_of_example("hello-object-scripts", "object-script-blocks");
+    let mut app = EditorApp::new(Some(&folder));
+    let back = script_in(&app, "BackDoor", "Open");
+    let front = script_in(&app, "FrontDoor", "Open");
+    app.open_script_instance(back);
+    app.switch_script_view(DOOR, ScriptView::Blocks);
+    let blocks = "objects/Door/Open.server.blocks.json";
+    // As a project opened with the block file already there.
+    let mut app = EditorApp::new(Some(&folder));
+    assert!(app.project.as_ref().unwrap().block_scripts.is_empty());
+
+    app.open_script_instance(front);
+    assert_eq!(app.tabs.active().unwrap().path, blocks);
+    let document = app
+        .project
+        .as_mut()
+        .unwrap()
+        .block_scripts
+        .iter_mut()
+        .find(|document| document.path == blocks)
+        .expect("a Blocks tab");
+    document.script.graph.shown = true;
+    assert!(app.write_tab(blocks));
+    let written = std::fs::read_to_string(folder.join(blocks)).unwrap();
+    let saved: axcenity_blocks::BlockScript = serde_json::from_str(&written).unwrap();
+    assert!(saved.graph.shown);
+    let project = app.project.as_ref().unwrap();
+    assert_eq!(project.scripts.len(), 1, "no Script of its own");
+    assert!(project.object_files[blocks].contains("opens"));
     let _ = std::fs::remove_dir_all(&folder);
 }
