@@ -25,6 +25,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 - AMD/Vulkan/Windows: the sky clear isn't sRGB-encoded through an sRGB view (`docs/rendering/pipeline.md`).
 - Lights are tiled in 2D, not clustered; rect lights use a representative point.
 - No vertex colors or `KHR_materials_emissive_strength` from glTF; FBX uses the first UV set; glTF animation isn't read.
+- Humanoid retargeting finds roles by bone names only: a skeleton with unusual names can't be mapped by hand yet; fingers aren't retargeted (`docs/rendering/animation.md`).
 
 ## Physics
 
@@ -48,6 +49,6 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 ## Content and platforms
 
 - References may name an asset by path or by ID (PR #78); older projects still use paths.
-- Built games ship sources and cooked copies (G12 plans cooked-only games).
+- Built games ship cooked textures without their sources (G12); what the CPU reads of such a texture (terrain layers, color grading lookups, UI images) is decoded from BC7 or BC5, so it's close to the source, not equal. Model files (FBX, glTF) still ship beside their cooked copies.
 - macOS is not verified on changes; mobile and web are not supported.
 - No binary world format (S10k's 10 MB `world.json` loads in 0.19 s since C11).

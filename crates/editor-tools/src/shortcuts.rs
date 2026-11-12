@@ -193,6 +193,8 @@ pub enum Action {
     QuickOpen,
     FindInScripts,
     Play,
+    /// Run without a player (roadmap G14).
+    Run,
     Stop,
     /// While paused at a breakpoint (roadmap G6).
     StepOver,
@@ -352,6 +354,7 @@ impl Action {
             QuickOpen,
             FindInScripts,
             Play,
+            Run,
             Stop,
             StepOver,
             StepInto,
@@ -495,6 +498,8 @@ impl Action {
             // F5 plays and Shift+F5 stops, as in Roblox Studio.
             Play => keys![NONE F5],
             Stop => keys![SHIFT F5],
+            // F8 runs without a player, as Studio's Run does.
+            Run => keys![NONE F8],
             // Stepping while paused, as in Roblox Studio and most debuggers.
             StepOver => keys![NONE F10],
             StepInto => keys![NONE F11],
@@ -650,7 +655,7 @@ impl Action {
     pub fn context(self) -> Context {
         use Action::*;
         match self {
-            Save | Settings | Search | Palette | QuickOpen | FindInScripts | Play | Stop
+            Save | Settings | Search | Palette | QuickOpen | FindInScripts | Play | Run | Stop
             | StepOver | StepInto | StepOut | DevConsole => Context::Everywhere,
             Undo | Redo | Duplicate | Rename | Delete | Tool(_) | PutToolDown | UseTool => {
                 Context::Scene
@@ -700,6 +705,7 @@ impl Action {
             QuickOpen => "Quick Open",
             FindInScripts => "Find in Scripts",
             Play => "Play, or Continue",
+            Run => "Run without a player",
             Stop => "Stop",
             StepOver => "Step Over, while paused",
             StepInto => "Step Into, while paused",
@@ -815,8 +821,8 @@ impl Action {
     pub fn command(self) -> Option<String> {
         use Action::*;
         Some(match self {
-            Save | Settings | Search | Palette | QuickOpen | FindInScripts | Play | Stop | Undo
-            | Redo | Duplicate | Rename | Delete => format!("{self:?}"),
+            Save | Settings | Search | Palette | QuickOpen | FindInScripts | Play | Run | Stop
+            | Undo | Redo | Duplicate | Rename | Delete => format!("{self:?}"),
             Tool(tool) => format!("Tool({tool:?})"),
             TerrainTool(tool) => format!("TerrainTool({tool:?})"),
             _ => return None,

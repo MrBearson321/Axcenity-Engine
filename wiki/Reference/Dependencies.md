@@ -26,6 +26,7 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | Models | `gltf` 1.4 (`KHR_texture_transform`, `extras`), `ufbx` 0.11, `meshopt` 0.7 | assets | MIT/Apache; ufbx MIT/Unlicense | ufbx and meshoptimizer are C/C++ built with `cc` |
 | Images | `image` 0.25 (bmp, exr, hdr, jpeg, png, tga), `png` 0.18 | assets, terrain, player icon, editor thumbnails | MIT/Apache | |
 | Texture cooking | `intel_tex_2` 0.5 | cook (editor only) | MIT/Apache | Prebuilt ISPC kernels; never linked by player/server/testing |
+| Cooked texture decoding | `texture2ddecoder` 0.1.2 | assets (player too) | MIT/Apache | Pure Rust, no unsafe; decodes BC7/BC5 top levels for CPU readers in cooked-only games (G12); pulls in `paste` (already in the tree) |
 | Networking | `renet` 2, `renet_netcode` 2, `postcard` 1.1 (`use-std`) | net | MIT/Apache | renet pair moves together |
 | Packing | `zstd` 0.13, `zip` 2 (deflate) | project, editor, collab (wire messages of 16 KiB or more, C11) | MIT/BSD; MIT | zstd builds C with `cc` |
 | UI layout | `taffy` 0.7 | ui | MIT | |

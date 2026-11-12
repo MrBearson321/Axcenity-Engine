@@ -604,7 +604,7 @@ The roadmap said to measure the ratio before compressing `.axgame` files. Each e
 
 - **Compressing is worth little for textures, a lot for worlds.** zstd over the whole file found 0.72–0.90 for cooked games (BC7 data) and 0.98–1.0 for uncooked ones (PNG and JPEG are compressed already), but `world.json` shrinks about 50×. Level 9 gave 0.81 where level 3 gave 0.83, at twice the time, so entries use level 3. Building takes longer: hello-roads packs in 3.3 s instead of 1.0 s.
 - **Unpacking on several threads** makes up for the decompression; on one thread hello-roads took 520 ms.
-- **The bigger size cost is shipping each texture twice**: a cooked game carries both the source image and its cooked copy (hello-roads: 393 MB before cooking, 830 MB after). Leaving out sources that have a current cooked copy would about halve such games, but the player still reads a source's pixels for some uses, so that's a separate change.
+- **The bigger size cost is shipping each texture twice**: a cooked game carried both the source image and its cooked copy (hello-roads: 393 MB before cooking, 830 MB after). Build Game now leaves out sources that have a current cooked copy (roadmap G12, [rendering/textures.md](rendering/textures.md)): hello-character 369 → 212 MB, hello-roads 711 → 337 MB (version 2 packs, `build_game::tests::cooked_only_sizes`).
 - **Reading in place** (no temporary copy) would need a file layer under the project loader, `assets`, `scene` and the player (about 600 file calls); with unpacking at 30–170 ms here it isn't the bottleneck.
 
 ### Collaborate on S10k (C11)

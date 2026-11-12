@@ -85,6 +85,7 @@ fn strafe_takes() -> Arc<Vec<Take>> {
                 scale: Keys::default(),
             };
             Take {
+                skeleton: Default::default(),
                 name: take_name([x, z]),
                 duration: 1.0,
                 frame_rate: 30.0,

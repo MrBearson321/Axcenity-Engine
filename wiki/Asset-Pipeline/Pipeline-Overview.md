@@ -46,7 +46,7 @@ flowchart TD
     D3 --> D4[free after 600 undrawn frames]
   end
   subgraph Ship["Build Game"]
-    S1["pack_game: sources + current .axtex,<br/>.axlod, .axmodel → game.axgame v2 (zstd)"] --> S2["player unpacks (8 threads, mtimes kept)<br/>→ cooked copies trusted without hashing"]
+    S1["pack_game_with cooked_only: current .axtex<br/>(texture sources shipped empty, listed: G12),<br/>models + .axlod, .axmodel → game.axgame v2 (zstd)"] --> S2["player unpacks (8 threads, mtimes kept)<br/>→ cooked copies trusted without hashing"]
   end
   Import --> Cook --> Load --> Draw
   Cook --> Ship --> Load
@@ -58,6 +58,7 @@ flowchart TD
 |---|---|
 | An `ax://` ID and its path share one load and one cache entry (`assets/src/references.rs`) | `assets` |
 | Every game file read goes through `assets`, inside the project (`safe_path` refuses absolute paths, drives, schemes, `..`) | `assets` |
+| In a built game, an empty texture listed in `cooked-only.txt` counts as current for its cooked copy; CPU pixels come from the decoded top level (`cooked::is_current`, `decode_top_level`, G12) | `assets` |
 | Never read or decode under the `Assets` lock; one read per file however many threads ask (`LoadTicket`) | `assets/src/loading.rs` (M5) |
 | A model not loaded yet draws **nothing** (no placeholder); a reloading one keeps its last version; only a missing or bad file is the grey box | `scene` (M5 follow-up) |
 | Physics uses `model_blocking`: a part needs its real collision shape | `physics` |

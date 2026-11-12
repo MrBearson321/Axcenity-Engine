@@ -184,7 +184,7 @@ fn watches_section(ui: &mut egui::Ui, watches: &mut crate::watches::Watches) {
 /// The green "Playing" badge in the header during Play, with a dot that
 /// pulses gently (steady when motion is reduced). Paused at a breakpoint,
 /// it's an amber "Paused" with a steady dot.
-pub(in crate::app) fn playing_badge(ui: &mut egui::Ui, paused: bool) {
+pub(in crate::app) fn playing_badge(ui: &mut egui::Ui, paused: bool, running: bool) {
     let palette = theme::palette(ui.ctx());
     let (color, text, hover) = if paused {
         (
@@ -192,6 +192,13 @@ pub(in crate::app) fn playing_badge(ui: &mut egui::Ui, paused: bool) {
             "Paused",
             "Paused. Continue (F5) carries on, Step Over (F10), Step Into (F11) and Step Out \
              (Shift+F11) run one line at a time, and Stop (Shift+F5) ends the game.",
+        )
+    } else if running {
+        (
+            palette.success,
+            "Running",
+            "Running without a player: Scripts and physics run, the fly camera moves. \
+             Only the Properties panel can change the game, until you press Stop.",
         )
     } else {
         (
@@ -326,7 +333,14 @@ impl EditorApp {
     pub(in crate::app) fn shortcuts(&mut self, ctx: &egui::Context) {
         // Stop is taken first: egui counts Shift+F5 as F5 too.
         let pressed = ctx.input_mut(|input| {
-            shortcuts::consume_first(input, &[shortcuts::Action::Play, shortcuts::Action::Stop])
+            shortcuts::consume_first(
+                input,
+                &[
+                    shortcuts::Action::Play,
+                    shortcuts::Action::Stop,
+                    shortcuts::Action::Run,
+                ],
+            )
         });
         let (stop, play) = (
             pressed == Some(shortcuts::Action::Stop),
@@ -334,6 +348,10 @@ impl EditorApp {
         );
         if stop {
             self.stop();
+        } else if pressed == Some(shortcuts::Action::Run) {
+            if !self.playing() {
+                self.run();
+            }
         } else if play && self.paused() {
             self.continue_play();
         } else if play {

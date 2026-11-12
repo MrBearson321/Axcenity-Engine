@@ -19,7 +19,7 @@ use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::MoveInput;
 use axcenity_core::input::{InputEvent, InputMap, InputState};
-use axcenity_core::{InstanceId, KeyCode, MouseBehavior, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, KeyCode, MouseBehavior, Vector3, World};
 use axcenity_net::Network;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
@@ -98,6 +98,8 @@ pub struct Session {
     label: Option<String>,
     /// The server view: no input, and the fly camera.
     observing: bool,
+    /// Run (roadmap G14): no player on this device, so always observing.
+    run: bool,
 }
 
 /// The game's levels for Play's `LevelService` (Phase 48): every level by
@@ -139,6 +141,49 @@ impl Session {
         capabilities: &Capabilities,
         levels: PlayLevels,
     ) -> Result<Session, Crash> {
+        Self::begin(
+            edit_world,
+            scripts,
+            breakpoints,
+            pause_on_error,
+            output,
+            assets,
+            camera,
+            loading,
+            input_map,
+            save_folder,
+            graphics,
+            capabilities,
+            levels,
+            false,
+        )
+    }
+
+    /// [`start`](Self::start), or with `run` on, Run (roadmap G14): the game
+    /// as a server with no player of its own, as `axcenity-server` runs it.
+    /// Scripts and physics run; no player joins, so no character spawns
+    /// (one placed in the Workspace stays where it is), LocalScripts don't
+    /// start, the loading screen doesn't show, and the view is the fly
+    /// camera with no input for the game.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin(
+        edit_world: &World,
+        scripts: &[ScriptFile],
+        breakpoints: &Breakpoints,
+        pause_on_error: bool,
+        output: &mut Output,
+        assets: Assets,
+        camera: CameraState,
+        loading: &LoadingScreen,
+        input_map: &InputMap,
+        save_folder: Option<PathBuf>,
+        graphics: &GraphicsSettings,
+        capabilities: &Capabilities,
+        levels: PlayLevels,
+        run: bool,
+    ) -> Result<Session, Crash> {
+        let no_loading_screen = LoadingScreen::default();
+        let loading = if run { &no_loading_screen } else { loading };
         let mut session = Session {
             sim: Sim::new(edit_world.clone(), axcenity_sim::script_runtime(), assets),
             schedule: Schedule::for_host(Hosts::EDITOR_PLAY),
@@ -156,8 +201,13 @@ impl Session {
             kept: PlayEdits::default(),
             network: Network::new(multi::play_game()),
             label: None,
-            observing: false,
+            observing: run,
+            run,
         };
+        if run {
+            // Before any script runs, so no player ever joins.
+            session.sim.scripts.set_dedicated();
+        }
         // Up before any script runs, as in the player.
         session.loading_gui = LoadingGui::start(
             &mut session.sim.world,
@@ -223,6 +273,13 @@ impl Session {
                 .update(&mut session.sim.world, &session.sim.assets, 0.0);
             session.forward_animator_errors(output);
             for script in scripts {
+                // LocalScripts run on a player's device, and Run has none.
+                if run
+                    && session.sim.world.get(script.instance).map(|i| i.class())
+                        == Some(ClassName::LocalScript)
+                {
+                    continue;
+                }
                 session.sim.scripts.start_script(
                     &mut session.sim.world,
                     script.instance,

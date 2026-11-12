@@ -474,3 +474,31 @@ fn a_model_with_embedded_maps_loads_the_same_cooked_as_uncooked() {
         let _ = fs::remove_dir_all(folder);
     }
 }
+
+/// What a cooked-only game decodes for the CPU (G12) is close to the source:
+/// BC7 within a few steps a channel, BC5's red and green likewise, with blue
+/// worked out from them and alpha opaque.
+#[test]
+fn a_cooked_top_level_decodes_close_to_its_source() {
+    let source = gradient(64, 32, 200);
+    let cooked = cook_rgba(64, 32, &source).unwrap();
+    let decoded = axcenity_assets::decode_top_level(&cooked).unwrap();
+    assert_eq!(decoded.len(), source.len());
+    let worst = source
+        .iter()
+        .zip(&decoded)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(worst <= 6, "BC7 differs by {worst}");
+
+    // A flat normal pointing out of the surface.
+    let up = [128, 128, 255, 255].repeat(16 * 16);
+    let cooked = cook_normal_rgba(16, 16, &up).unwrap();
+    let decoded = axcenity_assets::decode_top_level(&cooked).unwrap();
+    for pixel in decoded.chunks(4) {
+        assert!(pixel[0].abs_diff(128) <= 1 && pixel[1].abs_diff(128) <= 1);
+        assert!(pixel[2] >= 253, "blue worked out as about 1: {pixel:?}");
+        assert_eq!(pixel[3], 255);
+    }
+}
