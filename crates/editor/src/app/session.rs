@@ -200,6 +200,7 @@ impl EditorApp {
         let developer_console = project.manifest.developer_console;
         let loading_screen = project.manifest.loading_screen.clone();
         let branding = project.manifest.branding.clone();
+        self.profiler.set_budget(project.manifest.memory_budget);
         self.output.info(format!(
             "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
              to run it.",
@@ -938,6 +939,9 @@ impl EditorApp {
         if let Some(cost) = session.cost() {
             if self.profiler.memory_due() {
                 self.profiler.record_memory(session.memory());
+                for warning in self.profiler.take_warnings() {
+                    self.output.warning(warning);
+                }
             }
             self.profiler.record_game(cost, session.load());
         }

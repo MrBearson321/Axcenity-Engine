@@ -69,7 +69,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G4 | Script completion and diagnostics in the editor | Stage 1 (completion and signature hints) and stage 2 (luau-lsp errors and lints in code tabs) in review |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
 | G6 | Debugger stepping and watches | Planned |
-| G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126) |
+| G7 | Memory breakdown (Profiler Memory tab and F9 Stats); history, peaks and budgets | **Done** (#125, #126; history, peaks and budgets: competitive roadmap PR) |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
 | G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |

@@ -221,6 +221,17 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "Which groups of parts pass through each other, saved in the project.",
         ),
         setting(
+            Project,
+            "Memory budget",
+            &[
+                "Memory limit",
+                "RAM budget",
+                "Lua memory",
+                "Profiler warning",
+            ],
+            "Limits the Profiler compares the playing game's memory with, saved in the project.",
+        ),
+        setting(
             Graphics,
             "Quality",
             &["Graphics preset", "Ultra", "High", "Medium", "Low"],

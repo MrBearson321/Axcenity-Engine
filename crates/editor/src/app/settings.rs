@@ -95,6 +95,7 @@ impl SettingsPage {
 
 mod appearance;
 mod graphics;
+mod memory_budget;
 mod search;
 
 use appearance::*;
@@ -531,6 +532,9 @@ impl EditorApp {
             let lighting = self.world.lighting();
             self.select_from_viewport(Some(lighting));
         }
+        ui.add_space(space::S);
+        section(ui, "Memory budget");
+        self.memory_budget_settings(ui);
         ui.add_space(space::S);
         section(ui, "Branding");
         self.branding_settings(ui);

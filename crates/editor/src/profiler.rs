@@ -7,7 +7,10 @@
 //! the network), **Graphics** (frame and pass times, draws, culling,
 //! levels of detail, GPU memory and shaders, all from [`RenderStats`]) and
 //! **Memory** (roadmap G7: what the game holds by kind, from
-//! `Session::memory`, the GPU's share, and the Instances by class).
+//! `Session::memory`, the GPU's share, and the Instances by class; how the
+//! total moved over the last minute or so, each kind's peak and change since
+//! Play started, and the project's memory budget, with a warning in Output
+//! the first time the game goes over one).
 //!
 //! Readings start fresh at each Play, update every frame, and freeze at
 //! Stop. The player has no profiler.
@@ -17,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use axcenity_core::bench::{Bound, FramePacing};
 use axcenity_core::memory::MemoryBreakdown;
+use axcenity_project::memory_budget::MemoryBudget;
 use axcenity_render::{FramePass, LOD_LEVELS, RenderStats, SHADOW_CASCADE_COUNT, ShaderError};
 use eframe::egui::{self, RichText};
 
@@ -29,6 +33,11 @@ const WINDOW: usize = 120;
 /// Asking the OS for the process's memory every frame would be wasted
 /// work; every this many frames is plenty.
 const MEMORY_EVERY: u64 = 15;
+/// How many memory samples the Memory tab's chart keeps: at 60 fps and
+/// one every [`MEMORY_EVERY`] frames, the last minute.
+const MEMORY_HISTORY: usize = 240;
+/// How many rows [`MemoryBreakdown::rows`] has.
+const MEMORY_ROWS: usize = 7;
 /// How many classes the Memory tab lists, the most bytes first.
 const MEMORY_CLASSES: usize = 12;
 /// How many shader messages the Graphics tab keeps, newest last.
@@ -179,6 +188,22 @@ pub struct Profiler {
     memory: Option<usize>,
     /// The game's memory by kind, as last asked ([`Profiler::memory_due`]).
     breakdown: Option<MemoryBreakdown>,
+    /// The first breakdown of this Play, to show what changed since.
+    first_breakdown: Option<MemoryBreakdown>,
+    /// Each breakdown's counted total, oldest first.
+    memory_history: VecDeque<usize>,
+    /// The largest bytes of each [`MemoryBreakdown::rows`] row this Play.
+    peak_rows: [usize; MEMORY_ROWS],
+    /// The largest counted total this Play.
+    peak_total: usize,
+    /// The project's memory budget (Settings > This project), kept across
+    /// Plays.
+    budget: MemoryBudget,
+    /// Which of [`budget_rows`]' limits this Play has gone over, so each
+    /// warns once.
+    warned: [bool; 3],
+    /// Warnings not yet handed to Output ([`Profiler::take_warnings`]).
+    warnings: Vec<String>,
     /// Each client's connection to the server, as last measured (Play with
     /// several clients, Phase 67).
     network: Vec<NetworkRow>,
@@ -209,6 +234,7 @@ impl Profiler {
             state: State::Live,
             tab: self.tab,
             shader_messages: std::mem::take(&mut self.shader_messages),
+            budget: self.budget,
             ..Profiler::default()
         };
     }
@@ -258,11 +284,52 @@ impl Profiler {
         self.is_live() && self.frames.is_multiple_of(MEMORY_EVERY)
     }
 
-    /// The game's memory by kind, for the Memory tab.
+    /// The game's memory by kind, for the Memory tab: kept in the history
+    /// and the peaks, and checked against the budget.
     pub fn record_memory(&mut self, breakdown: MemoryBreakdown) {
-        if self.is_live() {
-            self.breakdown = Some(breakdown);
+        if !self.is_live() {
+            return;
         }
+        let total = breakdown.total();
+        if self.memory_history.len() == MEMORY_HISTORY {
+            self.memory_history.pop_front();
+        }
+        self.memory_history.push_back(total);
+        self.peak_total = self.peak_total.max(total);
+        for (peak, (_, _, size)) in self.peak_rows.iter_mut().zip(breakdown.rows()) {
+            *peak = (*peak).max(size);
+        }
+        for (index, (name, used, limit)) in budget_rows(&breakdown, &self.budget)
+            .into_iter()
+            .enumerate()
+        {
+            let Some(limit) = limit else { continue };
+            if used > megabytes(limit) && !self.warned[index] {
+                self.warned[index] = true;
+                self.warnings.push(format!(
+                    "Memory: {name} is {}, over its {limit} MB budget \
+                     (Settings > This project > Memory budget).",
+                    bytes(used)
+                ));
+            }
+        }
+        self.first_breakdown
+            .get_or_insert_with(|| breakdown.clone());
+        self.breakdown = Some(breakdown);
+    }
+
+    /// The project's memory budget, to compare the game with.
+    pub fn set_budget(&mut self, budget: MemoryBudget) {
+        self.budget = budget;
+    }
+
+    pub fn budget(&self) -> MemoryBudget {
+        self.budget
+    }
+
+    /// The budget warnings since last asked, for Output.
+    pub fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
     }
 
     /// The memory breakdown last recorded, for the Developer Console.
@@ -632,12 +699,33 @@ impl Profiler {
             );
             if let Some(breakdown) = &self.breakdown {
                 row(ui, "Game (counted)", bytes(breakdown.total()));
+                row(ui, "Peak this Play", bytes(self.peak_total));
             }
             row(ui, "GPU", bytes(gpu as usize));
         });
         let Some(breakdown) = &self.breakdown else {
             return;
         };
+        let palette = theme::palette(ui.ctx());
+        ui.add_space(6.0);
+        let totals: Vec<f32> = self
+            .memory_history
+            .iter()
+            .map(|&total| total as f32)
+            .collect();
+        let game_limit = self.budget.game_mb.map(|mb| megabytes(mb) as f32);
+        bars(ui, &totals, MEMORY_HISTORY, game_limit);
+        if !self.budget.is_empty() {
+            section(ui, "Budget", |ui| {
+                for (name, used, limit) in budget_rows(breakdown, &self.budget) {
+                    let Some(limit) = limit else { continue };
+                    let over = used > megabytes(limit);
+                    let color = if over { palette.warning } else { palette.text };
+                    let value = format!("{} of {limit} MB", bytes(used));
+                    row_colored(ui, name, value, color);
+                }
+            });
+        }
         section(ui, "Game, by kind", |ui| {
             for (name, count, size) in breakdown.rows() {
                 let value = match count {
@@ -647,6 +735,22 @@ impl Profiler {
                 row(ui, name, value);
             }
         });
+        if let Some(first) = &self.first_breakdown {
+            section(ui, "Since Play started", |ui| {
+                for (((name, _, now), (_, _, then)), peak) in breakdown
+                    .rows()
+                    .into_iter()
+                    .zip(first.rows())
+                    .zip(self.peak_rows)
+                {
+                    row(
+                        ui,
+                        name,
+                        format!("{}, peak {}", change(now, then), bytes(peak)),
+                    );
+                }
+            });
+        }
         section(ui, "Instances by class", |ui| {
             for (class, used) in breakdown.instances.classes.iter().take(MEMORY_CLASSES) {
                 row(
@@ -664,13 +768,17 @@ impl Profiler {
                 row(ui, "Other classes", more.to_string());
             }
         });
-        let palette = theme::palette(ui.ctx());
         ui.add_space(6.0);
+        let budget_note = if self.budget.is_empty() {
+            " Set a budget in Settings > This project."
+        } else {
+            ""
+        };
         ui.label(
-            RichText::new(
+            RichText::new(format!(
                 "Estimates of what each part holds; the process also has the editor, \
-                 fonts and the allocator's spare room.",
-            )
+                 fonts and the allocator's spare room.{budget_note}"
+            ))
             .color(palette.text_weak)
             .size(type_scale::CAPTION),
         );
@@ -743,13 +851,18 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
 }
 
 fn row(ui: &mut egui::Ui, name: &str, value: String) {
+    let color = theme::palette(ui.ctx()).text;
+    row_colored(ui, name, value, color);
+}
+
+fn row_colored(ui: &mut egui::Ui, name: &str, value: String, color: egui::Color32) {
     let palette = theme::palette(ui.ctx());
     ui.label(RichText::new(name).color(palette.text_secondary));
     ui.label(
         RichText::new(value)
             .family(egui::FontFamily::Monospace)
             .size(type_scale::BODY - 1.0)
-            .color(palette.text),
+            .color(color),
     );
     ui.end_row();
 }
@@ -757,20 +870,29 @@ fn row(ui: &mut egui::Ui, name: &str, value: String) {
 /// Each recent frame's CPU time as a bar, scaled to the slowest, with a
 /// line at 16.7 ms (60 fps) when it's in range.
 fn history(ui: &mut egui::Ui, frames: &[f32]) {
+    bars(ui, frames, WINDOW, Some(1000.0 / 60.0));
+}
+
+/// `values` as bars, the newest at the right, room for `slots` of them,
+/// scaled to the largest (or `limit`, if larger). Bars over `limit` are in
+/// the warning color, and a line marks it.
+fn bars(ui: &mut egui::Ui, values: &[f32], slots: usize, limit: Option<f32>) {
     let palette = theme::palette(ui.ctx());
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 3.0, palette.inset);
-    let budget = 1000.0 / 60.0;
-    let top = frames.iter().copied().fold(budget, f32::max);
-    let bar = rect.width() / WINDOW as f32;
-    // The newest frame is at the right.
-    let start = rect.right() - bar * frames.len() as f32;
-    for (index, &ms) in frames.iter().enumerate() {
-        let height = rect.height() * (ms / top).clamp(0.0, 1.0);
+    let top = values
+        .iter()
+        .copied()
+        .fold(limit.unwrap_or(0.0), f32::max)
+        .max(f32::MIN_POSITIVE);
+    let bar = rect.width() / slots as f32;
+    let start = rect.right() - bar * values.len() as f32;
+    for (index, &value) in values.iter().enumerate() {
+        let height = rect.height() * (value / top).clamp(0.0, 1.0);
         let left = start + bar * index as f32;
-        let color = if ms > budget {
+        let color = if limit.is_some_and(|limit| value > limit) {
             palette.warning
         } else {
             palette.accent
@@ -784,12 +906,39 @@ fn history(ui: &mut egui::Ui, frames: &[f32]) {
             color,
         );
     }
-    let y = rect.bottom() - rect.height() * budget / top;
-    painter.hline(
-        rect.x_range(),
-        y,
-        egui::Stroke::new(1.0_f32, palette.border_strong),
-    );
+    if let Some(limit) = limit {
+        let y = rect.bottom() - rect.height() * limit / top;
+        painter.hline(
+            rect.x_range(),
+            y,
+            egui::Stroke::new(1.0_f32, palette.border_strong),
+        );
+    }
+}
+
+/// The budgeted figures: a name, the bytes used and the limit in MB.
+fn budget_rows(
+    breakdown: &MemoryBreakdown,
+    budget: &MemoryBudget,
+) -> [(&'static str, usize, Option<u32>); 3] {
+    [
+        ("Game", breakdown.total(), budget.game_mb),
+        ("Lua", breakdown.lua, budget.lua_mb),
+        ("Textures", breakdown.textures.bytes, budget.textures_mb),
+    ]
+}
+
+fn megabytes(mb: u32) -> usize {
+    (mb as usize) << 20
+}
+
+/// How `now` differs from `then`: "+1.5 MB", "-512 KB" or "no change".
+fn change(now: usize, then: usize) -> String {
+    match now.cmp(&then) {
+        std::cmp::Ordering::Equal => "no change".to_owned(),
+        std::cmp::Ordering::Greater => format!("+{}", bytes(now - then)),
+        std::cmp::Ordering::Less => format!("-{}", bytes(then - now)),
+    }
 }
 
 /// The average of `times`, or `None` if there are none.
@@ -1269,6 +1418,67 @@ mod tests {
         assert!(!profiler.memory_due());
         profiler.record_memory(MemoryBreakdown::default());
         assert_eq!(profiler.breakdown(), Some(&breakdown()));
+    }
+
+    #[test]
+    fn the_memory_tab_keeps_peaks_changes_and_warns_over_budget_once() {
+        let mut profiler = Profiler::default();
+        profiler.set_budget(MemoryBudget {
+            game_mb: Some(1024),
+            lua_mb: Some(4),
+            textures_mb: None,
+        });
+        profiler.start();
+        assert_eq!(profiler.budget().lua_mb, Some(4), "kept across Plays");
+        profiler.record_game(frame(1), GameLoad::default());
+        profiler.record_memory(breakdown());
+        assert!(
+            profiler.take_warnings().is_empty(),
+            "3 MB of Lua is in budget"
+        );
+
+        let mut bigger = breakdown();
+        bigger.lua = 6 << 20;
+        profiler.record_memory(bigger.clone());
+        let warnings = profiler.take_warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("Lua is 6.0 MB, over its 4 MB budget"));
+        profiler.record_memory(bigger);
+        assert!(profiler.take_warnings().is_empty(), "once a Play");
+
+        // Lua fell back, but its peak stays.
+        profiler.record_memory(breakdown());
+        profiler.tab = Tab::Memory;
+        let text = shown_text(&mut profiler);
+        for line in [
+            "Peak this Play\n411.0 MB",
+            "SINCE PLAY STARTED",
+            "Lua\nno change, peak 6.0 MB",
+            "BUDGET",
+            "Game\n408.0 MB of 1024 MB",
+            "Lua\n3.0 MB of 4 MB",
+        ] {
+            assert!(text.contains(line), "{line:?} in {text}");
+        }
+        assert!(!text.contains("Textures\n300.0 MB of"), "no texture budget");
+        assert_eq!(profiler.memory_history.len(), 4);
+
+        // The next Play starts again and may warn again.
+        profiler.stop();
+        profiler.start();
+        assert_eq!(profiler.peak_total, 0);
+        assert!(profiler.memory_history.is_empty());
+        let mut bigger = breakdown();
+        bigger.lua = 5 << 20;
+        profiler.record_memory(bigger);
+        assert_eq!(profiler.take_warnings().len(), 1);
+    }
+
+    #[test]
+    fn a_change_reads_with_its_sign() {
+        assert_eq!(change(3 << 20, 1 << 20), "+2.0 MB");
+        assert_eq!(change(1 << 19, 1 << 20), "-512 KB");
+        assert_eq!(change(7, 7), "no change");
     }
 
     /// A world of `parts` parts in a row in front of the camera.
