@@ -8,7 +8,20 @@ use axcenity_assets::{MATERIAL_SUFFIX, MATERIALS_FOLDER, material_json, read_tex
 use super::*;
 use crate::asset_browser::{AssetEntry, AssetKind, display_name, prefab_file_stem};
 use crate::terrain_studio::TerrainAction;
-use crate::toolbox_panel::{Target, ToolboxAction, install};
+use crate::toolbox_panel::{CardDrag, Spot, Target, ToolboxAction, install};
+use crate::viewport::DropTarget;
+use axcenity_render::glam::Vec3;
+
+/// Where a dropped Toolbox card lands, as the viewport gives a dropped tile.
+fn drop_target(spot: Spot) -> DropTarget {
+    DropTarget {
+        point: Vec3::new(spot.point.x, spot.point.y, spot.point.z),
+        normal: Vec3::new(spot.normal.x, spot.normal.y, spot.normal.z),
+        part: spot.part,
+        ui: spot.ui,
+        released: true,
+    }
+}
 
 impl EditorApp {
     /// The Toolbox tab.
@@ -29,6 +42,37 @@ impl EditorApp {
         }
     }
 
+    /// A Toolbox card was dragged onto the viewport and let go at `target`:
+    /// the Toolbox gets it, and its install is placed there (texture sets on
+    /// the part, sounds at the point; skies ask and models go through the
+    /// Import dialog, as Get does).
+    pub(in crate::app) fn drop_toolbox_card(
+        &mut self,
+        ctx: &egui::Context,
+        card: &CardDrag,
+        target: DropTarget,
+    ) {
+        if self.playing() {
+            return;
+        }
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let spot = Spot {
+            point: Vector3::new(target.point.x, target.point.y, target.point.z),
+            normal: Vector3::new(target.normal.x, target.normal.y, target.normal.z),
+            part: target.part,
+            ui: target.ui,
+        };
+        if !self
+            .toolbox
+            .get_dropped(ctx, &folder, card, Target::Drop(spot))
+        {
+            self.output
+                .error(format!("Could not get {} from the Toolbox now.", card.name));
+        }
+    }
+
     pub(in crate::app) fn toolbox_action(&mut self, action: ToolboxAction) {
         // Whatever the Toolbox did may have downloaded or installed something.
         self.inventory.refresh();
@@ -37,20 +81,34 @@ impl EditorApp {
             ToolboxAction::Notice { error: false, text } => self.output.info(text),
             ToolboxAction::TextureSet { path, name, target } => {
                 self.asset_browser.refresh();
-                if let Some(Target::TerrainLayer(layer)) = target {
-                    let entry = AssetEntry {
-                        kind: AssetKind::TextureSet,
-                        path,
-                        name,
-                    };
-                    self.terrain_action(TerrainAction::UseTextureSet(layer, entry));
+                let entry = AssetEntry {
+                    kind: AssetKind::TextureSet,
+                    path,
+                    name,
+                };
+                match target {
+                    Some(Target::TerrainLayer(layer)) => {
+                        self.terrain_action(TerrainAction::UseTextureSet(layer, entry));
+                    }
+                    Some(Target::Drop(spot)) => self.drop_asset(&entry, Some(drop_target(spot))),
+                    None => {}
                 }
             }
             ToolboxAction::AskSky(path) => {
                 self.asset_browser.refresh();
                 self.ask_sky(path);
             }
-            ToolboxAction::Sound(_) => self.asset_browser.refresh(),
+            ToolboxAction::Sound { path, target } => {
+                self.asset_browser.refresh();
+                if let Some(Target::Drop(spot)) = target {
+                    let entry = AssetEntry {
+                        kind: AssetKind::Audio,
+                        name: display_name(&path),
+                        path,
+                    };
+                    self.drop_asset(&entry, Some(drop_target(spot)));
+                }
+            }
             ToolboxAction::ImportModel { file, key, variant } => {
                 self.toolbox_imports.insert(file.clone(), (key, variant));
                 self.import_model(&file);
@@ -134,5 +192,49 @@ impl EditorApp {
         ));
         self.asset_browser.refresh();
         self.open_material(&path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sound_dragged_from_the_toolbox_onto_a_part_lands_inside_it() {
+        let temp =
+            std::env::temp_dir().join(format!("axcenity-toolbox-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+        let folder = axcenity_project::create_project(&temp, "Toolbox Drop").unwrap();
+        std::fs::create_dir_all(folder.join("assets/audio")).unwrap();
+        std::fs::write(folder.join("assets/audio/rain-1a2b.ogg"), b"sound").unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        let part = app.world.create(ClassName::Part).unwrap();
+        app.world
+            .set_parent(part, Some(app.world.workspace()))
+            .unwrap();
+        let spot = Spot {
+            point: Vector3::new(0.0, 1.0, 0.0),
+            normal: Vector3::new(0.0, 1.0, 0.0),
+            part: Some(part),
+            ui: None,
+        };
+
+        app.toolbox_action(ToolboxAction::Sound {
+            path: "assets/audio/rain-1a2b.ogg".to_owned(),
+            target: Some(Target::Drop(spot)),
+        });
+        let sound = app.selected.expect("the placed sound is selected");
+        let instance = app.world.get(sound).unwrap();
+        assert_eq!(instance.class(), ClassName::Sound);
+        assert_eq!(instance.parent(), Some(part));
+        // Got without a drop (the Get button), nothing is placed.
+        let children = app.world.get(part).unwrap().children().len();
+        app.toolbox_action(ToolboxAction::Sound {
+            path: "assets/audio/rain-1a2b.ogg".to_owned(),
+            target: None,
+        });
+        assert_eq!(app.world.get(part).unwrap().children().len(), children);
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }
