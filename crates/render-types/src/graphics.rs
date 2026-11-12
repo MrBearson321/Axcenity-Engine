@@ -599,6 +599,12 @@ pub struct GraphicsSettings {
     /// every preset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_traced_shadows: Option<RayTracedShadows>,
+    /// Whether the GPU is opened with hardware ray tracing at the next
+    /// start: off unless turned on (at every preset), since opening it
+    /// changes the device even while no ray traced effect is on. Read once,
+    /// before the device exists (`render::adapters::want_ray_tracing`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_tracing: Option<bool>,
 }
 
 impl GraphicsSettings {
@@ -792,6 +798,12 @@ impl GraphicsSettings {
         })
     }
 
+    /// Whether the GPU is opened with hardware ray tracing at the next
+    /// start: the override, or off.
+    pub fn ray_tracing(&self) -> bool {
+        self.ray_tracing.unwrap_or(false)
+    }
+
     /// How far ray traced effects see, in studs: the override, kept within
     /// [`RAY_TRACING_DISTANCE_RANGE`], or the preset's. An override that
     /// isn't a number is ignored.
@@ -903,7 +915,7 @@ impl GraphicsSettings {
         };
         if ray_traced_shadows != self.ray_traced_shadows() {
             notes.push(
-                "Ray traced shadows are off: this GPU can't ray trace. The shadow maps are used."
+                "Ray traced shadows are off: Hardware ray tracing is off or this GPU can't ray trace. The shadow maps are used."
                     .to_owned(),
             );
         }
@@ -1457,6 +1469,7 @@ mod tests {
             motion_blur: Some(MotionBlurQuality::Low),
             ray_tracing_distance: Some(600.0),
             ray_traced_shadows: Some(RayTracedShadows::Medium),
+            ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1682,6 +1695,19 @@ mod tests {
     }
 
     #[test]
+    fn hardware_ray_tracing_is_off_unless_turned_on() {
+        for quality in Quality::ALL {
+            assert!(!GraphicsSettings::preset(quality).ray_tracing());
+        }
+        let on = GraphicsSettings {
+            ray_tracing: Some(true),
+            ..GraphicsSettings::default()
+        };
+        assert!(on.ray_tracing());
+        assert!(!GraphicsSettings::default().ray_tracing());
+    }
+
+    #[test]
     fn ray_tracing_distance_follows_the_preset_and_stays_in_range() {
         let distances = Quality::ALL.map(|q| GraphicsSettings::preset(q).ray_tracing_distance());
         assert_eq!(distances, [150.0, 250.0, 400.0, 800.0]);
@@ -1792,6 +1818,7 @@ mod tests {
                         motion_blur: Some(MotionBlurQuality::Low),
                         ray_tracing_distance: None,
                         ray_traced_shadows: Some(RayTracedShadows::High),
+                        ray_tracing: post,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);

@@ -174,5 +174,5 @@ How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or Hig
 UserGameSettings.RayTracedShadows: EnumRayTracedShadows
 ```
 
-Hardware ray traced sun shadows: Off, Low (1 ray per pixel), Medium (2) or High (4). Off at every preset. On a GPU that can't ray trace it reads as chosen but the shadow maps are drawn. Lighting's ShadowSoftness still sets how soft they are.
+Hardware ray traced sun shadows: Off, Low (1 ray per pixel), Medium (2) or High (4). Off at every preset. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the shadow maps are drawn. Lighting's ShadowSoftness still sets how soft they are.
 

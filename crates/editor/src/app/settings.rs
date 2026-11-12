@@ -17,6 +17,34 @@ use axcenity_render::{
     RayTracedShadows, ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
+/// The file beside eframe's saved settings that says whether the GPU is
+/// opened with hardware ray tracing: the device is made before the app (and
+/// its settings) exists, so the choice is kept where `main` can read it.
+fn ray_tracing_file() -> Option<std::path::PathBuf> {
+    eframe::storage_dir(crate::APP_ID).map(|folder| folder.join("hardware-ray-tracing.txt"))
+}
+
+/// Whether Settings > Graphics > Hardware ray tracing was on when the
+/// editor last saved. Off without the file.
+pub(crate) fn saved_ray_tracing() -> bool {
+    ray_tracing_file()
+        .and_then(|file| std::fs::read_to_string(file).ok())
+        .is_some_and(|text| text.trim() == "on")
+}
+
+/// Keeps `on` for the next start ([`saved_ray_tracing`]). Never in tests.
+pub(super) fn remember_ray_tracing(on: bool) {
+    if cfg!(test) || saved_ray_tracing() == on {
+        return;
+    }
+    if let Some(file) = ray_tracing_file() {
+        let _ = std::fs::create_dir_all(file.parent().unwrap_or(&file));
+        if let Err(err) = std::fs::write(&file, if on { "on" } else { "off" }) {
+            log::warn!("couldn't keep the hardware ray tracing setting: {err}");
+        }
+    }
+}
+
 /// The pages of the Settings window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum SettingsPage {
