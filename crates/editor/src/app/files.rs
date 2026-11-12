@@ -36,6 +36,7 @@ use crate::surface::{self, MapFile};
 use crate::theme::icons;
 use crate::tree::{self, Insertable};
 
+mod attach_script;
 mod export;
 mod import;
 mod packages;
