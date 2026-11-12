@@ -81,6 +81,7 @@ flowchart LR
 - Lights are tiled in 2D, not clustered; depth-heavy scenes may need clusters (`docs/rendering/lights.md`).
 - Rect lights light from a representative point, not a true area integral.
 - Bakes go stale when the world changes; the editor flags them but doesn't rebake automatically.
+- Real-time GI draws six faces of the whole scene per probe. With hardware ray tracing (planned RT2, `docs/research/hardware-ray-tracing.md`) rays would update the same light probe volumes instead.
 
 ## Related documentation
 

@@ -1,0 +1,22 @@
+# A stand-alone probe, not a member of the engine's workspace: it measures
+# what hardware ray queries cost through wgpu on this machine's GPU, for
+# docs/research/hardware-ray-tracing.md. Nothing in the engine depends on it.
+[package]
+name = "ray-tracing-probe"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Its own workspace, so the engine's `crates/*` workspace doesn't pick it up.
+[workspace]
+
+[dependencies]
+# Same wgpu as the engine (Cargo.toml), with the static DXC the DX12 backend
+# needs for Shader Model 6.5 ray queries.
+wgpu = { version = "=30.0.1", features = ["static-dxc"] }
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
+[profile.release]
+debug = false
