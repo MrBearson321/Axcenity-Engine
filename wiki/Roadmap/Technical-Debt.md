@@ -14,7 +14,7 @@ Structural problems that make the engine harder to change. Each has a roadmap it
 
 | Debt | Why it hurts | Planned answer | Status |
 |---|---|---|---|
-| `editor` is one ~177k-line crate; `EditorApp` has ~118 fields | 5–6 s incremental rebuilds; weak internal boundaries | L6/G11: sub-crates behind an `EditorContext`, one panel family per PR | In progress: shared UI base in `editor-kit`; Toolbox, Graphics Benchmark, viewport tools and Model Studio in crates of their own |
+| `editor` is one ~177k-line crate; `EditorApp` has ~118 fields | 5–6 s incremental rebuilds; weak internal boundaries | L6/G11: sub-crates behind an `EditorContext`, one panel family per PR | In progress: shared UI base in `editor-kit`; Toolbox, Graphics Benchmark, shared tools, Model Studio, node-graph editor and UI Designer in crates of their own |
 | ~~`script` hosts most gameplay systems with ~20 `step_*`/`fire_*` entry points~~ | Was: hard to test systems alone | L7: `gameplay` crate behind `GameSystem` | **Done** 2026-11-11 ([Gameplay systems](../Engine-Systems/Gameplay-Systems.md)); Players stays in `script` by decision; `net` still talks to `ScriptRuntime` through many methods |
 | String-keyed property maps | ~9% of S10k instructions; ~2 KB per Part (estimate) | L1 typed slots | Parked by measurement |
 | wgpu 25 / egui 0.32 / winit 0.30 locked together | Blocks newer wgpu features (L5, G9) | M12 | In progress (PR #104) |
