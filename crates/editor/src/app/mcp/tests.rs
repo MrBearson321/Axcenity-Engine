@@ -2601,3 +2601,76 @@ fn errors_a_small_model_tripped_on_point_to_the_right_tool() {
     );
     assert!(text.contains("\"Crate\""), "{text}");
 }
+
+#[test]
+fn view_capture_draws_the_scene_as_a_png_from_the_camera_an_object_or_a_point() {
+    let mut opened = open("hello-part", "mcp-view-capture");
+    let host = &mut opened.app;
+    // Wrong combinations are refused before drawing anything.
+    let error = call(
+        host,
+        "view_capture",
+        json!({"id": "Workspace/Block", "from": [0, 10, 10]}),
+    )
+    .unwrap_err();
+    assert!(error.message.contains("not both"), "{error}");
+    let error = call(host, "view_capture", json!({"at": [0, 0, 0]})).unwrap_err();
+    assert!(error.message.contains("at goes with id or from"), "{error}");
+    let error = call(host, "view_capture", json!({"id": "Lighting"})).unwrap_err();
+    assert!(error.message.contains("no parts to frame"), "{error}");
+    let text = match call(host, "view_capture", json!({"size": "small"})) {
+        Ok(text) => text,
+        // A computer without a graphics adapter says so.
+        Err(error) => {
+            assert!(error.message.contains("no graphics adapter"), "{error}");
+            return;
+        }
+    };
+    assert!(
+        text.starts_with("320x180 picture from the editor's camera: camera at ["),
+        "{text}"
+    );
+    let png = host.session.png.take().expect("a picture");
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        std::fs::write(
+            std::path::Path::new(&folder).join("mcp-view-capture.png"),
+            &png,
+        )
+        .unwrap();
+    }
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut pixels).unwrap();
+    assert_eq!((info.width, info.height), (320, 180));
+    let colors: std::collections::BTreeSet<[u8; 3]> = pixels
+        .chunks(4)
+        .map(|pixel| [pixel[0] / 16, pixel[1] / 16, pixel[2] / 16])
+        .collect();
+    assert!(colors.len() > 8, "the scene, not one color");
+    // Framing an object looks at its middle; a point looks where it's told.
+    let framed = ok(host, "view_capture", json!({"id": "Workspace/Block"}));
+    assert!(framed.starts_with("640x360 picture framing "), "{framed}");
+    assert!(framed.contains("Part \"Block\""), "{framed}");
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        let png = host.session.png.take().unwrap();
+        std::fs::write(
+            std::path::Path::new(&folder).join("mcp-view-capture-framed.png"),
+            &png,
+        )
+        .unwrap();
+    }
+    let pointed = ok(
+        host,
+        "view_capture",
+        json!({"from": [0, 20, 30], "at": [0, 0, 0], "size": "large"}),
+    );
+    assert!(
+        pointed.contains("camera at [0,20,30] looking at [0,0,0]"),
+        "{pointed}"
+    );
+    assert!(host.session.png.is_some());
+    // Reading changes nothing: no undo step.
+    let history = ok(host, "history", json!({}));
+    assert!(history.starts_with("0 steps to undo"), "{history}");
+}
