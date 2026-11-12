@@ -225,10 +225,27 @@ pub(super) fn warnings(path: &str, source: &str) -> Vec<String> {
     if class == ClassName::ModuleScript {
         return Vec::new();
     }
-    crate::side_warnings::side_warnings(source, class)
+    let mut lines: Vec<String> = crate::side_warnings::side_warnings(source, class)
         .into_iter()
         .map(|warning| format!("warning {path}:{}: {}", warning.line, warning.message))
-        .collect()
+        .collect();
+    // Scripts sit in their service, not under a part: `script.Parent` is
+    // the service, a mistake that compiles and then never fires.
+    if let Some(line) = source
+        .lines()
+        .position(|line| line.contains("script.Parent"))
+    {
+        let service = match class {
+            ClassName::LocalScript => "StarterPlayerScripts",
+            _ => "ServerScriptService",
+        };
+        lines.push(format!(
+            "warning {path}:{}: script.Parent is {service} (scripts stay in their service); \
+             reach a part by its path, like workspace.Block",
+            line + 1
+        ));
+    }
+    lines
 }
 
 /// After an undo or redo that may have put a file back: takes in every

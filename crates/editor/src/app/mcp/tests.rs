@@ -38,7 +38,7 @@ fn call(app: &mut Headless, tool: &str, args: Value) -> Result<String, ToolError
         .find(|entry| entry.spec.name == tool)
         .unwrap_or_else(|| panic!("no tool {tool}"))
         .spec;
-    let args = Args::new(args.as_object().cloned().unwrap_or_default());
+    let mut args = Args::new(args.as_object().cloned().unwrap_or_default());
     args.check(spec)?;
     run(&mut app.host(), spec, &args, Some("test"))
 }
@@ -2544,4 +2544,34 @@ fn errors_a_small_model_tripped_on_point_to_the_right_tool() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("give name and side"), "{error}");
+    // A server script using script.Parent is warned: it's the service.
+    let text = ok(
+        host,
+        "script_write",
+        json!({"name": "TouchScript", "side": "server", "text": "script.Parent.Touched:Connect(function() print(\"touched\") end)\n"}),
+    );
+    assert!(
+        text.contains("script.Parent is ServerScriptService") && text.contains("workspace.Block"),
+        "{text}"
+    );
+    // A script's file given as an object names the script's object.
+    let error = call(
+        host,
+        "object_set",
+        json!({"id": "scripts/TouchScript.server.lua", "props": {"Name": "X"}}),
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("its object is \"ServerScriptService/TouchScript\" (ID "),
+        "{error}"
+    );
+    // Numbers and lists sent as text are taken as meant.
+    let text = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Crate", "color": "[1,0,0]", "position": "[0, 2, 0]"}),
+    );
+    assert!(text.contains("\"Crate\""), "{text}");
 }

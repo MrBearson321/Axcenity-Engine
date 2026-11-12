@@ -98,6 +98,9 @@ pub fn resolve(world: &World, text: &str) -> Result<InstanceId, ToolError> {
         );
     }
     let root = world.root();
+    if text.ends_with(".lua") || text.ends_with(".luau") {
+        return Err(script_file(world, text));
+    }
     let trimmed = text.trim_matches('/');
     let path = trimmed
         .strip_prefix("game/")
@@ -170,6 +173,30 @@ pub fn resolve(world: &World, text: &str) -> Result<InstanceId, ToolError> {
         }
     }
     Ok(at)
+}
+
+/// The error for a script's file path given as an object: names the
+/// script's object, which stays in its service.
+fn script_file(world: &World, file: &str) -> ToolError {
+    let class = axcenity_project::script_class(file);
+    let service = axcenity_project::script_service(world, class);
+    let name = axcenity_project::script_name(file);
+    let object = world.get(service).and_then(|instance| {
+        instance
+            .children()
+            .iter()
+            .copied()
+            .find(|&child| world.get(child).is_some_and(|c| c.name() == name))
+    });
+    let error = ToolError::not_found(format!("{} is a script file, not an object", quoted(file)));
+    match object {
+        Some(id) => error.with_fix(format!(
+            "its object is {} (ID {}); scripts stay in their service, so reach a part from the code (workspace.Block)",
+            quoted(&path(world, id)),
+            id_text(id)
+        )),
+        None => error.with_fix("script_read and script_write take script files"),
+    }
 }
 
 #[cfg(test)]

@@ -31,7 +31,18 @@ impl Args {
     /// names, every required one present, each of the right type. Clients
     /// don't all validate, and a model reads this message better than a
     /// schema error.
-    pub fn check(&self, spec: &ToolSpec) -> Result<(), ToolError> {
+    ///
+    /// A number, list or object sent as JSON text (`"[1,0,0]"`, `"3"`) is
+    /// taken as that value: small models quote arrays and don't stop when
+    /// told, and what they meant is plain.
+    pub fn check(&mut self, spec: &ToolSpec) -> Result<(), ToolError> {
+        for (name, value) in self.0.iter_mut() {
+            if let Some(param) = spec.param(name)
+                && let Some(parsed) = unquoted(param.kind, value)
+            {
+                *value = parsed;
+            }
+        }
         for (name, value) in &self.0 {
             let Some(param) = spec.param(name) else {
                 let names: Vec<&str> = spec.params.iter().map(|p| p.name).collect();
@@ -152,6 +163,15 @@ fn fits(kind: Kind, value: &Value) -> bool {
     }
 }
 
+/// `value` as the JSON it quotes, when `kind` isn't text and that fits it.
+fn unquoted(kind: Kind, value: &Value) -> Option<Value> {
+    if matches!(kind, Kind::String | Kind::Enum(_)) {
+        return None;
+    }
+    let parsed: Value = serde_json::from_str(value.as_str()?.trim()).ok()?;
+    fits(kind, &parsed).then_some(parsed)
+}
+
 fn describe(kind: Kind) -> String {
     match kind {
         Kind::String => "a string".into(),
@@ -242,6 +262,26 @@ mod tests {
     }
 
     #[test]
+    fn numbers_and_lists_sent_as_text_are_taken_as_meant() {
+        let mut a = args(json!({"id": "17", "near": "[1.0, 0, -2]", "limit": " 3 "}));
+        assert_eq!(a.check(&SPEC), Ok(()));
+        assert_eq!(a.vector3("near"), Some([1.0, 0.0, -2.0]));
+        assert_eq!(a.limit(50, 500), 3);
+        // Text stays text, and what doesn't parse to the right shape is
+        // still an error.
+        let mut a = args(json!({"id": "[1,2,3]"}));
+        assert_eq!(a.check(&SPEC), Ok(()));
+        assert_eq!(a.str("id"), Some("[1,2,3]"));
+        assert_eq!(
+            args(json!({"id": "17", "near": "[1,2]"}))
+                .check(&SPEC)
+                .unwrap_err()
+                .to_string(),
+            "error bad_args: near should be three numbers, like [0,5,0], not \"[1,2]\""
+        );
+    }
+
+    #[test]
     fn readers_give_defaults_and_caps() {
         let a = args(json!({"id": "17", "detail": "full", "near": [1, 2.5, -3], "limit": 9999}));
         assert_eq!(a.detail(Detail::Std), Detail::Full);
@@ -272,7 +312,7 @@ mod pairs_tests {
 
     #[test]
     fn pairs_are_lists_of_two_named_strings() {
-        let good = Args::new(
+        let mut good = Args::new(
             json!({"edits": [{"find": "a", "replace": "b"}]})
                 .as_object()
                 .cloned()
@@ -283,7 +323,7 @@ mod pairs_tests {
             good.pairs("edits", "find", "replace"),
             Some(vec![("a", "b")])
         );
-        let bad = Args::new(
+        let mut bad = Args::new(
             json!({"edits": [{"find": "a"}]})
                 .as_object()
                 .cloned()

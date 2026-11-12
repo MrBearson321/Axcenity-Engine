@@ -181,12 +181,14 @@ fn read_steps(args: &Args) -> Result<Vec<Step>, ToolError> {
                 "step {number}: confirm goes on the batch, not on a step"
             )));
         }
-        Args::new(map.clone())
+        // Checked args keep what the check repaired (a list sent as text).
+        let mut checked = Args::new(map);
+        checked
             .check(op.spec())
             .map_err(|error| in_step(error, number, op))?;
         steps.push(Step {
             op,
-            args: map,
+            args: checked.0,
             name,
         });
     }
