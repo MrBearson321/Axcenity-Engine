@@ -137,19 +137,25 @@ mod tests {
                 "viewport/view_cube.rs",
                 include_str!("viewport/view_cube.rs"),
             ),
-            ("gizmo.rs", include_str!("gizmo.rs")),
+            ("gizmo.rs", include_str!("../../editor-tools/src/gizmo.rs")),
             ("splines.rs", include_str!("splines.rs")),
             ("constraints.rs", include_str!("constraints.rs")),
-            ("ui_handles.rs", include_str!("ui_handles.rs")),
+            (
+                "ui_handles.rs",
+                include_str!("../../editor-ui-designer/src/ui_handles.rs"),
+            ),
             (
                 "ui_designer/artboard.rs",
-                include_str!("ui_designer/artboard.rs"),
+                include_str!("../../editor-ui-designer/src/artboard.rs"),
             ),
             (
                 "ui_designer/rulers.rs",
-                include_str!("ui_designer/rulers.rs"),
+                include_str!("../../editor-ui-designer/src/rulers.rs"),
             ),
-            ("model_studio/view.rs", include_str!("model_studio/view.rs")),
+            (
+                "model_studio/view.rs",
+                include_str!("../../editor-model-studio/src/view.rs"),
+            ),
         ];
         let tokens = [
             overlay::SELECTED,

@@ -7,8 +7,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use axcenity_mcp::{
-    Args, Class, Job, Kind, Param, Profile, PromptArg, PromptSpec, ResourceSpec, Setup, ToolError,
-    ToolSpec, serve,
+    Args, Class, Job, Kind, Param, Profile, PromptArg, PromptSpec, Reply, ResourceSpec, Setup,
+    ToolError, ToolSpec, serve,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
@@ -121,6 +121,7 @@ fn start_pair() -> Client {
     std::thread::spawn(move || {
         for job in engine {
             let Job { call, reply } = job;
+            let call_root = call.args.str("root").map(str::to_owned);
             let outcome = if call.args.str("root") == Some("nowhere") {
                 Err(ToolError::not_found("no object \"nowhere\"")
                     .with_fix("scene_inspect lists objects"))
@@ -132,7 +133,10 @@ fn start_pair() -> Client {
                     Value::Object(call.args.0)
                 ))
             };
-            let _ = reply.send(outcome);
+            // A root of "picture" answers with an image too, as
+            // view_capture does.
+            let png = (call_root.as_deref() == Some("picture")).then(|| b"PNG!".to_vec());
+            let _ = reply.send(outcome.map(|text| Reply { text, png }));
         }
     });
     let setup = Setup {
@@ -218,6 +222,22 @@ async fn a_2025_client_calls_a_tool_and_the_engine_sees_its_name_and_arguments()
         text_of(&call),
         r#"scene_inspect for Test Client with {"root":"Workspace"}"#
     );
+}
+
+#[tokio::test]
+async fn a_picture_comes_back_as_image_content_after_the_text() {
+    let mut client = legacy_client().await;
+    let call = client
+        .request(
+            "tools/call",
+            json!({"name": "scene_inspect", "arguments": {"root": "picture"}}),
+        )
+        .await;
+    let content = &call["result"]["content"];
+    assert_eq!(content[0]["type"], "text", "{call}");
+    assert_eq!(content[1]["type"], "image", "{call}");
+    assert_eq!(content[1]["mimeType"], "image/png", "{call}");
+    assert_eq!(content[1]["data"], "UE5HIQ==", "{call}");
 }
 
 #[tokio::test]

@@ -1094,6 +1094,37 @@ impl ToolWindow {
     }
 }
 
+/// Team Create: `who` is editing the document shown, so it's read-only
+/// here. Every document tab says it the same way.
+pub fn locked_banner(ui: &mut egui::Ui, who: &str) {
+    let warning = ui.visuals().warn_fg_color;
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(theme::with_icon(
+                icons::LOCK,
+                &format!(
+                    "{who} is editing this file. It's read-only here until they save or close it."
+                ),
+            ))
+            .color(warning),
+        )
+        .wrap(),
+    );
+}
+
+/// A transparency from 0 to 1 as a 0–100% slider. Returns the new value.
+pub fn transparency_slider(ui: &mut egui::Ui, value: f64) -> Option<f64> {
+    let mut percent = (value * 100.0).clamp(0.0, 100.0);
+    ui.add(
+        egui::Slider::new(&mut percent, 0.0..=100.0)
+            .suffix("%")
+            .max_decimals(0)
+            .clamping(egui::SliderClamping::Always),
+    )
+    .changed()
+    .then_some((percent / 100.0).clamp(0.0, 1.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

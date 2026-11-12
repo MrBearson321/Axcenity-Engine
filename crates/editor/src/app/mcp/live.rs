@@ -33,7 +33,7 @@ use eframe::egui;
 use serde_json::{Value, json};
 
 use super::changes::ChangeLog;
-use super::{Host, Session, run, setup};
+use super::{Finish, Host, Session, run, run_finish, setup};
 use crate::app::EditorApp;
 
 /// Where the open editor says how to reach it, in the project's hidden
@@ -140,6 +140,27 @@ pub(crate) struct Live {
     changes: ChangeLog,
     /// The last session number given out.
     last_me: u32,
+    /// Calls whose slow half runs on a thread of its own.
+    pending: Vec<Pending>,
+    /// Asks for a frame, when a pending call's work is done.
+    wake: Waker,
+    /// Sets up each new client's session (tests: the Toolbox's answers).
+    #[cfg(test)]
+    pub(super) prepare: Option<Prepare>,
+}
+
+/// Sets up a new client's session, for tests.
+#[cfg(test)]
+pub(super) type Prepare = Box<dyn Fn(&mut Session)>;
+
+/// A call waiting for its work (`Session::later`): its client's other
+/// calls wait behind it, so they're answered in order.
+struct Pending {
+    /// The client's session number.
+    me: u32,
+    job: Job,
+    finish: Finish,
+    done: mpsc::Receiver<Box<dyn std::any::Any + Send>>,
 }
 
 impl Live {
@@ -152,6 +173,7 @@ impl Live {
         write_endpoint(folder, port, &token)?;
         let stop = Arc::new(AtomicBool::new(false));
         let incoming = Arc::new(Mutex::new(Vec::new()));
+        let wake = Waker(waker.0.clone());
         let thread = {
             let (stop, incoming, token) = (stop.clone(), incoming.clone(), token.clone());
             std::thread::Builder::new()
@@ -168,6 +190,10 @@ impl Live {
             clients: Vec::new(),
             changes: ChangeLog::default(),
             last_me: 0,
+            pending: Vec::new(),
+            wake,
+            #[cfg(test)]
+            prepare: None,
         })
     }
 
@@ -203,6 +229,11 @@ impl Live {
             self.last_me += 1;
             let mut session = Session::new(incoming.hello.mode, self.last_me);
             session.import_folders = incoming.hello.import_folders;
+            session.off_thread = true;
+            #[cfg(test)]
+            if let Some(prepare) = &self.prepare {
+                prepare(&mut session);
+            }
             self.clients.push(Client {
                 jobs: incoming.jobs,
                 session,
@@ -216,6 +247,7 @@ impl Live {
         }
         // What the user did since the last frame.
         self.changes.take(&mut app.world, None);
+        self.finish_pending(app);
         let started = Instant::now();
         let mut more = false;
         'rounds: loop {
@@ -224,6 +256,10 @@ impl Live {
                 if started.elapsed() >= BUDGET {
                     more = true;
                     break 'rounds;
+                }
+                let me = client.session.me;
+                if self.pending.iter().any(|pending| pending.me == me) {
+                    continue;
                 }
                 let job = match client.jobs.try_recv() {
                     Ok(job) => job,
@@ -244,7 +280,25 @@ impl Live {
                     &job.call.args,
                     job.call.client.as_deref(),
                 );
-                job.answer(outcome);
+                match client.session.later.take() {
+                    // The slow half on its own thread; answered when it's done.
+                    Some(later) => {
+                        let (sender, done) = mpsc::channel();
+                        let wake = self.wake.0.clone();
+                        let work = later.work;
+                        std::thread::spawn(move || {
+                            let _ = sender.send(work());
+                            wake();
+                        });
+                        self.pending.push(Pending {
+                            me,
+                            job,
+                            finish: later.finish,
+                            done,
+                        });
+                    }
+                    None => job.answer_with(outcome, client.session.png.take()),
+                }
                 ran = true;
             }
             if !ran {
@@ -253,10 +307,57 @@ impl Live {
         }
         // The last client gone: the world stops noting changes.
         self.clients.retain(|client| !client.gone);
+        let clients = &self.clients;
+        self.pending
+            .retain(|pending| clients.iter().any(|client| client.session.me == pending.me));
         if self.clients.is_empty() {
             app.world.stop_recording_changes();
         }
         more
+    }
+}
+
+impl Live {
+    /// Answers the pending calls whose work is done, finishing each on
+    /// the editor.
+    fn finish_pending(&mut self, app: &mut EditorApp) {
+        let mut waiting = Vec::new();
+        for pending in std::mem::take(&mut self.pending) {
+            let made = match pending.done.try_recv() {
+                Ok(made) => made,
+                Err(TryRecvError::Empty) => {
+                    waiting.push(pending);
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    pending.job.answer(Err(axcenity_mcp::ToolError::internal(
+                        "the work stopped unexpectedly",
+                    )));
+                    continue;
+                }
+            };
+            let Some(client) = self
+                .clients
+                .iter_mut()
+                .find(|client| client.session.me == pending.me)
+            else {
+                continue;
+            };
+            let mut host = Host {
+                app: &mut *app,
+                session: &mut client.session,
+                changes: &mut self.changes,
+            };
+            let outcome = run_finish(
+                &mut host,
+                pending.job.call.tool,
+                &pending.job.call.args,
+                pending.finish,
+                made,
+            );
+            pending.job.answer_with(outcome, client.session.png.take());
+        }
+        self.pending = waiting;
     }
 }
 

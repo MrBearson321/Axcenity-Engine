@@ -683,7 +683,10 @@ impl EditorApp {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "These changes were made while you were offline (or before the                              editor or the host stopped) and couldn't be applied when they were                              sent again: someone changed or deleted what they edited. Make them                              again if you still want them.",
+                            "These changes were made while you were offline (or before the \
+                             editor or the host stopped) and couldn't be applied when they were \
+                             sent again: someone changed or deleted what they edited. Make them \
+                             again if you still want them.",
                         )
                         .color(palette.text_weak),
                     )
@@ -726,7 +729,12 @@ impl EditorApp {
                         ui.ctx().copy_text(text.join("\n"));
                     }
                     if ui
-                        .add(widgets::button(widgets::Role::Primary, None, "Done", &palette))
+                        .add(widgets::button(
+                            widgets::Role::Primary,
+                            None,
+                            "Done",
+                            &palette,
+                        ))
                         .clicked()
                     {
                         close = true;

@@ -12,6 +12,10 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | Scripting, scene bridge, technical debt | Usability brief Phase 6: `ScriptRuntime` methods split into `runtime/`, the draw list into `draw_list/`; oversized-files and crate-`CLAUDE.md` debt rows | Claude |
+| 2026-11-12 | MCP server | Toolbox tools: `toolbox_search`, `toolbox_get` | Claude |
+| 2026-11-12 | MCP server | `data_edit`: data tables for AI clients | Claude |
+| 2026-11-12 | MCP server | `view_capture`: pictures as MCP image content | Claude |
 | 2026-11-12 | MCP server | Step 7 measurements and the TCP_NODELAY fix for live clients | Claude |
 | 2026-11-12 | MCP server | Small-model results and lenient arguments (lists and numbers sent as text) | Claude |
 | 2026-11-11 | Editor architecture, Toolbox | Plugin toolkit: `.axcenity-plugin` packs, scaffold/export, Toolbox Import plugin; start-screen rail crossfade and atmosphere | Cursor |

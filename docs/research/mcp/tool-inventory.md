@@ -200,8 +200,8 @@ Save the world, levels and open files. Preview names the files that will be writ
 |---|---|
 | `view_capture` | Needs a GPU frame in headless mode and costs image tokens; high value for multimodal agents. After Phase 4. |
 | `mesh_edit` | Model Studio ops need face/edge selection by index; revisit with `view_capture`. |
-| `asset_search_online`, `asset_get` | Wrap the Toolbox backend (PR #90, Toolbox thread) once it's on `main`. |
-| `data_edit` | Data tables, dialogues, string table: simple JSON files, after the core. |
+| `asset_search_online`, `asset_get` | Done as `toolbox_search` and `toolbox_get` (full profile), through `editor_toolbox::agent`. |
+| `data_edit` | Data tables done (full profile). Dialogues and the string table are left for when a client asks. |
 | `graph_edit` | Block scripts, UI graphs, behavior trees, material graphs: agents should write Lua; graphs later if asked. |
 | `run_lua` | Not planned (decision D6). |
 

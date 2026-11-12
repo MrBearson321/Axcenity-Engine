@@ -42,17 +42,37 @@ pub struct Call {
 /// What a call returns: the text the model reads, or an error.
 pub type Outcome = Result<String, ToolError>;
 
-/// A [`Call`] and where to send its [`Outcome`].
+/// What a call that worked gives the client: its text, and a PNG for the
+/// few tools that show something (`view_capture`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reply {
+    pub text: String,
+    pub png: Option<Vec<u8>>,
+}
+
+impl From<String> for Reply {
+    fn from(text: String) -> Reply {
+        Reply { text, png: None }
+    }
+}
+
+/// A [`Call`] and where to send what came of it.
 #[derive(Debug)]
 pub struct Job {
     pub call: Call,
-    pub reply: oneshot::Sender<Outcome>,
+    pub reply: oneshot::Sender<Result<Reply, ToolError>>,
 }
 
 impl Job {
     /// Sends the outcome back. The client may have gone, which is fine.
     pub fn answer(self, outcome: Outcome) {
-        let _ = self.reply.send(outcome);
+        self.answer_with(outcome, None);
+    }
+
+    /// Sends the outcome back with a picture, when it worked and there is
+    /// one.
+    pub fn answer_with(self, outcome: Outcome, png: Option<Vec<u8>>) {
+        let _ = self.reply.send(outcome.map(|text| Reply { text, png }));
     }
 }
 
@@ -176,7 +196,13 @@ impl ServerHandler for Handler {
         }
         let client = context.client_info().map(|info| info.name);
         Ok(match self.run(tool, args, client).await? {
-            Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+            Ok(Reply { text, png }) => {
+                let mut content = vec![ContentBlock::text(text)];
+                if let Some(png) = png {
+                    content.push(ContentBlock::image(crate::text::base64(&png), "image/png"));
+                }
+                CallToolResult::success(content)
+            }
             Err(error) => failed(&error),
         }
         .into())
@@ -293,7 +319,7 @@ impl ServerHandler for Handler {
         }
         let client = context.client_info().map(|info| info.name);
         match self.run(tool, args, client).await? {
-            Ok(text) => {
+            Ok(Reply { text, .. }) => {
                 Ok(ReadResourceResult::new(vec![ResourceContents::text(text, request.uri)]).into())
             }
             Err(error) => Err(ErrorData::resource_not_found(error.to_string(), None)),
@@ -309,7 +335,7 @@ impl Handler {
         tool: &'static ToolSpec,
         args: Args,
         client: Option<String>,
-    ) -> Result<Outcome, ErrorData> {
+    ) -> Result<Result<Reply, ToolError>, ErrorData> {
         let (reply, answer) = oneshot::channel();
         let job = Job {
             call: Call { tool, args, client },

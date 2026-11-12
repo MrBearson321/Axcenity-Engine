@@ -736,7 +736,11 @@ dependencies = [
  "axcenity-core",
  "axcenity-editor-benchmark",
  "axcenity-editor-kit",
+ "axcenity-editor-model-studio",
+ "axcenity-editor-node-graph",
  "axcenity-editor-toolbox",
+ "axcenity-editor-tools",
+ "axcenity-editor-ui-designer",
  "axcenity-gameplay",
  "axcenity-mcp",
  "axcenity-mesh-edit",
@@ -808,12 +812,41 @@ dependencies = [
  "axcenity-project",
  "axcenity-render",
  "axcenity-scene",
+ "axcenity-ui",
  "axcenity-workspace-hack",
  "eframe",
  "egui-phosphor",
  "png",
  "pollster 0.4.0",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "axcenity-editor-model-studio"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-editor-tools",
+ "axcenity-mesh-edit",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "image",
+]
+
+[[package]]
+name = "axcenity-editor-node-graph"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-blocks",
+ "axcenity-editor-kit",
+ "axcenity-editor-tools",
+ "axcenity-workspace-hack",
+ "eframe",
  "serde_json",
 ]
 
@@ -832,6 +865,43 @@ dependencies = [
  "rfd",
  "serde_json",
  "zip",
+]
+
+[[package]]
+name = "axcenity-editor-tools"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-character",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-project",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "log",
+]
+
+[[package]]
+name = "axcenity-editor-ui-designer"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-blocks",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-editor-node-graph",
+ "axcenity-editor-tools",
+ "axcenity-project",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-script",
+ "axcenity-sim",
+ "axcenity-ui",
+ "axcenity-workspace-hack",
+ "eframe",
 ]
 
 [[package]]

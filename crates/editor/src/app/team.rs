@@ -1408,7 +1408,9 @@ impl EditorApp {
                     }
                     self.team_panel.following = None;
                     self.output.warning(
-                        "Team Create: the host ended the session. Your copy stays open,                          read-only; changes not sent yet are kept and go to the host the next                          time you join. Leave the session to work on your copy alone.",
+                        "Team Create: the host ended the session. Your copy stays open, \
+                         read-only; changes not sent yet are kept and go to the host the next \
+                         time you join. Leave the session to work on your copy alone.",
                     );
                     self.toasts
                         .warning("The host ended the Team Create session: read-only now.");

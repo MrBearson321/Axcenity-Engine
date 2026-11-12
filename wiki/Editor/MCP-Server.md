@@ -57,14 +57,17 @@ sequenceDiagram
 ```
 
 - With the setting off, or no editor listening, `--mcp` runs headless and writes `.axcenity/mcp-headless.lock`; the editor warns on opening such a project, and a headless server refuses writes while an editor listens, so two copies never overwrite each other.
+- `data_edit` (full profile) edits data tables as files through `DataTable::from_json` (validation for free), written at once with one `record_asset` undo step; it refuses a table the Data Table tab has unsaved changes to.
 - `render_stats` (full profile) reads the viewport's last frame (`EditorApp::last_drawn`) and the Profiler's Play readout; without the window it says to connect to the editor.
-- Every live client is a session of its own over one shared change log. Writes are refused while the editor plays. A long call (`game_run`) holds the window: there are no job handles yet.
+- `toolbox_search` and `toolbox_get` (full profile) are the Toolbox tab's search and Get through `editor_toolbox::agent` (the same sources, licence filter, package choice, asset directory and installs; a texture also gets a material). They are the only tools that reach the network; a get is one undo step for the project's files, and the package stays in the asset directory. Tests answer from memory (`agent::testing`, `Session::toolbox_http`, `Session::asset_dir`).
+- Every live client is a session of its own over one shared change log. Writes are refused while the editor plays. A long call (`game_run`) holds the window. The Toolbox tools' network half runs on its own thread (`mcp::after`, `Session::later`, `Live::pending`) and finishes on the editor when done, the client's later calls waiting behind it.
 
 ## Development guidance
 
 - Keep schemas flat (no `oneOf`/`$ref`), summaries one sentence, errors that say what to do next.
 - New tools go in `editor/src/app/mcp/` (one file each) and go through `EditorApp` paths so undo and history stay consistent.
 - `scripts/check-platform.sh` checks the player doesn't link it.
+- `view_capture` (standard): a PNG of the shown world drawn offscreen by `TextureRenderer` on a device the tool makes once (`OnceLock`), returned as MCP image content (`axcenity_mcp::Reply { text, png }`, `Job::answer_with`; the tool leaves it in `Session::png`). No adapter: `unsupported`.
 - Measurements (step 7): `docs/mcp/benchmarks.md`. Results are 10–60 tokens typically; a call takes well under 1 ms in-process; a live client's round trip is one frame (0.3 ms when the waker repaints at once) since both loopback ends set `TCP_NODELAY` (without it, ~44 ms of Nagle/delayed-ACK); a write on S10k costs 20–30 ms; `--mcp` without the window waits for the project to open (~4 s for S10k in the container).
 - Small local models drive the `lite` profile (PRs #178, #181 and the follow-up on arguments sent as text; Qwen3 8B 21/21, gpt-oss-20b 19/21, Llama 3.1 8B 6/21 on 7 tasks × 3, `docs/mcp/README.md`). What moved them was error text naming the next call, so when a model gets stuck, fix the message first. Arguments are lenient where the meaning is plain: an empty filter is no filter, and a list or number sent as JSON text is parsed.
 

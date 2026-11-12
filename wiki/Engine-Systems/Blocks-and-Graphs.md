@@ -44,7 +44,7 @@ flowchart LR
 | `crates/blocks-runtime/src/behavior_tree.rs`, `dialogue.rs` | Node sets for behavior trees and dialogues |
 | `crates/blocks/src/lib.rs`, `lua.rs` | `from_lua`, the Luau reader |
 | `crates/project/src/ui_graphs.rs` | Compiles each graph to a LocalScript `EventGraph` under its ScreenGui at load |
-| `crates/editor/src/block_editor.rs`, `block_editor/graph.rs`, `node_graph.rs` | The editors |
+| `crates/editor/src/block_editor.rs`, `block_editor/graph.rs`, `crates/editor-node-graph` | The editors |
 
 ## Testing
 

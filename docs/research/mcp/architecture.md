@@ -203,7 +203,7 @@ A D call without `confirm` changes nothing and returns a preview (what goes or c
 ### 7.5 Limits and boundaries
 
 - Paths: the plugin rules (`plugins/src/files.rs`): project-relative, `/`, no `..`, no absolute, no links out. Imports read only from folders the user allows in settings.
-- No Lua execution, no shell, no network (Toolbox downloads later go through its backend), no editor/user settings writes.
+- No Lua execution, no shell, no network except the Toolbox tools, which go through the Toolbox's own sources and checks (`toolbox_search`, `toolbox_get`), no editor/user settings writes.
 - Locked objects are refused. Services can't be deleted or reparented (tree rules in `tree.rs`).
 - Caps: request 1 MB, `batch` 100 ops / 2,000 objects, results ≈ 4,000 tokens before paging, Play ≤ 60 s, one running job per session.
 - Auth: stdio is the user's own process. The loopback relay binds 127.0.0.1 only and requires the token from the endpoint file (user-only permissions). `clientInfo.name` is self-reported: used for labels, not trust.
@@ -272,7 +272,7 @@ Each step is a PR with tests, merged before the next starts depending on it.
 | 5 | Change cursors everywhere, folding, prompts, resource mirrors; small-model pass | 4.x | Local models on Paul's PC |
 | 6 | `docs/mcp/` user docs, client configs, diagnostics (`axcenity-editor --mcp --check`) | 3.4 | |
 | 7 | Benchmarks, confusing-tool review, schema simplification | all | Done: [benchmarks](../../mcp/benchmarks.md); no schema needed simplifying |
-| later | `view_capture`, Toolbox tools (after #90 lands), Streamable HTTP if a client needs it, `data_edit`, mesh ops | as listed | |
+| later | `view_capture` (done: standard profile), Toolbox tools (done: `toolbox_search`, `toolbox_get`, full profile), Streamable HTTP if a client needs it, `data_edit` (done: data tables, full profile), mesh ops | as listed | |
 
 Coordination: G2 (scripts inside objects, #91) changes where scripts live; `script_write` follows whatever lands. G4 (luau-lsp) can later feed `project_check` with type errors. The Toolbox thread owns `crates/toolbox`; MCP only wraps its API. M12 (egui 0.36) touches `EditorApp::update`; the live host's hook is one call there, so the order doesn't matter much, but step 3.4 should land after M12 to avoid a conflict.
 

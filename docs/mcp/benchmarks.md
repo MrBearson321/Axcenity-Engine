@@ -20,8 +20,8 @@ What a client pays every turn: the `tools/list` JSON for a profile, plus the ins
 | Profile | Tools | Tokens | Budget (test) |
 |---|---|---|---|
 | `lite` | 13 | 2,095 | 2,100 |
-| `standard` | 21 | 4,174 | 4,500 |
-| `full` | 28 | 5,357 | 6,500 |
+| `standard` | 22 | 4,362 | 4,500 |
+| `full` | 32 | 6,168 | 6,500 |
 | instructions | | 134 | 150 |
 
 ## Tools

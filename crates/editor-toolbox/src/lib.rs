@@ -62,6 +62,7 @@ use eframe::egui;
 use axcenity_editor_kit::theme::{self, icons};
 use axcenity_editor_kit::{responsive, widgets};
 
+pub mod agent;
 mod drawer;
 pub mod install;
 mod packs;
