@@ -41,6 +41,7 @@ pub mod ik;
 mod ik_control;
 mod property_clip;
 pub mod ragdoll;
+mod retarget;
 pub mod sequence;
 mod threads;
 
@@ -68,6 +69,7 @@ pub use property_clip::{
     current_numbers, model_pivot, numbers_of, resolve_target, sample_time, sample_track,
     target_path, value_from_numbers,
 };
+pub use retarget::{HumanBone, HumanoidMap};
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
 
 #[cfg(test)]

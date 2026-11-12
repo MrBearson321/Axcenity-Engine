@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 15] = [
+pub const BUILT_INS: [(&str, &str); 16] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -33,6 +33,7 @@ pub const BUILT_INS: [(&str, &str); 15] = [
         "open <script> — open a script by name or path, such as `open Spinner`",
     ),
     ("play", "play — start Play"),
+    ("run", "run — run the game without a player"),
     ("stop", "stop — stop Play"),
     ("save", "save — save the project"),
     (
@@ -82,6 +83,8 @@ pub enum Command<'a> {
     Find(&'a str),
     Open(&'a str),
     Play,
+    /// Run without a player (roadmap G14).
+    Run,
     Stop,
     Save,
     Check,
@@ -116,6 +119,7 @@ pub fn parse(input: &str) -> Command<'_> {
         ("help", true) => Command::Help,
         ("clear", true) => Command::Clear,
         ("play", true) => Command::Play,
+        ("run", true) => Command::Run,
         ("stop", true) => Command::Stop,
         ("save", true) => Command::Save,
         ("check", true) => Command::Check,

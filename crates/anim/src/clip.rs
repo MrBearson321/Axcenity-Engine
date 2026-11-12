@@ -13,6 +13,7 @@ use glam::{Mat4, Quat, Vec3};
 use crate::bones::{bone_from_numbers, bone_paths, find_bone};
 use crate::files::{ClipFile, PropertyName, TakeLink};
 use crate::property_clip::{EvaluatedProperty, PropertyClip, sample_track};
+use crate::retarget::{HumanoidMap, Retarget};
 
 /// A clip ready to play on one thing: its property tracks checked and,
 /// with a rig, its take and bone tracks bound to the rig's bones (matched
@@ -35,6 +36,9 @@ struct BoundTake {
     takes: Arc<Vec<Take>>,
     take: usize,
     binding: Vec<Option<usize>>,
+    /// Set when the take is for another skeleton and plays through humanoid
+    /// roles (G16); `binding` is then unused.
+    retarget: Option<Retarget>,
     /// The bone root motion takes its travel from, if the link has root
     /// motion on and the take moves one across the ground.
     root: Option<RootBone>,
@@ -99,8 +103,10 @@ impl Clip {
                 let takes =
                     takes.ok_or_else(|| format!("its model `{}` can't be read", link.source))?;
                 let take = BoundTake::bind(link.clone(), takes, rig)?;
-                for bone in take.binding.iter().flatten() {
-                    animated[*bone] = true;
+                for bone in take.targets() {
+                    if let Some(slot) = animated.get_mut(bone) {
+                        *slot = true;
+                    }
                 }
                 Some(take)
             }
@@ -301,17 +307,33 @@ impl BoundTake {
                 }
             })?;
         let binding = takes[take].bind(rig);
-        if !binding.iter().any(Option::is_some) && !takes[take].tracks.is_empty() {
-            return Err(format!(
-                "the take `{}` moves none of the model's bones (it's for another skeleton)",
-                link.take
-            ));
+        // A take for another skeleton (other bone names) plays through
+        // humanoid roles, unless it moves some of the model's humanoid
+        // bones by name (the same skeleton, or one named like it).
+        let named = HumanoidMap::detect(&rig.bones)
+            .bones()
+            .any(|bone| binding.contains(&Some(bone)));
+        let mut retarget = None;
+        if !named && !takes[take].tracks.is_empty() {
+            match Retarget::new(&takes[take], rig) {
+                Ok(bound) => retarget = Some(bound),
+                Err(why) if !binding.iter().any(Option::is_some) => {
+                    return Err(format!(
+                        "the take `{}` moves none of the model's bones: it's for another \
+                         skeleton, and can't be retargeted because {why}",
+                        link.take
+                    ));
+                }
+                // Some bones match by name: play those, as before.
+                Err(_) => {}
+            }
         }
         let mut bound = Self {
             link,
             takes,
             take,
             binding,
+            retarget,
             root: None,
         };
         if bound.link.root_motion {
@@ -324,17 +346,36 @@ impl BoundTake {
         &self.takes[self.take]
     }
 
+    /// The rig's bones the take moves.
+    fn targets(&self) -> Vec<usize> {
+        match &self.retarget {
+            Some(retarget) => retarget.targets().collect(),
+            None => self.binding.iter().flatten().copied().collect(),
+        }
+    }
+
+    /// Poses the bones the take moves at `time` seconds into it.
+    fn pose_at(&self, time: f32, rig: &Rig, pose: &mut Pose) {
+        match &self.retarget {
+            Some(retarget) => retarget.sample(self.take(), time, rig, pose),
+            None => self.take().sample(time, &self.binding, rig, pose),
+        }
+    }
+
     /// The first bone (parents come first, so the top-most) whose track
     /// really moves it across the ground during the clip.
     fn find_root(&self, rig: &Rig) -> Option<RootBone> {
         let take = self.take();
-        let mut candidates: Vec<usize> = take
-            .tracks
-            .iter()
-            .zip(&self.binding)
-            .filter(|(track, _)| track.translation.values.len() > 1)
-            .filter_map(|(_, bone)| *bone)
-            .collect();
+        let mut candidates: Vec<usize> = match &self.retarget {
+            Some(retarget) => vec![retarget.hips()],
+            None => take
+                .tracks
+                .iter()
+                .zip(&self.binding)
+                .filter(|(track, _)| track.translation.values.len() > 1)
+                .filter_map(|(_, bone)| *bone)
+                .collect(),
+        };
         candidates.sort_unstable();
         for bone in candidates {
             let at = |through: f64| self.root_world(rig, bone, link_time(&self.link, through));
@@ -360,8 +401,7 @@ impl BoundTake {
     /// and its heading.
     fn root_world(&self, rig: &Rig, bone: usize, time: f64) -> (Vec3, f32) {
         let mut pose = rig.rest_pose();
-        self.take()
-            .sample(time as f32, &self.binding, rig, &mut pose);
+        self.pose_at(time as f32, rig, &mut pose);
         let world = rig.world(&pose);
         let (_, rotation, position) = world[bone].to_scale_rotation_translation();
         (position, yaw(rotation))
@@ -369,7 +409,7 @@ impl BoundTake {
 
     fn sample(&self, through: f64, rig: &Rig, pose: &mut Pose) {
         let time = link_time(&self.link, through) as f32;
-        self.take().sample(time, &self.binding, rig, pose);
+        self.pose_at(time, rig, pose);
         if let Some(root) = self.root {
             pin_root(rig, pose, root);
         }

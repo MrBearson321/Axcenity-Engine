@@ -129,6 +129,9 @@ impl EditorApp {
                 self.play();
             }
         }
+        if clicks.run {
+            self.run();
+        }
         if clicks.stop {
             self.stop();
         }
@@ -200,6 +203,22 @@ impl EditorApp {
                     .on_hover_text(format!(
                         "{hover} ({})",
                         crate::shortcuts::Action::Play.menu_text(ui.ctx())
+                    ))
+                    .on_disabled_hover_text(if playing {
+                        "The game is playing."
+                    } else {
+                        "Open a project first."
+                    })
+                    .clicked();
+                let run_button = RibbonButton::new(filled_icons::PERSON_SIMPLE_RUN, "Run")
+                    .family(theme::filled())
+                    .color(palette.success);
+                clicks.run = ui
+                    .add_enabled(!playing && can_play, run_button)
+                    .on_hover_text(format!(
+                        "Save, then run the game with no player: Scripts and physics run, no \
+                         character spawns, and the fly camera stays ({})",
+                        crate::shortcuts::Action::Run.menu_text(ui.ctx())
                     ))
                     .on_disabled_hover_text(if playing {
                         "The game is playing."

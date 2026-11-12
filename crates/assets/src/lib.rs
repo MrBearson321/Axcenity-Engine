@@ -64,11 +64,11 @@ pub use color_grading::{
     Palette, lookup_from_strip, palette_from_image, parse_cube, read_color_lookup, read_palette,
 };
 pub use cooked::{
-    COOKED_EXTENSION, COOKED_FOLDER, CookedFormat, CookedTexture, SourceStamp, content_hash,
-    cooked_format, cooked_path, cooked_relative_path, decode_cooked, embedded_cooked_done,
-    embedded_cooked_files, embedded_cooked_format, embedded_cooked_path,
-    embedded_cooked_relative_path, encode_cooked, has_alpha, is_cooked, mark_embedded_cooked,
-    read_cooked, sampled_average, write_cooked, write_embedded_cooked,
+    COOKED_EXTENSION, COOKED_FOLDER, COOKED_ONLY_FILE, CookedFormat, CookedTexture, SourceStamp,
+    content_hash, cooked_format, cooked_path, cooked_relative_path, decode_cooked,
+    decode_top_level, embedded_cooked_done, embedded_cooked_files, embedded_cooked_format,
+    embedded_cooked_path, embedded_cooked_relative_path, encode_cooked, has_alpha, is_cooked,
+    mark_embedded_cooked, read_cooked, sampled_average, write_cooked, write_embedded_cooked,
 };
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
