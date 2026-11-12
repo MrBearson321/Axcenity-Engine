@@ -512,6 +512,8 @@ struct RibbonClicks {
     bake_probes: bool,
     check_assets: bool,
     play: bool,
+    /// Run without a player (roadmap G14).
+    run: bool,
     stop: bool,
 }
 

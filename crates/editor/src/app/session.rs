@@ -433,10 +433,25 @@ impl EditorApp {
     pub(super) fn playing(&self) -> bool {
         self.play.is_some()
     }
+    /// Whether the game runs without a player (Run, roadmap G14).
+    pub(super) fn running(&self) -> bool {
+        self.play.as_ref().is_some_and(|play| play.running())
+    }
     /// Starts the game: saves the project if it has unsaved changes, then
     /// runs its scripts and physics on a copy of the world. If saving fails,
     /// Play doesn't start, so a crash during Play can't lose the changes.
     pub(super) fn play(&mut self) {
+        self.play_settings.run = false;
+        self.start_game();
+    }
+    /// Run (roadmap G14, F8): starts the game as [`play`](Self::play) does,
+    /// but with no player: Scripts and physics run, no character spawns,
+    /// LocalScripts don't start, and the fly camera stays the view.
+    pub(super) fn run(&mut self) {
+        self.play_settings.run = true;
+        self.start_game();
+    }
+    fn start_game(&mut self) {
         if self.playing() || self.viewport.is_dragging() || self.project.is_none() {
             return;
         }
@@ -473,6 +488,13 @@ impl EditorApp {
             self.output.info(format!(
                 "Play continues in \"{}\" from where it was; its scripts started again. \
                  Press Stop (Shift+F5) to go back to editing.",
+                project.name
+            ));
+        } else if self.play_settings.run {
+            self.output.info(format!(
+                "Running \"{}\" without a player: Scripts and physics run, no character \
+                 spawns and LocalScripts don't start. Press Stop (Shift+F5) to go back to \
+                 editing; the world will be as it was before.",
                 project.name
             ));
         } else {

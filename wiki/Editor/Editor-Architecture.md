@@ -39,7 +39,7 @@ flowchart TB
 
 ## Play mode
 
-Play (F5) autosaves if needed, clones the World (every `InstanceId` stays valid), reads scripts from disk, and creates a fresh `ScriptRuntime` and `Physics`; each editor frame `Session::frame` runs the `EDITOR_PLAY` schedule under `catch_unwind` with the real elapsed time (≤ 0.1 s). Properties edits during Play change the game world (no undo); **Keep** pins copy chosen values back at Stop as one undo step. Breakpoints pause the session. Several clients (1–8) are separate `Session`s over the in-memory loopback with an emulated network. Full behavior: `docs/architecture/play-mode.md`; lifecycle diagram: [Execution lifecycle](../Architecture/Execution-Lifecycle.md#play-and-stop).
+Play (F5) autosaves if needed, clones the World (every `InstanceId` stays valid), reads scripts from disk, and creates a fresh `ScriptRuntime` and `Physics`; each editor frame `Session::frame` runs the `EDITOR_PLAY` schedule under `catch_unwind` with the real elapsed time (≤ 0.1 s). Properties edits during Play change the game world (no undo); **Keep** pins copy chosen values back at Stop as one undo step. Breakpoints pause the session. Several clients (1–8) are separate `Session`s over the in-memory loopback with an emulated network. **Run** (F8, roadmap G14) is the same with one `Session` marked as a server with no player (`ScriptRuntime::set_dedicated`, as `axcenity-server`): Scripts and physics run, no character spawns, LocalScripts don't start, and the fly camera stays the view. Full behavior: `docs/architecture/play-mode.md`; lifecycle diagram: [Execution lifecycle](../Architecture/Execution-Lifecycle.md#play-and-stop).
 
 ## Plugins
 
