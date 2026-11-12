@@ -338,10 +338,17 @@ fn team_client(app: &EditorApp) -> Option<&axcenity_collab::Client> {
 
 #[test]
 fn two_editors_share_a_session_over_the_network() {
-    let mut a = EditorApp::new(Some(&copy_of_example("hello-touched", "team-net-host")));
+    let project = copy_of_example("hello-touched", "team-net-host");
+    let mut a = EditorApp::new(Some(&project));
     let invite = a
         .host_network_session(Some(&team_folder("host")), 0)
         .expect("hosting");
+    // The project as it was is kept in Version History first (C5).
+    assert!(
+        axcenity_project::list_versions(&project)
+            .iter()
+            .any(|v| v.label == super::team::SESSION_CHECKPOINT)
+    );
     // The invite names this computer's LAN address; join over loopback.
     let port = invite.host.rsplit(':').next().unwrap();
     let invite = axcenity_collab::access::Invite {
@@ -444,6 +451,21 @@ fn what_one_editor_selects_shows_in_the_others_session() {
         });
     }
     assert_eq!(b.explorer.others.get(&part).map(Vec::len), Some(1));
+
+    // Dragging a field shows as a bar over the other's Properties (C6).
+    a.team_panel.editing_field = Some("Transparency".to_owned());
+    std::thread::sleep(std::time::Duration::from_millis(110));
+    settle(&mut a, &mut b);
+    assert_eq!(
+        b.team_selections()[0].editing.as_deref(),
+        Some("Transparency")
+    );
+    let mut drawn = String::new();
+    for _ in 0..2 {
+        let output = theme::run(&ctx, Default::default(), |ui| b.properties_pane(ui));
+        drawn = format!("{:?}", output.shapes);
+    }
+    assert!(drawn.contains("Member 1 is changing Transparency"));
 }
 
 /// Draws the Collaborate panel 260 points wide (the narrowest column), and
@@ -1043,6 +1065,15 @@ fn stop_offline_then_join_again() {
         .map(|r| r.label.as_str())
         .collect();
     assert_eq!(recovered, ["Rename to Box"], "{:?}", warnings(&c));
+    // The copy from before they were sent is a checkpoint to compare with
+    // (C5); the window points at it.
+    assert!(c.team_panel.offline_checkpoint);
+    let mirror = c.team.as_ref().unwrap().files_folder().unwrap().to_owned();
+    assert!(
+        axcenity_project::list_versions(&mirror)
+            .iter()
+            .any(|v| v.label == super::team::OFFLINE_CHECKPOINT && v.pinned)
+    );
     // Everything is confirmed: the recovery file is gone.
     c.team_frame();
     assert!(

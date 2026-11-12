@@ -113,6 +113,31 @@ impl Net {
         }
     }
 
+    /// The host stops without ending (a crash: what it hadn't sent is lost)
+    /// and starts again from its journal in `project`, as an editor or
+    /// `axcenity-collab` does: the recovered World, the journal discarded,
+    /// then a new journal.
+    pub fn crash_host(&mut self, project: &std::path::Path) {
+        let roles: Vec<Role> = (0..self.clients.len())
+            .map(|i| self.host.role(member(i)).expect("a member"))
+            .collect();
+        for i in 0..self.clients.len() {
+            self.connected[i] = false;
+            self.up[i].clear();
+            self.down[i].clear();
+            self.clients[i].disconnected();
+        }
+        let recovered = crate::journal::recover(project)
+            .expect("the journal reads")
+            .expect("there's a journal");
+        crate::journal::discard(project).expect("discarded");
+        self.host = Host::new(recovered.world);
+        for (i, role) in roles.into_iter().enumerate() {
+            self.host.add_member(member(i), role);
+        }
+        self.host.start_journal(project).expect("a new journal");
+    }
+
     /// Client `i` makes an edit.
     pub fn submit(&mut self, i: usize, label: &str, ops: Vec<Op>) -> Result<u64, Refusal> {
         let result = self.clients[i].submit(&mut self.worlds[i], label, ops);

@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1); the PC side of its two-machine test passed over Tailscale and the Mac's join is next (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built (§5.4). C5 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1); the PC side of its two-machine test passed over Tailscale and the Mac's join is next (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built (§5.4). C5's fixes and checkpoints are built (§5.5). C6's field-being-dragged bar is built; its runs over Tailscale wait for the two machines (§5.6). C7 onwards follow the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -160,6 +160,24 @@ The invite names the host by its MagicDNS name (falling back to its `100.x` addr
 
 **Still to do in C4:** time a first setup by someone new to Tailscale on Paul's machines (the five-minute criterion), and a later session (under one minute).
 
+### 5.5 Initial sync and recovery (C5)
+
+**The double apply, fixed.** A host that wrote a member's edit to its journal and stopped before the confirmation left came back (new epoch) not knowing it had handled it; the member, from another run, renumbered every unconfirmed edit and sent it again, so it applied twice. Now the journal's folder keeps `handled` (the newest transaction number the host handled from each member: a line `member number` each), written with every snapshot and when a session ends, and folded in from the journal's entries when a recovered journal is discarded. `Host::start_journal` reads it back, so the next run's join message tells each member the newest of theirs it has; the client drops pending edits up to that number instead of re-sending them (they're in the snapshot it just took), and `Client::recover_unsent` leaves them out of a recovery file the same way. The file stays across clean ends, as a member's edits can reach a later session. Members are keyed by their stable member number from the members file.
+
+**Checkpoints.** Hosting (the editor and `axcenity-collab`) keeps an unpinned Version History version "Before Collaborate session" (nothing new when the project is unchanged since the last one). A member whose editor sends edits made offline first keeps a pinned checkpoint of its copy, "Before sending changes made offline"; when some of them couldn't apply, the Recovered Changes window points at it with a **Version History…** button, where Compare shows what differs from the session. That's the "compare my copy with the session" view, reusing Version History's.
+
+**Fault tests:** `journal_tests.rs` `edits_the_host_wrote_just_before_it_stopped_apply_once` (fails without the fix: the Part is added twice) and `a_recovery_file_leaves_out_what_the_host_already_has`; the editor tests check both checkpoints. A member offline across a host restart (`rejoin_tests.rs`) and other versions refused at the handshake (`net_tests.rs`) were already covered.
+
+**Join time** (`join_time_of_ten_thousand_parts`, run by hand, release, cloud container): two members join a 10,000-Part World in 156 ms in-process; the join message is 205 KiB. Over Tailscale between Paul's PC and Mac the transfer adds the link's time; Paul's own projects are measured in the two-machine test.
+
+**Left:** the two-machine cut test over Tailscale (C6 re-runs the convergence tests there). Recovery files stay in `.axcenity/teamcreate` inside the project folder, which never syncs or exports; moving them to the editor's data folder would change where TC6 recovery looks and wasn't needed.
+
+### 5.6 Real-time scene collaboration (C6)
+
+Scene sync itself was built in TC2–TC6 and needed no change. **Built:** the field-being-dragged bar left from TC4. While a Properties field is dragged, the editor puts its name in its presence's `editing` (already in the wire format, so no format change); the others' Properties show "▍ Paul is changing Transparency" in that member's colour, under "Also selected by", for the Instance they both have selected. It clears when the pointer is released. Tested in `team_tests::what_one_editor_selects_shows_in_the_others_session`.
+
+**Left for the two machines:** the convergence and editor tests over Tailscale between Paul's PC and Mac, a 15-minute scripted session, and the added frame cost of 3 members dragging on S10k (`--bench` on the PC).
+
 ## 6. Identity, authorization and the Django account manager (C10, C12)
 
 Today: an `Identity` (name, colour, Ed25519 key) per machine, a members file on the host mapping public keys to roles, and invites that bind a new key to a role. Tailscale adds a *network* identity (the tailnet login) that is shown but never grants anything; the brief's "being on the tailnet doesn't mean you can edit" is already how the host works.
@@ -176,7 +194,7 @@ Seams to add (no new service, no placeholder backend):
 - **No LAN discovery for sessions** (games have it). Not needed once Tailscale is the path; skipped.
 - **Version History checkpoints of a member's mirror** were left from TC6. C9.
 - **UI snapshots of the panel** were taken on Paul's PC in the hardware test; the wizard's are made by its tests (§5.4).
-- **The double apply after a host stops** right after writing an edit (TC6 "Left"). C5.
+- **The double apply after a host stops** right after writing an edit (TC6 "Left"). Fixed in C5 (§5.5).
 
 ## 8. Phased plan C1–C12
 

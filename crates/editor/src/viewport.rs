@@ -404,6 +404,8 @@ pub struct MemberSelection {
     pub name: String,
     pub color: egui::Color32,
     pub selection: Vec<InstanceId>,
+    /// The Properties field they're dragging, such as "Transparency".
+    pub editing: Option<String>,
 }
 
 /// Which visual-debug overlays the viewport draws. Off in the player.
