@@ -241,6 +241,8 @@ Every way in was reviewed against the roles: the TCP listener, the handshake, an
 | `Checkpoint` | Save-checkpoint (Editors, Owner) | 3, then one every 10 s | Each writes the World to disk: an Editor could fill the host's disk | Fixed (budget). Saved checkpoints aren't pruned: accepted, the Owner decides |
 | `Restore` | Owner | 2, then one every 5 s | — | Fixed (budget) |
 | `AuditLog` (new) | Owner | — | — | — |
+| `HostCard` (Collaborate 2.0 P4) | Editors and the Owner (`Role::may_host`) | 5, then one every 5 s | Each changes the successor list, which goes to everyone; the address is trimmed, one word, at most 260 bytes | Fixed (budget) |
+| `Tail` (Collaborate 2.0 P4) | Only a member a recovering host asked (`SendTail`), once | — | Replayed without role checks (the old host accepted them), so only from a member asked, only entries continuing the host's own count, and only while recovering | Fixed |
 
 **Before signing in** (`socket.rs`, `session.rs`):
 
@@ -329,6 +331,7 @@ Per-member budgets for each kind are in [§6.1](#61-security-review-c10); the li
 | Membership | `RoleChanged`, `Ended` | Host order | Members file in the host's data folder | Owner only for roles, removal, ending | — |
 | **Audit log (C10)** | `AuditLog` → `AuditLog(entries)` | On request | The host's last 500 in memory, all in `<members file>.audit.jsonl` in its data folder | Owner only | Wire format 7 |
 | **Members list (Collaborate 2.0 P3)** | `Members(MembersList)` | On joining, and to everyone who may host when it changes (its `version`) | Each member's project record in their Collaborate data folder (`records/<id>.json`) | Sent only to Editors and the Owner, never a Viewer | Wire format 8 ([collaborate-persistent.md](collaborate-persistent.md) §8.3) |
+| **Host handoff (Collaborate 2.0 P4)** | `HostCard { address, cert }` up; `Successors { hosts, next_id }` to everyone when the list changes; `HandingOff { to, last_seq }` when the host leaves; `SendTail { after }` → `Tail(entries)` while a new host recovers | Host order; a recovering host replays tails in the old host's order, then the edits it held | Each member's last 2,000 accepted transactions of the current epoch, in memory | Cards from members who may host; tails only when asked | 8 successors. Wire format 9 ([collaborate-persistent.md](collaborate-persistent.md) §8.4) |
 
 ### 9.3 Identifiers, duplicates and recovery
 

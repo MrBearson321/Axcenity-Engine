@@ -4,8 +4,9 @@
 //! - **Successors:** members who may host send their [`HostCard`]; the
 //!   host ranks them ([`election::rank`]) and sends the list to everyone
 //!   whenever it changes, with the next Instance ID it would hand out.
-//! - **Leaving** ([`Host::hand_off`]): the host tells everyone who hosts
-//!   next and the last transaction they must have, and takes no more edits
+//! - **Leaving** ([`Host::hand_off`]): the host writes live documents'
+//!   typing to the files, tells everyone who hosts next and the last
+//!   transaction they must have, and takes no more edits
 //!   (members keep them pending and send them to the new host).
 //! - **Recovering** ([`Host::recover_from`]): a host that took over from a
 //!   lost one asks members ahead of it for the old host's transactions it
@@ -172,6 +173,9 @@ impl Host {
     /// transaction to have, and no edit is taken from now. Returns the
     /// successor too.
     pub fn hand_off(&mut self) -> (Option<HostCard>, Vec<Outgoing>) {
+        // Typing in live documents goes into the files first, so the
+        // successor's copy has it.
+        let mut out = self.write_back_now();
         self.handoff.leaving = true;
         let to = self.successors().into_iter().next();
         let who = to
@@ -187,10 +191,10 @@ impl Host {
                 self.seq
             ),
         );
-        let out = self.to_everyone(ToClient::HandingOff {
+        out.extend(self.to_everyone(ToClient::HandingOff {
             to: to.clone(),
             last_seq: self.seq,
-        });
+        }));
         (to, out)
     }
 
