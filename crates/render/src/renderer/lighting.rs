@@ -163,6 +163,8 @@ pub(super) fn frame_uniform(
         // And the clouds, which drift with the wind.
         clouds: Default::default(),
         weather: weather_uniform(&list.weather),
+        // Filled in while ray traced shadows are drawn.
+        ray_shadows: [0.0; 4],
     }
 }
 

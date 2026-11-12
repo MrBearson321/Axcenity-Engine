@@ -164,3 +164,153 @@ mod ray_hits {
         assert!(pixels.chunks(4).all(|p| p[..3] == first), "one plain color");
     }
 }
+
+/// Ray traced sun shadows (RT1, renderer/ray_shadows.rs).
+mod sun_shadows {
+    use super::*;
+    use crate::RayTracedShadows;
+
+    fn traced(shadows: RayTracedShadows) -> crate::GraphicsSettings {
+        crate::GraphicsSettings {
+            // No shadow maps, so any shadow seen is ray traced.
+            shadow_quality: Some(ShadowQuality::Off),
+            ray_traced_shadows: Some(shadows),
+            ..crate::GraphicsSettings::default()
+        }
+    }
+
+    /// The red channel along the middle row of a 64 × 64 frame.
+    fn middle_row(renderer: &mut TextureRenderer, list: &DrawList) -> Vec<u8> {
+        renderer.render(list).unwrap();
+        let pixels = renderer.read_pixels();
+        (0..64).map(|x| pixels[(32 * 64 + x) * 4]).collect()
+    }
+
+    #[test]
+    fn ray_traced_shadows_shade_like_the_shadow_maps_without_any_map() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut list = shadowed_wall();
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        // Today's shadow maps, to compare with.
+        let mapped = middle_of(&mut renderer, &list);
+
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        let shaded = middle_of(&mut renderer, &list);
+        assert!(renderer.scene.shadow_map.is_none(), "no shadow map is made");
+        assert!(renderer.scene.ray_shadows.is_some());
+        assert!(renderer.stats().ray_tracing.instances >= 2);
+        assert!(
+            shaded[0].abs_diff(mapped[0]) <= 24,
+            "ray traced {shaded:?}, mapped {mapped:?}"
+        );
+
+        list.items[1].casts_shadow = false;
+        let lit = middle_of(&mut renderer, &list);
+        assert!(lit[0] > shaded[0] + 40, "{shaded:?} vs {lit:?}");
+    }
+
+    #[test]
+    fn soft_ray_traced_shadows_have_soft_edges_and_hard_ones_do_not() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut list = shadowed_wall();
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::High));
+        let hard = middle_row(&mut renderer, &list);
+        list.shadows.softness = 1.0;
+        let soft = middle_row(&mut renderer, &list);
+        // Between the darkest and lightest of the row: the soft edge.
+        let between = |row: &[u8]| {
+            let (low, high) = (*row.iter().min().unwrap(), *row.iter().max().unwrap());
+            row.iter()
+                .filter(|&&value| value > low + 12 && value + 12 < high)
+                .count()
+        };
+        assert!(
+            between(&soft) > between(&hard) + 2,
+            "hard {hard:?}\nsoft {soft:?}"
+        );
+        assert!(*soft.iter().min().unwrap() + 40 < *soft.iter().max().unwrap());
+    }
+
+    #[test]
+    fn past_their_reach_the_shadow_maps_take_over() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        // The wall is 10 studs away; the world's shadows reach 5.
+        let mut list = shadowed_wall();
+        list.shadows.distance = 5.0;
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        let far = middle_of(&mut renderer, &list);
+        list.items[1].casts_shadow = false;
+        let lit = middle_of(&mut renderer, &list);
+        assert_eq!(far, lit, "no shadow past the reach without shadow maps");
+    }
+
+    #[test]
+    fn turning_them_off_frees_them_and_draws_as_before() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let list = shadowed_wall();
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.render(&list).unwrap();
+        let before = renderer.read_pixels();
+        renderer.set_graphics(&traced(RayTracedShadows::Medium));
+        renderer.render(&list).unwrap();
+        assert!(renderer.stats().buffer_bytes > 64 * 64 * 4);
+        renderer.set_graphics(&crate::GraphicsSettings::default());
+        renderer.render(&list).unwrap();
+        assert!(renderer.scene.ray_shadows.is_none());
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default()
+        );
+        assert_eq!(renderer.read_pixels(), before);
+    }
+
+    #[test]
+    fn a_world_without_shadows_traces_nothing() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut list = shadowed_wall();
+        list.shadows.enabled = false;
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::High));
+        renderer.render(&list).unwrap();
+        assert!(renderer.scene.ray_shadows.is_none());
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default()
+        );
+    }
+
+    #[test]
+    fn without_ray_queries_the_setting_is_off_with_a_note() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::High));
+        assert_eq!(
+            renderer.graphics().ray_traced_shadows,
+            RayTracedShadows::Off
+        );
+        assert!(
+            renderer
+                .graphics()
+                .notes
+                .iter()
+                .any(|note| note.contains("can't ray trace"))
+        );
+        renderer.render(&shadowed_wall()).unwrap();
+        assert!(renderer.scene.ray_shadows.is_none());
+    }
+}

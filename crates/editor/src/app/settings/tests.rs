@@ -140,6 +140,7 @@ fn graphics_settings_survive_a_restart() {
         sharpen: Some(false),
         motion_blur: Some(MotionBlurQuality::Low),
         ray_tracing_distance: Some(300.0),
+        ray_traced_shadows: Some(RayTracedShadows::Medium),
     };
     let mut storage = MemoryStorage::default();
     eframe::App::save(&mut app, &mut storage);

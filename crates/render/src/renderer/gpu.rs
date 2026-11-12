@@ -345,7 +345,8 @@ pub(super) fn create_frame_bind_group(
         tile_buffer,
         joint_buffer,
         light_probe_buffer,
-    ]: [&wgpu::Buffer; 5],
+        ray_shadow_mask,
+    ]: [&wgpu::Buffer; 6],
     [
         shadow_view,
         spot_shadow_view,
@@ -385,6 +386,10 @@ pub(super) fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: JOINTS_BINDING,
                 resource: joint_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 17,
+                resource: ray_shadow_mask.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,

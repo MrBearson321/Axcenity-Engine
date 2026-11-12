@@ -571,6 +571,8 @@ declare extern type UserGameSettings with
 	Sharpen: boolean
 	--- How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.
 	MotionBlur: EnumMotionBlur
+	--- Hardware ray traced sun shadows: Off, Low (1 ray per pixel), Medium (2) or High (4). Off at every preset. On a GPU that can't ray trace it reads as chosen but the shadow maps are drawn. Lighting's ShadowSoftness still sets how soft they are.
+	RayTracedShadows: EnumRayTracedShadows
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1244,6 +1246,18 @@ declare extern type EnumStreamingStateItems with
 	StreamedOut: EnumStreamingState
 end
 
+--- One choice of `Enum.RayTracedShadows`.
+declare extern type EnumRayTracedShadows extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedShadows`.
+declare extern type EnumRayTracedShadowsItems with
+	Off: EnumRayTracedShadows
+	Low: EnumRayTracedShadows
+	Medium: EnumRayTracedShadows
+	High: EnumRayTracedShadows
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1288,6 +1302,7 @@ declare extern type EnumLibrary with
 	NormalId: EnumNormalIdItems
 	ModelStreamingMode: EnumModelStreamingModeItems
 	StreamingState: EnumStreamingStateItems
+	RayTracedShadows: EnumRayTracedShadowsItems
 end
 
 -- Instances -----------------------------------------------------------------
