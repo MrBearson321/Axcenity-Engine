@@ -469,11 +469,13 @@ fn main() {
     // --- TLAS rebuilds ---------------------------------------------------
     println!();
     println!("## TLAS rebuild with every instance moved (median of 10)");
-    println!("| instances | CPU fill + encode + submit ms | GPU build ms | CPU wall ms |");
-    println!("|---|---|---|---|");
+    println!(
+        "| instances | CPU placing (probe's own loop) ms | CPU wgpu encode + submit ms | GPU build ms | CPU wall ms |"
+    );
+    println!("|---|---|---|---|---|");
     for count in [1_000u32, 10_000, 100_000] {
         if count > limits.max_tlas_instance_count {
-            println!("| {count} | over the device limit | | |");
+            println!("| {count} | over the device limit | | | |");
             continue;
         }
         let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
@@ -482,10 +484,13 @@ fn main() {
             flags: fast_build,
             update_mode: wgpu::AccelerationStructureUpdateMode::Build,
         });
-        let (mut cpu, mut gpu, mut wall) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut placing, mut cpu, mut gpu, mut wall) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for frame in 0..10 {
             let start = Instant::now();
             place(&mut tlas, frame, count);
+            let placed = Instant::now();
+            placing.push((placed - start).as_secs_f64() * 1e3);
             let mut encoder = device.create_command_encoder(&Default::default());
             if let (Some(t), true) = (&timer, inside) {
                 encoder.write_timestamp(&t.set, 0);
@@ -496,7 +501,7 @@ fn main() {
                 t.resolve(&mut encoder, 2);
             }
             queue.submit(Some(encoder.finish()));
-            cpu.push(start.elapsed().as_secs_f64() * 1e3);
+            cpu.push(placed.elapsed().as_secs_f64() * 1e3);
             wait(&device);
             wall.push(start.elapsed().as_secs_f64() * 1e3);
             if let (Some(t), true) = (&timer, inside) {
@@ -504,7 +509,8 @@ fn main() {
             }
         }
         println!(
-            "| {count} | {:.3} | {:.3} | {:.3} |",
+            "| {count} | {:.3} | {:.3} | {:.3} | {:.3} |",
+            median(placing),
             median(cpu),
             median(gpu),
             median(wall)

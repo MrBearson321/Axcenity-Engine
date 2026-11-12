@@ -101,6 +101,7 @@ Since rendering Phase 1 (PR #83): frame rate with 1% lows, CPU- or GPU-bound, pe
 - Overlapping see-through items can blend in the wrong order (sorted by center).
 - AMD/Vulkan/Windows: sky clear not sRGB-encoded through an sRGB view (`docs/rendering/pipeline.md`).
 - The item shader uses all 16 sampled textures and all 16 vertex attributes (wgpu defaults): a new frame texture must share or replace a binding; a new per-item value must pack into an existing attribute.
+- No hardware ray tracing yet. Planned as an optional tier (RT0–RT5, `docs/research/hardware-ray-tracing.md`): wgpu 30's experimental ray queries work on DX12, Vulkan and Metal, a ray per pixel for sun shadows measured 0.25–0.30 ms at 1440p on an RX 9070 XT, and wgpu has no acceleration structure refit (every update is a full build).
 - No indirect drawing, no GPU-driven culling (L5, now unblocked by M12), no render graph (L8 deferred). Frames acquire through `CurrentSurfaceTexture` (Lost or Outdated reconfigures, Timeout or Occluded skips the frame) since M12.
 
 ## Development guidance
