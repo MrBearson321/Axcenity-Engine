@@ -551,6 +551,8 @@ Require representative benchmark evidence demonstrating a meaningful bottleneck 
 **Priority:** Medium
 **Status:** Partial (R18). Baked light probe volumes with stale-bake warnings, baked reflection probes, and optional real-time probe GI (off by default).
 
+**Ray-traced GI:** RT2 in [hardware-ray-tracing.md](hardware-ray-tracing.md) (ray-traced probe GI, DDGI-style) writes into the same light probe volumes and replaces `realtime_gi.rs`'s raster cube faces when ray tracing is on. It is R18's additional real-time GI technique on RT-capable GPUs. The rest of R18 (probe placement, diagnostics, quality settings, the non-RT path) applies to every GPU. G9 stage 2 is independent, because RT denoisers run before TAA.
+
 Improve indirect lighting while preserving the existing baked-probe and optional real-time probe architecture.
 
 ### Requirements
@@ -952,7 +954,7 @@ The following should not become immediate development priorities.
 |---|---|---|
 | Complete Nanite equivalent | Deferred | Requires demonstrated large-world need |
 | Full Lumen equivalent | Deferred | Existing GI architecture is sufficient for current scope |
-| Hardware ray tracing | Deferred | Cost and compatibility |
+| Hardware ray tracing | Planned, optional (RT0–RT5) | Paul overrode the deferral on 2026-11-12: [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240), off by default and only on RT-capable GPUs |
 | Occlusion culling overhaul | Deferred | Existing measurements do not justify it |
 | Parallel Luau | Deferred | Current script performance does not justify added complexity |
 | ECS replacement | Do not pursue currently | Preserve the Instance architecture |
@@ -1102,7 +1104,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Occlusion culling | Deferred (measured ≤ 1.9 ms) | HZB | Occluders | PVS | Umbra | `docs/rendering/performance.md` | Low | — | Defer |
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
 | Global illumination | Partial: baked probes, optional real-time probes | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
-| Ray tracing | Deferred | Yes | — | — | HDRP | gap analysis P4 | Low | — | Defer |
+| Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
 | Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; editor diagnostics partial | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
