@@ -1,6 +1,6 @@
 # Team Board
 
-The project's shared tasks and who they're assigned to (T1 of [../research/teamwork.md](../research/teamwork.md)). Data: the `teamwork` crate. Panel: `crates/editor/src/team_board.rs` (draws, returns `BoardAction`s). App side: `crates/editor/src/app/team_board.rs` (reads the board, writes items, notices new assignments). Tests: `crates/teamwork/src/tests.rs`, `crates/editor/src/app/team_board_tests.rs`.
+The project's shared tasks and bugs and who they're assigned to (T1 and T2 of [../research/teamwork.md](../research/teamwork.md)). Data: the `teamwork` crate. Panel: `crates/editor/src/team_board.rs` (draws, returns `BoardAction`s). App side: `crates/editor/src/app/team_board.rs` (reads the board, writes items, notices new assignments). Tests: `crates/teamwork/src/tests.rs`, `crates/editor/src/app/team_board_tests.rs`.
 
 ## Files
 
@@ -18,7 +18,8 @@ The project's shared tasks and who they're assigned to (T1 of [../research/teamw
 
 - Tab beside the Scene; Window > Team Board, Ctrl+K, and the Collaborate panel's Team Board line open it.
 - List (grouped by status) or Board (columns To do, In progress, In review, Done; Won't do shows under Done). Below 520 points wide, Board shows the list. Cards drag between columns (`dnd_drag_source` / `dnd_drop_zone`).
-- Filters: Everyone, Mine, Unassigned, a person, a label, words, and Done (finished items).
+- Filters: Everyone, Mine, Unassigned, a person, a label, Tasks and Bugs, words, and Done (finished items).
+- Bugs (T2): the add field's kind menu makes a Task or a Bug. A bug's window adds Severity, Found in (This build fills `found_in()`), Fixed in, Steps to reproduce, Expected and What happens; statuses read Open … Won't fix. **Report the last error** (`BoardAction::ReportLastError`, shown when Bug is chosen and the Output has an error) and the Explorer's **Report a Bug…** (`explorer::Action::ReportBug`, `report_bug_about`) make a bug with its link and open it.
 - Clicking a row or card opens the item's window (one at a time): fields commit when a text field loses focus; status, priority, assignees and the checklist commit at once.
 - People to assign: `Board::people` (everyone the board names) plus the session's roster and this computer's Collaborate name (`EditorApp::board_me`; "Tester" in tests unless `team_board.me` is set).
 - A new assignment by someone else shows once as a toast and an Output line (`notice_new_assignments`).

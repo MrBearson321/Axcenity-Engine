@@ -198,3 +198,66 @@ fn a_viewer_sees_the_board_but_cannot_change_it() {
     assert_eq!(on_disk.get(&task.id), Some(&task));
     draw_board(&mut b, "team-board-viewer", egui::vec2(260.0, 300.0));
 }
+
+#[test]
+fn bugs_are_reported_from_the_last_error_and_from_the_explorer() {
+    let project = copy_of_example("hello-part", "team-board-bugs");
+    let mut app = EditorApp::new(Some(&project));
+    as_person(&mut app, "Sam");
+    app.output
+        .error("scripts/door.server.lua:12: attempt to index nil with 'Open'");
+    app.output.info("Something after it");
+
+    app.team_board.panel.new_kind = axcenity_teamwork::Kind::Bug;
+    app.apply_board_actions(vec![BoardAction::ReportLastError]);
+    let crash = task_named(
+        &mut app,
+        "scripts/door.server.lua:12: attempt to index nil with 'Open'",
+    )
+    .expect("the bug");
+    assert_eq!(crash.kind, axcenity_teamwork::Kind::Bug);
+    let report = crash.bug.clone().unwrap();
+    assert!(report.actual.contains("attempt to index nil"));
+    assert!(report.found_in.contains(std::env::consts::OS), "{report:?}");
+    assert_eq!(
+        crash.links,
+        [axcenity_teamwork::Link::File {
+            path: "scripts/door.server.lua".into(),
+            line: Some(12)
+        }]
+    );
+    assert_eq!(
+        app.team_board.panel.open.as_deref(),
+        Some(crash.id.as_str())
+    );
+    assert!(app.layout.is_open(crate::layout::Pane::TeamBoard));
+
+    // The Explorer's Report a Bug links the part.
+    let block = crate::console::resolve_path(&app.world, "Workspace.Block").unwrap();
+    app.act(crate::explorer::Action::ReportBug(block));
+    let about = task_named(&mut app, "Problem with Block").expect("the bug");
+    assert_eq!(
+        about.links,
+        [axcenity_teamwork::Link::Instance("Workspace.Block".into())]
+    );
+    let mut blocker = crash.clone();
+    blocker.set_severity(
+        axcenity_teamwork::Severity::Blocker,
+        "Sam",
+        crash.created_at + 1,
+    );
+    blocker.bug_mut().steps = "1. Press Play\n2. Open the door".into();
+    app.apply_board_actions(vec![BoardAction::Save(Box::new(blocker))]);
+    app.apply_board_actions(vec![BoardAction::Create {
+        kind: axcenity_teamwork::Kind::Task,
+        title: "Fix the door script".into(),
+    }]);
+    assert!(task_named(&mut app, "Fix the door script").is_some());
+    assert_eq!(board(&mut app).open_bugs(), (2, 1));
+
+    app.team_board.panel.open = Some(crash.id.clone());
+    draw_board(&mut app, "team-board-bug", egui::vec2(560.0, 860.0));
+    app.team_board.panel.open = None;
+    app.team_board.panel.filter.kinds = vec![axcenity_teamwork::Kind::Bug];
+    draw_board(&mut app, "team-board-bugs", egui::vec2(260.0, 360.0));
+}

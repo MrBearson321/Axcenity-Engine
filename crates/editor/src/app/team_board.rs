@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use axcenity_collab::Capability;
-use axcenity_teamwork::{Board, Copies, Item, time};
+use axcenity_teamwork::{Board, Copies, Item, Kind, Link, time};
 use eframe::egui;
 
 use super::EditorApp;
@@ -183,6 +183,8 @@ impl EditorApp {
         let selected = self.selected.and_then(|id| self.world.full_name(id));
         let script = self.tabs.active().map(|tab| tab.path.clone());
         let read_only = !self.board_writable();
+        let last_error = self.last_error().map(|(text, _)| text);
+        let found_in = found_in();
         let mut panel = std::mem::take(&mut self.team_board.panel);
         let Some(board) = self.team_board.board() else {
             self.team_board.panel = panel;
@@ -196,6 +198,8 @@ impl EditorApp {
             selected,
             script,
             read_only,
+            last_error,
+            found_in: &found_in,
         };
         let actions = panel.show(ui, &cx);
         self.team_board.panel = panel;
@@ -216,6 +220,8 @@ impl EditorApp {
         let selected = self.selected.and_then(|id| self.world.full_name(id));
         let script = self.tabs.active().map(|tab| tab.path.clone());
         let read_only = !self.board_writable();
+        let last_error = self.last_error().map(|(text, _)| text);
+        let found_in = found_in();
         let mut panel = std::mem::take(&mut self.team_board.panel);
         let Some(board) = self.team_board.board() else {
             panel.open = None;
@@ -230,6 +236,8 @@ impl EditorApp {
             selected,
             script,
             read_only,
+            last_error,
+            found_in: &found_in,
         };
         let actions = panel.window(ctx, &cx);
         self.team_board.panel = panel;
@@ -278,8 +286,25 @@ impl EditorApp {
                 self.open_script(&path, line.map(|l| l as usize));
                 return;
             }
+            BoardAction::ReportLastError if writable => {
+                let Some((text, location)) = self.last_error() else {
+                    return;
+                };
+                let mut bug = Item::bug_from_error(&text, &found_in(), &me, time::now());
+                if let Some(location) = location {
+                    bug.links.push(Link::File {
+                        path: location.path,
+                        line: Some(location.line as u32),
+                    });
+                }
+                self.open_new_board_item(bug);
+                return;
+            }
             // A Viewer can look but not change.
-            BoardAction::Create { .. } | BoardAction::Save(_) | BoardAction::Delete(_) => return,
+            BoardAction::Create { .. }
+            | BoardAction::Save(_)
+            | BoardAction::Delete(_)
+            | BoardAction::ReportLastError => return,
         };
         if let Err(error) = result {
             self.output
@@ -331,4 +356,71 @@ impl EditorApp {
         }
         ui.add_space(crate::theme::space::S);
     }
+
+    /// The Console's last error with its stack trace, and where in which
+    /// script it happened.
+    fn last_error(&self) -> Option<(String, Option<crate::output::Location>)> {
+        let line = self
+            .output
+            .lines()
+            .iter()
+            .rev()
+            .find(|line| line.kind == crate::output::OutputKind::Error)?;
+        let mut text = line.text.clone();
+        for frame in &line.trace {
+            text.push('\n');
+            text.push_str(&frame.text);
+        }
+        Some((text, line.location.clone()))
+    }
+
+    /// Writes a new item and opens it on the board.
+    fn open_new_board_item(&mut self, item: Item) {
+        self.load_board();
+        if !self.board_writable() {
+            return;
+        }
+        let Some((root, board)) = self.team_board.loaded.as_mut() else {
+            return;
+        };
+        let root = root.clone();
+        let opened = item.clone();
+        match board.save(&root, item) {
+            Ok(()) => {
+                self.team_board.panel.open_item(&opened);
+                self.layout.open(crate::layout::Pane::TeamBoard);
+            }
+            Err(error) => self
+                .output
+                .error(format!("Team Board: couldn't save the board: {error}")),
+        }
+    }
+
+    /// The Explorer's Report a Bug: a bug about the Instance `id`, linked
+    /// to it, opened to fill in.
+    pub(in crate::app) fn report_bug_about(&mut self, id: axcenity_core::InstanceId) {
+        let Some(path) = self.world.full_name(id) else {
+            return;
+        };
+        let name = self
+            .world
+            .get(id)
+            .map(|instance| instance.name().to_owned())
+            .unwrap_or_default();
+        let me = self.board_me();
+        let now = time::now();
+        let mut bug = Item::new(Kind::Bug, &format!("Problem with {name}"), &me, now);
+        bug.bug_mut().found_in = found_in();
+        bug.links.push(Link::Instance(path));
+        self.open_new_board_item(bug);
+    }
+}
+
+/// This build and system, for a bug's Found in: "0.2.0-alpha.1 on linux".
+pub(crate) fn found_in() -> String {
+    format!(
+        "{} on {}",
+        axcenity_release::BuildInfo::current().version,
+        std::env::consts::OS
+    )
 }
