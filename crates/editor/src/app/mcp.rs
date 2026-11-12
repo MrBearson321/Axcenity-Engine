@@ -20,7 +20,7 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axcenity_mcp::{
     Allowed, Args, Class, Code, Confirms, Detail, Job, Kind, Mode, Outcome, Param, Profile, Setup,
@@ -63,6 +63,8 @@ mod script_write;
 mod solid_op;
 mod style_edit;
 mod terrain_edit;
+mod toolbox_get;
+mod toolbox_search;
 mod values;
 mod view_capture;
 
@@ -141,6 +143,11 @@ pub(super) struct Session {
     /// The picture the last call made (`view_capture`), sent with its
     /// answer.
     pub png: Option<Vec<u8>>,
+    /// Where the Toolbox tools download from: the network, or a test's
+    /// fixed answers.
+    pub toolbox_http: Option<Box<dyn axcenity_toolbox::http::Http>>,
+    /// The central asset directory, when not the user's own (tests).
+    pub asset_dir: Option<PathBuf>,
 }
 
 impl Session {
@@ -159,11 +166,25 @@ impl Session {
             me,
             asked: 0,
             png: None,
+            toolbox_http: None,
+            asset_dir: None,
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
             ),
         }
+    }
+}
+
+impl Session {
+    /// What the Toolbox tools fetch through: the network (a client made the
+    /// first time, with the tab's longest wait), unless a test set its own.
+    pub fn toolbox_http(&mut self) -> &dyn axcenity_toolbox::http::Http {
+        let http = self.toolbox_http.get_or_insert_with(|| {
+            let client = axcenity_toolbox::http::Client::new(Duration::from_secs(15 * 60));
+            Box::new(client)
+        });
+        &**http
     }
 }
 
@@ -311,6 +332,14 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &view_capture::SPEC,
         call: view_capture::call,
+    },
+    Tool {
+        spec: &toolbox_search::SPEC,
+        call: toolbox_search::call,
+    },
+    Tool {
+        spec: &toolbox_get::SPEC,
+        call: toolbox_get::call,
     },
 ];
 

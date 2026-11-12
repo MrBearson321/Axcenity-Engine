@@ -21,7 +21,7 @@ What a client pays every turn: the `tools/list` JSON for a profile, plus the ins
 |---|---|---|---|
 | `lite` | 13 | 2,095 | 2,100 |
 | `standard` | 22 | 4,362 | 4,500 |
-| `full` | 29 | 5,545 | 6,500 |
+| `full` | 31 | 5,936 | 6,500 |
 | instructions | | 134 | 150 |
 
 ## Tools

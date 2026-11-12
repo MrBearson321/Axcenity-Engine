@@ -2674,3 +2674,74 @@ fn view_capture_draws_the_scene_as_a_png_from_the_camera_an_object_or_a_point() 
     let history = ok(host, "history", json!({}));
     assert!(history.starts_with("0 steps to undo"), "{history}");
 }
+
+#[test]
+fn toolbox_search_and_get_bring_an_asset_in_as_one_undo_step() {
+    let mut opened = open("hello-part", "mcp-toolbox");
+    let assets = std::env::temp_dir().join(format!(
+        "axcenity-mcp-toolbox-assets-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&assets);
+    let project = opened.folder.clone();
+    let host = &mut opened.app;
+    // Never the network: ambientCG's answers from memory.
+    host.session.toolbox_http = Some(Box::new(
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(),
+    ));
+    host.session.asset_dir = Some(assets.clone());
+    let found = ok(host, "toolbox_search", json!({"query": "fabric"}));
+    assert!(
+        found.starts_with("1 of 1 texture result for \"fabric\"\nambientcg:Fabric086 · Fabric 086 · CC0 · 1K 2K · JPG"),
+        "{found}"
+    );
+    assert!(found.contains("\nnot searched: Poly Haven"), "{found}");
+    assert!(
+        found.ends_with("toolbox_get {\"key\":\"ambientcg:Fabric086\"}"),
+        "{found}"
+    );
+    let wrong = call(
+        host,
+        "toolbox_search",
+        json!({"query": "rain", "kind": "sound", "source": "ambientcg"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    let wrong = call(host, "toolbox_get", json!({"key": "Fabric086"})).unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    assert!(wrong.to_string().contains("ambientcg:Ground054"), "{wrong}");
+
+    let got = ok(host, "toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+    let set = "assets/textures/Fabric086/Fabric086.texture.json";
+    assert!(
+        got.starts_with(&format!(
+            "got Fabric 086 (1K JPG, CC0 1.0): texture set {set}, material assets/materials/"
+        )),
+        "{got}"
+    );
+    assert!(got.ends_with("undo \"AI (test): Get Fabric 086\""), "{got}");
+    let material = got
+        .split("material ")
+        .nth(1)
+        .and_then(|rest| rest.split(" · ").next())
+        .unwrap()
+        .to_owned();
+    assert!(project.join(set).is_file(), "{got}");
+    assert!(project.join(&material).is_file(), "{got}");
+    // The material is ready to assign.
+    ok(
+        host,
+        "material_edit",
+        json!({"action": "assign", "path": material, "id": "Workspace/Block"}),
+    );
+    ok(host, "history", json!({"action": "undo"}));
+    // One undo takes the texture set and the material away; redo brings them back.
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join(set).exists(), "{got}");
+    assert!(!project.join(&material).exists(), "{got}");
+    ok(host, "history", json!({"action": "redo"}));
+    assert!(project.join(set).is_file() && project.join(&material).is_file());
+    // The package stays in the asset directory: a second get downloads nothing.
+    host.session.toolbox_http = Some(Box::new(axcenity_toolbox::http::Fixture::default()));
+    let _ = std::fs::remove_dir_all(&assets);
+}
