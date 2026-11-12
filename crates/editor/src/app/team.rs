@@ -57,10 +57,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axcenity_collab::access::{Access, Invite};
-use axcenity_collab::hosted::{members_file, session_id, session_world};
+use axcenity_collab::hosted::{members_file, session_world};
 use axcenity_collab::identity::Identity;
 use axcenity_collab::journal;
 use axcenity_collab::mirror::{Change, Mirror};
+use axcenity_collab::project::ProjectRecord;
 use axcenity_collab::session::{HostSession, Hosting, Remote, RemoteEvent};
 use axcenity_collab::socket::{DEFAULT_PORT, HostCert};
 use axcenity_collab::{
@@ -137,13 +138,13 @@ impl TeamStart {
 /// Where Collaborate keeps this computer's identity, the host's
 /// certificate and each hosted project's members: the editor's data
 /// folder, never the project folder (which may be pushed somewhere public).
-fn data_folder() -> Option<PathBuf> {
+pub(super) fn data_folder() -> Option<PathBuf> {
     eframe::storage_dir(crate::APP_ID)
         .map(|data| axcenity_collab::hosted::renamed_folder(&data, "Collaborate", "Team Create"))
 }
 
 /// This computer's identity, made the first time.
-fn load_identity(folder: &Path) -> std::io::Result<Identity> {
+pub(super) fn load_identity(folder: &Path) -> std::io::Result<Identity> {
     let path = folder.join("identity.json");
     match Identity::load(&path) {
         Ok(identity) => Ok(identity),
@@ -274,7 +275,7 @@ impl Hub {
 }
 
 /// How this editor reaches its session.
-enum Link {
+pub(super) enum Link {
     /// A [`Hub`] in this process (tests).
     Hub(SharedHub),
     /// The network, and the session's host if this editor runs it.
@@ -282,6 +283,14 @@ enum Link {
         remote: Box<Remote>,
         hosting: Option<Hosting>,
     },
+}
+
+/// A session this editor started hosting.
+pub(crate) struct HostedSession {
+    /// The first invite, when one was made.
+    pub(crate) invite: Option<Invite>,
+    /// How others reach this computer (`host:port`).
+    pub(crate) address: String,
 }
 
 /// This editor's place in a session.
@@ -311,7 +320,7 @@ pub(crate) struct Team {
     mirror_synced: Option<std::time::Instant>,
     /// Where a joining editor keeps the folders of the sessions it joins.
     /// `None` when hosting, and in-process sessions without files.
-    mirrors_home: Option<PathBuf>,
+    pub(super) mirrors_home: Option<PathBuf>,
     /// The mirror's folder opens as the project once the session's files
     /// are in it (a joining editor).
     open_mirror: bool,
@@ -327,10 +336,18 @@ pub(crate) struct Team {
     /// Open live documents (C7), by path: the text the tab and the
     /// document last agreed on (`None` until the host's arrives).
     live: BTreeMap<String, Option<String>>,
+    /// The Collaborate data folder, where this computer's record of the
+    /// project is kept (Collaborate 2.0, P3); `None` in in-process tests.
+    pub(super) data: Option<PathBuf>,
+    /// The host's certificate, when joined over the network.
+    pub(super) host_cert: Option<axcenity_collab::identity::Fingerprint>,
+    /// The members list version last written to the record (`Some(None)`:
+    /// recorded before any list arrived).
+    pub(super) recorded: Option<Option<u64>>,
 }
 
 impl Team {
-    fn new(link: Link, address: String, invite: Option<String>) -> Team {
+    pub(super) fn new(link: Link, address: String, invite: Option<String>) -> Team {
         Team {
             client: None,
             link,
@@ -350,6 +367,9 @@ impl Team {
             unsent_loaded: false,
             session_name: None,
             live: BTreeMap::new(),
+            data: None,
+            host_cert: None,
+            recorded: None,
         }
     }
 
@@ -577,7 +597,10 @@ impl EditorApp {
         port: u16,
         name: Option<String>,
     ) -> Result<Invite, String> {
-        let invite = self.host_session_on(folder, port, true, name)?;
+        let invite = self
+            .host_session_on(folder, port, true, name, true)?
+            .invite
+            .ok_or("no invite was made")?;
         let reach = self.team.as_ref().and_then(|team| team.tailscale.clone());
         match reach {
             Some(note) => self.output.info(format!("Collaborate: {note}")),
@@ -597,16 +620,22 @@ impl EditorApp {
         folder: Option<&Path>,
         port: u16,
     ) -> Result<Invite, String> {
-        self.host_session_on(folder, port, false, None)
+        self.host_session_on(folder, port, false, None, true)?
+            .invite
+            .ok_or_else(|| "no invite was made".to_owned())
     }
 
-    fn host_session_on(
+    /// Hosts the open project. `make_invite`: an invite for the panel's
+    /// role (only the Owner may); without one, the session is for the
+    /// project's members, who rejoin by key (Collaborate 2.0, P3).
+    pub(super) fn host_session_on(
         &mut self,
         folder: Option<&Path>,
         port: u16,
         tailscale: bool,
         name: Option<String>,
-    ) -> Result<Invite, String> {
+        make_invite: bool,
+    ) -> Result<HostedSession, String> {
         let folder = folder
             .map(Path::to_owned)
             .or_else(data_folder)
@@ -619,19 +648,43 @@ impl EditorApp {
         let identity = load_identity(&folder).map_err(|e| format!("your identity: {e}"))?;
         let cert = HostCert::load_or_make(&folder.join("host-certificate.json"))
             .map_err(|e| format!("the host certificate: {e}"))?;
+        // One ID for the project wherever it's hosted (Collaborate 2.0):
+        // members keep one folder for it, and this computer's record of it
+        // has the members list it was last sent.
+        let (project_id, id_problem) =
+            super::collab_project::persistent_project_id(&cert.fingerprint(), &project);
+        if let Some(problem) = id_problem {
+            self.output.warning(format!("Collaborate: {problem}"));
+        }
+        let record = ProjectRecord::load(&folder, &project_id);
         let access_path = members_file(&folder, &project);
-        let access = match Access::load(&access_path) {
-            Ok(access) => access,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Access::owned_by(identity.public_key(), &identity.name)
-            }
-            Err(error) => return Err(format!("the members list: {error}")),
-        };
+        let (access, from_record) = super::collab_project::starting_access(
+            Access::load(&access_path),
+            record.as_ref().and_then(|r| r.members.as_ref()),
+            || Access::owned_by(identity.public_key(), &identity.name),
+        )?;
+        let me = access
+            .member(&identity.public_key())
+            .cloned()
+            .ok_or("you're no longer a member of this project, so you can't host it")?;
+        if make_invite && !super::collab_project::may_invite(me.role) {
+            return Err(
+                "only the project's Owner invites people. Host for the project's members \
+                 instead: they rejoin without an invite"
+                    .to_owned(),
+            );
+        }
+        if from_record {
+            self.output.info(format!(
+                "Collaborate: hosting with the project's members as last shared ({} member(s))",
+                access.members().len()
+            ));
+        }
         // The project's files as they are now; the host keeps what members
         // upload beside them, in `.axcenity` (never synced).
         let (store, files) = FolderStore::open(&project)
             .map_err(|e| format!("couldn't read the project's files: {e}"))?;
-        let session_id = session_id(&cert.fingerprint(), &project);
+        let session_id = project_id.clone();
         let mirror = Mirror::open(&project, &session_id, &identity.name);
         // What a session that stopped without ending left is taken in
         // first: starting the journal writes over it.
@@ -674,10 +727,26 @@ impl EditorApp {
         } else {
             None
         };
-        let invite = session.invite(
-            self.team_panel.invite_role.role(),
-            self.team_panel.invite_lifetime.seconds(),
-        );
+        let invite = make_invite.then(|| {
+            session.invite(
+                self.team_panel.invite_role.role(),
+                self.team_panel.invite_lifetime.seconds(),
+            )
+        });
+        let address = session.address().to_owned();
+        if let Err(error) = super::collab_project::record_hosted(super::collab_project::Hosted {
+            data: &folder,
+            id: &project_id,
+            folder: &project,
+            name: session.name(),
+            members: session.access().members_list(),
+            me: me.id,
+            my_name: &identity.name,
+            address: address.clone(),
+            cert: cert.fingerprint(),
+        }) {
+            log::warn!("Collaborate: couldn't keep this computer's record of the project: {error}");
+        }
         let loopback = session.loopback();
         let hosting = session.serve();
         let remote = Box::new(Remote::join(
@@ -691,13 +760,14 @@ impl EditorApp {
                 remote,
                 hosting: Some(hosting),
             },
-            invite.host.clone(),
-            Some(invite.link()),
+            address.clone(),
+            invite.as_ref().map(Invite::link),
         );
         team.tailscale = reach;
         team.mirror = Some(mirror);
+        team.data = Some(folder);
         self.team = Some(team);
-        Ok(invite)
+        Ok(HostedSession { invite, address })
     }
 
     /// Joins the session `invite` names. The edit World is replaced with
@@ -726,8 +796,10 @@ impl EditorApp {
             invite.host.clone(),
             None,
         );
-        team.mirrors_home = Some(folder.join("Projects"));
+        team.mirrors_home = Some(super::collab_project::mirrors_home(&folder));
         team.session_name = invite.name.clone();
+        team.host_cert = Some(invite.cert);
+        team.data = Some(folder);
         self.team = Some(team);
         Ok(())
     }
@@ -858,6 +930,7 @@ impl EditorApp {
         };
         let hosted = team.hosting().is_some();
         let unsaved = !self.history.is_saved();
+        self.record_left_project(&team);
         // A member's edits the host never confirmed go with them next time.
         if !hosted
             && let (Some(client), Some(mirror)) = (&team.client, &team.mirror)
@@ -1134,6 +1207,7 @@ impl EditorApp {
         self.count_unread_chat();
         self.team_locks();
         self.keep_unsent();
+        self.record_joined_project();
         self.follow_member();
     }
 

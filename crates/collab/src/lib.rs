@@ -50,6 +50,7 @@ pub mod message;
 pub mod mirror;
 pub mod op;
 pub mod presence;
+pub mod project;
 pub mod role;
 pub mod session;
 pub mod socket;

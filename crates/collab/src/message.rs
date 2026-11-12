@@ -188,4 +188,8 @@ pub enum ToClient {
     HistoryNotice(String),
     /// The host's audit log, oldest first (C10), to the Owner who asked.
     AuditLog(Vec<crate::audit::AuditEntry>),
+    /// The project's members (Collaborate 2.0, P3), to each member who
+    /// may host (Editors and the Owner), when they join and whenever the
+    /// list changes, so any of them can host the project later.
+    Members(crate::project::MembersList),
 }

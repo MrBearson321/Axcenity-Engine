@@ -178,6 +178,9 @@ pub struct Client {
     checkpoints: Vec<crate::history::Checkpoint>,
     /// The host's audit log as last sent (C10; the Owner's).
     audit: Vec<crate::audit::AuditEntry>,
+    /// The project's members as the host last sent them (Collaborate 2.0,
+    /// P3), kept so this computer can host the project later.
+    members: Option<crate::project::MembersList>,
 }
 
 impl Client {
@@ -218,6 +221,7 @@ impl Client {
             chatted: VecDeque::new(),
             checkpoints: Vec::new(),
             audit: Vec::new(),
+            members: None,
         }
     }
 
@@ -399,6 +403,12 @@ impl Client {
     }
 
     /// The session's chat, oldest first.
+    /// The project's members as the host last sent them, if this member
+    /// may host (Editors and the Owner get it; Viewers don't).
+    pub fn members_list(&self) -> Option<&crate::project::MembersList> {
+        self.members.as_ref()
+    }
+
     pub fn chat(&self) -> &VecDeque<ChatLine> {
         &self.chat
     }
@@ -1142,6 +1152,11 @@ impl Client {
             ToClient::Checkpoints(list) => self.checkpoints = list,
             ToClient::HistoryNotice(text) => self.notices.push(Notice::History(text)),
             ToClient::AuditLog(entries) => self.audit = entries,
+            ToClient::Members(list) => {
+                if list.is_newer_than(self.members.as_ref()) {
+                    self.members = Some(list);
+                }
+            }
             ToClient::DocRefused { path, reason } => {
                 if self.live.contains_key(&path) {
                     self.live.insert(path.clone(), ClientDoc::new());

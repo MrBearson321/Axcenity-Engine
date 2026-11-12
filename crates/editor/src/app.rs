@@ -63,6 +63,7 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod collab_project;
 mod collab_repo;
 mod collab_setup;
 mod inventory;
@@ -1860,6 +1861,8 @@ mod tool_window_tests;
 #[cfg(test)]
 mod tour_snapshots;
 
+#[cfg(test)]
+mod collab_project_tests;
 #[cfg(test)]
 mod collab_repo_tests;
 #[cfg(test)]

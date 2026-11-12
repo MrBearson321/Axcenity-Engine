@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::{self, Fingerprint, PublicKey};
 use crate::message::MemberId;
+use crate::project::MembersList;
 use crate::role::Role;
 
 /// How long an invite works unless the owner says otherwise.
@@ -187,6 +188,11 @@ pub struct Access {
     members: Vec<Member>,
     invites: Vec<Issued>,
     next_member: u32,
+    /// Goes up whenever who's a member, or their role, name or colour,
+    /// changes; it orders the [`MembersList`] copies the host sends out
+    /// (Collaborate 2.0, P3). Older files have none.
+    #[serde(default)]
+    version: u64,
 }
 
 impl Access {
@@ -219,8 +225,48 @@ impl Access {
             account: None,
         };
         self.next_member += 1;
+        self.version += 1;
         self.members.push(member.clone());
         member
+    }
+
+    /// Which change of the members this is (see [`MembersList::version`]).
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// The members, without the invites, to hand to members who may host
+    /// later.
+    pub fn members_list(&self) -> MembersList {
+        MembersList {
+            version: self.version,
+            members: self.members.clone(),
+            next_member: self.next_member,
+        }
+    }
+
+    /// Access for a host starting from a members list it was sent (no
+    /// invites: those stay with the host that made them).
+    pub fn from_list(list: &MembersList) -> Access {
+        Access {
+            members: list.members.clone(),
+            invites: Vec::new(),
+            next_member: list.next_member.max(1),
+            version: list.version,
+        }
+    }
+
+    /// Takes `list`'s members if it's newer than ours, keeping our own
+    /// invites; true if it did. Used when a host that had been away comes
+    /// back to a project whose members changed meanwhile.
+    pub fn take_list(&mut self, list: &MembersList) -> bool {
+        if list.version <= self.version {
+            return false;
+        }
+        self.members = list.members.clone();
+        self.next_member = self.next_member.max(list.next_member);
+        self.version = list.version;
+        true
     }
 
     pub fn members(&self) -> &[Member] {
@@ -261,8 +307,11 @@ impl Access {
     ) -> Result<Member, AccessRefusal> {
         let name = &tidy_name(name);
         if let Some(member) = self.members.iter_mut().find(|m| m.key == key) {
-            member.name = name.to_owned();
-            member.color = color;
+            if member.name != *name || member.color != color {
+                member.name = name.to_owned();
+                member.color = color;
+                self.version += 1;
+            }
             return Ok(member.clone());
         }
         let secret = invite.ok_or(AccessRefusal::NotInvited)?;
@@ -285,13 +334,23 @@ impl Access {
 
     /// Changes a member's role. False if there's no such member.
     pub fn set_role(&mut self, member: MemberId, role: Role) -> bool {
-        let found = self.members.iter_mut().find(|m| m.id == member);
-        found.map(|m| m.role = role).is_some()
+        let Some(found) = self.members.iter_mut().find(|m| m.id == member) else {
+            return false;
+        };
+        if found.role != role {
+            found.role = role;
+            self.version += 1;
+        }
+        true
     }
 
     /// Takes a member out of the project.
     pub fn remove(&mut self, member: MemberId) {
+        let before = self.members.len();
         self.members.retain(|m| m.id != member);
+        if self.members.len() != before {
+            self.version += 1;
+        }
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -408,5 +467,42 @@ mod link_tests {
         assert_eq!(joined.name, "Eve Owner joined");
         assert_eq!(tidy_name("  \n "), "Someone");
         assert_eq!(tidy_name(&"x".repeat(200)).len(), 64);
+    }
+
+    #[test]
+    fn the_members_list_version_counts_changes_and_older_lists_dont_replace_newer() {
+        let owner = crate::identity::Identity::new("Paul", [1, 2, 3]).public_key();
+        let mut access = Access::owned_by(owner, "Paul");
+        let first = access.version();
+        // The same member joining again unchanged isn't a change.
+        access.admit(owner, "Paul", grey(), None, now()).unwrap();
+        assert_eq!(access.version(), first);
+        let secret = access.invite(Role::Editor, 60, now());
+        let sam = crate::identity::Identity::new("Sam", [0; 3]).public_key();
+        let joined = access
+            .admit(sam, "Sam", [0; 3], Some(secret), now())
+            .unwrap();
+        assert!(access.version() > first);
+        let with_sam = access.members_list();
+        assert!(access.set_role(joined.id, Role::Viewer));
+        assert!(
+            access.set_role(joined.id, Role::Viewer),
+            "no change, still found"
+        );
+        let demoted = access.members_list();
+        assert_eq!(demoted.version, with_sam.version + 1);
+
+        // A host starting from a list has the same members and numbers on.
+        let mut other = Access::from_list(&demoted);
+        assert_eq!(other.members(), access.members());
+        assert!(!other.take_list(&with_sam), "an older list is ignored");
+        access.remove(joined.id);
+        assert!(other.take_list(&access.members_list()));
+        assert_eq!(other.members().len(), 1);
+        // Older members files (no version) still read.
+        let json = serde_json::to_string(&Access::owned_by(owner, "Paul")).unwrap();
+        let json = json.replace(",\"version\":1", "");
+        assert!(!json.contains("version"), "{json}");
+        assert_eq!(serde_json::from_str::<Access>(&json).unwrap().version(), 0);
     }
 }

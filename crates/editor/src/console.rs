@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 10] = [
+pub const BUILT_INS: [(&str, &str); 13] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -45,6 +45,19 @@ pub const BUILT_INS: [(&str, &str); 10] = [
         "checkpoint [label] — upload a checkpoint to the project's repository now \
          (Collaborate; projects linked to one)",
     ),
+    (
+        "projects",
+        "projects — list the Collaborate projects this computer knows, and who hosted last",
+    ),
+    (
+        "rejoin",
+        "rejoin <project> — rejoin a Collaborate project's session without an invite",
+    ),
+    (
+        "host",
+        "host — host the open Collaborate project for its members, who rejoin without an \
+         invite",
+    ),
 ];
 
 /// The most commands the history keeps.
@@ -65,6 +78,10 @@ pub enum Command<'a> {
     Check,
     /// The label after `checkpoint`, if any.
     Checkpoint(&'a str),
+    Projects,
+    /// The project's name or ID after `rejoin`.
+    Rejoin(&'a str),
+    Host,
     /// Anything else.
     Lua(&'a str),
 }
@@ -94,6 +111,9 @@ pub fn parse(input: &str) -> Command<'_> {
         ("find", _) => Command::Find(rest),
         ("open", _) => Command::Open(rest),
         ("checkpoint", _) => Command::Checkpoint(rest),
+        ("projects", true) => Command::Projects,
+        ("rejoin", _) => Command::Rejoin(rest),
+        ("host", true) => Command::Host,
         _ => Command::Lua(line),
     }
 }
@@ -542,7 +562,8 @@ mod tests {
         assert_eq!(names("workspace.Bas"), ["Baseplate"]);
         assert!(names("workspace.Baseplate.Transp").contains(&"Transparency".to_string()));
         assert_eq!(names("print(wor"), ["workspace"]);
-        assert_eq!(names("pr"), ["print"]);
+        assert_eq!(names("pr"), ["print", "projects"]);
+        assert_eq!(names("pri"), ["print"]);
         assert_eq!(names("he"), ["help"]);
         assert_eq!(names("select Work"), ["Workspace"]);
         assert_eq!(complete("x = workspace.Bas", &world, &globals).start, 14);
