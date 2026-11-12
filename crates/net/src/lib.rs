@@ -22,6 +22,7 @@ mod game;
 mod handshake;
 mod motion;
 mod ownership;
+mod replay;
 mod replicate;
 mod session;
 pub mod streaming;
@@ -35,6 +36,10 @@ pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
 };
 pub use ownership::{CharacterCheck, Owned, OwnedSender, TELEPORT_DISTANCE};
+pub use replay::{
+    BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
+    ReplayFrame, Replays, WirePose, eyes_of,
+};
 pub use replicate::{
     Applied, LevelState, Op, Replicator, Update, WireAnimator, WireChange, WireInstance,
     WireParameter, apply, replicated_parts,
@@ -68,6 +73,8 @@ mod lag_tests;
 mod multiplayer_tests;
 #[cfg(test)]
 mod object_script_tests;
+#[cfg(test)]
+mod replay_tests;
 #[cfg(test)]
 mod replication_tests;
 #[cfg(test)]

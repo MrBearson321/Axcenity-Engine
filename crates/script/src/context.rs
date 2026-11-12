@@ -774,6 +774,11 @@ impl Context {
         crate::network::take_requests(&self.lua)
     }
 
+    /// The `ReplayService` calls made on this side since the last take.
+    pub fn take_replay_requests(&self) -> Vec<crate::replay::ReplayRequest> {
+        crate::replay::take_requests(&self.lua)
+    }
+
     /// Fires a no-argument event on one Instance.
     pub fn fire_instance_event(
         &self,

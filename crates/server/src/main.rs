@@ -189,6 +189,10 @@ fn main() -> Result<()> {
         version: project.manifest.version.clone(),
     };
     let mut network = Network::new(game_info.clone());
+    // `ReplayService:StopRecording` saves beside the server's saves (Phase 81).
+    network.set_replay_folder(
+        axcenity_save::game_folder(&project.manifest.name).map(|data| data.join("replays")),
+    );
     let mut bench_clients = if arguments.bench_clients > 0 {
         let first = network.host_in_memory(&mut world, &mut scripts, false);
         BenchClients::join(&mut network, first, &game_info, arguments.bench_clients)

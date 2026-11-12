@@ -38,6 +38,7 @@ Values that aren't Instances, such as Vector3, CFrame and Signal.
 | [SaveService](types/SaveService.md) | Save slots, player data, settings and checkpoints, from `game:GetService("SaveService")`. |
 | [LevelService](types/LevelService.md) | The game's levels, from `game:GetService("LevelService")`: `world.json` is the start level, and each other level is `levels/<name>.world.json`. |
 | [NetworkService](types/NetworkService.md) | Hosting and joining games, from `game:GetService("NetworkService")`, so a menu can do them. |
+| [ReplayService](types/ReplayService.md) | Recording the game to a `.replay` file, and keeping the last few seconds for a kill cam, from `game:GetService("ReplayService")`. |
 | [LocalizationService](types/LocalizationService.md) | The language UI text shows, from `game:GetService("LocalizationService")`. |
 | [GuiService](types/GuiService.md) | The player's game UI settings, from `game:GetService("GuiService")`, for a settings menu. |
 | [UserGameSettings](types/UserGameSettings.md) | This computer's graphics settings, from `game:GetService("UserGameSettings")`, for a settings menu. |

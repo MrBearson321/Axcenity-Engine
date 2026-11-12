@@ -214,6 +214,14 @@ impl ScriptRuntime {
         requests
     }
 
+    /// The `ReplayService` calls scripts made since the last call, the
+    /// Scripts' first (Phase 81). The host does them in its network send.
+    pub fn take_replay_requests(&mut self) -> Vec<crate::ReplayRequest> {
+        let mut requests = self.server.take_replay_requests();
+        requests.extend(self.client.take_replay_requests());
+        requests
+    }
+
     /// Streaming (Phase 80), on a device following a server: `gone` is
     /// off this device now (`StreamingState` reads StreamedOut), and each
     /// of `arrived` that had gone fires `StreamedIn`.

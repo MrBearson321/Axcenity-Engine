@@ -235,6 +235,7 @@
     * [SaveService](api/types/SaveService.md)
     * [LevelService](api/types/LevelService.md)
     * [NetworkService](api/types/NetworkService.md)
+    * [ReplayService](api/types/ReplayService.md)
     * [LocalizationService](api/types/LocalizationService.md)
     * [GuiService](api/types/GuiService.md)
     * [UserGameSettings](api/types/UserGameSettings.md)

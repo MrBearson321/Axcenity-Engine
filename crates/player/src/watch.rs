@@ -49,6 +49,9 @@ pub struct Arguments {
     /// `--quality <Low|Medium|High|Ultra>`: that preset with no overrides,
     /// for this run only (`graphics.json` is left as it is).
     pub quality: Option<Quality>,
+    /// `--replay <file>`: watch a `.replay` of the game instead of
+    /// playing it (Phase 81).
+    pub replay: Option<PathBuf>,
 }
 
 /// Hosting or joining from the start.
@@ -133,6 +136,11 @@ impl Arguments {
                     );
                 };
                 parsed.quality = Some(quality);
+            } else if argument == "--replay" {
+                let Some(file) = arguments.next() else {
+                    bail!("--replay takes the .replay file to watch\n\n{USAGE}");
+                };
+                parsed.replay = Some(PathBuf::from(file));
             } else if argument == "--password" {
                 let Some(password) = arguments.next() else {
                     bail!("--password takes the game's password\n\n{USAGE}");
@@ -145,6 +153,9 @@ impl Arguments {
             } else {
                 bail!("only one game can be played at a time\n\n{USAGE}");
             }
+        }
+        if parsed.replay.is_some() && parsed.network.is_some() {
+            bail!("a replay is watched on its own, without --host or --join\n\n{USAGE}");
         }
         Ok(parsed)
     }
@@ -218,6 +229,15 @@ mod tests {
 
     fn parse(arguments: &[&str]) -> Result<Arguments> {
         Arguments::parse(arguments.iter().map(OsString::from))
+    }
+
+    #[test]
+    fn replay_takes_a_file_and_isnt_played_online() {
+        let watched = parse(&["--replay", "final.replay", "examples/hello-part"]).unwrap();
+        assert_eq!(watched.replay, Some(PathBuf::from("final.replay")));
+        assert_eq!(watched.game, Some(PathBuf::from("examples/hello-part")));
+        assert!(parse(&["--replay"]).is_err());
+        assert!(parse(&["--replay", "a.replay", "--host", "examples/hello-part"]).is_err());
     }
 
     #[test]
