@@ -235,6 +235,8 @@ pub struct ExplorerOutput {
     /// What to open (see [`opens_with`]): its row was double-clicked, or Open was
     /// picked in its menu. Works during Play too.
     pub open: Option<InstanceId>,
+    /// What to show in the Object Viewer: View was picked in its menu.
+    pub view: Option<InstanceId>,
     /// The selection the arrow keys moved to, the last one primary; it
     /// replaces the selection.
     pub select: Option<Vec<InstanceId>>,
@@ -740,6 +742,7 @@ impl Explorer {
                     label.context_menu(|ui| match row_menu(ui, world, row.id) {
                         Some(RowCommand::Rename) => start_rename = Some(row.id),
                         Some(RowCommand::Open) => output.open = Some(row.id),
+                        Some(RowCommand::View) => output.view = Some(row.id),
                         Some(command) => output.action = command.action(row.id),
                         None => {}
                     });
@@ -1061,6 +1064,8 @@ enum RowCommand {
     InsertScript(ClassName),
     /// Open a script in a tab.
     Open,
+    /// Look at it in the Object Viewer.
+    View,
     /// Give a script inside an object a file of its own.
     MakeUnique,
     /// Animate a Part, Model or UI element (see [`Action::Animate`]).
@@ -1089,7 +1094,7 @@ impl RowCommand {
                 near: Some(id),
             }),
             RowCommand::InsertScript(class) => Some(Action::InsertScript(class)),
-            RowCommand::Open | RowCommand::Rename => None,
+            RowCommand::Open | RowCommand::View | RowCommand::Rename => None,
             RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
             RowCommand::SaveMaterial => Some(Action::SaveMaterial(id)),
@@ -1198,6 +1203,14 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .clicked()
     {
         chosen = Some(RowCommand::Open);
+    }
+    if scene_bounds(world, id).is_some()
+        && ui
+            .button(theme::menu_item(ui.ctx(), icons::CUBE, "View"))
+            .on_hover_text("Look at it alone, from every side, in the Object Viewer")
+            .clicked()
+    {
+        chosen = Some(RowCommand::View);
     }
     let in_object = world
         .get(id)

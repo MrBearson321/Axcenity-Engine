@@ -48,6 +48,9 @@ impl EditorApp {
         if let Some(id) = explorer.open {
             self.open_instance(ui.ctx(), id);
         }
+        if let Some(id) = explorer.view {
+            self.view_instance(id);
+        }
     }
 
     /// The Properties panel (with the Style section for UI elements), then
@@ -184,6 +187,7 @@ impl EditorApp {
             Some(BrowserAction::EditMaterial(path)) => self.open_material(&path),
             Some(BrowserAction::EditModel(path)) => self.open_in_model_studio(&path),
             Some(BrowserAction::FindReferences(path)) => self.find_asset_references(&path),
+            Some(BrowserAction::View(path)) => self.view_asset(&path),
             Some(BrowserAction::RenameAsset { from, to }) => self.rename_asset(&from, &to),
             Some(BrowserAction::FindUnused(paths)) => self.find_unused_assets(&paths),
             Some(BrowserAction::Notice { error, text }) => {

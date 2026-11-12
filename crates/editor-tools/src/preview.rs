@@ -84,6 +84,21 @@ impl Canvas {
         ui.painter_at(rect)
             .image(target.texture_id, rect, whole, egui::Color32::WHITE);
     }
+
+    /// Shows the picture drawn last in `rect` again, without drawing:
+    /// false if there's none of that size.
+    pub fn show_last(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {
+        let Some(target) = &self.target else {
+            return false;
+        };
+        if target.renderer.size() != Self::pixels(ui, rect) {
+            return false;
+        }
+        let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        ui.painter_at(rect)
+            .image(target.texture_id, rect, whole, egui::Color32::WHITE);
+        true
+    }
 }
 
 /// Lays a checkered floor of `TILES` × `TILES` tiles, `tile` studs across,

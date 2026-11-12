@@ -416,6 +416,10 @@ pub struct EditorApp {
     sequencer: crate::sequencer::Sequencer,
     /// The Model Studio tab (Phase 55).
     model_studio: crate::model_studio::ModelStudio,
+    /// The Object Viewer tab's object (cohesion pass CW5).
+    /// Boxed: two worlds of its own would make every `EditorApp` on the
+    /// stack much bigger.
+    object_viewer: Box<axcenity_editor_tools::object_viewer::ObjectViewer>,
     /// The block script whose tab is under the mouse, set as it's drawn:
     /// Ctrl+Z and Ctrl+Y are its then, and the world's keys aren't taken.
     block_tab_pointer: Option<String>,
@@ -546,6 +550,11 @@ impl DockViewer<'_> {
             Pane::Tests => self.app.tests_pane(ui),
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
+            Pane::ObjectViewer => {
+                self.app
+                    .object_viewer
+                    .ui(ui, self.render_state, &self.app.assets)
+            }
             Pane::Toolbox => self.app.toolbox_pane(ui),
             Pane::Inventory => self.app.inventory_pane(ui),
             Pane::VersionExplorer => self
@@ -982,6 +991,7 @@ impl EditorApp {
             materials: Default::default(),
             sequencer: Default::default(),
             model_studio: Default::default(),
+            object_viewer: Default::default(),
             block_tab_pointer: None,
             scene_drawn_pass: None,
             ui_designer: UiDesigner::default(),

@@ -95,6 +95,10 @@ pub enum Pane {
     /// Editing a model's meshes (`model_studio.rs`, Phase 55). Starts
     /// closed; opening a model in it opens it.
     ModelStudio,
+    /// One object or model alone, to look at from every side (cohesion
+    /// pass CW5, `object_viewer` in `editor-tools`). Starts closed; View on
+    /// an Explorer row or an Assets model or prefab opens it.
+    ObjectViewer,
     /// The Toolbox: assets from ambientCG, Poly Haven and Openverse, and
     /// the asset library (`toolbox_panel.rs`). Starts closed; the Assets
     /// panel's Toolbox button opens it beside Assets.
@@ -121,7 +125,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 25] = [
+    pub const CLOSABLE: [Pane; 26] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -143,6 +147,7 @@ impl Pane {
         Pane::Tests,
         Pane::Plugins,
         Pane::ModelStudio,
+        Pane::ObjectViewer,
         Pane::Toolbox,
         Pane::Inventory,
         Pane::VersionExplorer,
@@ -174,6 +179,7 @@ impl Pane {
             Pane::Tests => "Tests",
             Pane::Plugins => "Plugins",
             Pane::ModelStudio => "Model Studio",
+            Pane::ObjectViewer => "Object Viewer",
             Pane::Toolbox => "Toolbox",
             Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
@@ -208,6 +214,7 @@ impl Pane {
             Pane::Tests => icons::FLASK,
             Pane::Plugins => icons::PUZZLE_PIECE,
             Pane::ModelStudio => icons::POLYGON,
+            Pane::ObjectViewer => icons::CUBE,
             Pane::Toolbox => icons::TOOLBOX,
             Pane::Inventory => icons::TRAY_ARROW_DOWN,
             Pane::VersionExplorer => icons::GIT_BRANCH,
@@ -331,7 +338,8 @@ impl Layout {
             | Pane::DataTable
             | Pane::Material
             | Pane::Sequencer
-            | Pane::ModelStudio => Some(Pane::Scene),
+            | Pane::ModelStudio
+            | Pane::ObjectViewer => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain
             | Pane::Tags
@@ -756,6 +764,7 @@ mod tests {
                     | Pane::Tests
                     | Pane::Plugins
                     | Pane::ModelStudio
+                    | Pane::ObjectViewer
                     | Pane::Toolbox
                     | Pane::Inventory
                     | Pane::VersionExplorer

@@ -127,6 +127,7 @@ One PR per phase (bigger phases may split), each from `main`, each with RED/GREE
 
 - **CW5.1** `editor-tools/src/object_viewer.rs` on `preview::Canvas`: a world of its own built from an Instance subtree (copied) or an asset file (model, prefab, material), orbit/pan/zoom, frame, reset, lighting presets, floor and sky toggles; draws only on change.
 - **CW5.2** Opened from Explorer (context menu and the open action), Assets, Toolbox (downloaded items), Model Studio; one dock tab reused.
+- *Status (CP5 PR):* CW5.1 done for Instances, models, prefabs and materials (on a ball). CW5.2: Explorer's **View** item and Assets' **View** item open the one tab; the Explorer's double-click keeps framing in the Scene (CP3), since a part is edited there. Toolbox items reach it once installed, through their Assets tile; Model Studio already has its own orbit view, so it isn't hooked.
 
 ### CP6. Physics
 
