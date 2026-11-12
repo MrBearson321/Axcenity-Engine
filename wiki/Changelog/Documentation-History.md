@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | Scripting, scene bridge, technical debt | Usability brief Phase 6: `ScriptRuntime` methods split into `runtime/`, the draw list into `draw_list/`; oversized-files and crate-`CLAUDE.md` debt rows | Claude |
 | 2026-11-12 | MCP server | Toolbox tools: `toolbox_search`, `toolbox_get` | Claude |
 | 2026-11-12 | MCP server | `data_edit`: data tables for AI clients | Claude |
 | 2026-11-12 | MCP server | `view_capture`: pictures as MCP image content | Claude |

@@ -2,8 +2,8 @@
 title: Technical debt
 type: roadmap
 status: current
-verified: 2026-11-11
-verified_commit: 19c7179d
+verified: 2026-11-12
+verified_commit: e1eea07
 docs: [docs/research/engine-modernization-report.md, docs/research/usability/design-system.md]
 tags: [roadmap, debt]
 ---
@@ -21,7 +21,9 @@ Structural problems that make the engine harder to change. Each has a roadmap it
 | Retained draw list still has a from-scratch path | Two code paths | M4 next step: spatial chunks, then remove it | Open |
 | Hand-ordered render passes | Each new pass edits `ScenePipeline::draw` | L8 render graph | Deferred |
 | Editor design-system drift | Inconsistent UI; editor cost with big scenes | Design-system phases | Phases 1–5 done; Phase 6 optional |
-| Several graph canvases | Duplicate code | Phase 91 "One graph canvas" | Planned |
+| Several graph canvases | Duplicate code (`node_graph.rs`, block scripts' Graph view, the Animation state machine) | Phase 91 / design system V24 "One graph canvas" | Planned |
+| Oversized files with several jobs | Hard to find code; more merge conflicts | Usability brief Phase 6 (`docs/research/usability/refactoring.md`): verbatim splits into parent + folder | Done for Properties, Settings, Material tab, Assets panel, `ScriptRuntime`, the scene draw list and the player; `render/renderer/scene.rs` waits for L8 |
+| `editor`/`script` crate `CLAUDE.md` lines are file maps (~10k characters) | Every editor PR edits them; most merge conflicts start there | Move the file maps into `docs/` | Proposed |
 | Legacy paths, old templates | Dead weight | Phase 92 | Planned |
 | `crates.md` host rows drift from the manifests | Agents read wrong rules | Documentation fix | Fixed on the wiki branch (see [Documentation history](../Changelog/Documentation-History.md#open-documentation-gaps)) |
 | Flaky GPU tests under contention | Noise in local verification | Diagnose `every_example_renders` black frames | Open |

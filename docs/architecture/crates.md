@@ -67,15 +67,21 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 | `app/chrome.rs` | `panes` (dock panels), `menus` (title and menu bar), `toolbar` (ribbon and tools), `windows` (shortcuts, versions, pause and overlay widgets) |
 | `app/files.rs` | `export`, `import` (models and animations), `pickers`, `script_files`, `watch` (files changed on disk) |
 | `app/terrain.rs` | `strokes`, `layers`, `jobs` (generate and erode), `disk` |
+| `app/settings.rs` | `search` (the rows universal search finds, and outlining a found row), `graphics` (the Graphics page), `appearance` (Appearance, Typography, Accessibility and the theme preview) |
 | `editor/src/animation.rs` | `documents` (open, close, follow), `chrome` (show, breadcrumb, outline), `clip_ui`, `machine_ui`, `dialogs`; the clip and state-machine editors are `animation/clip_editor.rs`, `property_editor.rs` and `controller_editor.rs` (each with its own children) |
 | `editor-tools/src/posing.rs` | `tree` (the drawer's bone tree and folds) |
-| `editor/src/asset_browser.rs` | `packages` (model folders), `scan` (finding asset files and their kinds), `thumbnails` |
+| `editor/src/asset_browser.rs` | `packages` (model folders), `scan` (finding asset files and their kinds), `thumbnails`, `panel` (drawing the panel, its menus and dialogs), `origin` (grouping by source) |
+| `editor/src/properties.rs` | `groups` (which property goes in which section, Advanced), `files` (controls for properties that name a file), `values` (the control for each value type), `many` (several selected) |
+| `editor/src/material_editor.rs` | `graph` (the Graph view and Parameters), `values` (the Values view's rows and sections) |
 | `editor/src/block_editor.rs` | `painter` (drawing blocks), `palette`, `canvas` (canvas, dragging, Lua preview), `menus` |
 | `editor-node-graph/src/lib.rs` | `draw` (nodes, pins, values), `menu` (the node menu), `variables` |
 | `editor/src/terrain_studio.rs` | `tool_settings`, `layers`, `presets` |
 | `editor/src/start.rs` | `dialogs`, `cards`, `pages`, `global` |
 | `editor/src/viewport.rs` | `input` (camera, picking, dragging), `overlays` (selection, lights, brush, debug), `game_input` (Play's mouse and touch input), `view_mode` (Viewport > View Mode) |
 | `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` (per-pass GPU time, `FramePass`), plus one child per drawing feature (`fog`, `water`, `temporal`, `gpu_particles`, `debug_views` and the rest; `crates/render/CLAUDE.md` names each); its tests are `tests/` by feature |
+| `player/src/main.rs` | `host_io` (the player's `HostIo` for the frame schedule), `window` (the window's events), plus `input`, `graphics`, `splash`, `preload`, `watch`, `dev_console` |
+| `scene/src/draw_list.rs` | `lights` (Lighting's settings, lights, reflection probes, light markers), `materials` (Part and model materials, textures) |
+| `script/src/lib.rs` | `runtime/` holds more `impl ScriptRuntime` blocks: `chat`, `players` (joining, network requests, messages between devices), `console`, `frame` (the frame steps and the events hosts fire), `debugging` |
 | `project/src/lib.rs` | `templates`, `scripts`, `stylesheets`, `ui_graphs` (plus `world_file`, `migrate`, `packed`, `versions`, `validate`, `terrain_files`) |
 | `ui/src/lib.rs` | `css` (property parsing), `paint` (draw items), `style` |
 | `blocks-runtime/src/lib.rs` | `translate` (Lua output), `node_graph` (generic graphs), `ui_graph` (UI nodes and their Lua), `behavior_tree` (the nodes behavior trees offer) |
