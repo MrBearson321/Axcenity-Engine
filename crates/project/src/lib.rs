@@ -47,6 +47,7 @@ mod object_scripts;
 mod package;
 mod packed;
 mod prefabs;
+mod recovery;
 mod starter_character;
 mod terrain_files;
 mod validate;
@@ -70,6 +71,11 @@ pub use default_sky::{
     DEFAULT_SKY, DEFAULT_SKY_CLOCK_TIME, DEFAULT_SKY_LATITUDE, DEFAULT_SKY_PATH, add_default_sky,
 };
 pub use input_map::{INPUT_FILE, load_input_map, parse_input_map, save_input_map, write_input_map};
+pub use recovery::{
+    RECOVERY_FOLDER, RECOVERY_STALE_AFTER, Recovered, RecoveryInfo, RecoverySnapshot,
+    discard_recovery, left_behind_recovery, load_recovered, recovery_info, touch_recovery,
+    write_recovery,
+};
 pub use scripts::*;
 pub use strings::{STRINGS_FILE, parse_strings, save_strings, write_strings};
 pub use stylesheets::*;
@@ -530,6 +536,17 @@ pub(crate) fn load_project(
     level: Option<&str>,
     progress: &mut dyn FnMut(LoadStep),
 ) -> Result<Project, LoadError> {
+    load_project_with(folder, level, None, progress)
+}
+
+/// [`load_project`], with `recovered` (an AutoRecover snapshot's world,
+/// already holding `level`'s Workspace) in place of the saved world.
+pub(crate) fn load_project_with(
+    folder: &Path,
+    level: Option<&str>,
+    recovered: Option<World>,
+    progress: &mut dyn FnMut(LoadStep),
+) -> Result<Project, LoadError> {
     progress(LoadStep::Manifest);
     let manifest_path = folder.join(MANIFEST_FILE);
     let manifest_text = read(&manifest_path)?;
@@ -595,7 +612,8 @@ pub(crate) fn load_project(
         .map_or((None, None), |u| (Some(u.from), Some(u.backup.clone())));
 
     progress(LoadStep::World);
-    let (mut world, mut world_loaded) = match load_world(folder) {
+    let has_recovered = recovered.is_some();
+    let (mut world, mut world_loaded) = match recovered.map_or_else(|| load_world(folder), Ok) {
         Ok(world) => (world, true),
         // The upgrade left a world this engine can't read: put the files
         // back as they were rather than open an empty Workspace over them.
@@ -609,8 +627,8 @@ pub(crate) fn load_project(
         }
     };
     // A level other than the start level: its Workspace, before terrains,
-    // scripts and UI graphs look in it.
-    if let Some(name) = level {
+    // scripts and UI graphs look in it. A recovered world has it already.
+    if let Some(name) = level.filter(|_| !has_recovered) {
         let opened = std::fs::read_to_string(folder.join(levels::level_path(name)))
             .map_err(|source| LoadError::Read {
                 path: folder.join(levels::level_path(name)),

@@ -185,26 +185,21 @@ impl Board {
     }
 
     /// The items `filter` lets through, in board order: status, then
-    /// priority, then due date (soonest first, none last), then newest.
+    /// priority, then a bug's severity, then due date (soonest first, none
+    /// last), then newest.
     pub fn filtered<'a>(&'a self, filter: &Filter) -> Vec<&'a Item> {
         let mut items: Vec<&Item> = self.items.values().filter(|i| filter.lets(i)).collect();
-        items.sort_by(|a, b| {
-            let due = |i: &Item| i.due.map_or(i64::MAX, Date::days);
+        let key = |i: &&'a Item| {
             (
-                a.status,
-                a.priority,
-                due(a),
-                std::cmp::Reverse(a.created_at),
-                &a.id,
+                i.status,
+                i.priority,
+                i.severity(),
+                i.due.map_or(i64::MAX, Date::days),
+                std::cmp::Reverse(i.created_at),
+                &i.id,
             )
-                .cmp(&(
-                    b.status,
-                    b.priority,
-                    due(b),
-                    std::cmp::Reverse(b.created_at),
-                    &b.id,
-                ))
-        });
+        };
+        items.sort_by(|a, b| key(a).cmp(&key(b)));
         items
     }
 
@@ -245,6 +240,20 @@ impl Board {
         labels.sort_by_key(|l| l.to_lowercase());
         labels.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         labels
+    }
+
+    /// How many bugs aren't fixed (or closed) yet, and how many of those
+    /// are Blockers.
+    pub fn open_bugs(&self) -> (usize, usize) {
+        self.items
+            .values()
+            .filter(|i| i.kind == Kind::Bug && !i.status.is_finished())
+            .fold((0, 0), |(open, blockers), i| {
+                (
+                    open + 1,
+                    blockers + usize::from(i.severity() == crate::Severity::Blocker),
+                )
+            })
     }
 
     /// How many unfinished items are assigned to `person`, and how many of
@@ -310,11 +319,12 @@ impl Filter {
             return true;
         }
         let haystack = format!(
-            "{} {} {} {}",
+            "{} {} {} {} {}",
             item.title,
             item.description,
             item.labels.join(" "),
-            item.short_id()
+            item.short_id(),
+            item.bug.as_ref().map_or("", |bug| bug.actual.as_str())
         )
         .to_lowercase();
         words.iter().all(|w| haystack.contains(w.as_str()))

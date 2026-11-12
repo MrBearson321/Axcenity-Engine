@@ -24,6 +24,8 @@ pub(super) enum SettingsPage {
     Appearance,
     Typography,
     Layout,
+    /// AutoRecover (`app/autorecover.rs`).
+    Saving,
     /// What the Scene view draws while editing (the menu bar's Viewport).
     Viewport,
     Graphics,
@@ -43,10 +45,11 @@ pub(super) enum SettingsPage {
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 12] = [
+    const ALL: [SettingsPage; 13] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
+        SettingsPage::Saving,
         SettingsPage::Viewport,
         SettingsPage::Graphics,
         SettingsPage::Shortcuts,
@@ -63,6 +66,7 @@ impl SettingsPage {
             SettingsPage::Appearance => "Appearance",
             SettingsPage::Typography => "Text & density",
             SettingsPage::Layout => "Editor layout",
+            SettingsPage::Saving => "Saving",
             SettingsPage::Viewport => "Viewport",
             SettingsPage::Graphics => "Graphics",
             SettingsPage::Shortcuts => "Shortcuts",
@@ -80,6 +84,7 @@ impl SettingsPage {
             SettingsPage::Appearance => icons::PALETTE,
             SettingsPage::Typography => icons::TEXT_AA,
             SettingsPage::Layout => icons::LAYOUT,
+            SettingsPage::Saving => icons::FLOPPY_DISK,
             SettingsPage::Viewport => icons::CUBE_FOCUS,
             SettingsPage::Graphics => icons::MONITOR,
             SettingsPage::Shortcuts => icons::KEYBOARD,
@@ -179,6 +184,7 @@ impl EditorApp {
                                 SettingsPage::Appearance => appearance_page(ui, &mut appearance),
                                 SettingsPage::Typography => typography_page(ui, &mut appearance),
                                 SettingsPage::Layout => self.layout_page(ui),
+                                SettingsPage::Saving => self.saving_page(ui),
                                 SettingsPage::Viewport => self.viewport_page(ui),
                                 SettingsPage::Graphics => {
                                     let capabilities = self.capabilities.unwrap_or_default();
@@ -464,6 +470,50 @@ impl EditorApp {
              Not saved between runs.",
             );
         found(ui, &row, "Show culling");
+    }
+
+    fn saving_page(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            "Saving",
+            "How your unsaved work is kept safe. Yours, for every project.",
+        );
+        section(ui, "AutoRecover");
+        let row = ui
+            .horizontal(|ui| {
+                ui.label(theme::with_icon(
+                    icons::CLOCK_COUNTER_CLOCKWISE,
+                    "Keep a copy of unsaved work",
+                ));
+                egui::ComboBox::from_id_salt("autorecover minutes")
+                    .selected_text(autorecover::minutes_label(self.autorecover.minutes))
+                    .show_ui(ui, |ui| {
+                        for minutes in autorecover::MINUTE_CHOICES {
+                            ui.selectable_value(
+                                &mut self.autorecover.minutes,
+                                minutes,
+                                autorecover::minutes_label(minutes),
+                            );
+                        }
+                    });
+            })
+            .response
+            .on_hover_text(
+                "While a project has unsaved changes, a copy of them is written to its \
+                 .axcenity/autorecover folder this often. If the editor crashes or the \
+                 computer loses power, opening the project offers to recover them. Saving \
+                 removes the copy.",
+            );
+        found(ui, &row, "Keep a copy of unsaved work");
+        ui.add_space(space::S);
+        ui.label(
+            egui::RichText::new(
+                "Kept: the world, script tabs and block scripts. Not yet kept: UI graphs, \
+                 behavior trees, dialogues, data tables, materials and terrain sculpting, so \
+                 save those yourself. A Collaborate session keeps its own copy.",
+            )
+            .color(theme::palette(ui.ctx()).text_weak),
+        );
     }
 
     /// The open project's settings: what they are and where each is

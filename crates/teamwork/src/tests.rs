@@ -238,3 +238,74 @@ fn text_is_tidied_and_kept_short() {
     task.unassign("Nobody", "Paul", 5);
     assert_eq!(task.events.len(), 1, "nothing happened");
 }
+
+#[test]
+fn a_bug_reports_what_happened_and_sorts_by_severity() {
+    let root = temp("bugs");
+    let (mut board, _) = Board::load(&root, Copies::Merge);
+    let message = "scripts/door.server.lua:12: attempt to index nil with 'Open'\nstack traceback:\n  scripts/door.server.lua:12";
+    let mut crash = Item::bug_from_error(message, "0.2.0-alpha.1 on Linux", "Sam", 10);
+    assert_eq!(crash.kind, Kind::Bug);
+    assert_eq!(
+        crash.title,
+        "scripts/door.server.lua:12: attempt to index nil with 'Open'"
+    );
+    assert_eq!(crash.bug.as_ref().unwrap().actual, message);
+    assert_eq!(
+        crash.bug.as_ref().unwrap().found_in,
+        "0.2.0-alpha.1 on Linux"
+    );
+    crash.set_severity(Severity::Blocker, "Sam", 11);
+    crash.set_severity(Severity::Blocker, "Sam", 12);
+    assert_eq!(crash.events.len(), 2, "one change, one event");
+    assert_eq!(
+        crash.events[1].describe(Kind::Bug),
+        "Sam set the severity to Blocker"
+    );
+    crash.set_status(Status::InReview, "Sam", 13);
+    assert_eq!(
+        crash.events[2].describe(Kind::Bug),
+        "Sam moved it to Fix in review"
+    );
+    crash.set_status(Status::Todo, "Sam", 14);
+
+    let long = "x".repeat(200);
+    let typo = Item::bug_from_error(&long, "", "Paul", 20);
+    assert_eq!(typo.title.chars().count(), 90);
+    assert!(typo.title.ends_with('…'));
+    assert_eq!(typo.severity(), Severity::Minor);
+    let task = Item::new(Kind::Task, "Not a bug", "Paul", 30);
+    assert!(task.bug.is_none());
+
+    for item in [&crash, &typo, &task] {
+        board.save(&root, (*item).clone()).unwrap();
+    }
+    let text = std::fs::read_to_string(root.join(item_path(&crash.id))).unwrap();
+    assert!(text.contains("\"severity\": \"blocker\""), "{text}");
+    let task_text = std::fs::read_to_string(root.join(item_path(&task.id))).unwrap();
+    assert!(!task_text.contains("\"bug\""), "{task_text}");
+    let (board, _) = Board::load(&root, Copies::Merge);
+    assert_eq!(board.get(&crash.id), Some(&crash));
+    assert_eq!(board.open_bugs(), (2, 1));
+
+    let bugs = Filter {
+        kinds: vec![Kind::Bug],
+        ..Filter::default()
+    };
+    let order: Vec<&str> = board
+        .filtered(&bugs)
+        .iter()
+        .map(|i| i.id.as_str())
+        .collect();
+    assert_eq!(order, [crash.id.as_str(), typo.id.as_str()]);
+    let found = Filter {
+        text: "index nil".into(),
+        ..Filter::default()
+    };
+    assert_eq!(
+        board.filtered(&found).len(),
+        1,
+        "the error text is searched"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
