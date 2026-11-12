@@ -502,11 +502,43 @@ impl<'a> Converter<'a> {
         let [handler] = args.as_slice() else {
             return None;
         };
+        // object:GetPropertyChangedSignal("Name") and
+        // object:GetAttributeChangedSignal("Name")
         if let ExprKind::Method(object, method, args) = &signal.kind
-            && method == "GetPropertyChangedSignal"
-            && matches!(args.as_slice(), [Expr { kind: ExprKind::Str(name), .. }] if name == "Occupant")
+            && matches!(
+                method.as_str(),
+                "GetPropertyChangedSignal" | "GetAttributeChangedSignal"
+            )
+            && let [
+                Expr {
+                    kind: ExprKind::Str(name),
+                    ..
+                },
+            ] = args.as_slice()
         {
-            return self.seat_occupied(object, handler);
+            let property = method == "GetPropertyChangedSignal";
+            if property
+                && name == "Occupant"
+                && let Some(block) = self.seat_occupied(object, handler)
+            {
+                return Some(block);
+            }
+            let target = self.target(object)?;
+            let function = self.handler(handler, 0)?;
+            let body = self.body(&function.body, Scope::default());
+            return Some(Block::new(if property {
+                BlockKind::WhenPropertyChanged {
+                    target,
+                    property: name.clone(),
+                    body,
+                }
+            } else {
+                BlockKind::WhenAttributeChanged {
+                    target,
+                    attribute: name.clone(),
+                    body,
+                }
+            }));
         }
         let ExprKind::Field(object, event) = &signal.kind else {
             return None;
@@ -1318,6 +1350,34 @@ impl<'a> Converter<'a> {
                 Some(BlockKind::WaitForChild {
                     target: self.container(object)?,
                     name: name.clone(),
+                })
+            }
+            // object:SetAttribute("Name", value)
+            ExprKind::Method(object, method, args)
+                if method == "SetAttribute"
+                    && let [
+                        Expr {
+                            kind: ExprKind::Str(name),
+                            ..
+                        },
+                        value,
+                    ] = args.as_slice() =>
+            {
+                Some(BlockKind::SetAttribute {
+                    target: self.target(object)?,
+                    attribute: name.clone(),
+                    value: self.expression(value, scope),
+                })
+            }
+            // object.Event:Wait()
+            ExprKind::Method(signal, method, args)
+                if method == "Wait"
+                    && args.is_empty()
+                    && let ExprKind::Field(object, event) = &signal.kind =>
+            {
+                Some(BlockKind::WaitForEvent {
+                    target: self.target(object)?,
+                    event: event.clone(),
                 })
             }
             // An Animator's parameters and states, named by a string.
@@ -2479,6 +2539,15 @@ impl<'a> Converter<'a> {
                 {
                     return Some(Expression::KeyDown {
                         key: self.key(key)?,
+                    });
+                }
+                if method == "GetAttribute"
+                    && let [arg] = args.as_slice()
+                    && let ExprKind::Str(attribute) = &arg.kind
+                {
+                    return Some(Expression::Attribute {
+                        target: self.target(object)?,
+                        attribute: attribute.clone(),
                     });
                 }
                 if let [arg] = args.as_slice()

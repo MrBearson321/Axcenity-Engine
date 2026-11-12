@@ -48,6 +48,7 @@ impl ViewMode {
                 DebugView::AmbientOcclusion => "Ambient Occlusion",
                 DebugView::Overdraw => "Overdraw",
                 DebugView::LodLevels => "LOD Levels",
+                DebugView::RayHits => "Ray Hits",
             },
             ViewMode::CullingBounds => "Culling Bounds",
         }
@@ -76,6 +77,11 @@ impl ViewMode {
                 DebugView::LodLevels => {
                     "Each model's level of detail: green is its own mesh, then yellow, orange \
                      and red for simpler copies. Grey has none."
+                }
+                DebugView::RayHits => {
+                    "What the camera's rays hit with hardware ray tracing: each item its own \
+                     color, dimmer farther away, within the ray tracing distance only. Needs a \
+                     GPU that can ray trace."
                 }
             },
             ViewMode::CullingBounds => {
@@ -131,7 +137,10 @@ mod tests {
             pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
                 .ok()
                 .and_then(|adapter| {
-                    pollster::block_on(adapter.request_device(&Default::default())).ok()
+                    // With ray queries where the GPU has them, for Ray Hits.
+                    let mut descriptor = axcenity_render::wgpu::DeviceDescriptor::default();
+                    axcenity_render::adapters::with_ray_queries(&adapter, &mut descriptor);
+                    pollster::block_on(adapter.request_device(&descriptor)).ok()
                 })
         else {
             eprintln!("skipped: no graphics adapter on this machine");

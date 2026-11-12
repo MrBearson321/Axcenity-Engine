@@ -51,6 +51,9 @@ pub enum Edit {
     /// Asks whether to use the sky image at this project path (dragged onto
     /// the row from the Assets panel).
     AskSkyImage(String),
+    /// Puts the engine's default sky into the project (if it isn't there)
+    /// and asks whether to use it, with the sun moved to match.
+    UseDefaultSky,
     /// Animates the selected Part, Model or UI element: an Animator, a new
     /// clip and an Animation playing it, opened in the Animation tab.
     Animate,

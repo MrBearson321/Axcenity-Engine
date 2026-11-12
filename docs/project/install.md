@@ -6,6 +6,8 @@ Each editor package includes the player for that OS beside the editor, and playe
 
 This is an alpha: expect bugs and breaking changes. Builds are not code-signed.
 
+What a computer needs (supported systems, processor, memory, graphics, network and storage): [System requirements](../../documentation/reference/system-requirements.md).
+
 ## Windows (`.exe`)
 
 1. Download `AxcenityEditor-*-windows-x86_64.exe`.
@@ -62,7 +64,7 @@ cd AxcenityEditor-*-linux-x86_64
 ./axcenity-editor
 ```
 
-Install a Vulkan driver for your GPU (`mesa-vulkan-drivers` on Debian/Fedora; `vulkan-icd-loader` plus a vendor package on Arch). Nothing is copied into system folders.
+Install a Vulkan driver for your GPU (`mesa-vulkan-drivers` on Debian/Fedora; `vulkan-icd-loader` plus a vendor package on Arch). On an X11 desktop you also need `libxkbcommon-x11` (`libxkbcommon-x11-0` on Debian and Ubuntu), which desktop installs normally have; without it the editor and player stop at start with "Library libxkbcommon-x11.so could not be loaded". Nothing is copied into system folders.
 
 ## AppImage
 

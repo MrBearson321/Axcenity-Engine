@@ -508,3 +508,82 @@ fn the_ribbon_keeps_one_height_across_tabs() {
         "{heights:?}"
     );
 }
+
+/// The labels of every item the macOS menu bar's menus hold, submenus too.
+fn native_labels(app: &mut EditorApp) -> BTreeSet<String> {
+    use super::native_menu::MenuNode;
+    fn walk(nodes: &[MenuNode], into: &mut BTreeSet<String>) {
+        for node in nodes {
+            match node {
+                MenuNode::Item(item) => {
+                    into.insert(item.label.clone());
+                }
+                MenuNode::Submenu { label, items } => {
+                    into.insert(label.clone());
+                    walk(items, into);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut labels = BTreeSet::new();
+    for menu in app.native_menus() {
+        walk(&menu.items, &mut labels);
+    }
+    labels
+}
+
+#[test]
+fn every_header_menu_item_is_in_the_macos_menu_bar() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    let ctx = warm(theme::test_context());
+    let mut clock = 0.0;
+    // What's drawn with no menu open: the logo, Settings and the chips.
+    let before: BTreeSet<String> =
+        clickables(&chrome_frame(&mut app, &ctx, &mut clock, Vec::new()))
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect();
+    let mut drawn = BTreeSet::new();
+    let menus: &[(&str, &[&str])] = &[
+        ("File", &["Build Game"]),
+        ("Edit", &["Undo History"]),
+        ("View", &["Layout"]),
+        ("Viewport", &["View Mode"]),
+        ("Debug", &[]),
+        ("Help", &[]),
+    ];
+    for (menu, submenus) in menus {
+        let mut note = |output: &egui::FullOutput| {
+            for (label, _) in clickables(output) {
+                drawn.insert(label);
+            }
+        };
+        note(&open(&mut app, &ctx, &mut clock, menu));
+        for submenu in *submenus {
+            note(&hover(&mut app, &ctx, &mut clock, submenu));
+        }
+        close(&mut app, &ctx, &mut clock);
+    }
+    let native = native_labels(&mut app);
+    // A header item's label ends with its shortcut ("Save Ctrl+S").
+    let in_native = |label: &str| {
+        native
+            .iter()
+            .any(|n| label == n || label.starts_with(&format!("{n} ")))
+    };
+    // Quit is the app menu's Quit Axcenity Editor, as on every Mac.
+    let renamed = ["Quit"];
+    let missing: Vec<&String> = drawn
+        .iter()
+        .filter(|label| {
+            !before.contains(*label)
+                && !menus.iter().any(|(menu, _)| menu == label)
+                && !renamed.contains(&label.as_str())
+                && !in_native(label)
+        })
+        .collect();
+    assert!(missing.is_empty(), "not in the macOS menu bar: {missing:?}");
+    assert!(drawn.contains("Version History…"), "{drawn:?}");
+    assert!(drawn.len() > 60, "{} drawn", drawn.len());
+}

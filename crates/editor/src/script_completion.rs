@@ -552,7 +552,7 @@ impl<'a> Resolver<'a> {
         if let Ty::Instance { class, id } = ty {
             let world = self.world;
             match (name, argument) {
-                ("GetService", Some(service)) => {
+                ("GetService" | "FindService", Some(service)) => {
                     let id = world.find_first_child(world.root(), &service);
                     let class = id
                         .and_then(|id| world.get(id))

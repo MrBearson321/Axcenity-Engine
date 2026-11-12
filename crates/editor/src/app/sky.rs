@@ -1,7 +1,10 @@
 //! Choosing the world's sky image (Lighting's `SkyImage`): picked from the
 //! computer in Properties, dragged onto the viewport or the Properties row,
 //! double-clicked in the Assets panel, or dropped on the window as a file.
-//! Every way asks "Use this sky?" first; yes is one undo step.
+//! Every way asks "Use this sky?" first; yes is one undo step. The engine's
+//! default sky (`axcenity_project::DEFAULT_SKY`) is one button away too:
+//! its file is written into the project first, and using it also moves the
+//! sun to where the picture's sun is.
 
 use super::*;
 
@@ -11,6 +14,25 @@ impl EditorApp {
     pub(super) fn ask_sky(&mut self, path: String) {
         if self.project.is_some() {
             self.confirm_sky = Some(path);
+        }
+    }
+
+    /// Writes the default sky into the project's `assets/sky` (kept if it's
+    /// there already) and asks whether to use it.
+    pub(super) fn ask_default_sky(&mut self) {
+        let Some(project) = self.project.as_ref() else {
+            return;
+        };
+        match axcenity_project::add_default_sky(&project.folder) {
+            Ok(path) => {
+                self.asset_browser.refresh();
+                self.ask_sky(path.to_owned());
+            }
+            Err(err) => {
+                let err = files::chain(&err);
+                self.output
+                    .error(format!("Could not add the default sky: {err}"));
+            }
         }
     }
 
@@ -55,6 +77,12 @@ impl EditorApp {
         let mut message = "It replaces the sky colors: it's drawn behind the world, and parts \
                            reflect it and are lit by it. Undo puts the old sky back."
             .to_owned();
+        if path == axcenity_project::DEFAULT_SKY_PATH {
+            message.push_str(
+                " The sun moves to where the picture's sun is (Lighting's ClockTime and \
+                 GeographicLatitude), so shadows fall the way the sky shows.",
+            );
+        }
         if self.graphics.reflection_quality() == axcenity_render::ReflectionQuality::Low {
             message.push_str(
                 " Your Reflection quality is Low, so the editor keeps showing the sky colors: \
@@ -92,10 +120,23 @@ impl EditorApp {
             return;
         }
         let lighting = shown(&self.world, &self.play).lighting();
-        self.apply(
-            lighting,
-            Edit::Property("SkyImage", Value::String(path.clone())),
-        );
+        let sky = Edit::Property("SkyImage", Value::String(path.clone()));
+        if path == axcenity_project::DEFAULT_SKY_PATH {
+            // The sky and the sun that matches it, as one step.
+            let sun = |name, value| Edit::Property(name, Value::Number(value));
+            self.change(
+                lighting,
+                Field::Property("SkyImage"),
+                "Use the default sky".to_owned(),
+                vec![
+                    sky,
+                    sun("ClockTime", axcenity_project::DEFAULT_SKY_CLOCK_TIME),
+                    sun("GeographicLatitude", axcenity_project::DEFAULT_SKY_LATITUDE),
+                ],
+            );
+        } else {
+            self.apply(lighting, sky);
+        }
         self.history.seal();
         let name = crate::asset_browser::display_name(&path);
         self.toasts.success(format!("Sky set to {name}"));
@@ -138,6 +179,53 @@ mod tests {
         assert_eq!(sky_image(&app), "assets/sky/noon.hdr");
         app.undo();
         assert_eq!(sky_image(&app), "", "undo puts the old sky back");
+    }
+
+    /// The sun button writes the default sky into the project, asks, and
+    /// yes sets it and the sun to match as one undo step.
+    #[test]
+    fn the_default_sky_is_added_to_the_project_and_moves_the_sun() {
+        let parent = std::env::temp_dir().join(format!(
+            "axcenity-default-sky-editor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        // A genre template has no default sky of its own.
+        let folder = axcenity_project::create_project_from(
+            &parent,
+            "Sky",
+            axcenity_project::Template::TopDown,
+        )
+        .unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        let lighting = app.world.lighting();
+        let clock = |app: &EditorApp| {
+            app.world
+                .get(lighting)
+                .and_then(|lighting| lighting.property("ClockTime"))
+                .cloned()
+        };
+        let before = clock(&app);
+        app.apply(lighting, Edit::UseDefaultSky);
+        let path = axcenity_project::DEFAULT_SKY_PATH;
+        assert_eq!(
+            std::fs::read(folder.join(path)).unwrap(),
+            axcenity_project::DEFAULT_SKY
+        );
+        assert_eq!(app.confirm_sky.as_deref(), Some(path));
+
+        app.answer_sky(true);
+        assert_eq!(sky_image(&app), path);
+        assert_eq!(
+            clock(&app),
+            Some(Value::Number(axcenity_project::DEFAULT_SKY_CLOCK_TIME))
+        );
+        app.undo();
+        assert_eq!(sky_image(&app), "", "one undo puts the old sky back");
+        assert_eq!(clock(&app), before, "and the old sun");
+        drop(app);
+        let _ = std::fs::remove_dir_all(parent);
     }
 
     #[test]

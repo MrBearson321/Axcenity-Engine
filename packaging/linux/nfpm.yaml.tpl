@@ -74,6 +74,8 @@ overrides:
       - mesa-vulkan-drivers
       - libwayland-client0
       - libx11-6
+      # winit loads it at start on X11; without it the window can't open.
+      - libxkbcommon-x11-0
   rpm:
     depends:
       - alsa-lib
@@ -82,10 +84,12 @@ overrides:
     recommends:
       - mesa-vulkan-drivers
       - libX11
+      - libxkbcommon-x11
       - libwayland-client
   archlinux:
     depends:
       - alsa-lib
       - dbus
       - libxkbcommon
+      - libxkbcommon-x11
       - vulkan-icd-loader

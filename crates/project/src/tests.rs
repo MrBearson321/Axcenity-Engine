@@ -296,6 +296,56 @@ fn every_template_makes_a_project_that_loads_cleanly() {
     fs::remove_dir_all(parent).unwrap();
 }
 
+/// Baseplate and Empty start under the default sky: its file is in the
+/// project (the bytes the engine carries), Lighting points at it and the
+/// sun stands where the picture's does. The genre templates keep their own
+/// skies and get no copy.
+#[test]
+fn blank_projects_start_under_the_default_sky() {
+    let parent = temp_folder("default-sky");
+    for template in Template::ALL {
+        let folder = create_project_from(&parent, template.name(), template).unwrap();
+        let project = load(&folder).unwrap();
+        let lighting = project.world.get(project.world.lighting()).unwrap();
+        let sky = lighting.property("SkyImage").and_then(Value::as_str);
+        let number = |name| match lighting.property(name) {
+            Some(Value::Number(value)) => *value,
+            _ => f64::NAN,
+        };
+        if template.has_default_sky() {
+            assert_eq!(sky, Some(DEFAULT_SKY_PATH), "{template:?}");
+            assert_eq!(
+                fs::read(folder.join(DEFAULT_SKY_PATH)).unwrap(),
+                DEFAULT_SKY
+            );
+            assert_eq!(number("ClockTime"), DEFAULT_SKY_CLOCK_TIME, "{template:?}");
+            assert_eq!(number("GeographicLatitude"), DEFAULT_SKY_LATITUDE);
+        } else {
+            assert_eq!(sky, Some(""), "{template:?}");
+            assert!(!folder.join(DEFAULT_SKY_PATH).exists(), "{template:?}");
+        }
+    }
+    fs::remove_dir_all(parent).unwrap();
+}
+
+/// The built-in sky is a whole 2:1 Radiance picture, and adding it to a
+/// project keeps a file already there.
+#[test]
+fn the_default_sky_is_a_2_to_1_hdr_and_adding_it_keeps_an_existing_file() {
+    assert!(DEFAULT_SKY.starts_with(b"#?RADIANCE"));
+    let header = String::from_utf8_lossy(&DEFAULT_SKY[..200]);
+    assert!(header.contains("-Y 1024 +X 2048"), "{header}");
+
+    let folder = temp_folder("default-sky-kept");
+    let file = folder.join(DEFAULT_SKY_PATH);
+    assert_eq!(add_default_sky(&folder).unwrap(), DEFAULT_SKY_PATH);
+    assert_eq!(fs::read(&file).unwrap(), DEFAULT_SKY);
+    fs::write(&file, b"mine").unwrap();
+    assert_eq!(add_default_sky(&folder).unwrap(), DEFAULT_SKY_PATH);
+    assert_eq!(fs::read(&file).unwrap(), b"mine");
+    fs::remove_dir_all(folder).unwrap();
+}
+
 /// A genre template's own file wins over the shared one of the same path:
 /// the Arena's Save keeps players' stats, not a world slot.
 #[test]

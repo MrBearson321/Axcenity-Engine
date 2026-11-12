@@ -582,7 +582,7 @@ type Row = (&'static str, fn(&GraphicsSettings) -> String);
 /// The settings that differ between `now` and `recommended`, as they'd be
 /// drawn (each the override or its preset's value).
 pub fn changes(now: &GraphicsSettings, recommended: &GraphicsSettings) -> Vec<Change> {
-    let rows: [Row; 20] = [
+    let rows: [Row; 21] = [
         ("Preset", |s| {
             let preset = Tier::of(s.quality).label();
             if s.automatic {
@@ -618,6 +618,9 @@ pub fn changes(now: &GraphicsSettings, recommended: &GraphicsSettings) -> Vec<Ch
         ("Film grain", |s| on_off(s.film_grain())),
         ("Chromatic aberration", |s| on_off(s.chromatic_aberration())),
         ("Sharpen", |s| on_off(s.sharpen())),
+        ("Ray tracing distance", |s| {
+            format!("{} studs", s.ray_tracing_distance())
+        }),
     ];
     rows.into_iter()
         .filter_map(|(setting, value)| {

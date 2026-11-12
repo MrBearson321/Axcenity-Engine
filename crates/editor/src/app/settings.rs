@@ -13,8 +13,8 @@ use crate::theme::{
 use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, ReflectionQuality,
-    ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
+    GraphicsSettings, MotionBlurQuality, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE,
+    ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// The pages of the Settings window.

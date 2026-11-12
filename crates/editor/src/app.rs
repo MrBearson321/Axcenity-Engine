@@ -57,6 +57,7 @@ mod material_tab;
 pub(crate) mod mcp;
 mod mixer;
 mod model_studio;
+mod native_menu;
 mod nav_overlay;
 mod open;
 mod plugins;
@@ -390,6 +391,8 @@ pub struct EditorApp {
     viewport_rect: Option<egui::Rect>,
     /// True while Help > About is open.
     about_open: bool,
+    /// The system menu bar on macOS (`native_menu.rs`).
+    native_menu: native_menu::NativeMenu,
     /// True while Help > Learn is open over the project.
     learn_open: bool,
     /// A Sound being listened to from the Properties panel, outside Play.
@@ -988,6 +991,7 @@ impl EditorApp {
             thumbnail_wanted: None,
             viewport_rect: None,
             about_open: false,
+            native_menu: Default::default(),
             learn_open: false,
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
@@ -1173,6 +1177,8 @@ impl eframe::App for EditorApp {
     /// Takes the keys that move the game UI's focus during Play before
     /// egui sees them, so Tab and the arrows don't move egui's own focus.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // First, so keys chosen from the macOS menu bar reach Play's too.
+        self.take_native_menu_input(raw_input);
         self.take_nav_keys(ctx, raw_input);
     }
 
@@ -1181,7 +1187,10 @@ impl eframe::App for EditorApp {
     /// the whole window.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.run_native_menu_clicks(&ctx);
         self.frame(ui, frame.wgpu_render_state());
+        // After the frame, so the menu bar shows what it changed.
+        self.sync_native_menu(&ctx);
         self.pace_frame();
         // Relaunching into a rebuilt editor saves the settings first.
         self.launch(&ctx, frame);

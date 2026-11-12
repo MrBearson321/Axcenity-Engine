@@ -126,6 +126,7 @@ mod tests {
             chromatic_aberration: Some(false),
             sharpen: None,
             motion_blur: Some(MotionBlurQuality::High),
+            ray_tracing_distance: Some(1000.0),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

@@ -40,6 +40,10 @@ pub enum TranslateError {
     InvalidKey(String),
     #[error("property name `{0}` must contain only letters, digits or underscores")]
     InvalidProperty(String),
+    #[error(
+        "attribute name `{0}` must be 1 to 100 letters, digits or underscores, not starting with RBX"
+    )]
+    InvalidAttribute(String),
     #[error("only event blocks can be at the top level, and events cannot be nested")]
     InvalidEventPlacement,
     #[error("`{0}` isn't one of Luau's operators")]
@@ -466,6 +470,35 @@ impl Writer {
                     body,
                 )
             }
+            BlockKind::WhenPropertyChanged {
+                target: t,
+                property,
+                body,
+            } => {
+                if !valid_identifier(property) {
+                    return Err(TranslateError::InvalidProperty(property.clone()));
+                }
+                (
+                    format!(
+                        "{}:GetPropertyChangedSignal({}):Connect(function()",
+                        target(t)?,
+                        quote(property)
+                    ),
+                    body,
+                )
+            }
+            BlockKind::WhenAttributeChanged {
+                target: t,
+                attribute,
+                body,
+            } => (
+                format!(
+                    "{}:GetAttributeChangedSignal({}):Connect(function()",
+                    target(t)?,
+                    attribute_name(attribute)?
+                ),
+                body,
+            ),
             BlockKind::WhenSeatOccupied { seat, body } => {
                 let seat = target(seat)?;
                 self.line(format!(
@@ -568,6 +601,12 @@ impl Writer {
             BlockKind::Wait { seconds } => {
                 let seconds = self.expression(seconds)?;
                 self.line(format!("task.wait({seconds})"));
+            }
+            BlockKind::WaitForEvent { target: t, event } => {
+                if !valid_identifier(event) {
+                    return Err(TranslateError::InvalidProperty(event.clone()));
+                }
+                self.line(format!("{}.{event}:Wait()", target(t)?));
             }
             BlockKind::WaitUntil { condition } => {
                 let condition = self.expression(condition)?;
@@ -966,6 +1005,18 @@ impl Writer {
                 let value = self.expression(value)?;
                 self.line(format!("{}.{property} = {value}", target(t)?));
             }
+            BlockKind::SetAttribute {
+                target: t,
+                attribute,
+                value,
+            } => {
+                let value = self.expression(value)?;
+                self.line(format!(
+                    "{}:SetAttribute({}, {value})",
+                    target(t)?,
+                    attribute_name(attribute)?
+                ));
+            }
             BlockKind::PlaySound { target: t } => self.line(format!("{}:Play()", target(t)?)),
             BlockKind::PlayCutscene { sequence } => {
                 self.line(format!("{}:Play()", target(sequence)?))
@@ -1176,6 +1227,8 @@ impl Writer {
             | BlockKind::WhenAgentSenses { .. }
             | BlockKind::WhenSplineReached { .. }
             | BlockKind::WhenSeatOccupied { .. }
+            | BlockKind::WhenPropertyChanged { .. }
+            | BlockKind::WhenAttributeChanged { .. }
             | BlockKind::WhenPromptTriggered { .. }
             | BlockKind::WhenPartClicked { .. }
             | BlockKind::WhenCommandRun { .. }
@@ -1216,6 +1269,7 @@ impl Writer {
             | Expression::TouchingPart
             | Expression::PartUnderMouse
             | Expression::Property { .. }
+            | Expression::Attribute { .. }
             | Expression::Raycast { .. }
             | Expression::RaycastIgnoring { .. }
             | Expression::Vector3 { .. }
@@ -1314,6 +1368,14 @@ impl Writer {
                 }
                 format!("{}.{property}", target(t)?)
             }
+            Expression::Attribute {
+                target: t,
+                attribute,
+            } => format!(
+                "{}:GetAttribute({})",
+                target(t)?,
+                attribute_name(attribute)?
+            ),
             Expression::Raycast { origin, direction } => {
                 format!(
                     "workspace:Raycast({}, {})",
@@ -1491,6 +1553,20 @@ pub(super) fn quote(text: &str) -> String {
 
 /// Whether `name` can be a Lua variable: letters, digits and underscores,
 /// not starting with a digit, and not a Lua keyword.
+/// `name` quoted, if it's an attribute name the engine takes (the rule of
+/// `core::is_attribute_name`).
+fn attribute_name(name: &str) -> Result<String, TranslateError> {
+    let valid = !name.is_empty()
+        && name.len() <= 100
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !name.starts_with("RBX");
+    if valid {
+        Ok(quote(name))
+    } else {
+        Err(TranslateError::InvalidAttribute(name.to_owned()))
+    }
+}
+
 pub fn valid_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars

@@ -85,6 +85,7 @@ impl Context {
             .map(|shared| shared.wait().clone())
             .expect("installed just above");
         tree::install(&lua, &wait).expect("creating WaitForChild only fails when out of memory");
+        crate::events::install(&lua).expect("creating Signal:Wait only fails when out of memory");
         sandbox::lock_string_metatable(&lua)
             .expect("changing the string metatable only fails when out of memory");
         let mut methods = remote::methods(&lua)
@@ -165,6 +166,11 @@ impl Context {
             axcenity_core::ClassName::DataModel,
             "GetService",
             instance::get_service(&lua).expect("only fails when out of memory"),
+        ));
+        methods.push((
+            axcenity_core::ClassName::DataModel,
+            "FindService",
+            instance::find_service(&lua).expect("only fails when out of memory"),
         ));
         lua.set_app_data(ClassMethods::new(methods));
         Self { lua }
