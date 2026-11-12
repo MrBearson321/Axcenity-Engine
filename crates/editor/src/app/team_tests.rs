@@ -451,6 +451,21 @@ fn what_one_editor_selects_shows_in_the_others_session() {
         });
     }
     assert_eq!(b.explorer.others.get(&part).map(Vec::len), Some(1));
+
+    // Dragging a field shows as a bar over the other's Properties (C6).
+    a.team_panel.editing_field = Some("Transparency".to_owned());
+    std::thread::sleep(std::time::Duration::from_millis(110));
+    settle(&mut a, &mut b);
+    assert_eq!(
+        b.team_selections()[0].editing.as_deref(),
+        Some("Transparency")
+    );
+    let mut drawn = String::new();
+    for _ in 0..2 {
+        let output = theme::run(&ctx, Default::default(), |ui| b.properties_pane(ui));
+        drawn = format!("{:?}", output.shapes);
+    }
+    assert!(drawn.contains("Member 1 is changing Transparency"));
 }
 
 /// Draws the Collaborate panel 260 points wide (the narrowest column), and

@@ -918,6 +918,7 @@ impl EditorApp {
                         .copied()
                         .filter(|&id| self.world.get(id).is_some())
                         .collect(),
+                    editing: presence.editing.clone(),
                 })
             })
             .collect();
@@ -1418,7 +1419,7 @@ impl EditorApp {
                 position: camera.position.to_array(),
                 look: look.to_array(),
             }),
-            editing: None,
+            editing: self.team_panel.editing_field.clone(),
         }
     }
 

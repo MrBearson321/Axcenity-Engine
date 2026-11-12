@@ -77,6 +77,13 @@ impl EditorApp {
                             .color(palette.text_weak),
                     );
                 });
+                // A bar in their colour for a field someone is dragging
+                // (C6): what you set there now may be overwritten.
+                for member in &others {
+                    if let Some(field) = &member.editing {
+                        changing_bar(ui, &member.name, member.color, field);
+                    }
+                }
                 ui.add_space(theme::space::XS);
             }
         }
@@ -105,6 +112,10 @@ impl EditorApp {
             return;
         }
         let mut style_edit = None;
+        // What this editor is dragging, for the others (C6).
+        if !ui.input(|input| input.pointer.any_down()) {
+            self.team_panel.editing_field = None;
+        }
         let edit = properties::show(ui, world, &self.assets, selected, !editing, &kept, |ui| {
             // Stylesheets are edited, not the game, so not during Play.
             if editing {
@@ -114,6 +125,11 @@ impl EditorApp {
         // Other panels may already be drawn this frame, so draw again to
         // show the change everywhere.
         if let (Some(id), Some(edit)) = (selected, edit) {
+            if let properties::Edit::Property(field, _) = &edit
+                && ui.input(|input| input.pointer.any_down())
+            {
+                self.team_panel.editing_field = Some((*field).to_owned());
+            }
             self.apply(id, edit);
             ui.ctx().request_repaint();
         }
@@ -1254,4 +1270,20 @@ impl EditorApp {
             }
         }
     }
+}
+
+/// "▍ Paul is changing Transparency", the bar in their colour.
+fn changing_bar(ui: &mut egui::Ui, name: &str, color: egui::Color32, field: &str) {
+    let palette = theme::palette(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (bar, _) = ui.allocate_exact_size(egui::vec2(3.0, 16.0), egui::Sense::hover());
+        ui.painter().rect_filled(bar, 1.5, color);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!("{name} is changing {field}")).color(palette.text_weak),
+            )
+            .truncate(),
+        );
+    });
 }

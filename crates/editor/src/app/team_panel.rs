@@ -34,6 +34,9 @@ pub(crate) struct TeamPanel {
     /// A Version History checkpoint was kept before edits made offline
     /// were sent again, for the Recovered Changes window (C5).
     pub(crate) offline_checkpoint: bool,
+    /// The Properties field this editor is dragging, for others to see
+    /// (C6).
+    pub(crate) editing_field: Option<String>,
     /// The setup wizard and Start Session dialog (C4).
     pub(crate) setup: super::collab_setup::Setup,
     /// This computer's identity, for Settings > Collaborate (read when the
