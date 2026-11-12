@@ -32,7 +32,7 @@ pub(super) enum Overlay {
 }
 
 impl Overlay {
-    const ALL: [Overlay; 8] = [
+    pub(super) const ALL: [Overlay; 8] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -43,7 +43,7 @@ impl Overlay {
         Overlay::Culling,
     ];
 
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Overlay::Colliders => "Colliders",
             Overlay::Raycasts => "Raycasts",
@@ -56,7 +56,7 @@ impl Overlay {
         }
     }
 
-    fn flag(self, overlays: &mut viewport::OverlayToggles) -> &mut bool {
+    pub(super) fn flag(self, overlays: &mut viewport::OverlayToggles) -> &mut bool {
         match self {
             Overlay::Colliders => &mut overlays.colliders,
             Overlay::Raycasts => &mut overlays.raycasts,
