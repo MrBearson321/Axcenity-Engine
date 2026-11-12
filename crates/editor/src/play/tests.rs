@@ -4,6 +4,7 @@ use std::time::Instant;
 use axcenity_core::{ClassName, Value};
 
 use super::*;
+use axcenity_script::BreakpointRules;
 
 fn script(world: &mut World, source: &str) -> ScriptFile {
     let instance = world.create(ClassName::Script).unwrap();
@@ -43,6 +44,7 @@ fn the_projects_loading_screen_covers_play_until_a_local_script_is_ready() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -99,6 +101,7 @@ fn scripts_change_only_the_copy() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -127,6 +130,7 @@ fn script_errors_go_to_output_and_the_game_keeps_running() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -162,6 +166,7 @@ fn a_panic_in_a_frame_is_caught_with_its_message() {
         &World::new(),
         &[],
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -210,6 +215,7 @@ end",
         &world,
         &scripts,
         &breakpoints,
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -275,6 +281,15 @@ end",
 /// A session of `source` as `scripts/test.server.lua`, with breakpoints at
 /// `lines`, after its first frame.
 fn debugged(source: &str, lines: &[usize], pause_on_error: bool) -> (Session, Output) {
+    debugged_with(source, lines, &BreakpointRules::new(), pause_on_error)
+}
+
+fn debugged_with(
+    source: &str,
+    lines: &[usize],
+    rules: &BreakpointRules,
+    pause_on_error: bool,
+) -> (Session, Output) {
     let mut world = World::new();
     let scripts = [script(&mut world, source)];
     let breakpoints = Breakpoints::from([(
@@ -286,6 +301,7 @@ fn debugged(source: &str, lines: &[usize], pause_on_error: bool) -> (Session, Ou
         &world,
         &scripts,
         &breakpoints,
+        rules,
         pause_on_error,
         &mut output,
         Assets::default(),
@@ -308,6 +324,25 @@ fn debugged(source: &str, lines: &[usize], pause_on_error: bool) -> (Session, Ou
         )
         .unwrap();
     (session, output)
+}
+
+#[test]
+fn a_conditional_breakpoint_applies_from_a_scripts_first_run() {
+    let rules = BreakpointRules::from([(
+        ("scripts/test.server.lua".to_owned(), 2),
+        axcenity_script::BreakpointRule {
+            condition: Some("i == 4".to_owned()),
+            ..Default::default()
+        },
+    )]);
+    let (session, _) = debugged_with("for i = 1, 6 do\n  print(i)\nend", &[2], &rules, false);
+    let pause = session.pause().expect("paused where i is 4");
+    let i = pause.frames[0]
+        .locals
+        .iter()
+        .find(|local| local.name == "i")
+        .unwrap();
+    assert_eq!(i.value, "4");
 }
 
 #[test]
@@ -365,6 +400,7 @@ fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -477,6 +513,7 @@ fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -538,6 +575,7 @@ fn render_stepped_sees_this_frames_animated_pose() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::new(&folder),
@@ -605,6 +643,7 @@ fn particles_and_streaming_move_on_in_the_frame_without_a_scene_tab() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         Assets::default(),
@@ -640,6 +679,7 @@ fn play(world: &World, scripts: &[ScriptFile], clients: usize, output: &mut Outp
         world,
         scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         output,
         Assets::default(),
         CameraState::default(),
@@ -663,6 +703,7 @@ fn run(world: &World, scripts: &[ScriptFile], clients: usize, output: &mut Outpu
         world,
         scripts,
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         output,
         Assets::default(),
         CameraState::default(),
@@ -953,6 +994,7 @@ fn bench_project_play() {
         &world,
         &[],
         &Breakpoints::new(),
+        &BreakpointRules::new(),
         false,
         &mut output,
         assets,

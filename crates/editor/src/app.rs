@@ -311,6 +311,9 @@ pub struct EditorApp {
     ui_warnings: Vec<String>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
+    /// Pause was pressed and Play hasn't paused since, so the pause it
+    /// makes says so in Output.
+    pause_pressed: bool,
     /// Turns keyboard events into key presses for LocalScripts during Play.
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
@@ -958,6 +961,7 @@ impl EditorApp {
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
+            pause_pressed: false,
             profiler: Profiler::default(),
             last_drawn: None,
             mixer: crate::mixer::Mixer::default(),

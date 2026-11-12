@@ -114,20 +114,58 @@ pub(in crate::app) fn paused_panel(
     resume
 }
 
-/// Names and values, one per row.
+/// Names and values, one per row. A table's row has a chevron that opens
+/// its entries below it, indented.
 fn variables(
     ui: &mut egui::Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
+    id: impl std::hash::Hash + std::fmt::Debug + Copy,
     list: &[axcenity_script::Local],
 ) {
     crate::responsive::form(ui, id, |ui| {
-        for local in list {
-            ui.monospace(&local.name);
-            ui.add(egui::Label::new(egui::RichText::new(&local.value).monospace()).truncate())
-                .on_hover_text(&local.value);
-            ui.end_row();
-        }
+        variable_rows(ui, egui::Id::new(id), list, 0);
     });
+}
+
+fn variable_rows(ui: &mut egui::Ui, id: egui::Id, list: &[axcenity_script::Local], depth: usize) {
+    for (index, local) in list.iter().enumerate() {
+        let row_id = id.with((index, &local.name));
+        let open = !local.fields.is_empty()
+            && ui.data(|data| data.get_temp::<bool>(row_id).unwrap_or(false));
+        ui.horizontal(|ui| {
+            ui.add_space(14.0 * depth as f32);
+            if local.fields.is_empty() {
+                ui.monospace(&local.name);
+                return;
+            }
+            let icon = if open {
+                icons::CARET_DOWN
+            } else {
+                icons::CARET_RIGHT
+            };
+            let clicked = ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(format!("{icon} {}", local.name)).monospace(),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text(if open {
+                    "Hide its entries"
+                } else {
+                    "Show its entries"
+                })
+                .clicked();
+            if clicked {
+                ui.data_mut(|data| data.insert_temp(row_id, !open));
+            }
+        });
+        ui.add(egui::Label::new(egui::RichText::new(&local.value).monospace()).truncate())
+            .on_hover_text(&local.value);
+        ui.end_row();
+        if open {
+            variable_rows(ui, row_id, &local.fields, depth + 1);
+        }
+    }
 }
 
 /// The watches: each expression with its value in the innermost frame, a
@@ -361,6 +399,8 @@ impl EditorApp {
             }
         } else if play && self.paused() {
             self.continue_play();
+        } else if play && self.playing() {
+            self.pause_play();
         } else if play {
             self.play();
         } else if self.paused() {
@@ -504,6 +544,7 @@ mod tests {
         let local = |name: &str, value: &str| Local {
             name: name.to_owned(),
             value: value.to_owned(),
+            fields: Vec::new(),
         };
         Pause {
             path: "scripts/door.server.lua".to_owned(),

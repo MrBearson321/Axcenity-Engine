@@ -1211,7 +1211,9 @@ impl EditorApp {
             Command::Play => {
                 if self.paused() {
                     self.continue_play();
-                } else if !playing && self.project.is_some() {
+                } else if playing {
+                    self.pause_play();
+                } else if self.project.is_some() {
                     self.play();
                 }
             }

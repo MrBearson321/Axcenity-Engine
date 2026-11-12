@@ -125,6 +125,8 @@ impl EditorApp {
         if clicks.play {
             if self.paused() {
                 self.continue_play();
+            } else if self.playing() {
+                self.pause_play();
             } else {
                 self.play();
             }
@@ -189,23 +191,49 @@ impl EditorApp {
         match group {
             RibbonGroup::Game => ribbon::group_tinted(ui, "Game", Some(group.hue()), |ui| {
                 let palette = theme::palette(ui.ctx());
-                // Paused at a breakpoint, Play is Continue, as in Studio.
-                let (label, hover) = if paused {
-                    ("Continue", "Continue the game from the breakpoint")
+                // Paused at a breakpoint, Play is Continue, as in Studio;
+                // while the game runs, it's Pause (roadmap G6).
+                let pausing = self.pausing();
+                let (icon, label, hover) = if paused {
+                    (
+                        filled_icons::PLAY,
+                        "Continue",
+                        "Continue the game from the breakpoint",
+                    )
+                } else if pausing {
+                    (
+                        filled_icons::PAUSE,
+                        "Pausing…",
+                        "Play pauses at the next line a script runs",
+                    )
+                } else if playing {
+                    (
+                        filled_icons::PAUSE,
+                        "Pause",
+                        "Pause at the next line a script runs, to see its variables and step",
+                    )
                 } else {
-                    ("Play", "Save, then run the game here")
+                    (filled_icons::PLAY, "Play", "Save, then run the game here")
                 };
-                let play_button = RibbonButton::new(filled_icons::PLAY, label)
+                let color = if playing && !paused {
+                    palette.warning
+                } else {
+                    palette.success
+                };
+                let play_button = RibbonButton::new(icon, label)
                     .family(theme::filled())
-                    .color(palette.success);
+                    .color(color);
                 clicks.play = ui
-                    .add_enabled((!playing || paused) && can_play, play_button)
+                    .add_enabled(
+                        (playing && !pausing || paused || !playing) && can_play,
+                        play_button,
+                    )
                     .on_hover_text(format!(
                         "{hover} ({})",
                         crate::shortcuts::Action::Play.menu_text(ui.ctx())
                     ))
-                    .on_disabled_hover_text(if playing {
-                        "The game is playing."
+                    .on_disabled_hover_text(if pausing {
+                        "Waiting for a script to run a line."
                     } else {
                         "Open a project first."
                     })
