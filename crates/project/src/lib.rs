@@ -84,7 +84,7 @@ pub use asset_fix::{
     moved_suggestion, plan_fix, read_ignored, suggestion, write_ignored,
 };
 pub use asset_refs::{
-    RefPlace, Reference, find_references, is_model_part, plan_rename, unused_assets,
+    RefPlace, Reference, find_references, is_model_part, plan_rename, plan_switch, unused_assets,
 };
 pub use backup::{
     BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,

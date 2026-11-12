@@ -65,6 +65,33 @@ impl EditorApp {
                 return;
             }
         };
+        let label = if name(from) == name(to) {
+            format!("Move `{}` to `{to}`", name(from))
+        } else {
+            format!("Rename `{}` to `{}`", name(from), name(to))
+        };
+        let count = self.apply_move_plan(plan, label.clone());
+        self.output.info(format!(
+            "{label}: {count} {} changed to match.",
+            if count == 1 {
+                "reference"
+            } else {
+                "references"
+            }
+        ));
+        if self
+            .references
+            .as_ref()
+            .is_some_and(|open| open.asset == from)
+        {
+            self.find_asset_references(to);
+        }
+    }
+
+    /// Applies `plan`, which moves one file and points what uses it at the
+    /// new place, as the undo step `label`. Returns how many references
+    /// changed with it.
+    pub(super) fn apply_move_plan(&mut self, plan: project::FixPlan, label: String) -> usize {
         let mut properties = Vec::new();
         for change in &plan.properties {
             let Some(before) = self
@@ -103,29 +130,10 @@ impl EditorApp {
             self.assets.forget(&blob.path);
         }
         self.assets.forget_failures();
-        let label = if name(from) == name(to) {
-            format!("Move `{}` to `{to}`", name(from))
-        } else {
-            format!("Rename `{}` to `{}`", name(from), name(to))
-        };
         let count = blobs.len().saturating_sub(2) + properties.len();
-        self.output.info(format!(
-            "{label}: {count} {} changed to match.",
-            if count == 1 {
-                "reference"
-            } else {
-                "references"
-            }
-        ));
         self.history
             .record_blobs_and_properties(&mut self.world, label, blobs, properties);
-        if self
-            .references
-            .as_ref()
-            .is_some_and(|open| open.asset == from)
-        {
-            self.find_asset_references(to);
-        }
+        count
     }
 
     /// Goes to one reference: selects its Instance, opens its script at

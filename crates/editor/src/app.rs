@@ -55,6 +55,7 @@ pub(crate) mod mcp;
 mod mixer;
 mod model_studio;
 mod nav_overlay;
+mod open;
 mod plugins;
 mod prefabs;
 mod probes;
@@ -1869,6 +1870,8 @@ mod multi_edit_tests;
 mod navigation_tests;
 #[cfg(test)]
 mod object_script_tests;
+#[cfg(test)]
+mod open_tests;
 #[cfg(test)]
 mod palette_tests;
 #[cfg(test)]

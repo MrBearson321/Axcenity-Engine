@@ -315,8 +315,15 @@ impl EditorApp {
                 continue;
             }
             project.object_files.remove(&blob.path);
+            project
+                .block_scripts
+                .retain(|document| document.path != blob.path);
+            // Moved as it was, or switched between Code and Blocks.
+            let switched = project::switched_script_path(&blob.path);
             let went = blobs.iter().find(|other| {
-                other.path != blob.path && other.before.is_none() && other.after == blob.before
+                other.path != blob.path
+                    && other.before.is_none()
+                    && (other.after == blob.before || switched.as_ref() == Some(&other.path))
             });
             if let Some(went) = went {
                 moves.push((blob.path.clone(), went.path.clone()));
@@ -324,6 +331,10 @@ impl EditorApp {
         }
         for (from, to) in moves {
             self.tabs.rename(&from, &to);
+            // A block file's tab draws its blocks document.
+            if project::is_block_script(&to) && self.tabs.get(&to).is_some() {
+                self.open_object_blocks(&to);
+            }
         }
     }
 }

@@ -88,6 +88,7 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
+| 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP3: Explorer double-click opens the right editor; scripts inside objects switch Code ↔ Blocks |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP2: one look for menus and ribbon, a welcome page when nothing is open |
 | 2026-11-12 | Roadmap | Saving: Don't Save leaves files as they were saved |
 | 2026-11-12 | ADR-0024, roadmap | Cohesion pass audit and plan (CP1–CP9) |

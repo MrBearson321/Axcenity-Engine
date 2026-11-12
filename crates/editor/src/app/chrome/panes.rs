@@ -46,7 +46,7 @@ impl EditorApp {
             ui.ctx().request_repaint();
         }
         if let Some(id) = explorer.open {
-            self.open_script_instance(id);
+            self.open_instance(ui.ctx(), id);
         }
     }
 

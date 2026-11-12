@@ -227,7 +227,51 @@ pub fn plan_rename(
     if extension(from) == "gltf" && parent(from) != parent(to) {
         return Err("a .gltf names the files beside it: rename it in its folder".to_owned());
     }
+    plan_move(folder, world, open, from, to, None)
+}
 
+/// What switching the code of scripts inside objects at `from` between
+/// Code and Blocks changes: the file is replaced by `content` at its
+/// [`switched_script_path`](crate::switched_script_path) (`.server.lua` ↔
+/// `.server.blocks.json`), and every reference, its copies' `SourceFile`s
+/// and prefabs included, is pointed at it. Writes nothing.
+pub fn plan_switch(
+    folder: &Path,
+    world: &World,
+    open: Option<&str>,
+    from: &str,
+    content: Vec<u8>,
+) -> Result<FixPlan, String> {
+    let objects = format!("{}/", crate::OBJECTS_FOLDER);
+    let to = crate::switched_script_path(from)
+        .filter(|_| from.starts_with(&objects))
+        .ok_or_else(|| {
+            format!(
+                "only Scripts and LocalScripts in the {} folder switch here",
+                crate::OBJECTS_FOLDER
+            )
+        })?;
+    let from_disk = safe_path(from).ok_or_else(|| format!("`{from}` isn't a project path"))?;
+    if !folder.join(&from_disk).is_file() {
+        return Err(format!("`{from}` isn't there"));
+    }
+    if safe_path(&to).is_some_and(|to_disk| folder.join(to_disk).exists()) {
+        return Err(format!("`{to}` is taken"));
+    }
+    plan_move(folder, world, open, from, &to, Some(content))
+}
+
+/// The plan for moving the checked file `from` to `to`, with `content` in
+/// place of its bytes if given.
+fn plan_move(
+    folder: &Path,
+    world: &World,
+    open: Option<&str>,
+    from: &str,
+    to: &str,
+    content: Option<Vec<u8>>,
+) -> Result<FixPlan, String> {
+    let from_disk = safe_path(from).ok_or_else(|| format!("`{from}` isn't a project path"))?;
     // References by ID need no change: the sidecar moves with the file.
     let references = path_references(folder, world, open, from);
     let mut findings = Vec::new();
@@ -285,6 +329,9 @@ pub fn plan_rename(
             true
         }
     });
+    if let Some(content) = content {
+        bytes = content;
+    }
     plan.files.extend(files);
     plan.files.push(FileWrite {
         path: from.to_owned(),
