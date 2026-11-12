@@ -1,0 +1,5 @@
+# `repo`
+
+- Collaborate 2.0's Git side (P1–P5 of `docs/research/collaborate-persistent.md`, ADR-0022): the installed `git` behind `git::Runner` (`git.rs`), secrets that never print (`secret.rs`), GitHub's device sign-in and REST calls behind `github::Http` (`github.rs`), tokens in Git's own credential store (`credentials.rs`), linking a project folder to a remote (`repository.rs`).
+- No engine, egui or `collab` dependency: the editor joins this crate and `collab`. Never write a token to a file, a URL, a command line or a log: pass it through `Git::with_token` (an environment variable read by a one-off credential helper) and scrub output with `secret::redact`.
+- Tests run the real `git` on temp folders with a bare `file://` remote, and GitHub over a fake `Http`.

@@ -34,6 +34,7 @@ axcenity-plugins = { path = "crates/plugins" }
 axcenity-procedural = { path = "crates/procedural" }
 axcenity-project = { path = "crates/project" }
 axcenity-release = { path = "crates/release" }
+axcenity-repo = { path = "crates/repo" }
 axcenity-updater = { path = "crates/updater", default-features = false }
 axcenity-render = { path = "crates/render" }
 axcenity-render-types = { path = "crates/render-types" }
