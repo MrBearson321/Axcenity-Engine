@@ -27,6 +27,7 @@ mod asset_refs;
 mod assets;
 mod behavior_trees;
 mod block_undo;
+mod branding;
 mod chrome;
 mod collision_groups;
 mod command_palette;
@@ -227,6 +228,8 @@ pub struct EditorApp {
     /// A session to start once the project opens (`--team-host`,
     /// `--team-join`).
     team_start: Option<team::TeamStart>,
+    /// Settings > This project > Branding's previews.
+    branding_previews: branding::Previews,
     /// The Collaborate panel's own state (`app/team_panel.rs`).
     team_panel: team_panel::TeamPanel,
     /// The open project's Git remote: automatic checkpoints and uploads
@@ -834,6 +837,8 @@ struct OpenProject {
     developer_console: bool,
     /// How built games' loading screen goes (File > Build Game).
     loading_screen: axcenity_project::LoadingScreen,
+    /// The game's icon and banner (Settings > This project > Branding).
+    branding: axcenity_project::branding::Branding,
     /// The actions and their bindings (`input.json`, the Input window).
     input_map: axcenity_core::input::InputMap,
     folder: PathBuf,
@@ -905,6 +910,7 @@ impl EditorApp {
             history: History::new(),
             team: None,
             team_start: None,
+            branding_previews: Default::default(),
             team_panel: Default::default(),
             repo: Default::default(),
             tool: Tool::default(),

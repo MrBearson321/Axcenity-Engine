@@ -115,7 +115,7 @@ Audit and plan: `docs/research/cohesion-pass.md` (findings CF1–CF22, phases CP
 | CP5 Object Viewer | **Done** (#232): one tab for Explorer objects, models, prefabs and materials |
 | CP6 physics module split and properties | In review (#233): `physics::api`, drag and rolling friction, ApplyForce/ApplyTorque, momentum |
 | CP7 Team Projects, trust, firewall | Planned |
-| CP8 game branding | Planned |
+| CP8 game branding | In review: the manifest's icon and banner with checks, Settings > This project > Branding, the player's game icon, Build Game's `.ico`/`.icns`/PNG, `branding://` paths |
 | CP9 final validation | Planned |
 
 ## Tooling for AI clients and releases

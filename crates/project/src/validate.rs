@@ -247,9 +247,15 @@ pub fn check_assets(folder: &Path, world: &World) -> Report {
 /// [`check_assets`] with the level `open` in `world` (`None` for the start
 /// level). Every other level is read from its file and checked too.
 pub fn check_assets_in_level(folder: &Path, world: &World, open: Option<&str>) -> Report {
+    let loader = Assets::new(folder);
+    // `branding://icon` and `branding://banner` name the manifest's pictures.
+    if let Some(manifest) = crate::read_manifest(folder) {
+        let branding = &manifest.branding;
+        loader.set_branding(branding.icon.as_deref(), branding.banner.as_deref());
+    }
     let mut scan = Scan {
         folder: folder.to_path_buf(),
-        loader: Assets::new(folder),
+        loader,
         findings: Vec::new(),
         models: HashMap::new(),
         sourced: HashSet::new(),
@@ -637,6 +643,28 @@ impl Scan {
         if path.is_empty() {
             return;
         }
+        // A branding picture is checked as the file the manifest names.
+        let branded;
+        let path = if path.starts_with(axcenity_assets::BRANDING_SCHEME) {
+            branded = self.loader.resolve(path).to_string();
+            if branded == path {
+                self.push(
+                    FindingKind::MissingFile,
+                    owner.to_owned(),
+                    path.to_owned(),
+                    format!(
+                        "`{property}` names `{path}`, but the project has no such picture \
+                         (Settings > This project > Branding)"
+                    ),
+                    site,
+                    Some(kind),
+                );
+                return;
+            }
+            branded.as_str()
+        } else {
+            path
+        };
         // A reference by asset ID is checked as the path of the file with
         // that ID.
         let named;
@@ -1212,6 +1240,59 @@ mod tests {
         }
         add(folder, folder, &mut files);
         files
+    }
+
+    #[test]
+    fn branding_paths_are_checked_as_the_pictures_they_name() {
+        let folder = scratch("branding");
+        let mut world = World::new();
+        let screen = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(screen, Some(world.root())).unwrap();
+        for (name, image) in [("Banner", "branding://banner"), ("Icon", "branding://icon")] {
+            let label = world.create(ClassName::ImageLabel).unwrap();
+            world.set_name(label, name).unwrap();
+            world.set_parent(label, Some(screen)).unwrap();
+            world
+                .set_property(label, "Image", Value::String(image.into()))
+                .unwrap();
+        }
+        // No branding: both are missing, naming the setting.
+        let report = check_assets(&folder, &world);
+        assert_eq!(report.findings.len(), 2, "{:?}", report.findings);
+        assert!(report.findings[0].message.contains("Branding"));
+
+        // Set, the icon's file is there and the banner's isn't.
+        fs::create_dir_all(folder.join("assets/branding")).unwrap();
+        fs::copy(
+            examples_folder().join("hello-shader/assets/textures/chevrons.png"),
+            folder.join("assets/branding/icon.png"),
+        )
+        .unwrap();
+        crate::branding::set_branding(
+            &folder,
+            &crate::branding::Branding {
+                icon: Some("assets/branding/icon.png".into()),
+                banner: Some("assets/branding/banner.png".into()),
+            },
+        )
+        .unwrap();
+        let report = check_assets(&folder, &world);
+        let paths: Vec<&str> = report.findings.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["assets/branding/banner.png"],
+            "{:?}",
+            report.findings
+        );
+        // The icon isn't unused: the manifest uses it.
+        let unused = crate::unused_assets(
+            &folder,
+            &World::new(),
+            None,
+            &["assets/branding/icon.png".to_owned()],
+        );
+        assert!(unused.is_empty(), "{unused:?}");
+        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]
