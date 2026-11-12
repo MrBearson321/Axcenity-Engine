@@ -21,7 +21,7 @@ use crate::ids::BLOCK_SIZE;
 use crate::live::LiveDoc;
 use crate::message::{Have, MemberId, ToClient, ToHost};
 use crate::op::{self, Op, Transaction};
-use crate::presence::{Collaborator, Presence};
+use crate::presence::{self, ChatLine, Collaborator, Presence, TextCursor};
 use crate::role::{Capability, Role};
 
 /// Something the editor should tell the user about, or act on.
@@ -166,6 +166,12 @@ pub struct Client {
     live: BTreeMap<String, ClientDoc>,
     /// Live documents others changed since [`Client::take_doc_changes`].
     live_changed: BTreeSet<String>,
+    /// The session's chat, oldest first (C8).
+    chat: VecDeque<ChatLine>,
+    /// Others' chat lines that arrived since [`Client::take_new_chat`].
+    new_chat: usize,
+    /// When this member's last chat lines went, for the rate limit.
+    chatted: VecDeque<std::time::Instant>,
 }
 
 impl Client {
@@ -201,6 +207,9 @@ impl Client {
             host_left: false,
             live: BTreeMap::new(),
             live_changed: BTreeSet::new(),
+            chat: VecDeque::new(),
+            new_chat: 0,
+            chatted: VecDeque::new(),
         }
     }
 
@@ -286,6 +295,64 @@ impl Client {
             });
         }
         true
+    }
+
+    /// This member's cursor in the live document at `path`, as presence
+    /// carries it: the selection's ends as character indexes (C8).
+    pub fn doc_cursor(&self, path: &str, anchor: usize, head: usize) -> Option<TextCursor> {
+        let open = self.live.get(path).filter(|open| open.ready)?;
+        Some(TextCursor {
+            path: path.to_owned(),
+            anchor: open.doc.sticky(anchor)?,
+            head: open.doc.sticky(head)?,
+        })
+    }
+
+    /// Where another member's `cursor` is in this copy of its document, as
+    /// character indexes (anchor, head).
+    pub fn resolve_cursor(&self, cursor: &TextCursor) -> Option<(usize, usize)> {
+        let open = self.live.get(&cursor.path).filter(|open| open.ready)?;
+        Some((
+            open.doc.resolve(&cursor.anchor)?,
+            open.doc.resolve(&cursor.head)?,
+        ))
+    }
+
+    /// Sends a line to the session's chat. It shows (for everyone, this
+    /// member too) once the host passes it on. Refused when offline, blank,
+    /// or more than [`presence::CHAT_PER_SECOND`] lines a second.
+    pub fn send_chat(&mut self, text: &str) -> Result<(), String> {
+        if !self.is_online() {
+            return Err("Not connected to the session".to_owned());
+        }
+        let Some(text) = presence::tidy_chat(text) else {
+            return Err("Nothing to send".to_owned());
+        };
+        let now = std::time::Instant::now();
+        while self
+            .chatted
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= std::time::Duration::from_secs(1))
+        {
+            self.chatted.pop_front();
+        }
+        if self.chatted.len() >= presence::CHAT_PER_SECOND {
+            return Err("Slow down a little".to_owned());
+        }
+        self.chatted.push_back(now);
+        self.outbox.push(ToHost::Chat(text));
+        Ok(())
+    }
+
+    /// The session's chat, oldest first.
+    pub fn chat(&self) -> &VecDeque<ChatLine> {
+        &self.chat
+    }
+
+    /// How many of others' chat lines arrived since last asked, for an
+    /// unread count.
+    pub fn take_new_chat(&mut self) -> usize {
+        std::mem::take(&mut self.new_chat)
     }
 
     /// Live documents others changed since last asked.
@@ -997,6 +1064,26 @@ impl Client {
                         }
                     }
                 }
+            }
+            ToClient::Chat(line) => {
+                if line.member != self.member {
+                    self.new_chat += 1;
+                }
+                self.chat.push_back(line);
+                while self.chat.len() > presence::CHAT_KEPT {
+                    self.chat.pop_front();
+                }
+            }
+            ToClient::ChatHistory(lines) => {
+                let before = self.chat.len();
+                self.chat = lines.into_iter().collect();
+                let me = self.member;
+                self.new_chat += self
+                    .chat
+                    .iter()
+                    .skip(before)
+                    .filter(|line| line.member != me)
+                    .count();
             }
             ToClient::DocRefused { path, reason } => {
                 if self.live.contains_key(&path) {

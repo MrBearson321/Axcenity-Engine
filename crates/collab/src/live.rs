@@ -27,7 +27,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{Doc, GetString, ReadTxn, StateVector, Text, TextRef, Transact, UndoManager, Update};
+use yrs::{
+    Assoc, Doc, GetString, IndexedSequence, ReadTxn, StateVector, StickyIndex, Text, TextRef,
+    Transact, UndoManager, Update,
+};
 
 use crate::files::FileHash;
 use crate::message::MemberId;
@@ -162,6 +165,42 @@ impl LiveDoc {
 
     pub fn text(&self) -> String {
         self.text.get_string(&self.doc.transact())
+    }
+
+    /// A place in the text, as a character index, that stays on the same
+    /// text while others type before it (a `yrs` sticky index), to send in
+    /// presence (C8). `None` past the end.
+    pub fn sticky(&self, chars: usize) -> Option<Vec<u8>> {
+        let txn = self.doc.transact();
+        let text = self.text.get_string(&txn);
+        let byte = text
+            .char_indices()
+            .nth(chars)
+            .map_or(text.len(), |(i, _)| i);
+        // At the end there's no text after it to stick to: it sticks to
+        // the end of the text instead.
+        let assoc = if byte == text.len() {
+            Assoc::Before
+        } else {
+            Assoc::After
+        };
+        self.text
+            .sticky_index(&txn, byte as u32, assoc)
+            .map(|sticky| sticky.encode_v1())
+    }
+
+    /// Where a [`LiveDoc::sticky`] place is now, as a character index.
+    /// `None` when it doesn't read or this copy hasn't seen its text.
+    pub fn resolve(&self, sticky: &[u8]) -> Option<usize> {
+        let sticky = StickyIndex::decode_v1(sticky).ok()?;
+        let txn = self.doc.transact();
+        let offset = sticky.get_offset(&txn)?;
+        let text = self.text.get_string(&txn);
+        let mut byte = (offset.index as usize).min(text.len());
+        while !text.is_char_boundary(byte) {
+            byte -= 1;
+        }
+        Some(text[..byte].chars().count())
     }
 
     /// What this copy has seen, for [`LiveDoc::update_since`] elsewhere.

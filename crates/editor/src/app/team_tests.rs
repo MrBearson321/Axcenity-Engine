@@ -795,6 +795,39 @@ fn a_joining_editor_gets_the_files_and_types_in_scripts_with_the_host() {
     });
     settle_net(&mut a, &mut b, |a, b| scripts(a) == scripts(b));
 
+    // Others' cursors (C8): the joiner's caret shows in the host's tab, and
+    // stays on the same text when the host types before it.
+    b.tabs.activate(b.tabs.get(&path).unwrap().id);
+    b.tabs.get_mut(&path).unwrap().cursor = Some((3, 3));
+    let joiner_name = team_client(&b)
+        .and_then(|client| {
+            client
+                .roster()
+                .iter()
+                .find(|c| c.member == client.member())
+                .map(|c| c.profile.name.clone())
+        })
+        .expect("the joiner is in the roster");
+    let caret = |a: &EditorApp| {
+        a.tabs
+            .get(&path)
+            .unwrap()
+            .others
+            .iter()
+            .map(|other| (other.name.clone(), other.anchor, other.head))
+            .collect::<Vec<_>>()
+    };
+    settle_net(&mut a, &mut b, |a, _| {
+        caret(a) == [(joiner_name.clone(), 3, 3)]
+    });
+    a.tabs.get_mut(&path).unwrap().text = format!("-- 1\n{hosts_only}");
+    settle_net(&mut a, &mut b, |a, b| {
+        b.tabs.get(&path).unwrap().text.starts_with("-- 1\n")
+            && caret(a) == [(joiner_name.clone(), 8, 8)]
+    });
+    // Its own cursor never shows in its own tab.
+    assert!(b.tabs.get(&path).unwrap().others.is_empty());
+
     // A new script from the host's editor reaches the joiner on the same
     // Instance, without a second Script.
     let new = "scripts/Extra.server.lua";
@@ -1132,4 +1165,63 @@ fn invite_defaults_are_kept_between_runs() {
     assert_eq!(panel.invite_lifetime.seconds(), 30 * 24 * 60 * 60);
     panel.read_text("garbled");
     assert_eq!(panel.to_text(), "viewer month");
+}
+
+// Chat (C8).
+
+#[test]
+fn chat_reaches_the_other_editor_with_an_unread_count_and_instance_links() {
+    let (mut a, mut b, _hub) = two_editors();
+    settle(&mut a, &mut b);
+    let part = a.world.get(a.world.workspace()).unwrap().children()[0];
+    let path = a.world.full_name(part).unwrap();
+    a.team_panel.chat_draft = format!("look at {path}, please");
+    a.send_team_chat();
+    assert!(a.team_panel.chat_draft.is_empty());
+    assert_eq!(a.team_panel.chat_problem, None);
+    settle(&mut a, &mut b);
+    let line = |app: &EditorApp| {
+        app.team()
+            .unwrap()
+            .client()
+            .chat()
+            .iter()
+            .map(|line| line.text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(line(&a), [format!("look at {path}, please")]);
+    assert_eq!(line(&b), line(&a));
+    // Unread for the other editor only, until its chat shows.
+    assert_eq!(a.team_panel.chat_unread, 0);
+    assert_eq!(b.team_panel.chat_unread, 1);
+    draw_panel(&mut b, "collaborate-chat");
+    assert_eq!(b.team_panel.chat_unread, 0);
+    // The path is a link to the Instance.
+    let text = &line(&b)[0];
+    let pieces = super::team_chat::pieces(text, &b.world);
+    assert!(pieces.contains(&super::team_chat::Piece::Instance(&path, part)));
+
+    // A blank message doesn't go, and says why.
+    b.team_panel.chat_draft = "   ".to_owned();
+    b.send_team_chat();
+    assert!(b.team_panel.chat_problem.is_some());
+}
+
+#[test]
+fn only_paths_of_instances_become_links() {
+    let (a, _b, _hub) = two_editors();
+    let part = a.world.get(a.world.workspace()).unwrap().children()[0];
+    let path = a.world.full_name(part).unwrap();
+    use super::team_chat::{Piece, pieces};
+    let text = format!("e.g. ({path}). and Workspace.Nothing");
+    let found = pieces(&text, &a.world);
+    assert_eq!(
+        found,
+        [
+            Piece::Text("e.g. ("),
+            Piece::Instance(&path, part),
+            Piece::Text("). and Workspace.Nothing"),
+        ]
+    );
+    assert_eq!(pieces("plain", &a.world), [Piece::Text("plain")]);
 }

@@ -21,11 +21,11 @@ use crate::files::{FileHash, Manifest, Piece};
 use crate::ids::IdBlock;
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
-use crate::presence::{Camera, Collaborator, Presence};
+use crate::presence::{Camera, ChatLine, Collaborator, Presence, TextCursor};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 4;
+pub const FORMAT: u8 = 5;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -537,6 +537,7 @@ enum WireToHost {
     Unlock(String),
     DocOpen(String, Blob),
     DocUpdate(String, Blob),
+    Chat(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -544,6 +545,8 @@ struct WirePresence {
     selection: Vec<u64>,
     camera: Option<([f32; 3], [f32; 3])>,
     editing: Option<String>,
+    /// Path, anchor, head.
+    script: Option<(String, Blob, Blob)>,
 }
 
 impl From<&Presence> for WirePresence {
@@ -552,6 +555,10 @@ impl From<&Presence> for WirePresence {
             selection: p.selection.iter().map(|i| i.to_bits()).collect(),
             camera: p.camera.map(|c| (c.position, c.look)),
             editing: p.editing.clone(),
+            script: p
+                .script
+                .as_ref()
+                .map(|c| (c.path.clone(), Blob(c.anchor.clone()), Blob(c.head.clone()))),
         }
     }
 }
@@ -562,6 +569,11 @@ impl From<WirePresence> for Presence {
             selection: p.selection.into_iter().map(id).collect(),
             camera: p.camera.map(|(position, look)| Camera { position, look }),
             editing: p.editing,
+            script: p.script.map(|(path, anchor, head)| TextCursor {
+                path,
+                anchor: anchor.0,
+                head: head.0,
+            }),
         }
     }
 }
@@ -599,6 +611,7 @@ impl From<&ToHost> for WireToHost {
             ToHost::DocUpdate { path, update } => {
                 WireToHost::DocUpdate(path.clone(), Blob(update.clone()))
             }
+            ToHost::Chat(text) => WireToHost::Chat(text.clone()),
         }
     }
 }
@@ -638,6 +651,7 @@ impl WireToHost {
                 path,
                 update: update.0,
             },
+            WireToHost::Chat(text) => ToHost::Chat(text),
         })
     }
 }
@@ -691,6 +705,8 @@ enum WireToClient {
     DocState(String, Blob, Blob, u64),
     DocUpdate(String, Blob, u32),
     DocRefused(String, String),
+    Chat(ChatLine),
+    ChatHistory(Vec<ChatLine>),
 }
 
 impl From<&ToClient> for WireToClient {
@@ -803,6 +819,8 @@ impl From<&ToClient> for WireToClient {
             ToClient::DocRefused { path, reason } => {
                 WireToClient::DocRefused(path.clone(), reason.clone())
             }
+            ToClient::Chat(line) => WireToClient::Chat(line.clone()),
+            ToClient::ChatHistory(lines) => WireToClient::ChatHistory(lines.clone()),
         }
     }
 }
@@ -917,6 +935,8 @@ impl WireToClient {
                 author: MemberId(author),
             },
             WireToClient::DocRefused(path, reason) => ToClient::DocRefused { path, reason },
+            WireToClient::Chat(line) => ToClient::Chat(line),
+            WireToClient::ChatHistory(lines) => ToClient::ChatHistory(lines),
         })
     }
 }

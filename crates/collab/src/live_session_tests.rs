@@ -388,3 +388,42 @@ fn document_messages_read_back_as_written() {
         assert_eq!(format!("{back:?}"), format!("{message:?}"));
     }
 }
+
+#[test]
+fn a_cursor_in_a_script_shows_for_the_others_and_stays_on_its_text() {
+    use crate::presence::Presence;
+    let mut net = session();
+    // Member 1's cursor at the start of line 2 ("print('door')").
+    let at = START.find("print").unwrap();
+    let cursor = net.clients[1].doc_cursor(DOOR, at, at).unwrap();
+    net.set_presence(
+        1,
+        Presence {
+            script: Some(cursor),
+            ..Presence::default()
+        },
+    );
+    net.settle();
+    let seen = |net: &Net, i: usize| {
+        let presence = &net.clients[i].presences()[&member(1)];
+        net.clients[i].resolve_cursor(presence.script.as_ref().unwrap())
+    };
+    assert_eq!(seen(&net, 2), Some((at, at)));
+    // Someone types above it: it moves with its line.
+    type_in(&mut net, 2, &format!("-- note\n{START}"));
+    net.settle();
+    assert_eq!(seen(&net, 2), Some((at + 8, at + 8)));
+    assert_eq!(seen(&net, 3), Some((at + 8, at + 8)));
+    // A cursor in a file that isn't live isn't passed on.
+    let mut odd = net.clients[1].doc_cursor(DOOR, 0, 0).unwrap();
+    odd.path = "levels/main.level.json".into();
+    net.set_presence(
+        1,
+        Presence {
+            script: Some(odd),
+            ..Presence::default()
+        },
+    );
+    net.settle();
+    assert!(net.clients[2].presences()[&member(1)].script.is_none());
+}

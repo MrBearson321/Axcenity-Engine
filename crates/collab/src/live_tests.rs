@@ -229,3 +229,28 @@ fn typing_in_a_five_thousand_line_script() {
         mine.state().len() / 1024
     );
 }
+
+#[test]
+fn a_cursor_stays_on_its_text_while_others_type_before_it() {
+    let host = LiveDoc::with_text("local a = 1\nlocal b = 2\n");
+    let mut mine = joined(&host);
+    let mut theirs = joined(&host);
+    // Their cursor at the start of line 2.
+    let cursor = theirs.sticky(12).unwrap();
+    assert_eq!(mine.resolve(&cursor), Some(12));
+    let update = mine.set_text("-- é☕\nlocal a = 1\nlocal b = 2\n").unwrap();
+    theirs.apply(&update).unwrap();
+    assert_eq!(mine.resolve(&cursor), Some(18));
+    assert_eq!(theirs.resolve(&cursor), Some(18));
+    // The end of the text is a place too; garbage isn't.
+    let length = theirs.text().chars().count();
+    let end = theirs.sticky(length).expect("the end");
+    let update = theirs.set_text(&format!("{}x", theirs.text())).unwrap();
+    mine.apply(&update).unwrap();
+    assert!(
+        mine.resolve(&end).is_some_and(|at| at >= length),
+        "{:?}",
+        mine.resolve(&end)
+    );
+    assert_eq!(mine.resolve(&[0xff, 0xff]), None);
+}

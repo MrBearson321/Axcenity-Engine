@@ -109,6 +109,7 @@ fn a_selection_reaches_the_others_and_late_joiners() {
             look: [0.0, 0.0, -1.0],
         }),
         editing: Some("Transparency".into()),
+        script: None,
     };
     net.set_presence(0, looking.clone());
     net.settle();
@@ -206,4 +207,103 @@ fn a_removed_member_leaves_the_roster_and_cant_edit() {
     );
     net.settle();
     assert!(net.host.world().get(id).is_none());
+}
+
+// Chat (C8).
+
+fn chat_texts(net: &Net, i: usize) -> Vec<(u32, String)> {
+    net.clients[i]
+        .chat()
+        .iter()
+        .map(|line| (line.member.0, line.text.clone()))
+        .collect()
+}
+
+#[test]
+fn chat_reaches_everyone_in_the_hosts_order() {
+    let (mut net, _, _) = session();
+    net.with_client(1, |client, _| client.send_chat("hello").unwrap());
+    net.with_client(0, |client, _| client.send_chat("hi there").unwrap());
+    // Viewers can talk too.
+    net.with_client(2, |client, _| client.send_chat("  can I look?  ").unwrap());
+    net.settle();
+    let first = chat_texts(&net, 0);
+    assert_eq!(first.len(), 3);
+    assert!(first.contains(&(3, "can I look?".to_owned())));
+    for i in 1..3 {
+        assert_eq!(chat_texts(&net, i), first, "member {i}");
+        // Unread: the two lines the others sent.
+        assert_eq!(net.clients[i].take_new_chat(), 2);
+    }
+}
+
+#[test]
+fn someone_joining_gets_the_last_two_hundred_lines() {
+    use crate::presence::CHAT_KEPT;
+    let (mut net, _, _) = session();
+    let start = std::time::Instant::now();
+    for n in 0..CHAT_KEPT + 5 {
+        net.tick(start + std::time::Duration::from_secs(n as u64));
+        let out = net
+            .host
+            .receive(member(0), crate::message::ToHost::Chat(format!("line {n}")));
+        net.route_out(out);
+    }
+    net.settle();
+    net.restart_editor(2);
+    net.connect(2);
+    net.settle();
+    let joined = chat_texts(&net, 2);
+    assert_eq!(joined.len(), CHAT_KEPT);
+    assert_eq!(joined[0].1, "line 5");
+    assert_eq!(joined.last().unwrap().1, format!("line {}", CHAT_KEPT + 4));
+}
+
+#[test]
+fn chat_is_plain_short_and_not_too_fast() {
+    use crate::message::ToHost;
+    use crate::presence::{CHAT_MOST, CHAT_PER_SECOND};
+    let (mut net, _, _) = session();
+    // Control characters go; line breaks stay; long lines are cut.
+    let out = net
+        .host
+        .receive(member(1), ToHost::Chat("a\u{1b}[31mb\nc\u{0}".into()));
+    net.route_out(out);
+    let out = net
+        .host
+        .receive(member(1), ToHost::Chat("x".repeat(CHAT_MOST * 2)));
+    net.route_out(out);
+    // Blank lines aren't sent at all.
+    let out = net.host.receive(member(1), ToHost::Chat(" \n\t ".into()));
+    assert!(out.is_empty());
+    net.settle();
+    let lines = chat_texts(&net, 0);
+    assert_eq!(lines[0].1, "a[31mb\nc");
+    assert_eq!(lines[1].1.chars().count(), CHAT_MOST);
+
+    // More than five a second: the host drops the rest, and the client
+    // says so before sending.
+    for n in 0..CHAT_PER_SECOND + 3 {
+        let out = net
+            .host
+            .receive(member(2), ToHost::Chat(format!("spam {n}")));
+        net.route_out(out);
+    }
+    net.settle();
+    let spam = chat_texts(&net, 0)
+        .into_iter()
+        .filter(|(_, text)| text.starts_with("spam"))
+        .count();
+    assert_eq!(spam, CHAT_PER_SECOND);
+    for _ in 0..CHAT_PER_SECOND {
+        net.with_client(0, |client, _| client.send_chat("quick").unwrap());
+    }
+    assert!(
+        net.with_client(0, |client, _| client.send_chat("too quick"))
+            .is_err()
+    );
+    assert!(
+        net.with_client(0, |client, _| client.send_chat("   "))
+            .is_err()
+    );
 }

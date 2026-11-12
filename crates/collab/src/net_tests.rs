@@ -703,6 +703,7 @@ fn a_member_flooding_the_host_is_cut_off_and_comes_back() {
                     look: [0.0, 0.0, 1.0],
                 }),
                 editing: None,
+                script: None,
             })
         })
         .collect();
