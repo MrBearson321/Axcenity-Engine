@@ -9,7 +9,7 @@ use axcenity_core::World;
 use crate::apply::{self, Doc, Note, Refusal};
 use crate::files::{self, Assembly, FileHash, FileStore, Manifest, MemoryStore, Piece};
 use crate::ids::{IdAllocator, IdBlock};
-use crate::journal::{self, Journal};
+use crate::journal::{self, Handled, Journal};
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
 use crate::presence::{Collaborator, Presence, Profile};
@@ -89,6 +89,9 @@ pub struct Host {
     snapshot_at: Instant,
     /// Names this run of the host ([`ToClient::Welcome`]).
     epoch: u64,
+    /// The newest transaction number earlier runs handled from each
+    /// member, from the journal's folder.
+    handled: Handled,
 }
 
 /// A number no earlier run of a host had (as near as random gets).
@@ -120,18 +123,33 @@ impl Host {
             journal: None,
             snapshot_at: Instant::now(),
             epoch: new_epoch(),
+            handled: Handled::new(),
         }
     }
 
     /// Keeps a journal in the project at `project` (TC6): a snapshot of
     /// the World now, then each accepted transaction, so a host that stops
     /// without ending the session can be recovered ([`journal::recover`]).
+    ///
+    /// What earlier runs handled from each member is read back first, so a
+    /// member re-sending edits this project's host already has (it wrote
+    /// them down just before it stopped) doesn't apply them twice (C5).
     pub fn start_journal(&mut self, project: &std::path::Path) -> std::io::Result<()> {
+        for (member, seq) in journal::handled(project) {
+            journal::note_handled(&mut self.handled, member, seq);
+        }
+        for (member, m) in &mut self.members {
+            m.last_client_seq = m
+                .last_client_seq
+                .max(self.handled.get(member).copied().unwrap_or(0));
+        }
+        let handled = self.handled();
         self.journal = Some(Journal::start(
             project,
             &self.doc.world,
             &self.doc.graveyard,
             self.seq,
+            &handled,
         )?);
         self.snapshot_at = self.clock;
         Ok(())
@@ -151,7 +169,10 @@ impl Host {
         if journal.since_snapshot() == 0 {
             return;
         }
-        if let Err(error) = journal.snapshot(&self.doc.world, &self.doc.graveyard, self.seq) {
+        let handled = handled_by(&self.handled, &self.members);
+        if let Err(error) =
+            journal.snapshot(&self.doc.world, &self.doc.graveyard, self.seq, &handled)
+        {
             log::error!("Collaborate: couldn't write the session's snapshot: {error}");
         }
     }
@@ -159,8 +180,9 @@ impl Host {
     /// The session ended cleanly: the journal and its snapshot go, as
     /// there's nothing to recover.
     pub fn end_journal(&mut self) {
+        let handled = self.handled();
         if let Some(journal) = self.journal.take()
-            && let Err(error) = journal.end()
+            && let Err(error) = journal.end(&handled)
         {
             log::warn!("Collaborate: couldn't remove the session's journal: {error}");
         }
@@ -251,6 +273,12 @@ impl Host {
         self.log.iter()
     }
 
+    /// The newest transaction number handled from each member, by this
+    /// run and the ones before it whose journal this one read.
+    pub fn handled(&self) -> Handled {
+        handled_by(&self.handled, &self.members)
+    }
+
     /// Lets `member` join with `role`. (TC3 does this when an invite is
     /// redeemed by a signed-in identity.)
     pub fn add_member(&mut self, member: MemberId, role: Role) {
@@ -259,7 +287,7 @@ impl Host {
             Member {
                 role,
                 blocks: Vec::new(),
-                last_client_seq: 0,
+                last_client_seq: self.handled.get(&member).copied().unwrap_or(0),
                 refused: VecDeque::new(),
                 connected: false,
                 profile: Profile::unnamed(member),
@@ -668,6 +696,14 @@ impl Host {
             })
             .collect()
     }
+}
+
+fn handled_by(earlier: &Handled, members: &BTreeMap<MemberId, Member>) -> Handled {
+    let mut handled = earlier.clone();
+    for (&member, m) in members {
+        journal::note_handled(&mut handled, member, m.last_client_seq);
+    }
+    handled
 }
 
 /// Whether `role` may change any file.

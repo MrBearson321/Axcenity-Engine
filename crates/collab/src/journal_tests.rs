@@ -221,3 +221,143 @@ fn unsent_edits_from_an_editor_that_stopped_are_sent_when_it_joins_again() {
     assert_eq!(net.host.world().get(a).unwrap().name(), "Door");
     net.assert_converged();
 }
+
+/// How many Parts named `name` the host's World has.
+fn count_named(net: &Net, name: &str) -> usize {
+    let world = net.host.world();
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .filter(|&id| world.get(id).is_some_and(|i| i.name() == name))
+        .count()
+}
+
+/// Fault test (C5): the host writes a member's edits down and stops before
+/// confirming them. The member sends them again to the next run of the
+/// host, which already has them from its journal: each applies once.
+#[test]
+fn edits_the_host_wrote_just_before_it_stopped_apply_once() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let a = world.create(ClassName::Part).unwrap();
+    world.set_name(a, "A").unwrap();
+    world.set_parent(a, Some(workspace)).unwrap();
+    let folder = Project::new();
+    let mut host = Host::new(world);
+    host.start_journal(&folder.0).unwrap();
+    let mut net = Net::with_host(host, &[Role::Owner, Role::Editor]);
+    net.settle();
+
+    let lamp = net.new_id(1);
+    net.submit(
+        1,
+        "Add Lamp",
+        vec![create(vec![part(lamp, workspace, "Lamp")])],
+    )
+    .unwrap();
+    net.submit(1, "Rename A", vec![rename(a, "A1")]).unwrap();
+    // The host takes both and writes them down; nothing it sends arrives.
+    while net.deliver_up(1) {}
+    assert_eq!(net.clients[1].pending(), 2, "not confirmed");
+    // A later edit the host never got.
+    net.submit(1, "Rename A", vec![rename(a, "A2")]).unwrap();
+
+    net.crash_host(&folder.0);
+    net.connect(0);
+    net.connect(1);
+    net.settle();
+    assert_eq!(count_named(&net, "Lamp"), 1, "the Lamp was added twice");
+    assert_eq!(net.host.world().get(a).unwrap().name(), "A2");
+    assert_eq!(net.clients[1].pending(), 0);
+    net.assert_converged();
+
+    // The numbers survive a clean end too: the next session still knows.
+    // (The edit sent again was renumbered after the editor's own: 4.)
+    net.host.end_journal();
+    assert_eq!(
+        journal::handled(&folder.0).get(&member(1)).copied(),
+        Some(4)
+    );
+}
+
+/// The same, for a member whose editor stopped too: its recovery file
+/// holds edits the host already has, which aren't applied again.
+#[test]
+fn a_recovery_file_leaves_out_what_the_host_already_has() {
+    let world = World::new();
+    let workspace = world.workspace();
+    let folder = Project::new();
+    let mirror = Project::new();
+    let mut host = Host::new(world.clone());
+    host.start_journal(&folder.0).unwrap();
+    let mut net = Net::with_host(host, &[Role::Owner, Role::Editor]);
+    net.settle();
+    let lamp = net.new_id(1);
+    net.submit(
+        1,
+        "Add Lamp",
+        vec![create(vec![part(lamp, workspace, "Lamp")])],
+    )
+    .unwrap();
+    while net.deliver_up(1) {}
+    let crate_id = net.new_id(1);
+    net.submit(
+        1,
+        "Add Crate",
+        vec![create(vec![part(crate_id, workspace, "Crate")])],
+    )
+    .unwrap();
+    journal::save_unsent(&mirror.0, &net.clients[1].unsent()).unwrap();
+    assert_eq!(journal::load_unsent(&mirror.0).unwrap().len(), 2);
+
+    net.crash_host(&folder.0);
+    net.restart_editor(1);
+    net.connect(0);
+    net.connect(1);
+    net.settle();
+    let unsent = journal::load_unsent(&mirror.0).unwrap();
+    let count = net.with_client(1, |client, world| client.recover_unsent(world, unsent));
+    assert_eq!(count, 1, "only the Crate is new to the host");
+    net.settle();
+    assert_eq!(count_named(&net, "Lamp"), 1);
+    assert_eq!(count_named(&net, "Crate"), 1);
+    net.assert_converged();
+}
+
+/// How long joining a 10,000-Part World takes on the host's side and the
+/// joiner's (the join message built, written, read and taken in), and how
+/// big it is (C5). Run by hand:
+/// `cargo test -p axcenity-collab --release --lib join_time -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, run by hand"]
+fn join_time_of_ten_thousand_parts() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    for n in 0..10_000 {
+        let id = world.create(ClassName::Part).unwrap();
+        world.set_name(id, format!("Part{n}")).unwrap();
+        world.set_parent(id, Some(workspace)).unwrap();
+    }
+    let host = Host::new(world);
+    let started = Instant::now();
+    let mut net = Net::with_host(host, &[Role::Owner, Role::Editor]);
+    net.settle();
+    let joined = started.elapsed();
+    let bytes = crate::wire::encode_to_client(&crate::message::ToClient::Welcome {
+        world: crate::message::Snapshot(Box::new(net.host.world().clone())),
+        graveyard: Default::default(),
+        seq: 0,
+        last_client_seq: 0,
+        role: Role::Editor,
+        ids: None,
+        rejected: Vec::new(),
+        files: Default::default(),
+        session: String::new(),
+        epoch: 0,
+    });
+    println!(
+        "two members joined 10,000 Parts in {joined:?}; the join message is {} KiB",
+        bytes.len() / 1024
+    );
+    net.assert_converged();
+}

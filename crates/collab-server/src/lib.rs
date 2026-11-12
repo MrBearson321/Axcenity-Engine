@@ -168,6 +168,14 @@ impl Server {
                 ));
             }
         }
+        // The project as it is before anyone changes it, in Version History
+        // (C5); nothing new when it's unchanged since the last version.
+        if let Err(error) = axcenity_project::record_version(&project, "Before Collaborate session")
+        {
+            said.push(format!(
+                "warning: couldn't keep a version before the session: {error}"
+            ));
+        }
         let cert = HostCert::load_or_make(&data.join("host-certificate.json"))
             .context("couldn't read or make the server's certificate")?;
         let members = members_file(&data, &project);

@@ -31,6 +31,9 @@ pub(crate) struct TeamPanel {
     /// Where following last put the camera: if it's elsewhere now, the
     /// user moved it, and following stops.
     pub(crate) followed_to: Option<[f32; 3]>,
+    /// A Version History checkpoint was kept before edits made offline
+    /// were sent again, for the Recovered Changes window (C5).
+    pub(crate) offline_checkpoint: bool,
     /// The setup wizard and Start Session dialog (C4).
     pub(crate) setup: super::collab_setup::Setup,
     /// This computer's identity, for Settings > Collaborate (read when the
@@ -687,6 +690,7 @@ impl EditorApp {
         }
         let mut open = true;
         let mut close = false;
+        let mut open_history = false;
         widgets::tool_window(icons::CLOCK_COUNTER_CLOCKWISE, "Recovered Changes")
             .id("recovered changes")
             .show(ctx, &mut open, |ui| {
@@ -704,6 +708,20 @@ impl EditorApp {
                     )
                     .wrap(),
                 );
+                if self.team_panel.offline_checkpoint {
+                    ui.add_space(theme::space::XS);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!(
+                                "Your copy from before they were sent is in Version History as \
+                                 “{}”: compare it with the session there.",
+                                super::team::OFFLINE_CHECKPOINT
+                            ))
+                            .color(palette.text_weak),
+                        )
+                        .wrap(),
+                    );
+                }
                 ui.add_space(theme::space::S);
                 egui::ScrollArea::vertical()
                     .max_height(220.0)
@@ -740,6 +758,18 @@ impl EditorApp {
                             .collect();
                         ui.ctx().copy_text(text.join("\n"));
                     }
+                    if self.team_panel.offline_checkpoint
+                        && ui
+                            .add(widgets::button(
+                                widgets::Role::Secondary,
+                                Some(icons::CLOCK_COUNTER_CLOCKWISE),
+                                "Version History…",
+                                &palette,
+                            ))
+                            .clicked()
+                    {
+                        open_history = true;
+                    }
                     if ui
                         .add(widgets::button(
                             widgets::Role::Primary,
@@ -753,6 +783,9 @@ impl EditorApp {
                     }
                 });
             });
+        if open_history {
+            self.version_history.open = true;
+        }
         if !open || close {
             self.team_panel.recovered.clear();
         }

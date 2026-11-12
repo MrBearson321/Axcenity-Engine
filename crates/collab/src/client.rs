@@ -94,6 +94,9 @@ pub struct Client {
     role: Role,
     pending: VecDeque<Pending>,
     next_client_seq: u64,
+    /// The newest of this member's transactions the host says it handled
+    /// (from the last join message).
+    host_handled: u64,
     asked_for_ids: bool,
     /// A fresh snapshot was asked for: host transactions until it comes
     /// don't apply to this copy.
@@ -144,6 +147,7 @@ impl Client {
             role: Role::Viewer,
             pending: VecDeque::new(),
             next_client_seq: 1,
+            host_handled: 0,
             asked_for_ids: false,
             awaiting_snapshot: false,
             connection: Connection::Offline,
@@ -445,7 +449,8 @@ impl Client {
     /// Takes in edits an earlier run of the editor made and never had
     /// confirmed (its recovery file): they apply here and go to the host
     /// like new ones, what they make with IDs from this member's blocks.
-    /// One that no longer applies is reported as a recovered refusal.
+    /// One the host already handled is left out (C5); one that no longer
+    /// applies is reported as a recovered refusal.
     /// Files are left out: the member's folder still has what they saved,
     /// and their [`Mirror`](crate::Mirror) sends it. Returns how many
     /// there were. Only once joined.
@@ -457,7 +462,9 @@ impl Client {
         for transaction in &mut transactions {
             transaction.ops.retain(Op::is_world);
         }
-        transactions.retain(|t| !t.ops.is_empty());
+        // Ones the host already handled are in the session (C5).
+        let handled = self.host_handled;
+        transactions.retain(|t| !t.ops.is_empty() && t.client_seq > handled);
         if !self.joined || self.host_left || transactions.is_empty() {
             return 0;
         }
@@ -725,8 +732,16 @@ impl Client {
                     // What this member made used IDs from blocks the new
                     // run of the host doesn't know: they get new ones, and
                     // every edit not confirmed is sent again, renumbered.
-                    let unsent: Vec<Transaction> =
-                        self.pending.drain(..).map(|p| p.transaction).collect();
+                    // Those the host already handled (it wrote them down
+                    // just before it stopped, and the confirmation never
+                    // left) are in the snapshot: sending them again would
+                    // apply them twice (C5).
+                    let unsent: Vec<Transaction> = self
+                        .pending
+                        .drain(..)
+                        .map(|p| p.transaction)
+                        .filter(|t| t.client_seq > last_client_seq)
+                        .collect();
                     self.next_client_seq = self.next_client_seq.max(last_client_seq + 1);
                     self.adopt(world, unsent);
                 }
@@ -899,6 +914,7 @@ impl Client {
         last_client_seq: u64,
         rejected: &[(u64, Refusal)],
     ) {
+        self.host_handled = last_client_seq;
         while let Some(front) = self.pending.front() {
             if front.transaction.client_seq > last_client_seq {
                 break;

@@ -93,6 +93,12 @@ pub const JOIN_FLAG: &str = "--collab-join";
 /// The flags from before Collaborate was renamed from Team Create; they
 /// still work.
 pub const OLD_HOST_FLAG: &str = "--team-host";
+
+/// Version History's name for the project as it was when a session started.
+pub(crate) const SESSION_CHECKPOINT: &str = "Before Collaborate session";
+/// Version History's name for a member's copy before edits made offline
+/// were sent again.
+pub(crate) const OFFLINE_CHECKPOINT: &str = "Before sending changes made offline";
 pub const OLD_JOIN_FLAG: &str = "--team-join";
 
 /// A session to start once the project has opened (from the command line).
@@ -570,6 +576,11 @@ impl EditorApp {
         // What a session that stopped without ending left is taken in
         // first: starting the journal writes over it.
         self.recover_team_session();
+        // The project as saved before anyone else changes it, in Version
+        // History (C5). Unpinned: an unchanged project adds nothing.
+        if let Err(error) = axcenity_project::record_version(&project, SESSION_CHECKPOINT) {
+            log::warn!("Collaborate: couldn't keep a version before the session: {error}");
+        }
         let mut host = Host::new(session_world(self.world.clone()))
             .with_files(files, Box::new(store))
             .with_session(session_id);
@@ -1126,6 +1137,15 @@ impl EditorApp {
         if unsent.is_empty() {
             return;
         }
+        // This copy as it is before they go, to compare with the session
+        // afterwards in Version History (C5).
+        let checkpoint = axcenity_project::record_checkpoint(mirror.root(), OFFLINE_CHECKPOINT);
+        if let Err(error) = &checkpoint {
+            log::warn!(
+                "Collaborate: couldn't keep a checkpoint before sending offline edits: {error}"
+            );
+        }
+        self.team_panel.offline_checkpoint = checkpoint.is_ok();
         let count = client.recover_unsent(&mut self.world, unsent);
         // The file now holds edits that are pending again: it's written
         // anew next frame, and removed once they're confirmed.
