@@ -37,6 +37,7 @@ pub mod branding;
 mod collaborate_file;
 mod compat;
 mod default_sky;
+mod duplicates;
 mod levels;
 pub mod memory_budget;
 mod migrate;
@@ -102,7 +103,8 @@ pub use asset_fix::{
     moved_suggestion, plan_fix, read_ignored, suggestion, write_ignored,
 };
 pub use asset_refs::{
-    RefPlace, Reference, find_references, is_model_part, plan_rename, plan_switch, unused_assets,
+    RefPlace, Reference, find_references, is_model_part, plan_merge, plan_rename, plan_switch,
+    unused_assets,
 };
 pub use backup::{
     BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,
@@ -111,6 +113,7 @@ pub use collaborate_file::{
     COLLABORATE_FILE, CollaborateFile, RepositoryLink, load_collaborate_file, save_collaborate_file,
 };
 pub use compat::{Compatibility, compatibility};
+pub use duplicates::{Duplicates, find_duplicates};
 pub use levels::{
     DEFAULT_START_LEVEL, FileChange, LEVEL_SUFFIX, LEVELS_FOLDER, check_level_name,
     copy_workspace_into, keep_level_file, level_file, level_names, level_path, load_levels,
