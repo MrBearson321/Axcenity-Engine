@@ -194,6 +194,21 @@ impl EditorApp {
     /// Returns false (with the reason in Output) if nothing is open or a
     /// file couldn't be written.
     pub(super) fn save(&mut self) -> bool {
+        if self.project.is_none() {
+            return false;
+        }
+        // The Model Studio's model first: its save is an undo step, so the
+        // world is marked saved after it.
+        if self
+            .model_studio
+            .doc
+            .as_ref()
+            .is_some_and(|doc| doc.unsaved())
+            && self.save_model_studio().is_none()
+        {
+            self.toasts.error("Could not save. Output says why.");
+            return false;
+        }
         let Some(project) = &self.project else {
             return false;
         };

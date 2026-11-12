@@ -1096,6 +1096,8 @@ impl EditorApp {
     /// Asks to `discard` the open world. Returns it when it can go ahead now,
     /// or `None` after putting up "Save changes?" because there are unsaved changes.
     pub(super) fn request(&mut self, discard: Discard) -> Option<Discard> {
+        // Files the Animation tab wrote since it was last drawn count too.
+        self.studio_actions(Vec::new());
         let unsaved = match &discard {
             Discard::CloseTab(path) => {
                 self.tabs.get(path).is_some_and(|tab| tab.unsaved())
@@ -1137,6 +1139,9 @@ impl EditorApp {
                 | Discard::Update(_) => self.save().then_some(discard),
             },
             Answer::DontSave => {
+                if !matches!(discard, Discard::CloseTab(_)) {
+                    self.discard_unsaved();
+                }
                 if let Discard::CloseTab(path) = &discard {
                     let source = self
                         .project
@@ -1204,10 +1209,9 @@ impl EditorApp {
         self.thumbnail_wanted = Some(true);
     }
     /// Puts the open project away and shows the start screen.
+    /// Nothing is written here: Save wrote what was to be kept, and "Don't
+    /// Save" means what wasn't is dropped (`documents.rs`).
     pub(super) fn finish_closing_project(&mut self) {
-        if let Some(project) = &self.project {
-            let _ = self.animation.write_all(&project.folder, &mut self.output);
-        }
         self.animation = AnimationStudio::default();
         self.asset_check.clear();
         // The session was this project's (or ended for good with it).
@@ -1295,18 +1299,8 @@ impl EditorApp {
         // What isn't saved: only the tab, when closing a tab.
         let mut items = Vec::new();
         if !matches!(discard, Discard::CloseTab(_)) {
-            if !self.history.is_saved() {
-                items.push((icons::GLOBE_HEMISPHERE_WEST, "The world".to_owned()));
-            }
-            for path in self.tabs.unsaved_paths() {
-                items.push((icons::FILE_CODE, path));
-            }
-            if let Some(project) = &self.project {
-                for document in &project.block_scripts {
-                    if document.script != document.saved {
-                        items.push((icons::PUZZLE_PIECE, document.path.clone()));
-                    }
-                }
+            for document in self.modified_documents() {
+                items.push((document.kind.icon(), document.name));
             }
         }
         let (icon, tone) = dialog::unsaved_style();

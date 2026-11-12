@@ -48,22 +48,10 @@ impl EditorApp {
             })
             .collect()
     }
-    /// True when the world or a script tab has changes that aren't saved.
+    /// True when anything has changes that aren't saved (see `documents.rs`).
     /// Undoing back to where it was saved counts as no changes.
     pub(super) fn unsaved(&self) -> bool {
-        !self.history.is_saved()
-            || self.tabs.any_unsaved()
-            || self.ui_graphs_unsaved()
-            || self.behavior.unsaved()
-            || self.dialogues.unsaved()
-            || self.data_tables.unsaved()
-            || self.materials.unsaved()
-            || self.project.as_ref().is_some_and(|project| {
-                project
-                    .block_scripts
-                    .iter()
-                    .any(|document| document.script != document.saved)
-            })
+        !self.modified_documents().is_empty()
     }
     /// Applies a change from the Properties panel, as an undo step such as
     /// "Change Color of Pad". During Play it changes the game instead.

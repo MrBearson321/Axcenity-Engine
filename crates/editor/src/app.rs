@@ -37,6 +37,7 @@ mod custom_materials;
 mod data_tables;
 mod dev_console;
 mod dialogues;
+mod documents;
 mod edits;
 mod engine;
 mod files;
@@ -1808,6 +1809,8 @@ mod data_table_tests;
 mod dev_console_tests;
 #[cfg(test)]
 mod dialogue_tests;
+#[cfg(test)]
+mod documents_tests;
 #[cfg(test)]
 mod explorer_keys_tests;
 #[cfg(test)]

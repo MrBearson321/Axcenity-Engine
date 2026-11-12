@@ -754,8 +754,10 @@ impl EditorApp {
     }
 
     /// Does what the Animation tab asked for.
-    pub(super) fn studio_actions(&mut self, actions: Vec<StudioAction>) {
-        for action in actions {
+    pub(in crate::app) fn studio_actions(&mut self, mut actions: Vec<StudioAction>) {
+        let mut written = self.animation.take_written();
+        written.append(&mut actions);
+        for action in written {
             match action {
                 StudioAction::Import => {
                     self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER)

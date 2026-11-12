@@ -132,7 +132,8 @@ impl AnimationStudio {
     ) {
         // A fresh copy, with whatever was changed in the world since.
         self.clip.objects.refresh(world);
-        let _ = self.write_all(project, output);
+        let written = self.write_all(project, output);
+        self.written.extend(written);
         self.rescan(project);
         self.load_clip(project, assets, path, output);
         self.view = View::Clip;
@@ -183,7 +184,8 @@ impl AnimationStudio {
         model: Option<String>,
         output: &mut Output,
     ) {
-        let _ = self.write_all(project, output);
+        let written = self.write_all(project, output);
+        self.written.extend(written);
         self.rescan(project);
         match store::read_controller(project, path) {
             Ok(file) => {

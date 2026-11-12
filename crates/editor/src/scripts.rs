@@ -335,10 +335,6 @@ impl ScriptTabs {
         std::mem::take(&mut self.breakpoints_changed)
     }
 
-    pub fn any_unsaved(&self) -> bool {
-        self.tabs.iter().any(ScriptTab::unsaved)
-    }
-
     /// The paths of the tabs with unsaved changes, in tab order.
     pub fn unsaved_paths(&self) -> Vec<String> {
         self.tabs
@@ -1124,7 +1120,7 @@ mod tests {
         tabs.get_mut("scripts/a.server.lua").unwrap().text = "edited".to_string();
         tabs.open("scripts/a.server.lua", "from disk", None);
         assert_eq!(tabs.active().unwrap().text, "edited");
-        assert!(tabs.any_unsaved());
+        assert!(!tabs.unsaved_paths().is_empty());
         assert_eq!(tabs.unsaved_paths(), ["scripts/a.server.lua"]);
 
         tabs.close("scripts/a.server.lua");

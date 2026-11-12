@@ -434,6 +434,11 @@ struct MachineView {
 
 #[derive(Default)]
 pub struct AnimationStudio {
+    /// Undo steps for files written outside `show` (opening another clip
+    /// or state machine writes the open one), for the app to record
+    /// ([`AnimationStudio::take_written`]), so the history and "Don't Save"
+    /// know about them.
+    written: Vec<StudioAction>,
     files: AnimationFiles,
     scanned: Option<Instant>,
     clip: ClipView,
@@ -561,6 +566,43 @@ impl AnimationStudio {
         flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
             .into_iter()
             .collect()
+    }
+
+    /// The undo steps for files written outside `show`, taken once.
+    pub fn take_written(&mut self) -> Vec<StudioAction> {
+        std::mem::take(&mut self.written)
+    }
+
+    /// The open clip and state machine, if they have changes not yet written.
+    pub fn unwritten_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        match &self.clip.doc {
+            Some(Clip::Property(doc)) if doc.unwritten() => paths.push(doc.path.clone()),
+            Some(Clip::Take(doc)) if doc.unwritten() => paths.push(doc.path.clone()),
+            _ => {}
+        }
+        if let Some(doc) = &self.machine.doc
+            && doc.unwritten()
+        {
+            paths.push(doc.path.clone());
+        }
+        paths
+    }
+
+    /// "Don't Save": closes the clip and state machine that have unwritten
+    /// changes, without writing them.
+    pub fn forget_unwritten(&mut self) {
+        let unwritten = match &self.clip.doc {
+            Some(Clip::Property(doc)) => doc.unwritten(),
+            Some(Clip::Take(doc)) => doc.unwritten(),
+            None => false,
+        };
+        if unwritten {
+            self.clip.doc = None;
+        }
+        if self.machine.doc.as_ref().is_some_and(|doc| doc.unwritten()) {
+            self.machine.doc = None;
+        }
     }
 
     /// Whether the clip at `path` is open with changes not yet written.
