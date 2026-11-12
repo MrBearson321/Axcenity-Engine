@@ -1220,7 +1220,7 @@ fn the_join_dialog_asks_for_a_link_then_says_how_joining_goes() {
 
     start.join_session();
     let drawn = draw(&mut start);
-    find(&drawn, "Join a Team Create session");
+    find(&drawn, "Join a Collaborate session");
     find(&drawn, "Invite link");
 
     start.show_joining();

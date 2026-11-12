@@ -159,7 +159,7 @@ pub fn recover(project: &Path) -> io::Result<Option<Recovered>> {
             ..
         }) = wire::decode_to_client(entry)
         else {
-            log::warn!("Team Create: a journal entry couldn't be read; recovery stops there");
+            log::warn!("Collaborate: a journal entry couldn't be read; recovery stops there");
             break;
         };
         // Already in the snapshot (it was written after this entry).
@@ -169,7 +169,7 @@ pub fn recover(project: &Path) -> io::Result<Option<Recovered>> {
         // The ops as the host applied them, in the same order on the same
         // World: they apply the same way again. Every ID was handed out.
         if let Err(reason) = apply::apply(&mut doc.view(), &ops, &|_| true) {
-            log::warn!("Team Create: journal transaction {entry_seq} didn't apply again: {reason}");
+            log::warn!("Collaborate: journal transaction {entry_seq} didn't apply again: {reason}");
             break;
         }
         seq = entry_seq;
@@ -218,7 +218,7 @@ pub fn load_unsent(root: &Path) -> io::Result<Vec<Transaction>> {
         match wire::decode_to_host(entry) {
             Ok(ToHost::Submit(transaction)) => out.push(transaction),
             _ => {
-                log::warn!("Team Create: an unsent edit couldn't be read; the rest are left out");
+                log::warn!("Collaborate: an unsent edit couldn't be read; the rest are left out");
                 break;
             }
         }

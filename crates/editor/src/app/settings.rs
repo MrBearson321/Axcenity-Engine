@@ -67,7 +67,7 @@ impl SettingsPage {
             SettingsPage::Accessibility => "Accessibility",
             SettingsPage::Updates => "Updates",
             SettingsPage::Ai => "AI connections",
-            SettingsPage::TeamCreate => "Team Create",
+            SettingsPage::TeamCreate => "Collaborate",
             SettingsPage::Engine => "Engine",
             SettingsPage::Project => "This project",
         }

@@ -1,4 +1,4 @@
-//! Team Create over real sockets on this computer (TC3): joining with an
+//! Collaborate over real sockets on this computer (TC3): joining with an
 //! invite, the handshake's refusals, editing together, and dropped
 //! connections. Each test has its own host on a free port.
 

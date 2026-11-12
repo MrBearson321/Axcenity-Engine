@@ -1,4 +1,4 @@
-//! Applying operations to a [`Doc`] with Team Create's conflict rules, and
+//! Applying operations to a [`Doc`] with Collaborate's conflict rules, and
 //! undoing them exactly.
 //!
 //! The host and every client run the same code: the host to decide what a
@@ -38,7 +38,7 @@ pub struct Place {
 /// made inside it meanwhile can go to the nearest place that still exists.
 pub type Graveyard = FxHashMap<InstanceId, Place>;
 
-/// A World as Team Create edits it, with its graveyard and the project's
+/// A World as Collaborate edits it, with its graveyard and the project's
 /// files: what the host keeps.
 #[derive(Clone)]
 pub struct Doc {

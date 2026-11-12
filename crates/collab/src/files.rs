@@ -302,7 +302,7 @@ impl FileStore for FolderStore {
             std::fs::rename(&temporary, &path)
         });
         if let Err(error) = written {
-            log::warn!("Team Create: couldn't keep an uploaded file: {error}");
+            log::warn!("Collaborate: couldn't keep an uploaded file: {error}");
         }
     }
 

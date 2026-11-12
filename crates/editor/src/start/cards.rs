@@ -64,7 +64,7 @@ pub(super) fn page_header(
                 .min_size(vec2(0.0, 32.0));
             if ui
                 .add(join)
-                .on_hover_text("Join someone's Team Create session with their invite link")
+                .on_hover_text("Join someone's Collaborate session with their invite link")
                 .clicked()
             {
                 action = Some(HeaderAction::Join);

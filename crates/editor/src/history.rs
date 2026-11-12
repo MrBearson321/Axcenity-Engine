@@ -196,7 +196,7 @@ pub struct BlobChange {
 pub struct Restored {
     pub texts: Vec<TextChange>,
     pub blobs: Vec<BlobChange>,
-    /// In a Team Create session, how many fields and moves were left alone
+    /// In a Collaborate session, how many fields and moves were left alone
     /// because someone else changed them since ([`History::set_shared`]).
     pub skipped: usize,
 }
@@ -332,7 +332,7 @@ pub struct History {
     /// The number of the top undo step when the world was last saved (or
     /// opened), or 0 if there were no steps then.
     saved_at: u64,
-    /// In a Team Create session others edit the world too, so undo and redo
+    /// In a Collaborate session others edit the world too, so undo and redo
     /// leave alone a field or a move someone changed since.
     shared: bool,
 }
@@ -921,7 +921,7 @@ impl History {
         self.open.is_some()
     }
 
-    /// What the newest step changed that Team Create doesn't share yet
+    /// What the newest step changed that Collaborate doesn't share yet
     /// (it shares Instances), such as "terrain".
     pub fn top_unshared(&self) -> Option<&'static str> {
         // Files a step writes (stylesheets, clips, imports) are shared by
@@ -942,7 +942,7 @@ impl History {
             .is_some_and(|step| matches!(step.kind, StepKind::World { .. }))
     }
 
-    /// Turns on Team Create's undo rule: undo and redo change only what's
+    /// Turns on Collaborate's undo rule: undo and redo change only what's
     /// still as this member's step left it ([`Restored::skipped`] counts
     /// the rest).
     pub fn set_shared(&mut self, shared: bool) {

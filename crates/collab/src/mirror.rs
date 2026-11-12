@@ -402,7 +402,7 @@ impl Mirror {
             });
         match written {
             Ok(()) => self.dirty = false,
-            Err(error) => log::warn!("Team Create: couldn't save the mirror's state: {error}"),
+            Err(error) => log::warn!("Collaborate: couldn't save the mirror's state: {error}"),
         }
     }
 }

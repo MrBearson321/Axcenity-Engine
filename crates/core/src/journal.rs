@@ -1,6 +1,6 @@
 //! The edit journal: every change to a World with the value it replaced,
 //! so a change made by any tool can be sent elsewhere and taken back
-//! exactly. Team Create (`collab`) turns it on for the editor's edit World
+//! exactly. Collaborate (`collab`) turns it on for the editor's edit World
 //! and turns each batch of edits into a transaction.
 //!
 //! It's off until [`World::record_edits`](crate::World::record_edits), so

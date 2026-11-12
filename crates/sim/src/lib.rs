@@ -61,7 +61,7 @@ pub struct Sim {
 impl Sim {
     /// A simulation of `world` with nothing moving yet.
     pub fn new(mut world: World, scripts: ScriptRuntime, assets: Assets) -> Self {
-        // A copy of a Team Create edit world keeps edits; the game's are
+        // A copy of a Collaborate edit world keeps edits; the game's are
         // never sent, so don't keep them.
         world.stop_recording_edits();
         // Agents and Humanoids walk on one navigation mesh (roadmap M13).

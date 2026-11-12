@@ -26,7 +26,7 @@ impl EditorApp {
         if self.play.is_some() {
             return;
         }
-        // Each copy in a Team Create session makes its own, so they're
+        // Each copy in a Collaborate session makes its own, so they're
         // never sent.
         let generators = &mut self.generators;
         let assets = &self.assets;

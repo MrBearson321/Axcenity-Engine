@@ -685,7 +685,7 @@ impl World {
     }
 
     /// Starts keeping every edit with the value it replaced, for
-    /// [`take_edits`](Self::take_edits) (Team Create). Calling it again
+    /// [`take_edits`](Self::take_edits) (Collaborate). Calling it again
     /// does nothing.
     pub fn record_edits(&mut self) {
         self.journal.recording = true;
@@ -712,7 +712,7 @@ impl World {
     }
 
     /// Runs `f` with the journal paused: its edits aren't kept, and
-    /// Instances it makes get IDs only this computer uses, so Team Create
+    /// Instances it makes get IDs only this computer uses, so Collaborate
     /// never sends them. For what the editor makes for itself, such as the
     /// pieces SplineMeshes generate.
     pub fn unrecorded<R>(&mut self, f: impl FnOnce(&mut World) -> R) -> R {
@@ -1063,7 +1063,7 @@ impl World {
         replica
     }
 
-    /// Turns this world into one that several writers fill (Team Create):
+    /// Turns this world into one that several writers fill (Collaborate):
     /// from now on [`create`](Self::create) gives IDs from 2³¹ up, which no
     /// other computer uses, as in a replica, and Instances other writers
     /// made go in at their own IDs with [`create_at`](Self::create_at).
@@ -1073,7 +1073,7 @@ impl World {
     }
 
     /// Lets this world make Instances at arena indices `start..start + len`
-    /// (generation 0): a block a Team Create host handed this writer. In a
+    /// (generation 0): a block a Collaborate host handed this writer. In a
     /// replica-mode world that keeps edits ([`record_edits`](Self::record_edits)),
     /// [`create`](Self::create) (and `duplicate` and `copy_from`) take
     /// these first, so what the user makes can be sent as is; once they run
@@ -1100,7 +1100,7 @@ impl World {
     }
 
     /// The first arena index no Instance in this world has had, so IDs from
-    /// there up (generation 0) are new everywhere. Team Create's host hands
+    /// there up (generation 0) are new everywhere. Collaborate's host hands
     /// out blocks of IDs from here for each writer's
     /// [`create_at`](Self::create_at).
     pub fn next_unused_index(&self) -> u32 {

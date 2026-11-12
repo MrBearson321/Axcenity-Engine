@@ -362,7 +362,7 @@ impl EditorApp {
         let solo = self.team.is_none();
         add(
             Command::ShareTeamCreate,
-            "Share with Team Create…",
+            "Start Collaborate Session…",
             "File",
             &["collaborate", "multiplayer editing", "invite", "host"],
             None,
@@ -373,7 +373,7 @@ impl EditorApp {
         );
         add(
             Command::JoinTeamCreate,
-            "Join Team Create…",
+            "Join Collaborate Session…",
             "File",
             &["collaborate", "invite link", "join session"],
             None,

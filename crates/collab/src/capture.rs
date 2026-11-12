@@ -1,5 +1,5 @@
 //! Turning edits made straight on a World (by any editor tool, a plugin or
-//! an AI client) into Team Create operations, from the World's edit journal
+//! an AI client) into Collaborate operations, from the World's edit journal
 //! ([`World::record_edits`]).
 //!
 //! [`capture`] reads what changed and builds the ops from the World as it
@@ -7,7 +7,7 @@
 //! values the journal kept. The client then applies the ops with
 //! [`apply`](crate::apply::apply), so the edit is on the World exactly as
 //! every other copy will apply it, and comes with an exact undo. No tool
-//! needs code of its own for Team Create.
+//! needs code of its own for Collaborate.
 //!
 //! Left alone: Instances only this computer has (`InstanceId::is_local`),
 //! and new Instances that are still outside the tree (kept in `unsent` until

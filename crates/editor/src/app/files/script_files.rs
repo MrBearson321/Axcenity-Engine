@@ -15,7 +15,7 @@ impl EditorApp {
     /// Adds the script at `path` (whose file has `source` in it) to the
     /// project, with a Script or LocalScript for it, and returns that.
     pub(in crate::app) fn add_script(&mut self, path: &str, source: String) -> InstanceId {
-        // In a Team Create session, the author's editor made its Script
+        // In a Collaborate session, the author's editor made its Script
         // already, and it arrived before the file did.
         let instance = self
             .team_script_instance(path)

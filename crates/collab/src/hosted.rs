@@ -52,3 +52,81 @@ pub fn session_world(mut world: World) -> World {
     }
     world
 }
+
+/// The folder `name` inside `parent`, taking over the folder of the
+/// feature's old name (`old`, from when Collaborate was called Team
+/// Create) the first time, so identities, host certificates and members
+/// lists carry over. When the old folder can't be moved it's used as it is.
+pub fn renamed_folder(parent: &Path, name: &str, old: &str) -> PathBuf {
+    let new = parent.join(name);
+    let previous = parent.join(old);
+    if new.exists() || !previous.is_dir() {
+        return new;
+    }
+    match std::fs::rename(&previous, &new) {
+        Ok(()) => new,
+        Err(error) => {
+            log::warn!(
+                "Collaborate: couldn't rename `{}` to `{}` ({error}); using it as it is",
+                previous.display(),
+                new.display()
+            );
+            previous
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "axcenity-collab-renamed-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_old_folder_is_taken_over_once() {
+        let parent = temp("old");
+        std::fs::create_dir(parent.join("Team Create")).unwrap();
+        std::fs::write(parent.join("Team Create").join("identity.json"), "{}").unwrap();
+        let folder = renamed_folder(&parent, "Collaborate", "Team Create");
+        assert_eq!(folder, parent.join("Collaborate"));
+        assert!(folder.join("identity.json").exists());
+        assert!(!parent.join("Team Create").exists());
+        // Later calls just use it.
+        assert_eq!(
+            renamed_folder(&parent, "Collaborate", "Team Create"),
+            folder
+        );
+        std::fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn a_new_folder_wins_over_an_old_one() {
+        let parent = temp("both");
+        std::fs::create_dir(parent.join("Team Create")).unwrap();
+        std::fs::create_dir(parent.join("Collaborate")).unwrap();
+        assert_eq!(
+            renamed_folder(&parent, "Collaborate", "Team Create"),
+            parent.join("Collaborate")
+        );
+        assert!(parent.join("Team Create").exists(), "left alone");
+        std::fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn with_neither_folder_the_new_name_is_used() {
+        let parent = temp("none");
+        assert_eq!(
+            renamed_folder(&parent, "Collaborate", "Team Create"),
+            parent.join("Collaborate")
+        );
+        std::fs::remove_dir_all(parent).unwrap();
+    }
+}

@@ -54,7 +54,7 @@ impl EditorApp {
     /// the edit made in it.
     pub(in crate::app) fn properties_pane(&mut self, ui: &mut egui::Ui) {
         let editing = !self.playing();
-        // In Team Create, who else has this selected: their changes may
+        // In Collaborate, who else has this selected: their changes may
         // land while you edit (the later one wins).
         if editing && let Some(selected) = self.selected {
             let others: Vec<_> = self
@@ -1189,7 +1189,7 @@ impl EditorApp {
             if ui.rect_contains_pointer(ui.max_rect()) {
                 self.block_tab_pointer = Some(path.clone());
             }
-            // Team Create: someone else is editing it, so it's shown as is.
+            // Collaborate: someone else is editing it, so it's shown as is.
             let locked_by = self
                 .team
                 .as_ref()

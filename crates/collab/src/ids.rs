@@ -47,7 +47,7 @@ impl IdAllocator {
             .next
             .checked_add(BLOCK_SIZE)
             .filter(|&next| next < 1 << 31)
-            .expect("Team Create ran out of IDs (over 2 billion)");
+            .expect("Collaborate ran out of IDs (over 2 billion)");
         block
     }
 }

@@ -111,7 +111,7 @@ pub struct Explorer {
     /// The hover text of the warning badge after each script that uses an API
     /// from the other side. The app fills it in each frame.
     pub warnings: HashMap<InstanceId, String>,
-    /// Rows other Team Create members have selected, with their colours.
+    /// Rows other Collaborate members have selected, with their colours.
     /// The app fills it in each frame.
     pub others: HashMap<InstanceId, Vec<egui::Color32>>,
     /// The text in Filter: while it isn't blank, only the Instances whose
