@@ -43,10 +43,12 @@ pub enum Kind {
     /// `HostCard`: each change sends the successor list to everyone
     /// (Collaborate 2.0, P4).
     HostCard,
+    /// `Tail`: up to 16 MiB to decode; one answers each `SendTail`.
+    Tail,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 11] = [
         Kind::Hello,
         Kind::Ids,
         Kind::Presence,
@@ -57,6 +59,7 @@ impl Kind {
         Kind::Checkpoint,
         Kind::Restore,
         Kind::HostCard,
+        Kind::Tail,
     ];
 
     /// How the audit log and the design doc name it.
@@ -72,6 +75,7 @@ impl Kind {
             Kind::Checkpoint => "checkpoints",
             Kind::Restore => "restores",
             Kind::HostCard => "host cards",
+            Kind::Tail => "transactions for a new host",
         }
     }
 }
@@ -114,6 +118,8 @@ pub fn budget(kind: Kind) -> Budget {
         Kind::Restore => (0.2, 2.0),
         // One per join, and when the person's address changes.
         Kind::HostCard => (0.2, 5.0),
+        // One per recovering host that asks.
+        Kind::Tail => (0.1, 3.0),
     };
     Budget { per_second, burst }
 }

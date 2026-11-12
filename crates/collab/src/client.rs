@@ -189,6 +189,10 @@ pub struct Client {
 /// ([`ToClient::SendTail`]).
 pub const TAIL_KEPT: usize = 2_000;
 
+/// The most a `Tail` answer holds, in bytes (half a host's 32 MiB message
+/// limit).
+pub const TAIL_BYTES: usize = 16 << 20;
+
 /// What a member keeps so the session can go on under another host.
 #[derive(Default)]
 struct Handover {
@@ -1269,14 +1273,26 @@ impl Client {
                 self.handover.leaving = Some(Handoff { to, last_seq });
             }
             ToClient::SendTail { after } => {
-                let entries: Vec<_> = self
+                // Oldest first and in one message, which must fit the
+                // host's limit: past `TAIL_BYTES` the newest are left out
+                // (the host lists what it couldn't recover).
+                let mut entries = Vec::new();
+                let mut bytes = 0;
+                for entry in self
                     .handover
                     .old_tail
                     .iter()
                     .flat_map(|(_, tail)| tail.iter())
                     .filter(|entry| entry.seq > after)
-                    .cloned()
-                    .collect();
+                {
+                    let size =
+                        crate::wire::encode_to_host(&ToHost::Tail(vec![entry.clone()])).len();
+                    if bytes + size > TAIL_BYTES {
+                        break;
+                    }
+                    bytes += size;
+                    entries.push(entry.clone());
+                }
                 self.outbox.push(ToHost::Tail(entries));
             }
             ToClient::Members(list) => {

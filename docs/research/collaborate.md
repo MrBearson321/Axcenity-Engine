@@ -242,7 +242,7 @@ Every way in was reviewed against the roles: the TCP listener, the handshake, an
 | `Restore` | Owner | 2, then one every 5 s | — | Fixed (budget) |
 | `AuditLog` (new) | Owner | — | — | — |
 | `HostCard` (Collaborate 2.0 P4) | Editors and the Owner (`Role::may_host`) | 5, then one every 5 s | Each changes the successor list, which goes to everyone; the address is trimmed, one word, at most 260 bytes | Fixed (budget) |
-| `Tail` (Collaborate 2.0 P4) | Only a member a recovering host asked (`SendTail`), once | — | Replayed without role checks (the old host accepted them), so only from a member asked, only entries continuing the host's own count, and only while recovering | Fixed |
+| `Tail` (Collaborate 2.0 P4) | Only a member a recovering host asked (`SendTail`), once | 3, then one every 10 s; the member's answer holds at most 16 MiB, oldest first (`client::TAIL_BYTES`) | Replayed without role checks (the old host accepted them), so only from a member asked, only entries continuing the host's own count, and only while recovering | Fixed |
 
 **Before signing in** (`socket.rs`, `session.rs`):
 

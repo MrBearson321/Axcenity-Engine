@@ -523,6 +523,7 @@ impl Host {
             ToHost::Checkpoint(_) => Some(Kind::Checkpoint),
             ToHost::Restore(_) => Some(Kind::Restore),
             ToHost::HostCard { .. } => Some(Kind::HostCard),
+            ToHost::Tail(_) => Some(Kind::Tail),
             _ => None,
         };
         if let Some(kind) = kind
