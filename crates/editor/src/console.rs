@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 9] = [
+pub const BUILT_INS: [(&str, &str); 15] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -40,6 +40,33 @@ pub const BUILT_INS: [(&str, &str); 9] = [
         "check — scan the project for missing files, invalid references, \
          import failures, and broken dependencies",
     ),
+    (
+        "checkpoint",
+        "checkpoint [label] — upload a checkpoint to the project's repository now \
+         (Collaborate; projects linked to one)",
+    ),
+    (
+        "projects",
+        "projects — list the Collaborate projects this computer knows, and who hosted last",
+    ),
+    (
+        "rejoin",
+        "rejoin <project> — rejoin a Collaborate project's session without an invite",
+    ),
+    (
+        "host",
+        "host — host the open Collaborate project for its members, who rejoin without an \
+         invite",
+    ),
+    (
+        "conflicts",
+        "conflicts — list the files changed both here and in the project's repository",
+    ),
+    (
+        "resolve",
+        "resolve <mine|theirs|both> [file] — choose what to keep of a conflicting file (all \
+         of them without a file); the merge is made once every file is chosen",
+    ),
 ];
 
 /// The most commands the history keeps.
@@ -58,6 +85,15 @@ pub enum Command<'a> {
     Stop,
     Save,
     Check,
+    /// The label after `checkpoint`, if any.
+    Checkpoint(&'a str),
+    Projects,
+    /// The project's name or ID after `rejoin`.
+    Rejoin(&'a str),
+    Host,
+    Conflicts,
+    /// The choice and file after `resolve`.
+    Resolve(&'a str),
     /// Anything else.
     Lua(&'a str),
 }
@@ -86,6 +122,12 @@ pub fn parse(input: &str) -> Command<'_> {
         ("select", _) => Command::Select(rest),
         ("find", _) => Command::Find(rest),
         ("open", _) => Command::Open(rest),
+        ("checkpoint", _) => Command::Checkpoint(rest),
+        ("projects", true) => Command::Projects,
+        ("rejoin", _) => Command::Rejoin(rest),
+        ("host", true) => Command::Host,
+        ("conflicts", true) => Command::Conflicts,
+        ("resolve", false) => Command::Resolve(rest),
         _ => Command::Lua(line),
     }
 }
@@ -485,6 +527,17 @@ mod tests {
         assert_eq!(parse("open Spinner"), Command::Open("Spinner"));
         assert_eq!(parse("find"), Command::Find(""));
         assert_eq!(parse("check"), Command::Check);
+        assert_eq!(parse("checkpoint"), Command::Checkpoint(""));
+        assert_eq!(
+            parse("checkpoint before boss"),
+            Command::Checkpoint("before boss")
+        );
+        assert_eq!(parse("conflicts"), Command::Conflicts);
+        assert_eq!(
+            parse("resolve theirs world.json"),
+            Command::Resolve("theirs world.json")
+        );
+        assert_eq!(parse("resolve"), Command::Lua("resolve"));
         for lua in [
             "clear = 5",
             "select(2, 'a', 'b')",
@@ -529,7 +582,8 @@ mod tests {
         assert_eq!(names("workspace.Bas"), ["Baseplate"]);
         assert!(names("workspace.Baseplate.Transp").contains(&"Transparency".to_string()));
         assert_eq!(names("print(wor"), ["workspace"]);
-        assert_eq!(names("pr"), ["print"]);
+        assert_eq!(names("pr"), ["print", "projects"]);
+        assert_eq!(names("pri"), ["print"]);
         assert_eq!(names("he"), ["help"]);
         assert_eq!(names("select Work"), ["Workspace"]);
         assert_eq!(complete("x = workspace.Bas", &world, &globals).start, 14);

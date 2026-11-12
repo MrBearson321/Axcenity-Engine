@@ -1016,7 +1016,7 @@ fn keep_until_a_save() {
 fn end_unsaved_then_save(project: &std::path::Path) {
     let (mut a, b) = session_with_a_crate(project, "end-unsaved");
     drop(b);
-    a.leave_team_session();
+    a.end_team_session();
     assert!(axcenity_collab::journal::has_recovery(project));
     assert!(a.save());
     assert!(!axcenity_collab::journal::has_recovery(project));
@@ -1030,7 +1030,7 @@ fn when_the_host_ends_the_session_the_joiner_stays_open_read_only() {
 fn host_ends_the_session() {
     let project = copy_of_example("hello-part", "team-host-leaves");
     let (mut a, mut b) = session_with_a_crate(&project, "host-leaves");
-    a.leave_team_session();
+    a.end_team_session();
     let start = std::time::Instant::now();
     while !matches!(
         b.team().map(|t| t.status()),

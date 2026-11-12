@@ -36,7 +36,7 @@ A large module is **a parent file plus a folder of the same name**. The parent k
 
 ## Dependencies
 
-Pin every third-party crate once in `[workspace.dependencies]` with an explaining comment (what it's for, its license); check Apache-2.0 compatibility; run `cargo hakari generate`. Development-only dependencies sit behind a feature nothing else can turn on (the editor's `hot-patch`). See [Add a dependency](../Guides/Recipes/Add-a-Dependency.md).
+Pin every third-party crate once in `[workspace.dependencies]` with an explaining comment (what it's for, its license); check Apache-2.0 compatibility; run `cargo hakari generate`. Development-only dependencies sit behind a feature nothing else can turn on (as the editor's `engine-dev` does for its code). See [Add a dependency](../Guides/Recipes/Add-a-Dependency.md).
 
 ## Crate rules
 

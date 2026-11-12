@@ -63,6 +63,11 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod collab_conflicts;
+mod collab_handoff;
+mod collab_project;
+mod collab_repo;
+mod collab_repo_ui;
 mod collab_setup;
 mod inventory;
 mod sky;
@@ -115,7 +120,6 @@ use crate::dialogue_editor::DialogueStudio;
 use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
-use crate::hot_patch;
 use crate::import_dialog::ImportDialog;
 use crate::layout::{self, Layout, Pane};
 use crate::loading::{self, Loading};
@@ -219,6 +223,9 @@ pub struct EditorApp {
     team_start: Option<team::TeamStart>,
     /// The Collaborate panel's own state (`app/team_panel.rs`).
     team_panel: team_panel::TeamPanel,
+    /// The open project's Git remote: automatic checkpoints and uploads
+    /// (`app/collab_repo.rs`).
+    repo: collab_repo::ProjectRepo,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
     tool: Tool,
@@ -871,6 +878,7 @@ impl EditorApp {
             team: None,
             team_start: None,
             team_panel: Default::default(),
+            repo: Default::default(),
             tool: Tool::default(),
             snap: Snap::default(),
             modes: Modes::default(),
@@ -979,7 +987,7 @@ impl EditorApp {
             adapter: None,
             benchmark: Default::default(),
             rebuilds: Rebuilds {
-                source: EngineSource::find(),
+                source: EngineSource::for_rebuilds(),
                 ..Rebuilds::default()
             },
             launching: None,
@@ -1124,9 +1132,7 @@ impl eframe::App for EditorApp {
     /// the whole window.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        // While dx serves the editor, through the newest code it patched in.
-        let patched = self.rebuilds.patched_frames();
-        hot_patch::call(patched, || self.frame(ui, frame.wgpu_render_state()));
+        self.frame(ui, frame.wgpu_render_state());
         self.pace_frame();
         // Relaunching into a rebuilt editor saves the settings first.
         self.launch(&ctx, frame);
@@ -1319,8 +1325,10 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.asking = Some(Discard::Quit);
             } else {
-                // Saved, or the changes were let go: a hosted session ends
-                // with nothing to recover.
+                // Saved, or the changes were let go: a last upload to the
+                // project's repository, then a hosted session ends with
+                // nothing to recover.
+                self.repo_close();
                 self.end_team_for_quit();
             }
         }
@@ -1387,6 +1395,8 @@ impl EditorApp {
         self.terrain_frame(ctx);
         // Collaborate: send what this frame's tools did, then catch up.
         self.team_frame();
+        // The project's repository: automatic checkpoints and uploads.
+        self.repo_frame();
         if let Some(every) = self.team_wants_frames() {
             ctx.request_repaint_after(every);
         }
@@ -1750,6 +1760,7 @@ impl EditorApp {
         self.settings_window(ctx);
         self.recovered_changes_window(ctx);
         self.collab_setup_windows(ctx);
+        self.repo_ui_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
@@ -1814,8 +1825,6 @@ mod graphics_benchmark_tests;
 #[cfg(test)]
 mod health_tests;
 #[cfg(test)]
-mod hot_patch_tests;
-#[cfg(test)]
 mod ik_tests;
 #[cfg(test)]
 mod imported_clip_tests;
@@ -1856,6 +1865,14 @@ mod tool_window_tests;
 #[cfg(test)]
 mod tour_snapshots;
 
+#[cfg(test)]
+mod collab_handoff_tests;
+#[cfg(test)]
+mod collab_project_tests;
+#[cfg(test)]
+mod collab_repo_tests;
+#[cfg(test)]
+mod collab_scenario_tests;
 #[cfg(test)]
 mod collab_setup_tests;
 #[cfg(test)]

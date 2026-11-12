@@ -42,6 +42,9 @@ pub enum AuditKind {
     Denied,
     /// A member went over a budget; what was over it was dropped.
     Limited,
+    /// The session moved to another host, or a new host recovered a lost
+    /// one's transactions (Collaborate 2.0).
+    Handoff,
 }
 
 /// One line of the audit log.
