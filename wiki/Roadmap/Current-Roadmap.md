@@ -63,10 +63,10 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 
 | Item | What | Status |
 |---|---|---|
-| G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107) |
+| G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107; card drag into the scene #238). Left: drag into Assets, sound preview, Freesound |
 | G2 | Scripts inside objects (`SourceFile` references, `objects/` folder) | **Done** (#91 design, #111, #114, #115, #117 on players' devices, in levels and characters, #120) |
 | G3 | Physics render interpolation | **Done** (#110) |
-| G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); go to definition is the open gap (competitive roadmap item 4) |
+| G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); Go to Definition (#239) |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
 | G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; a coroutine the script made itself still can't pause |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126); memory over time, peaks and budgets are the competitive roadmap's item 5 |

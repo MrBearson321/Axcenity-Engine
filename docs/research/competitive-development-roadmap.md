@@ -58,10 +58,10 @@ In particular (status checked on main `5143a5a`):
 
 | Existing item | Work | Status |
 |---|---|---|
-| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Gaps: dragging a result card into the scene, sound preview playback, Freesound |
+| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238. Gaps: dragging a card into the Assets panel, sound preview playback, Freesound |
 | G2 | Scripts inside objects | **Implemented** (#91, #111, #114, #115, #117, #120; Code/Blocks switch #230) |
 | G3 | Physics interpolation | **Implemented** (#110) |
-| G4 | Script completion and diagnostics | **Implemented** (#145 via #153). Gap: go to definition |
+| G4 | Script completion and diagnostics | **Implemented** (#145 via #153; go to definition #239) |
 | G5 | UI prefabs | **Implemented** (#122) |
 | G6 | Debugger stepping and watches | **Implemented** (#131). Limit: a coroutine the script made itself can't pause |
 | G7 | Memory profiling | **Partial** (#125, #126): breakdown by kind and class. Gaps: memory over time, peaks, budgets |
@@ -172,7 +172,7 @@ Improve visual smoothness for physics-driven objects when rendering above the ph
 
 **Priority:** Critical
 **Existing reference:** G4
-**Status:** Partial. Completion (Instance paths, members, `GetService`, Enums, signatures) and luau-lsp errors and lints in code tabs and Output are built (`editor/src/script_completion.rs`, `luau_check.rs`). Go to definition is the gap; luau-lsp isn't shipped with the editor.
+**Status:** Implemented. Completion (Instance paths, members, `GetService`, Enums, signatures), luau-lsp errors and lints in code tabs and Output, and Go to Definition (F12 or Ctrl+click: a local's line, an Instance, or an API Reference entry; #239) are built (`editor/src/script_completion.rs`, `luau_check.rs`). luau-lsp isn't shipped with the editor.
 
 Develop a more complete built-in scripting experience.
 
@@ -208,7 +208,7 @@ Use `luau-lsp` as a child process for diagnostics, following the existing archit
 
 **Priority:** Critical
 **Existing reference:** G1 and Toolbox integration documentation
-**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Gaps: dragging a result card into the scene or the Assets panel, sound preview playback, and Freesound (later, with a user's own key, as decided in G1).
+**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Gaps: dragging a card into the Assets panel, sound preview playback, and Freesound (later, with a user's own key, as decided in G1).
 
 Complete the centralized Toolbox architecture.
 
@@ -1058,7 +1058,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Physics render interpolation | Implemented | Physics smoothing, async physics | Physics interpolation (4.3+) | Rigidbody interpolation | `Rigidbody.interpolation` | `physics/src/blend.rs` (G3) | Critical | physics, scene | Keep |
 | Code completion in the built-in editor | Implemented | n/a (IDE, Blueprints) | Built-in editor with completion | IDE (C#) | IDE (C#) | `editor/src/script_completion.rs` (G4) | Critical | script definitions | Keep |
 | Inline diagnostics | Implemented (needs luau-lsp installed) | IDE | Built-in | IDE | IDE | `editor/src/luau_check.rs` (G4) | Critical | luau-lsp | Keep |
-| Go to definition | Missing | IDE | Built-in | IDE | IDE | G4 gap | High | completion | Implement |
+| Go to definition | Implemented (#239) | IDE | Built-in | IDE | IDE | `script_completion::definition_at` (G4) | High | completion | Keep |
 | Debugger: breakpoints, stepping, watches | Implemented (script-made coroutines can't pause) | Blueprint and C++ debuggers | Built-in debugger | IDE debugger | IDE debugger | `script/src/debugger.rs` (G6) | High | script | Keep; improve coroutines when a game needs it |
 | Hot reload of game code | Implemented (scripts keep state) | Live Coding | Script reload | C# hotload | Domain reload | Phase 89, ADR-0023 | High | script | Keep |
 | Parallel scripting | Deferred | n/a | Threads | Async tasks | Jobs | gap analysis P4 | Low | script | Defer (scripts 0.74 ms of XB10k) |
@@ -1069,7 +1069,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 
 | Feature | Axcenity | Unreal | Godot | s&box | Unity | Reference | Priority | Dependencies | Decision |
 |---|---|---|---|---|---|---|---|---|---|
-| Built-in asset discovery | Partial: no card drag, no sound preview | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
+| Built-in asset discovery | Partial: card drag into the scene (#238); no sound preview | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
 | Licence and attribution tracking | Implemented | Fab licences | Per asset | Platform | Asset Store EULA | `toolbox` `license.rs`, `provenance.rs`, CREDITS.txt | Critical | toolbox | Keep |
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
@@ -1140,8 +1140,8 @@ The following is the recommended order for execution. **Status** is on main `514
 |---|---|---|---|---|
 | 1 | Physics interpolation | G3 | Implemented (#110) | Nothing; hand check at 120–240 fps on the PC |
 | 2 | Scripts inside objects | G2 | Implemented (#111–#120, #230) | Nothing |
-| 3 | Complete Toolbox integration | G1 | Partial | Drag cards into the scene and Assets; sound preview |
-| 4 | Script completion and diagnostics | G4 | Partial | Go to definition |
+| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238) | Drag into Assets; sound preview |
+| 4 | Script completion and diagnostics | G4 | Implemented (#153, #239) | Nothing |
 | 5 | Memory profiler | G7 | Partial | Memory over time, peaks and budget warnings |
 | 6 | Audio occlusion and roll-off | G8 | Implemented (#128) | Nothing |
 | 7 | Debugger stepping and watches | G6 | Implemented (#131) | Nothing now (coroutine limit recorded) |
