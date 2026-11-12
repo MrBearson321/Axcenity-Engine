@@ -69,7 +69,7 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 | **Before → after** | Temperate Wet Patch launch to assets loaded 11.4 s (FXC) → 2.41 s (DXC) → 2.25 s (parallel); pipelines ready 1,123 → 886 ms. Farmhouse 10.1 → 2.60 → 2.36 s. Vulkan 0.98 s |
 | **Method** | Release player, `--bench 300`, one warm-up then medians of 3 |
 | **Hardware** | Desktop |
-| **Trade-offs** | About 21.5 MB more per Windows executable; Windows builds need the ATL component. About 0.4 s more than Vulkan is still unexplained (maybe Vulkan and GL adapter listing) |
+| **Trade-offs** | About 21.5 MB more per Windows executable; Windows builds need the ATL component. DirectX 12 also takes about 0.75 s longer than Vulkan to reach `using graphics adapter` (instance, surface and adapter setup; listing Vulkan and GL adapters too costs at most 50 ms). The `debug` lines in `Renderer::new` split it up |
 | **Detail** | `docs/rendering/pipeline.md`, "Graphics API" |
 
 ### Physics step and thread pools (2026-11-11)
