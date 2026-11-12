@@ -1003,6 +1003,17 @@ impl EditorApp {
                 .flat_map(|entry| &entry.drawings)
                 .collect()
         };
+        let plugin_handles: Vec<(usize, &axcenity_plugins::Handle)> = if self.playing() {
+            Vec::new()
+        } else {
+            self.plugins
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.running.is_some())
+                .flat_map(|(index, entry)| entry.handles.iter().map(move |h| (index, h)))
+                .collect()
+        };
         let mut console = self.dev_console_items();
         let emits = std::mem::take(&mut self.pending_emits);
         let debug_rays = self
@@ -1100,6 +1111,7 @@ impl EditorApp {
                             spline_editing,
                             plugin_mouse,
                             plugin_drawings,
+                            plugin_handles,
                             play_camera: match sequence.and_then(|p| p.camera) {
                                 Some(shot) => Some(crate::viewport::PlayCamera {
                                     shown: axcenity_script::CameraView {

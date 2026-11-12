@@ -468,6 +468,68 @@ fn drawings_stay_until_removed_and_the_host_hears_only_of_changes() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+#[test]
+fn a_handle_moves_where_it_is_dragged_and_fires_its_events() {
+    let folder = temp_folder("handles");
+    let found = project_with_plugin(
+        &folder,
+        "handles",
+        MANIFEST,
+        "local free = plugin:CreateHandle(Vector3.new(0, 1, 0))\n\
+         local slide = plugin:CreateHandle(Vector3.new(0, 0, 0), { Axis = Vector3.new(0, 2, 0), Size = 100, Color = Color3.new(0, 0, 1) })\n\
+         free.Dragged:Connect(function(at) print('dragged', at) end)\n\
+         free.DragEnded:Connect(function(at) print('ended', at, free.Position) end)\n\
+         slide.Dragged:Connect(function(at) slide.Position = at + Vector3.new(1, 0, 0) end)\n\
+         print(tostring(free), pcall(plugin.CreateHandle, plugin, Vector3.new(0, 0, 0), { Axis = Vector3.new(0, 0, 0) }))\n\
+         local button = plugin:CreateToolbar('H'):CreateButton('Remove')\n\
+         button.Click:Connect(function() free:Remove(); print(pcall(function() return free.Position end)) end)\n",
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert!(
+        printed[0].starts_with("PluginHandle\tfalse\t"),
+        "{}",
+        printed[0]
+    );
+    assert!(printed[0].contains("zero"), "{}", printed[0]);
+    let handles = plugin.take_handles().unwrap();
+    assert_eq!(handles.len(), 2);
+    assert_eq!(handles[0].axis, None);
+    assert_eq!(handles[0].size, DEFAULT_HANDLE_SIZE);
+    assert_eq!(handles[1].axis, Some(Vector3::new(0.0, 1.0, 0.0)));
+    assert_eq!(handles[1].size, 24.0);
+    assert_eq!(handles[1].color, axcenity_core::Color3::new(0.0, 0.0, 1.0));
+    assert_eq!(plugin.take_handles(), None);
+
+    let (free, slide) = (handles[0].id, handles[1].id);
+    plugin.drag_handle(&mut world, free, Vector3::new(2.0, 1.0, 0.0), false);
+    plugin.drag_handle(&mut world, free, Vector3::new(3.0, 1.0, 0.0), true);
+    // The plugin may move its handle itself in Dragged.
+    plugin.drag_handle(&mut world, slide, Vector3::new(0.0, 4.0, 0.0), false);
+    let handles = plugin.take_handles().unwrap();
+    assert_eq!(handles[0].position, Vector3::new(3.0, 1.0, 0.0));
+    assert_eq!(handles[1].position, Vector3::new(1.0, 4.0, 0.0));
+
+    plugin.click(&mut world, plugin.toolbars()[0].buttons[0].id);
+    assert_eq!(plugin.take_handles().unwrap().len(), 1);
+    // A removed handle can't be dragged, and nothing fires.
+    plugin.drag_handle(&mut world, free, Vector3::new(9.0, 9.0, 9.0), true);
+    assert_eq!(plugin.take_handles(), None);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(
+        printed[..2],
+        ["dragged\t2, 1, 0", "ended\t3, 1, 0\t3, 1, 0"]
+    );
+    assert!(
+        printed[2].starts_with("false\t") && printed[2].contains("removed"),
+        "{}",
+        printed[2]
+    );
+    assert_eq!(printed.len(), 3);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// The luau-lsp file names every global, method, field and event the
 /// plugin API has.
 #[test]
@@ -513,6 +575,10 @@ fn the_definitions_name_the_whole_plugin_api() {
         "function ClearDrawings(",
         "function Remove(",
         "function SetColor(",
+        "function CreateHandle(",
+        "Position: Vector3",
+        "Dragged: PluginSignal",
+        "DragEnded: PluginSignal",
     ];
     for name in names {
         assert!(

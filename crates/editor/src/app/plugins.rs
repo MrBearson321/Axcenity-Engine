@@ -82,6 +82,7 @@ impl EditorApp {
                 stylesheets: Vec::new(),
                 widgets: Vec::new(),
                 drawings: Vec::new(),
+                handles: Vec::new(),
             });
         }
         let roots = [
@@ -151,6 +152,7 @@ impl EditorApp {
         };
         entry.widgets.clear();
         entry.drawings.clear();
+        entry.handles.clear();
         if let Some(plugin) = entry.running.take() {
             plugin.stop(&mut self.world);
         }
@@ -276,6 +278,9 @@ impl EditorApp {
         let settings = plugin.take_settings();
         if let Some(drawings) = plugin.take_drawings() {
             entry.drawings = drawings;
+        }
+        if let Some(handles) = plugin.take_handles() {
+            entry.handles = handles;
         }
         for line in lines {
             match line.kind {
@@ -440,6 +445,14 @@ impl EditorApp {
     }
 
     /// Whether a plugin has the Scene View's left button (`plugin:Activate(true)`).
+    /// The user dragged a plugin's handle: it moves there, and the plugin
+    /// hears of it (`Dragged`, or `DragEnded` when let go).
+    pub(in crate::app) fn drag_plugin_handle(&mut self, moved: crate::viewport::HandleMove) {
+        self.call_plugin(moved.plugin, |plugin, world| {
+            plugin.drag_handle(world, moved.id, moved.position, moved.ended);
+        });
+    }
+
     pub(in crate::app) fn plugin_has_mouse(&self) -> bool {
         self.plugins
             .entries

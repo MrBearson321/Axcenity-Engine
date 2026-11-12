@@ -68,6 +68,8 @@ mod legend;
 mod move_overlay;
 mod overlays;
 mod plugin_drawings;
+mod plugin_handles;
+pub use plugin_handles::HandleMove;
 mod view_cube;
 mod view_mode;
 use overlays::*;
@@ -210,6 +212,8 @@ pub struct ViewportOutput {
     /// The mouse over the Scene View for the editor's plugins
     /// (`plugin:GetMouse()`), while any run and the game doesn't.
     pub plugin_mouse: Option<axcenity_plugins::MouseInput>,
+    /// A plugin handle the user dragged (`plugin:CreateHandle`).
+    pub plugin_handle: Option<HandleMove>,
     /// What drawing the scene took, for the Profiler.
     pub render: Option<RenderCost>,
     /// Materials whose surface shaders didn't compile, each once, for the
@@ -400,6 +404,9 @@ pub struct ViewportScene<'a> {
     /// What running plugins draw over the Scene View (`plugin:DrawLine`
     /// and the rest; roadmap G10). Empty during Play.
     pub plugin_drawings: Vec<&'a axcenity_plugins::Drawing>,
+    /// Running plugins' handles, each with its plugin's index in the
+    /// editor's list. Empty during Play.
+    pub plugin_handles: Vec<(usize, &'a axcenity_plugins::Handle)>,
     /// The camera during Play (`Session::shown_camera`, with whether the
     /// game holds the view). A controller's or a script's camera doesn't
     /// move the fly camera, so Stop shows it where it was.
@@ -723,6 +730,8 @@ pub struct Viewport {
     /// The left button went down on a Spline's curve and is held, so it
     /// neither selects nor drags anything else.
     spline_press: bool,
+    /// A plugin's handle being dragged.
+    handle_drag: Option<plugin_handles::HandleDrag>,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -767,6 +776,7 @@ impl Viewport {
             drag: None,
             spline_drag: None,
             spline_press: false,
+            handle_drag: None,
             particles: Particles::new(),
             terrain_stroke: false,
             plugin_press: false,
@@ -1051,6 +1061,7 @@ impl Viewport {
             spline_editing,
             plugin_mouse,
             plugin_drawings,
+            plugin_handles,
             play_camera,
             graphics,
             others,
@@ -1262,16 +1273,29 @@ impl Viewport {
         if cube_hit.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        // Plugin handles take a press on them while editing, before anything else.
+        let (plugin_handle, handle_taken) =
+            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+                let step = snap.move_on.then_some(snap.move_step);
+                self.plugin_handle_input(ui, &response, &screen, &plugin_handles, step)
+            } else {
+                self.handle_drag = None;
+                (None, false)
+            };
         // Splines take a press on their curve or points while editing.
         let (spline, spline_taken, spline_released) =
-            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+            if editing && brush.is_none() && picking.is_none() && !plugin_button && !handle_taken {
                 self.spline_input(ui, &response, &screen, world, spline_editing)
             } else {
                 self.spline_drag = None;
                 self.spline_press = false;
                 (None, false, false)
             };
-        let drag_tool = if spline_taken { None } else { drag_tool };
+        let drag_tool = if spline_taken || handle_taken {
+            None
+        } else {
+            drag_tool
+        };
         let drag = self.drag_input(
             ui,
             &response,
@@ -1301,6 +1325,7 @@ impl Viewport {
                 || picking.is_some()
                 || plugin_button
                 || spline_taken
+                || handle_taken
                 || cube_hit.is_some() =>
             {
                 None
@@ -1533,6 +1558,14 @@ impl Viewport {
         if !plugin_drawings.is_empty() {
             plugin_drawings::paint(&ui.painter_at(rect), &screen, &plugin_drawings);
         }
+        if !plugin_handles.is_empty() {
+            plugin_handles::paint_handles(
+                &ui.painter_at(rect),
+                &screen,
+                &plugin_handles,
+                self.handle_drag,
+            );
+        }
         if let Some(physics) = physics {
             paint_physics(&ui.painter_at(rect), &screen, physics, overlays);
         }
@@ -1677,6 +1710,7 @@ impl Viewport {
             surface,
             spline,
             plugin_mouse,
+            plugin_handle,
             render: Some(render),
             shader_errors,
         }

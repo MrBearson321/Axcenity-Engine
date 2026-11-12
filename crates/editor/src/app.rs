@@ -1727,6 +1727,10 @@ impl EditorApp {
         if let Some(mouse) = output.plugin_mouse {
             self.plugin_mouse(mouse);
         }
+        if let Some(moved) = output.plugin_handle {
+            self.drag_plugin_handle(moved);
+            ctx.request_repaint();
+        }
         if self.constraint_tool.is_some()
             && (self.playing()
                 || ctx.input(|input| shortcuts::pressed(input, shortcuts::Action::PutToolDown)))

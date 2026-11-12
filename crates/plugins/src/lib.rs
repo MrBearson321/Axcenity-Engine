@@ -27,7 +27,10 @@ use mlua::{IntoLuaMulti, MultiValue};
 pub use bundle::{
     Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
 };
-pub use draw::{DEFAULT_COLOR, DEFAULT_THICKNESS, Drawing, MAX_DRAWINGS, Shape};
+pub use draw::{
+    DEFAULT_COLOR, DEFAULT_HANDLE_SIZE, DEFAULT_THICKNESS, Drawing, Handle, MAX_DRAWINGS,
+    MAX_HANDLES, Shape,
+};
 pub use manifest::{
     ENTRY_FILE, Found, MANIFEST_FILE, Manifest, Origin, PLUGINS_FOLDER, Permission, find_plugins,
     plugin_files,
@@ -167,6 +170,7 @@ impl Plugin {
             modules: BTreeMap::new(),
             env: None,
             drawings: Default::default(),
+            handles: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -217,6 +221,43 @@ impl Plugin {
         let mut state = api::state(self.runtime.lua()).ok()?;
         std::mem::take(&mut state.drawings.changed)
             .then(|| state.drawings.shapes.values().cloned().collect())
+    }
+
+    /// Its handles in the Scene View, when they changed since the last call.
+    pub fn take_handles(&self) -> Option<Vec<Handle>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.handles.changed)
+            .then(|| state.handles.handles.values().cloned().collect())
+    }
+
+    /// The user dragged the handle numbered `id` to `position`: moves it
+    /// and fires its `Dragged(position)`, or its `DragEnded(position)` when
+    /// the button was let go (`ended`).
+    pub fn drag_handle(&self, world: &mut World, id: u64, position: Vector3, ended: bool) {
+        let moved = match api::state(self.runtime.lua()) {
+            Ok(mut state) => {
+                let handles = &mut state.handles;
+                match handles.handles.get_mut(&id) {
+                    Some(handle) => {
+                        handle.position = position;
+                        handles.changed = true;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            Err(_) => false,
+        };
+        if !moved {
+            return;
+        }
+        let at = axcenity_script::system::LuaVector3(position);
+        let key = if ended {
+            SignalKey::HandleDragEnded(id)
+        } else {
+            SignalKey::HandleDragged(id)
+        };
+        self.fire(world, key, at);
     }
 
     /// Whether it took the Scene View's left button (`plugin:Activate(true)`).

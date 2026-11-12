@@ -3,14 +3,18 @@
 //! the plugin removes them (retained, not redrawn every frame), so a plugin
 //! draws once when something changes. The editor draws them over the
 //! Scene View while editing ([`crate::Plugin::take_drawings`]).
+//!
+//! Handles (`plugin:CreateHandle`) are dots in the Scene View the user
+//! drags, freely or along an axis; the editor moves them and fires their
+//! `Dragged` and `DragEnded` ([`crate::Plugin::drag_handle`]).
 
 use std::collections::BTreeMap;
 
 use axcenity_core::{CFrame, Color3, Vector3};
 use axcenity_script::system::{LuaCFrame, LuaColor3, LuaVector3};
-use mlua::{FromLua, Lua, MetaMethod, Table, UserData, UserDataMethods, Value};
+use mlua::{FromLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value};
 
-use crate::api::state;
+use crate::api::{LuaSignal, SignalKey, state};
 
 /// How many drawings one plugin may keep at once.
 pub const MAX_DRAWINGS: usize = 10_000;
@@ -212,5 +216,131 @@ impl UserData for LuaDrawing {
             Ok(())
         });
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("PluginDrawing"));
+    }
+}
+
+/// How many handles one plugin may have at once.
+pub const MAX_HANDLES: usize = 256;
+/// A handle's radius unless the options give one, in points.
+pub const DEFAULT_HANDLE_SIZE: f32 = 7.0;
+
+/// A dot in the Scene View the user can drag (`plugin:CreateHandle`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Handle {
+    /// Its number, for [`crate::Plugin::drag_handle`].
+    pub id: u64,
+    pub position: Vector3,
+    pub color: Color3,
+    /// Its radius in points.
+    pub size: f32,
+    /// The direction it slides along (length 1), or `None` to move in the
+    /// plane facing the camera.
+    pub axis: Option<Vector3>,
+}
+
+/// A plugin's handles, by number, and whether they changed since the host
+/// last took them.
+#[derive(Default)]
+pub(crate) struct Handles {
+    pub(crate) handles: BTreeMap<u64, Handle>,
+    pub(crate) next: u64,
+    pub(crate) changed: bool,
+}
+
+/// `plugin:CreateHandle(position, options)`: `options` has `Color`, `Size`
+/// (radius in points, 3 to 24) and `Axis` (a Vector3 to slide along).
+pub(crate) fn handle(
+    lua: &Lua,
+    (position, opts): (LuaVector3, Option<Table>),
+) -> mlua::Result<LuaHandle> {
+    let position = finite(position.0, "position")?;
+    let mut color = DEFAULT_COLOR;
+    let mut size = DEFAULT_HANDLE_SIZE;
+    let mut axis = None;
+    if let Some(opts) = opts {
+        match opts.get::<Value>("Color")? {
+            Value::Nil => {}
+            value => color = LuaColor3::from_lua(value, lua)?.0,
+        }
+        if let Some(s) = opts.get::<Option<f32>>("Size")?
+            && s.is_finite()
+        {
+            size = s.clamp(3.0, 24.0);
+        }
+        if let Some(LuaVector3(v)) = opts.get::<Option<LuaVector3>>("Axis")? {
+            let v = finite(v, "Axis")?;
+            let length = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
+            if length < 1e-6 {
+                return Err(mlua::Error::runtime("Axis can't be a zero Vector3"));
+            }
+            axis = Some(Vector3::new(v.x / length, v.y / length, v.z / length));
+        }
+    }
+    let mut state = state(lua)?;
+    let handles = &mut state.handles;
+    if handles.handles.len() >= MAX_HANDLES {
+        return Err(mlua::Error::runtime(format!(
+            "a plugin can have at most {MAX_HANDLES} handles: remove some first"
+        )));
+    }
+    handles.next += 1;
+    let id = handles.next;
+    handles.handles.insert(
+        id,
+        Handle {
+            id,
+            position,
+            color,
+            size,
+            axis,
+        },
+    );
+    handles.changed = true;
+    Ok(LuaHandle(id))
+}
+
+/// A handle, by its number.
+pub(crate) struct LuaHandle(u64);
+
+fn with_handle<R>(lua: &Lua, id: u64, f: impl FnOnce(&mut Handle) -> R) -> mlua::Result<R> {
+    let mut state = state(lua)?;
+    let handles = &mut state.handles;
+    let handle = handles
+        .handles
+        .get_mut(&id)
+        .ok_or_else(|| mlua::Error::runtime("this handle was removed"))?;
+    let result = f(handle);
+    handles.changed = true;
+    Ok(result)
+}
+
+impl UserData for LuaHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("Position", |lua, this| {
+            with_handle(lua, this.0, |handle| LuaVector3(handle.position))
+        });
+        fields.add_field_method_set("Position", |lua, this, position: LuaVector3| {
+            let position = finite(position.0, "Position")?;
+            with_handle(lua, this.0, |handle| handle.position = position)
+        });
+        fields.add_field_method_get("Dragged", |_, this| {
+            Ok(LuaSignal(SignalKey::HandleDragged(this.0)))
+        });
+        fields.add_field_method_get("DragEnded", |_, this| {
+            Ok(LuaSignal(SignalKey::HandleDragEnded(this.0)))
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("Remove", |lua, this, ()| {
+            let mut state = state(lua)?;
+            if state.handles.handles.remove(&this.0).is_some() {
+                state.handles.changed = true;
+            }
+            state.handlers.remove(&SignalKey::HandleDragged(this.0));
+            state.handlers.remove(&SignalKey::HandleDragEnded(this.0));
+            Ok(())
+        });
+        methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("PluginHandle"));
     }
 }
