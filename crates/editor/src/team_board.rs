@@ -6,7 +6,8 @@
 //! Collaborate session and the project's repository then share).
 
 use axcenity_teamwork::{
-    Board, Date, Filter, Item, Kind, Link, Priority, Status, Whose, board, item::same_person, time,
+    Board, Date, Filter, Item, Kind, Link, Priority, Severity, Status, Whose, board,
+    item::same_person, time,
 };
 use eframe::egui::{self, RichText, vec2};
 
@@ -26,6 +27,8 @@ pub enum BoardAction {
     SelectInstance(String),
     /// Open this file (at this line).
     OpenFile { path: String, line: Option<u32> },
+    /// Make a bug report of the Console's last error (and open it).
+    ReportLastError,
 }
 
 /// List or columns.
@@ -51,6 +54,11 @@ pub struct Context<'a> {
     pub script: Option<String>,
     /// Can't change anything (a Viewer in a session, or no project).
     pub read_only: bool,
+    /// The Console's last error, to report as a bug.
+    pub last_error: Option<String>,
+    /// This build and system, for a bug's Found in ("0.2.0-alpha.1 on
+    /// windows").
+    pub found_in: &'a str,
 }
 
 /// What's typed into the open item's fields, kept until it's committed.
@@ -64,6 +72,11 @@ struct Draft {
     comment: String,
     check: String,
     person: String,
+    steps: String,
+    expected: String,
+    actual: String,
+    found_in: String,
+    fixed_in: String,
     /// The Delete button was pressed once.
     deleting: bool,
 }
@@ -76,6 +89,11 @@ impl Draft {
             description: item.description.clone(),
             due: item.due.map(|d| d.to_string()).unwrap_or_default(),
             labels: item.labels.join(", "),
+            steps: bug_text(item, |b| &b.steps),
+            expected: bug_text(item, |b| &b.expected),
+            actual: bug_text(item, |b| &b.actual),
+            found_in: bug_text(item, |b| &b.found_in),
+            fixed_in: bug_text(item, |b| &b.fixed_in),
             ..Draft::default()
         }
     }
@@ -88,6 +106,8 @@ pub struct BoardPanel {
     pub view: View,
     /// The title typed for a new item.
     pub new_title: String,
+    /// What a new item will be.
+    pub new_kind: Kind,
     /// The item whose window is open.
     pub open: Option<String>,
     draft: Draft,
@@ -160,10 +180,37 @@ fn priority_color(priority: Priority, palette: &theme::Palette) -> egui::Color32
     }
 }
 
-fn kind_icon(kind: Kind) -> &'static str {
+pub fn kind_icon(kind: Kind) -> &'static str {
     match kind {
         Kind::Task => icons::CHECK_SQUARE,
+        Kind::Bug => icons::BUG,
     }
+}
+
+fn severity_color(severity: Severity, palette: &theme::Palette) -> egui::Color32 {
+    match severity {
+        Severity::Blocker => palette.error,
+        Severity::Major => palette.warning,
+        Severity::Minor => palette.text_weak,
+        Severity::Trivial => palette.text_muted,
+    }
+}
+
+/// An item's kind icon, a bug's in its severity's colour.
+fn kind_mark(item: &Item, palette: &theme::Palette) -> RichText {
+    let color = match item.kind {
+        Kind::Bug => severity_color(item.severity(), palette),
+        Kind::Task => palette.text_muted,
+    };
+    RichText::new(kind_icon(item.kind)).color(color)
+}
+
+/// One of a bug's texts (empty for other kinds).
+fn bug_text(item: &Item, field: impl Fn(&axcenity_teamwork::BugInfo) -> &String) -> String {
+    item.bug
+        .as_ref()
+        .map(|b| field(b).clone())
+        .unwrap_or_default()
 }
 
 /// "Nov 20", in the error colour when it's past and the item isn't done.
@@ -180,6 +227,14 @@ fn due_text(item: &Item, today: Date, palette: &theme::Palette) -> Option<RichTe
 }
 
 impl BoardPanel {
+    /// Whose names the status headings use: bugs' when only bugs show.
+    fn heading_kind(&self) -> Kind {
+        match self.filter.kinds.as_slice() {
+            [kind] => *kind,
+            _ => Kind::Task,
+        }
+    }
+
     /// Opens `id`'s window.
     pub fn open_item(&mut self, item: &Item) {
         self.open = Some(item.id.clone());
@@ -225,11 +280,28 @@ impl BoardPanel {
     fn toolbar(&mut self, ui: &mut egui::Ui, cx: &Context<'_>, actions: &mut Vec<BoardAction>) {
         let palette = theme::palette(ui.ctx());
         ui.horizontal(|ui| {
+            ui.add_enabled_ui(!cx.read_only, |ui| {
+                ui.menu_button(
+                    RichText::new(kind_icon(self.new_kind)).color(palette.text_secondary),
+                    |ui| {
+                        for kind in Kind::ALL {
+                            let text = theme::with_icon(kind_icon(kind), kind.name());
+                            if ui.selectable_label(self.new_kind == kind, text).clicked() {
+                                self.new_kind = kind;
+                                ui.close();
+                            }
+                        }
+                    },
+                )
+                .response
+                .on_hover_text("What to add: a task or a bug");
+            });
             let width = (ui.available_width() - 34.0).max(60.0);
+            let hint = format!("New {}…", self.new_kind.name().to_lowercase());
             let response = ui.add_enabled(
                 !cx.read_only,
                 egui::TextEdit::singleline(&mut self.new_title)
-                    .hint_text(RichText::new("New task…").color(palette.text_muted))
+                    .hint_text(RichText::new(hint).color(palette.text_muted))
                     .desired_width(width),
             );
             let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -241,7 +313,7 @@ impl BoardPanel {
                 .clicked();
             if (enter || add) && !self.new_title.trim().is_empty() && !cx.read_only {
                 actions.push(BoardAction::Create {
-                    kind: Kind::Task,
+                    kind: self.new_kind,
                     title: std::mem::take(&mut self.new_title),
                 });
                 if enter {
@@ -249,6 +321,22 @@ impl BoardPanel {
                 }
             }
         });
+        if self.new_kind == Kind::Bug
+            && !cx.read_only
+            && let Some(error) = &cx.last_error
+        {
+            let first = error.lines().next().unwrap_or_default();
+            if ui
+                .small_button(theme::with_icon(
+                    icons::WARNING_CIRCLE,
+                    "Report the last error",
+                ))
+                .on_hover_text(first)
+                .clicked()
+            {
+                actions.push(BoardAction::ReportLastError);
+            }
+        }
         crate::responsive::toolbar(ui, |ui| {
             widgets::segmented(
                 ui,
@@ -309,6 +397,14 @@ impl BoardPanel {
                     },
                 );
             }
+            for kind in Kind::ALL {
+                let plural = kind.plural();
+                let label = format!("{}{}", plural[..1].to_uppercase(), &plural[1..]);
+                let on = self.filter.kinds == [kind];
+                if widgets::chip(ui, &label, on).clicked() {
+                    self.filter.kinds = if on { Vec::new() } else { vec![kind] };
+                }
+            }
             ui.checkbox(&mut self.filter.finished, "Done");
         });
         let today = Date::of(cx.now);
@@ -320,6 +416,20 @@ impl BoardPanel {
                 format!("{open} assigned to you")
             };
             let color = if late > 0 {
+                palette.error
+            } else {
+                palette.text_weak
+            };
+            ui.label(widgets::micro(&text, color));
+        }
+        let (bugs, blockers) = cx.board.open_bugs();
+        if bugs > 0 {
+            let text = if blockers > 0 {
+                format!("{bugs} open bugs, {blockers} blocking")
+            } else {
+                format!("{bugs} open bugs")
+            };
+            let color = if blockers > 0 {
                 palette.error
             } else {
                 palette.text_weak
@@ -365,6 +475,10 @@ impl BoardPanel {
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     self.status_button(ui, cx, item, actions);
+                    if item.kind == Kind::Bug {
+                        ui.label(kind_mark(item, &palette))
+                            .on_hover_text(format!("Bug, {}", item.severity().name()));
+                    }
                     let title = RichText::new(&item.title).color(if item.status.is_finished() {
                         palette.text_weak
                     } else {
@@ -426,6 +540,7 @@ impl BoardPanel {
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
+                let heading = self.heading_kind();
                 for status in Status::ALL {
                     let group: Vec<&&Item> = items.iter().filter(|i| i.status == status).collect();
                     if group.is_empty() {
@@ -436,7 +551,7 @@ impl BoardPanel {
                     ui.label(
                         RichText::new(format!(
                             "{icon}  {}  ·  {}",
-                            status.name(Kind::Task),
+                            status.name(heading),
                             group.len()
                         ))
                         .color(color)
@@ -458,6 +573,7 @@ impl BoardPanel {
     ) {
         let palette = theme::palette(ui.ctx());
         let statuses = board::columns();
+        let heading = self.heading_kind();
         let gap = theme::space::S;
         let width = ((ui.available_width() - gap * (statuses.len() as f32 - 1.0) - 4.0)
             / statuses.len() as f32)
@@ -490,7 +606,7 @@ impl BoardPanel {
                                 ui.label(
                                     RichText::new(format!(
                                         "{icon}  {}  ·  {}",
-                                        status.name(Kind::Task),
+                                        status.name(heading),
                                         in_column.len()
                                     ))
                                     .color(color)
@@ -544,6 +660,9 @@ impl BoardPanel {
                 ui.set_width(width);
                 ui.add(egui::Label::new(RichText::new(&item.title).color(palette.text)).wrap());
                 ui.horizontal(|ui| {
+                    if item.kind == Kind::Bug {
+                        ui.label(kind_mark(item, &palette));
+                    }
                     if item.priority <= Priority::High {
                         ui.label(
                             RichText::new(icons::FLAG)
@@ -645,6 +764,45 @@ impl BoardPanel {
             }
             ui.add_space(theme::space::XS);
             crate::responsive::form(ui, "board item fields", |ui| {
+                ui.label("Kind");
+                egui::ComboBox::from_id_salt("board kind")
+                    .selected_text(theme::with_icon(kind_icon(item.kind), item.kind.name()))
+                    .show_ui(ui, |ui| {
+                        for kind in Kind::ALL {
+                            let text = theme::with_icon(kind_icon(kind), kind.name());
+                            if ui.selectable_label(item.kind == kind, text).clicked()
+                                && kind != item.kind
+                            {
+                                changed.kind = kind;
+                                if kind == Kind::Bug {
+                                    changed.bug_mut();
+                                }
+                                changed.touch(me, now);
+                            }
+                        }
+                    });
+                ui.end_row();
+
+                if item.kind == Kind::Bug {
+                    ui.label("Severity");
+                    egui::ComboBox::from_id_salt("board severity")
+                        .selected_text(
+                            RichText::new(item.severity().name())
+                                .color(severity_color(item.severity(), &palette)),
+                        )
+                        .show_ui(ui, |ui| {
+                            for severity in Severity::ALL {
+                                if ui
+                                    .selectable_label(item.severity() == severity, severity.name())
+                                    .clicked()
+                                {
+                                    changed.set_severity(severity, me, now);
+                                }
+                            }
+                        });
+                    ui.end_row();
+                }
+
                 ui.label("Status");
                 egui::ComboBox::from_id_salt("board status")
                     .selected_text(item.status.name(item.kind))
@@ -782,7 +940,77 @@ impl BoardPanel {
                     }
                 }
                 ui.end_row();
+
+                if item.kind == Kind::Bug {
+                    ui.label("Found in");
+                    ui.horizontal(|ui| {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.draft.found_in)
+                                .hint_text("Version and system")
+                                .desired_width((ui.available_width() - 80.0).max(80.0)),
+                        );
+                        let this = ui.small_button("This build").on_hover_text(cx.found_in);
+                        if this.clicked() {
+                            self.draft.found_in = cx.found_in.to_owned();
+                        }
+                        if response.lost_focus() || this.clicked() {
+                            set_bug_text(&mut changed, me, now, &self.draft.found_in, |b| {
+                                &mut b.found_in
+                            });
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("Fixed in");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.draft.fixed_in)
+                            .hint_text("Checkpoint, commit or version")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if response.lost_focus() {
+                        set_bug_text(&mut changed, me, now, &self.draft.fixed_in, |b| {
+                            &mut b.fixed_in
+                        });
+                    }
+                    ui.end_row();
+                }
             });
+            if item.kind == Kind::Bug {
+                for (label, hint, field) in [
+                    (
+                        "Steps to reproduce",
+                        "1. Press Play\n2. Walk into the door",
+                        0,
+                    ),
+                    ("Expected", "What should happen", 1),
+                    (
+                        "What happens",
+                        "What happens instead (an error message, say)",
+                        2,
+                    ),
+                ] {
+                    ui.add_space(theme::space::S);
+                    widgets::section_label(ui, label);
+                    let text = match field {
+                        0 => &mut self.draft.steps,
+                        1 => &mut self.draft.expected,
+                        _ => &mut self.draft.actual,
+                    };
+                    let response = ui.add(
+                        egui::TextEdit::multiline(text)
+                            .hint_text(hint)
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if response.lost_focus() {
+                        set_bug_text(&mut changed, me, now, text, |b| match field {
+                            0 => &mut b.steps,
+                            1 => &mut b.expected,
+                            _ => &mut b.actual,
+                        });
+                    }
+                }
+            }
 
             ui.add_space(theme::space::S);
             widgets::section_label(ui, "Description");
@@ -1020,5 +1248,21 @@ impl BoardPanel {
         if changed != *item {
             actions.push(BoardAction::Save(Box::new(changed)));
         }
+    }
+}
+
+/// Sets the bug field `field` picks to `text` (tidied), if it changed.
+fn set_bug_text(
+    item: &mut Item,
+    who: &str,
+    now: u64,
+    text: &str,
+    field: impl Fn(&mut axcenity_teamwork::BugInfo) -> &mut String,
+) {
+    let text = axcenity_teamwork::item::tidy(text, axcenity_teamwork::item::MAX_TEXT);
+    let slot = field(item.bug_mut());
+    if *slot != text {
+        *slot = text;
+        item.touch(who, now);
     }
 }

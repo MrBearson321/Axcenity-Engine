@@ -119,6 +119,18 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "The start screen's sidebar shows only its icons, each with a tooltip.",
         ),
         setting(
+            Saving,
+            "Keep a copy of unsaved work",
+            &[
+                "AutoRecover",
+                "Autosave",
+                "Auto save",
+                "Crash recovery",
+                "Power outage",
+            ],
+            "How often unsaved work is copied, so a crash or power cut doesn't lose it.",
+        ),
+        setting(
             Viewport,
             "Show every light's cone",
             &["Light cones", "Spotlight"],

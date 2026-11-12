@@ -287,3 +287,60 @@ fn keywords_strings_comments_and_unknown_names_go_nowhere() {
     assert_eq!(definition("print(nowh|ere)"), None);
     assert_eq!(definition("x = 1 |  "), None);
 }
+
+#[test]
+fn a_string_argument_offers_the_names_its_method_takes() {
+    let mut world = world();
+    let door = world.find_first_child(world.workspace(), "Door").unwrap();
+    world
+        .set_attribute(door, "Locked", Some(axcenity_core::Value::Bool(true)))
+        .unwrap();
+    world.add_tag(door, "Doors").unwrap();
+    let at = |source: &str| {
+        complete(source, source.len(), &world)
+            .map(|found| {
+                (
+                    found.start,
+                    found
+                        .items
+                        .into_iter()
+                        .map(|item| item.label)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unwrap_or_default()
+    };
+    let (start, services) = at("local Players = game:GetService(\"Pl");
+    assert_eq!(start, "local Players = game:GetService(\"".len());
+    assert_eq!(services, ["Players"]);
+    assert!(at("game:GetService('").1.contains(&"RunService".to_owned()));
+    assert!(at("game:FindService(\"").1.contains(&"Debris".to_owned()));
+    assert!(
+        at("game:GetService(\"")
+            .1
+            .contains(&"QuestService".to_owned())
+    );
+    assert_eq!(at("Instance.new(\"PointL").1, ["PointLight"]);
+    assert!(
+        at("workspace.Door:IsA(\"Base")
+            .1
+            .contains(&"BasePart".to_owned())
+    );
+    assert_eq!(
+        at("workspace.Door:GetPropertyChangedSignal(\"Transp").1,
+        ["Transparency"]
+    );
+    assert_eq!(at("workspace.Door:GetAttribute(\"").1, ["Locked"]);
+    // An object completion can't follow: every attribute in the world.
+    assert_eq!(at("local function f(x) x:SetAttribute(\"L").1, ["Locked"]);
+    assert_eq!(at("workspace.Lights:WaitForChild(\"").1, ["Lamp"]);
+    assert_eq!(at("workspace:FindFirstChild(\"Do").1, ["Door"]);
+    assert_eq!(
+        at("game:GetService(\"CollectionService\"):GetTagged(\"").1,
+        ["Doors"]
+    );
+    // Anywhere else in a string, nothing.
+    assert!(at("print(\"Pl").1.is_empty());
+    assert!(at("local s = \"game:GetService(").1.is_empty());
+    assert!(at("-- game:GetService(\"").1.is_empty());
+}
