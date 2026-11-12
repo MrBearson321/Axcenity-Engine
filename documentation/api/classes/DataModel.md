@@ -198,6 +198,14 @@ DataModel.NetworkService: NetworkService
 
 Hosting and joining games (same as `game:GetService("NetworkService")`).
 
+#### ReplayService
+
+```luau
+DataModel.ReplayService: ReplayService
+```
+
+Replays and kill cams (same as `game:GetService("ReplayService")`).
+
 #### LocalizationService
 
 ```luau
@@ -238,7 +246,7 @@ What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same a
 DataModel:GetService(className: string): Instance
 ```
 
-The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"ContentProvider"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"ReplayService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"ContentProvider"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 
 ```lua
 local TweenService = game:GetService("TweenService")

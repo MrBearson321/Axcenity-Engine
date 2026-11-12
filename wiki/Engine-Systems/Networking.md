@@ -4,17 +4,17 @@ type: system
 status: current
 implementation: partial
 crates: [net, server, script]
-source: [crates/net/src/lib.rs, crates/net/src/transport.rs, crates/net/src/handshake.rs, crates/net/src/session.rs, crates/net/src/discovery.rs, crates/net/src/wire.rs, crates/net/src/replicate.rs, crates/net/src/motion.rs, crates/net/src/ownership.rs, crates/net/src/streaming.rs, crates/net/src/game.rs, crates/server/src/main.rs, crates/script/src/network.rs]
+source: [crates/script/src/lag.rs, crates/script/src/replay.rs, crates/net/src/replay.rs, crates/player/src/replay_view.rs, crates/net/src/lib.rs, crates/net/src/transport.rs, crates/net/src/handshake.rs, crates/net/src/session.rs, crates/net/src/discovery.rs, crates/net/src/wire.rs, crates/net/src/replicate.rs, crates/net/src/motion.rs, crates/net/src/ownership.rs, crates/net/src/streaming.rs, crates/net/src/game.rs, crates/server/src/main.rs, crates/script/src/network.rs]
 docs: [docs/architecture/networking.md, docs/architecture/streaming.md, crates/net/CLAUDE.md, crates/server/CLAUDE.md]
-verified: 2026-11-11
-verified_commit: 19c7179d
+verified: 2026-11-12
+verified_commit: db1ffa77
 tags: [system/networking, multiplayer]
 ---
 
 # Networking
 
 > [!summary]
-> Server-authoritative multiplayer over **renet 2** (reliable-ordered and unreliable channels) on UDP via **renet_netcode**, or an in-memory loopback with the same interface. A joined device keeps a **replica World** at the server's Instance IDs and runs only LocalScripts; the server diffs the world against what each player has and sends reliable updates in **postcard** (M7), and part **motion** quantized, prioritized and budgeted on the unreliable channel, smoothed 0.1 s behind on the device. Players move their own characters and owned assemblies with no delay; the server checks them. Single-player and editor Play are a **listen server**. **Partial**: local, LAN and a local dedicated server are the scope; netcode runs **unsecured**, and internet hosting, secure connect tokens (M11) and lag compensation/replays (Phase 81) are deferred or planned.
+> Server-authoritative multiplayer over **renet 2** (reliable-ordered and unreliable channels) on UDP via **renet_netcode**, or an in-memory loopback with the same interface. A joined device keeps a **replica World** at the server's Instance IDs and runs only LocalScripts; the server diffs the world against what each player has and sends reliable updates in **postcard** (M7), and part **motion** quantized, prioritized and budgeted on the unreliable channel, smoothed 0.1 s behind on the device. Players move their own characters and owned assemblies with no delay; the server checks them. Single-player and editor Play are a **listen server**. **Partial**: local, LAN and a local dedicated server are the scope; netcode runs **unsecured**, and internet hosting and secure connect tokens (M11) are deferred. Server raycasts can be **lag compensated**, and any device can record **replays** and kill cams (Phase 81).
 
 ## Architecture
 
@@ -35,8 +35,10 @@ sequenceDiagram
 ```
 
 - **IDs**: replica Instances keep the server's IDs; device-local ones are numbered from 2³¹ (`InstanceId::is_local`). ServerScriptService and ServerStorage never leave the server.
-- **Handshake** checks protocol (`PROTOCOL_VERSION`, 10 since M7), class-defaults fingerprint, game name, version, password, `MaxPlayers` (8); `Hello`/`Refused` stay JSON forever so a newer engine can say why it refuses.
+- **Handshake** checks protocol (`PROTOCOL_VERSION`, 10 since M7, 12 since Phase 81), class-defaults fingerprint, game name, version, password, `MaxPlayers` (8); `Hello`/`Refused` stay JSON forever so a newer engine can say why it refuses.
 - **Ownership** (Phase 66): `CharacterCheck` limits how far a character may move per packet (walk/run speed + 15%, jump height, never more than 30 studs); owned assemblies are held still on the server and placed where the owner says.
+- **Lag compensation** (Phase 81, `script/src/lag.rs`): the host's send records a second of poses for parts that moved (`LagHistory`, by `motion_revision`) and each remote player's rewind (round trip + 0.1 s smoothing, at most 1 s). `workspace:Raycast` with `RaycastParams.CompensateFor`, or in a `LagCompensated` Tool's RemoteEvent handler before it waits, tests moving parts where the shooter saw them (`physics::raycast_rewound`); their own character stays where it is. Shape casts and overlaps aren't compensated.
+- **Replays** (Phase 81, `net/src/replay.rs`): `ReplayService` queues requests; `Network::send` feeds a `Recorder` (its own `Replicator` plus exact poses of parts whose `motion_revision` moved; a snapshot keyframe every 10 s). A `.replay` is `AXREPLAY` + format version + postcard. `Playback` rebuilds from the keyframe before a moment in `empty_replica` with the game's Terrains, then applies frames, so playback is pure data and the same every time ([ADR-0010](../Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) replicas, no re-simulation). `BufferSeconds` + `PlayBuffer(player)` is a kill cam drawn by the player's `replay_view.rs` instead of the live world; `axcenity-player --replay` watches a file.
 - **Streaming**: with `StreamingEnabled`, each player gets only their share ([World streaming](World-Streaming.md)).
 
 ## Integration
@@ -57,17 +59,18 @@ Ports 47800 (game) and 47801 (LAN discovery). `--host [port]`, `--join addr:port
 
 ## Testing
 
-`cargo nextest run -p axcenity-net` (47 tests); `crates/server/tests/headless.rs` runs the real binary; editor `play/tests.rs` multi-client tests; LAN between two computers by hand: `cargo test -p axcenity-net -- --ignored --nocapture a_game_hosted_on_another_computer`.
+`cargo nextest run -p axcenity-net` (55 tests; `lag_tests` proves a compensated shot hits a moving target an uncompensated one misses; `replay_tests` a two-minute match that replays exactly and a 5 s kill cam); `crates/server/tests/headless.rs` runs the real binary; editor `play/tests.rs` multi-client tests; LAN between two computers by hand: `cargo test -p axcenity-net -- --ignored --nocapture a_game_hosted_on_another_computer`.
 
 ## Limitations
 
 - **Unsecured netcode**: no encryption or connect tokens; fine for direct-address and LAN play only ([ADR-0010](../Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md), development policy).
-- No relay or matchmaking; no lag compensation or replays (Phase 81, planned).
+- No relay or matchmaking. Replays don't record animation poses, sounds, particles or screen GUIs, and the timeline isn't clickable. Lag compensation covers `workspace:Raycast` only, and a part's pose between two recorded frames is interpolated linearly.
 - A RemoteEvent message with no handler is dropped (Roblox queues it).
 
 ## Development guidance
 
 - Never block: sockets are non-blocking; every wait counts in frame time.
+- Raise `REPLAY_VERSION` when `Replay` changes; a replay also carries `PROTOCOL_VERSION` and is refused across protocols.
 - Raise `PROTOCOL_VERSION` when a message or a class default changes (creates carry only non-default properties).
 - postcard: no skipped fields or `#[serde(tag)]` in wire types.
 - Nothing in ServerScriptService or ServerStorage goes to a player; a player's message belongs to the connection's Player whatever it says.

@@ -21,6 +21,7 @@ use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
 use crate::ownership::{
     CharacterCheck, OWNED_TAG, Owned, OwnedSender, character_of, character_parts,
 };
+use crate::replay::{BufferPlay, Replay, Replays};
 use crate::replicate::{LevelState, Replicator, Update, apply};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
 use crate::streaming::{PeerStream, Streams};
@@ -116,6 +117,8 @@ pub struct Network {
     /// `RequestStreamAroundAsync` calls for the player on this device, for
     /// the host to load around (see [`take_viewer_requests`](Self::take_viewer_requests)).
     viewer_requests: Vec<(u64, Vector3)>,
+    /// `ReplayService`'s recording and buffer (Phase 81).
+    replays: Replays,
 }
 
 impl Network {
@@ -148,7 +151,26 @@ impl Network {
             script_requests: BTreeSet::new(),
             finished_requests: Vec::new(),
             viewer_requests: Vec::new(),
+            replays: Replays::default(),
         }
+    }
+
+    /// Where `ReplayService:StopRecording` saves: the player's data
+    /// folder's `replays` (Phase 81). Without one, finished replays wait
+    /// in [`take_replays`](Self::take_replays).
+    pub fn set_replay_folder(&mut self, folder: Option<std::path::PathBuf>) {
+        self.replays.set_folder(folder);
+    }
+
+    /// Recordings finished with no folder to save them in, by name.
+    pub fn take_replays(&mut self) -> Vec<(String, Replay)> {
+        self.replays.take_kept()
+    }
+
+    /// The buffer a script's `ReplayService:PlayBuffer()` asked to show,
+    /// for the host to play over the game.
+    pub fn take_buffer_play(&mut self) -> Option<BufferPlay> {
+        self.replays.take_play()
     }
 
     /// `RequestStreamAroundAsync` calls for the player on this device,
@@ -568,6 +590,10 @@ impl Network {
     /// just joined, all of it), then the scripts' messages for them.
     /// Joined: the server gets the scripts' messages.
     pub fn send(&mut self, world: &World, scripts: &mut ScriptRuntime) {
+        // Replays (Phase 81) note the world as this frame left it.
+        let requests = scripts.take_replay_requests();
+        self.replays
+            .frame(world, requests, self.seconds, &self.game, &mut self.log);
         let messages = scripts.take_remote_messages();
         let mine = self.moved_here(world, scripts);
         match &mut self.session {
@@ -632,6 +658,20 @@ impl Network {
                 } else {
                     self.replicator.parts(world)
                 };
+                // Lag compensation (Phase 81): where moving parts are now,
+                // and how late each player sees them: their round trip
+                // plus the smoothing delay.
+                if !self.players.is_empty() {
+                    let rewinds: Vec<(InstanceId, f64)> = self
+                        .players
+                        .iter()
+                        .map(|(&peer, &player)| {
+                            let rtt = host.stats_of(peer).map_or(0.0, |stats| stats.rtt);
+                            (player, rtt + crate::motion::DELAY)
+                        })
+                        .collect();
+                    scripts.record_lag(world, self.clock, &rewinds);
+                }
                 // Who moves what (Phase 66): each player their character,
                 // and the assemblies the server gives them.
                 let owned = scripts.owned_parts(world);

@@ -308,6 +308,8 @@ declare extern type RaycastParams with
 	RespectCanCollide: boolean
 	--- Kept for familiarity; there's no water yet, so it changes nothing.
 	IgnoreWater: boolean
+	--- Lag compensation: on a server, `workspace:Raycast` for this Player's shot tests moving parts where that Player saw them when they fired (their round trip plus the smoothing delay, at most 1 second back); their own character is tested where it is. nil at first.
+	CompensateFor: Player?
 	--- Adds an Instance, or a list of them, to `FilterDescendantsInstances`.
 	function AddToFilter(self, instances: Instance | {Instance}): ()
 end
@@ -491,6 +493,20 @@ declare extern type NetworkService with
 	function FindLanGames(self): { { Name: string, Version: string, Address: string, Players: number, MaxPlayers: number, HasPassword: boolean } }
 	--- Leaves the game joined, or stops hosting; the other players leave `Players`.
 	function Disconnect(self): ()
+end
+
+--- Recording the game to a `.replay` file, and keeping the last few seconds for a kill cam, from `game:GetService("ReplayService")`. Each device records its own world as replication shows it; nothing is simulated again, so a replay looks the same each time. Watch a file with `axcenity-player --replay <file> <game>`. Both sides have it.
+declare extern type ReplayService with
+	--- Read-only: true between StartRecording and StopRecording.
+	IsRecording: boolean
+	--- Keeps the last this many seconds in memory (0, the default, keeps none; at most 60), for PlayBuffer.
+	BufferSeconds: number
+	--- Starts recording this device's game (again, if one was going).
+	function StartRecording(self): ()
+	--- Ends the recording and saves it as `<name>.replay` in the player's data folder, under `replays` (a server's beside its saves). `name` is 1 to 64 letters, digits, spaces, `-` or `_`.
+	function StopRecording(self, name: string): ()
+	--- Shows the last `BufferSeconds` on this device's screen, through `player`'s character's eyes if given (a kill cam), then goes back to the game; Escape ends it early. The game goes on underneath. Set BufferSeconds first.
+	function PlayBuffer(self, player: Player?): ()
 end
 
 --- The language UI text shows, from `game:GetService("LocalizationService")`. A TextLabel or TextButton with a `TextKey` shows that key's value from the project's string table (`strings.json`, edited in the UI Designer's Strings tab) in `Language`, or its own Text when there's none. Both sides share it.
@@ -1419,6 +1435,8 @@ declare extern type DataModel extends Instance with
 	ConsoleService: ConsoleService
 	--- Hosting and joining games (same as `game:GetService("NetworkService")`).
 	NetworkService: NetworkService
+	--- Replays and kill cams (same as `game:GetService("ReplayService")`).
+	ReplayService: ReplayService
 	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
 	LocalizationService: LocalizationService
 	--- The player's game UI settings (same as `game:GetService("GuiService")`).
@@ -1428,7 +1446,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"ContentProvider"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"ReplayService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"ContentProvider"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -4609,6 +4627,8 @@ declare extern type Tool extends Instance with
 	TextureId: string
 	--- The data-table row it is, as "table:key" (such as "weapons:sword"), for scripts to read with DataService. Save slots keep it. Empty for none.
 	Item: string
+	--- If true, the server's `workspace:Raycast` calls in handlers of a RemoteEvent inside this Tool are lag compensated for the Player who fired it, until the handler first waits (see RaycastParams.CompensateFor).
+	LagCompensated: boolean
 	--- Fires when it goes into the hand: Equip, the hotbar, or a save slot loading with it in hand.
 	Equipped: Signal
 	--- Fires when it leaves the hand: put away, another equipped, dropped or removed.

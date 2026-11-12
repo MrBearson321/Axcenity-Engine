@@ -70,6 +70,19 @@ impl ScriptRuntime {
         ownership::owned_parts(&self.ownership, world)
     }
 
+    /// Lag compensation (Phase 81): a server hosting players notes where
+    /// the parts that moved are at its `clock`, each frame, and how far
+    /// back each player's shots are turned (their round trip plus the
+    /// smoothing delay; 0 for its own player).
+    pub fn record_lag(&mut self, world: &World, clock: f64, rewinds: &[(InstanceId, f64)]) {
+        let mut lag = self.lag.0.borrow_mut();
+        lag.record(world, clock);
+        for &(player, seconds) in rewinds {
+            lag.set_rewind(player, seconds);
+        }
+        lag.keep_players(world);
+    }
+
     /// A player on another device leaves: `PlayerRemoving` fires on both
     /// sides, then the Player (and its character) go. The player on this
     /// device never leaves this way.
@@ -198,6 +211,14 @@ impl ScriptRuntime {
     pub fn take_network_requests(&mut self) -> Vec<NetworkRequest> {
         let mut requests = self.server.take_network_requests();
         requests.extend(self.client.take_network_requests());
+        requests
+    }
+
+    /// The `ReplayService` calls scripts made since the last call, the
+    /// Scripts' first (Phase 81). The host does them in its network send.
+    pub fn take_replay_requests(&mut self) -> Vec<crate::ReplayRequest> {
+        let mut requests = self.server.take_replay_requests();
+        requests.extend(self.client.take_replay_requests());
         requests
     }
 

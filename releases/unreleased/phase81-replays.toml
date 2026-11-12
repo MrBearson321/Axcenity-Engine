@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Record games as replays, watch them back and show kill cams"
+details = "ReplayService:StartRecording() and StopRecording(name) save a .replay in the player's data folder; axcenity-player --replay <file> <game> plays it with pause, speed, jumps, a timeline and a camera that follows any player. BufferSeconds and PlayBuffer(player) show the last seconds through a player's eyes."
+features = ["networking.replays"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = ["0d61d0b7"]
+stability = "stable"
+public = true
+evidence = "verified"

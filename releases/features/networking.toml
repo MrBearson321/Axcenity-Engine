@@ -23,3 +23,27 @@ docs = "docs/architecture/networking.md"
 version = "unreleased"
 evidence = "reconstructed"
 source = "commit 0e529208 (Transport, Hosting and Joining), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "networking.lag-compensation"
+name = "Lag compensation"
+subsystem = "networking"
+description = "Server raycasts test moving parts where the shooter saw them (RaycastParams.CompensateFor, Tool.LagCompensated)."
+status = "active"
+docs = "docs/architecture/networking.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "commit db1ffa77 (unified plan Phase 81)"
+
+[[feature]]
+id = "networking.replays"
+name = "Replays and kill cams"
+subsystem = "networking"
+description = "Record a game to a .replay file with ReplayService, watch it with axcenity-player --replay, and show the last seconds as a kill cam."
+status = "active"
+docs = "docs/architecture/networking.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "commit 0d61d0b7 (unified plan Phase 81)"

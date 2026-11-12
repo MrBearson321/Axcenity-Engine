@@ -21,7 +21,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (10 since roadmap M7), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password, their `user_id` (missing from older engines, read as 0) and their engine's class-defaults fingerprint (`defaults`, roadmap M7). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (10 since roadmap M7, 12 since Phase 81), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password, their `user_id` (missing from older engines, read as 0) and their engine's class-defaults fingerprint (`defaults`, roadmap M7). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|
@@ -73,6 +73,28 @@ Phase 66 (`ownership.rs` in `net`, `ownership.rs` in `script`).
 - **Seats.** The seat a device says its character sits in becomes the seat's `Occupant` on the server, so Scripts see who sits where.
 - **Assemblies.** `SetNetworkOwner`, `SetNetworkOwnershipAuto` and the driver of a VehicleSeat give an unanchored assembly to a player (`ScriptRuntime::owned_parts`). The server tells each device which parts it owns (`Ownership`, reliable). The owner simulates them (its VehicleSeat's `Throttle` and `Steer` drive the car at once) and sends them with its character; the server holds them still in its physics and puts them where the owner says, unless that's more than 60 studs from where they were. A server's own player owns nothing remotely: the host simulates it.
 
+## Lag compensation
+
+Phase 81 (`script/src/lag.rs`, `physics::raycast_rewound`). A player sees the server's world late: an update takes half their round trip to arrive, and their device shows parts `DELAY` (0.1 s) behind the newest motion it has. By the time their shot reaches the server, a moving target has moved on.
+
+- **History.** Each frame a hosting `Network::send` calls `ScriptRuntime::record_lag` with the server's clock and, for each player on another device, their round trip (renet's measure) plus `DELAY`, capped at `MAX_REWIND` (1 s). `LagHistory` notes where each part that moved is (only parts whose `motion_revision` changed; it catches up with the Workspace through `World::workspace_moves_since`) and keeps a second of poses per moving part. A part that hasn't moved for a second has no track, so a big still world costs nothing. The host's own player is never compensated.
+- **Who's compensated.** A server `workspace:Raycast` with `RaycastParams.CompensateFor = player`, or one made in the handler of a RemoteEvent inside a Tool with `LagCompensated` on (until the handler first waits), tests moving parts where they were that long ago, between the two recorded poses around that moment (angles the short way round). The shooter's own character is tested where it is now. Spherecast, Blockcast, Shapecast and the overlap queries aren't compensated.
+- **Proof.** `lag_tests::a_shot_at_a_moving_part_hits_where_the_player_saw_it_only_when_compensated`: over 150 ms each way, a player aims at a 4-stud target moving 10 studs a second; the compensated ray hits it, the same ray uncompensated misses, and the Tool handler's ray misses again after a `task.wait()`.
+- `Tool.LagCompensated` is a new class default, so the network protocol is 12.
+
+## Replays
+
+Phase 81 (`net/src/replay.rs`, `script/src/replay.rs`, `player/src/replay_view.rs`). A replay is one device's world as replication shows it, frame by frame: what a player who joined at the start would have been sent, with every moved part's exact pose (f32, not motion's quantized one). Nothing is simulated again on playback, so a frame looks the same each time and on any machine, without the cross-machine determinism the development policy rules out. Single-player records the same way, since its world is a listen server's.
+
+- **Scripts** (`game:GetService("ReplayService")`, both sides): `StartRecording()`, `StopRecording(name)` (saved as `<name>.replay` in the player's data folder under `replays`, a server's beside its saves; names are 1 to 64 letters, digits, spaces, `-` or `_`), `IsRecording`, `BufferSeconds` (0 off, at most 60) and `PlayBuffer(player?)`. Like `NetworkService`, the calls queue `ReplayRequest`s; `Network::send` does them and then notes the frame (`Replays`), so recording costs the device one more `Replicator::frame` and a pass over its parts' motion revisions a frame.
+- **Recorder.** The first frame and one every `KEYFRAME_SECONDS` (10) carry a whole snapshot as well, so playback can jump. A buffer keyframes every `BufferSeconds` and keeps only the frames from the last keyframe before that many seconds ago.
+- **File.** `AXREPLAY`, the format's version (`REPLAY_VERSION`, 1), then the `Replay` in postcard: the game's name and version, the network protocol, and the frames. A file from another format or protocol is refused with why.
+- **Playback** (`Playback`): a keyframe rebuilt in `World::empty_replica` with the game's own Terrain landscapes (as a joining device does), then each frame's update and poses in order. `seek` goes from the keyframe before the moment when it's behind or a keyframe is nearer, else forward.
+- **Watching.** `axcenity-player --replay <file> <game>` shows it instead of playing (no scripts start): Space pauses, Left and Right jump 5 s, Up and Down set ¼× to 4×, Return goes back to the start, Tab follows the next player through their character's Head (`eyes_of`), then the fly camera again; a timeline runs along the bottom. `PlayBuffer` shows the buffer over the live game the same way from the next frame, following the given player, until its last frame or Escape (`Network::take_buffer_play`).
+- **Proof.** `replay_tests::a_two_minute_match_plays_back_as_it_was_and_the_same_each_time`: a server and two players for two minutes of sliding, spinning, appearing and recoloured parts; the replay, saved and read back, shows the server's world exactly at five moments, played through, jumped to in either order, and stepped at 2×. `a_kill_cam_shows_the_last_five_seconds_from_the_killers_eyes`: a victim's device keeps 5 s and its kill cam shows the killer's view exactly as that device showed it, frame by frame.
+- The editor's Play records too, but saves nothing and shows no kill cam: it keeps the newest four replays in memory and logs "Recorded the replay".
+- **Not yet:** animation poses (characters show their parts' places but not skinned meshes' bones), sounds, particles and screen GUIs aren't recorded; the timeline isn't clickable.
+
 ## Remote calls
 
 RemoteEvents and RemoteFunctions use the same `Message`s as on one device. The runtime keeps a message for another device (to a Player who joined from elsewhere, or from a replica to the server) in `take_remote_messages`; `Network::send` sends it as `Remote` (`wire::WireMessage`: Instances as network IDs, Lua strings as bytes). The receiver hands it to `receive_remote_messages`, and it fires in the next frame's script step.
@@ -83,6 +105,7 @@ RemoteEvents and RemoteFunctions use the same `Message`s as on one device. The r
 
 ## Hosting and joining
 
+- `axcenity-player --replay <file> <game>` watches a replay ([Replays](#replays)).
 - `axcenity-player --host [port] <game>` runs a listen server (port 47800 if not given). `--join address:port` joins one. `--password <text>` sets a host's password, or gives it when joining. A port that's taken, or an address that can't be looked up, stops the player with the reason.
 - `axcenity-server <game> [--port <port>] [--password <text>]` loads a project folder or `.axgame` and runs its Scripts (and the ModuleScripts they require, never LocalScripts) with physics at 60 Hz, with no window, audio or GPU and no player of its own (`ScriptRuntime::set_dedicated`). Its frame is network receive, scripts, `Stepped`, physics, touches, breaks, health, `Heartbeat`, network send. Characters, agents and animation belong to players' devices. On Linux it needs no display; `script` still links `audio`'s library, which needs ALSA's `libasound` installed (not a sound device). `tests/headless.rs` runs the real binary with `DISPLAY` and `WAYLAND_DISPLAY` unset.
 - The player prints who joined and left, and every refusal and failure, to stderr (`Network::take_log`).

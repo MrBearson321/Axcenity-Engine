@@ -15,6 +15,7 @@ mod icon;
 mod input;
 mod logs;
 mod preload;
+mod replay_view;
 mod splash;
 mod watch;
 mod window;
@@ -92,7 +93,7 @@ const REGION_WAIT_SECONDS: f64 = 5.0;
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
-                     [--password text] [--bench frames] [--size WxH] [--quality preset] \
+                     [--password text] [--bench frames] [--size WxH] [--quality preset] [--replay file] \
                      [project-folder | game.axgame]  (or --version [--json])\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
@@ -100,7 +101,9 @@ const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | -
                      --host hosts the game (port 47800 unless given); --join joins one\n\
                      --bench measures that many frames' steps, prints them and quits\n\
                      --size sets the window's size in pixels, such as 2560x1440\n\
-                     --quality draws with that preset (Low, Medium, High, Ultra) for this run only";
+                     --quality draws with that preset (Low, Medium, High, Ultra) for this run only\n\
+                     --replay watches a .replay of the game (Space pauses, Left/Right jump, \
+                     Up/Down speed, Tab follows a player)";
 
 fn main() -> Result<()> {
     // `--version` (and `--version --json`): this build's version, channel,
@@ -227,6 +230,19 @@ fn main() -> Result<()> {
         }
     }
     let mut world = project.world;
+    // `--replay`: the game's own world only lends its Terrains; what's
+    // watched is the replay's (Phase 81).
+    let replay = match &arguments.replay {
+        Some(path) => {
+            let bytes = fs::read(path)
+                .with_context(|| format!("could not read the replay `{}`", path.display()))?;
+            let view = replay_view::ReplayView::open(&bytes, &world)
+                .map_err(|why| anyhow::anyhow!("could not play `{}`: {why}", path.display()))?;
+            world = world.empty_replica();
+            Some(view)
+        }
+        None => None,
+    };
     // The game's own loading screen is up before any script runs, so
     // scripts see it enabled; it takes the splash's place.
     let loading_gui = LoadingGui::start(
@@ -254,7 +270,10 @@ fn main() -> Result<()> {
     // The Workspace's models and textures load on other threads while the
     // scripts start and the window opens; the splash or loading screen
     // stays up until they're in (roadmap I11).
-    let preload = preload::Preload::start(&world, &assets);
+    let preload = preload::Preload::start(
+        replay.as_ref().map_or(&world, |view| view.playback.world()),
+        &assets,
+    );
     let mut scripts = axcenity_sim::script_runtime();
     scripts.set_assets(assets.clone());
     scripts.set_save_folder(data_folder.clone());
@@ -285,7 +304,9 @@ fn main() -> Result<()> {
         scripts.know_code(&path, &source);
     }
     scripts.set_levels(&start_level, &start_level, levels);
-    start_scripts(&mut scripts, &mut world, &project.scripts);
+    if replay.is_none() {
+        start_scripts(&mut scripts, &mut world, &project.scripts);
+    }
     // Hosting or joining from the command line, once the scripts listen
     // for players (Phase 63).
     let mut network = Network::new(GameInfo {
@@ -294,6 +315,8 @@ fn main() -> Result<()> {
     });
     // Joined, the LocalScripts start again on the server's world.
     network.set_client_scripts(client_scripts(&world, &project.scripts));
+    // `ReplayService:StopRecording` saves in the player's data (Phase 81).
+    network.set_replay_folder(data_folder.as_ref().map(|data| data.join("replays")));
     match arguments.network {
         Some(NetworkStart::Host(port)) => {
             let password = arguments.password.clone();
@@ -329,9 +352,10 @@ fn main() -> Result<()> {
 
     let mut app = App::new(world, scripts, stylesheets, assets, animators, camera);
     app.title = format!("{} - Axcenity Player", project.manifest.name);
-    app.show_splash = show_splash;
+    app.show_splash = show_splash && replay.is_none();
     app.splash = splash;
-    app.loading_gui = loading_gui;
+    app.loading_gui = if replay.is_none() { loading_gui } else { None };
+    app.replay = replay;
     app.loading_screen = loading;
     app.audio = audio;
     app.data_folder = data_folder;
@@ -728,6 +752,8 @@ struct App {
     frame_loading_assets: bool,
     /// The list and UI layout the draw steps are building, for rendering.
     frame_draw: Option<axcenity_render::DrawList>,
+    /// A replay on screen: `--replay`, or a script's kill cam (Phase 81).
+    replay: Option<replay_view::ReplayView>,
     frame_ui_layout: Option<axcenity_ui::UiLayout>,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
@@ -827,6 +853,7 @@ impl App {
             frame_size: winit::dpi::PhysicalSize::new(0, 0),
             frame_loading_assets: false,
             frame_draw: None,
+            replay: None,
             frame_ui_layout: None,
             last_frame: None,
             shader_time: 0.0,
@@ -1201,6 +1228,17 @@ impl App {
     /// Records a key for scripts (the UI took it when `processed`), and as
     /// held, until it comes up.
     fn push_key(&mut self, key: axcenity_core::KeyCode, pressed: bool, processed: bool) {
+        // A replay on screen takes its own keys (Phase 81).
+        if pressed && let Some(view) = &mut self.replay {
+            match view.key(key) {
+                Some(true) => return,
+                Some(false) => {
+                    self.replay = None;
+                    return;
+                }
+                None => {}
+            }
+        }
         if pressed {
             self.held_keys.insert(key);
         } else {

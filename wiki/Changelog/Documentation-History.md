@@ -24,6 +24,8 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 | 2026-11-12 | System inventory, roadmap | Collaborate 2.0 P2: automatic checkpoints and sync (`crates/repo/src/sync.rs`, `checkpoint.rs`, editor `app/collab_repo.rs`) | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate 2.0 P1: `crates/repo` (git runner, GitHub device sign-in, credentials in Git's store, linking), `collaborate.json` | Claude |
 | 2026-11-12 | World streaming, optimization log, known bottlenecks | Phase 80: the streaming world bench scene (`--make-streaming`) and the server's per-frame passes over every part cut (frame 21.9 → 4.2 ms in the container) | Claude |
+| 2026-11-12 | Networking | Phase 81: lag compensation (`LagHistory`, `RaycastParams.CompensateFor`, `Tool.LagCompensated`), protocol 12 | Claude |
+| 2026-11-12 | Networking | Phase 81: replays (`ReplayService`, `.replay` files, `Playback`, `axcenity-player --replay`) and kill cams | Claude |
 | 2026-11-12 | ADR-0022, ADR index, system inventory, roadmap | Collaborate 2.0 design (P0): host handoff by deterministic successor, members list replicated, persistent project ID, optional Git remote (`docs/research/collaborate-persistent.md`) | Claude |
 | 2026-11-12 | Mesh editing and CSG, specialized editors, roadmap | Unified Phase 90: Sculpt mode, retopology and Bake removed from the Model Studio; creators sculpt and bake in Blender | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C9: host checkpoints (`crates/collab/src/history.rs`, `.axcenity/teamcreate/history`, contents by hash) and the Owner's restore for everyone as one transaction | Claude |

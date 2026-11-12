@@ -171,6 +171,25 @@ impl HostIo for App {
     /// Builds the draw list at this window's current pixel size, from the
     /// camera scripts left.
     fn draw_scene(&mut self, seconds: f64) {
+        // A replay on screen is drawn instead of the game, which goes on
+        // underneath (Phase 81).
+        let free = self.shown_camera();
+        if let Some(view) = &mut self.replay {
+            if view.step(seconds) {
+                let camera = view.camera(free);
+                let draw_list = axcenity_scene::build_draw_list_posed(
+                    view.playback.world(),
+                    &self.sim.assets,
+                    camera,
+                    &axcenity_scene::Poses::new(),
+                    &mut view.terrain,
+                );
+                self.frame_draw = Some(draw_list);
+                self.frame_ui_layout = Some(axcenity_ui::UiLayout::default());
+                return;
+            }
+            self.replay = None;
+        }
         let size = self.frame_size;
         let on_top = self.loading_gui.as_ref().and_then(LoadingGui::on_top);
         let camera = self.shown_camera();
@@ -262,6 +281,11 @@ impl HostIo for App {
         draw_list
             .ui
             .extend(self.console_items(render_camera, (size.width, size.height)));
+        if let Some(view) = &self.replay {
+            draw_list
+                .ui
+                .extend(view.timeline_items(size.width as f32, size.height as f32));
+        }
         let loading_assets = self.frame_loading_assets;
         if self.show_splash {
             // The first drawn frame starts the splash clock.
@@ -298,5 +322,13 @@ impl HostIo for App {
     /// After the frame's scripts, physics and UI layout, before rendering.
     fn net_send(&mut self) {
         self.network.send(&self.sim.world, &mut self.sim.scripts);
+        // A script's `ReplayService:PlayBuffer()`: the kill cam shows from
+        // the next frame (Phase 81).
+        if let Some(play) = self.network.take_buffer_play() {
+            match replay_view::ReplayView::kill_cam(play, &self.sim.world) {
+                Ok(view) => self.replay = Some(view),
+                Err(why) => logs::line(LogLevel::Warning, None, &format!("warning: {why}")),
+            }
+        }
     }
 }

@@ -833,6 +833,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "boolean",
                 doc: "Kept for familiarity; there's no water yet, so it changes nothing.",
             },
+            Field {
+                name: "CompensateFor",
+                ty: "Player?",
+                doc: "Lag compensation: on a server, `workspace:Raycast` for this Player's shot tests moving parts where that Player saw them when they fired (their round trip plus the smoothing delay, at most 1 second back); their own character is tested where it is. nil at first.",
+            },
         ],
         operators: &[],
         methods: &[Function {
@@ -1307,6 +1312,43 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 name: "Disconnect",
                 doc: "Leaves the game joined, or stops hosting; the other players leave `Players`.",
                 params: &[],
+                returns: "()",
+            },
+        ],
+    },
+    ValueType {
+        class: "ReplayService",
+        doc: "Recording the game to a `.replay` file, and keeping the last few seconds for a kill cam, from `game:GetService(\"ReplayService\")`. Each device records its own world as replication shows it; nothing is simulated again, so a replay looks the same each time. Watch a file with `axcenity-player --replay <file> <game>`. Both sides have it.",
+        fields: &[
+            Field {
+                name: "IsRecording",
+                ty: "boolean",
+                doc: "Read-only: true between StartRecording and StopRecording.",
+            },
+            Field {
+                name: "BufferSeconds",
+                ty: "number",
+                doc: "Keeps the last this many seconds in memory (0, the default, keeps none; at most 60), for PlayBuffer.",
+            },
+        ],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "StartRecording",
+                doc: "Starts recording this device's game (again, if one was going).",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "StopRecording",
+                doc: "Ends the recording and saves it as `<name>.replay` in the player's data folder, under `replays` (a server's beside its saves). `name` is 1 to 64 letters, digits, spaces, `-` or `_`.",
+                params: &[("name", "string")],
+                returns: "()",
+            },
+            Function {
+                name: "PlayBuffer",
+                doc: "Shows the last `BufferSeconds` on this device's screen, through `player`'s character's eyes if given (a kill cam), then goes back to the game; Escape ends it early. The game goes on underneath. Set BufferSeconds first.",
+                params: &[("player", "Player?")],
                 returns: "()",
             },
         ],
@@ -2584,7 +2626,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"ContentProvider\"`, `\"DataService\"`, `\"DialogueService\"`, `\"QuestService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"ReplayService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"ContentProvider\"`, `\"DataService\"`, `\"DialogueService\"`, `\"QuestService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -3365,6 +3407,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "NetworkService",
             ty: "NetworkService",
             doc: "Hosting and joining games (same as `game:GetService(\"NetworkService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "ReplayService",
+            ty: "ReplayService",
+            doc: "Replays and kill cams (same as `game:GetService(\"ReplayService\")`).",
         },
     ),
     (

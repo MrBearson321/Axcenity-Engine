@@ -2571,6 +2571,10 @@ impl ClassName {
                 // The data-table row it is, as "table:key" (such as
                 // "weapons:sword"). Empty for none.
                 ("Item", Value::String(String::new())),
+                // Phase 81: the server's raycasts in the handlers of a
+                // RemoteEvent inside it are the sender's shots, tested
+                // against moving parts where that player saw them.
+                ("LagCompensated", Value::Bool(false)),
             ],
             ClassName::Inventory => vec![
                 // How many Tools it holds; touching more leaves them.

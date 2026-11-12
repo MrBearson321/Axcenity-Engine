@@ -78,6 +78,7 @@ pub mod hot_reload;
 mod http;
 mod input;
 mod instance;
+mod lag;
 mod lent;
 mod levels;
 mod localization;
@@ -90,6 +91,7 @@ mod prompt;
 mod query;
 mod random;
 mod remote;
+mod replay;
 mod run_service;
 mod runtime;
 mod sandbox;
@@ -145,6 +147,7 @@ pub use levels::Levels;
 pub use network::{LanGame, NetworkRequest};
 pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
+pub use replay::{MAX_BUFFER_SECONDS, ReplayRequest};
 pub use sequence::sound_actions as sequence_sound_actions;
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use spec::{FoundTest, TestReport, TestRequest};
@@ -267,6 +270,8 @@ pub struct ScriptRuntime {
     levels: levels::SharedLevels,
     /// Network ownership's settings (Phase 66).
     ownership: ownership::SharedOwnership,
+    /// Where moving parts were, for lag-compensated raycasts (Phase 81).
+    lag: lag::SharedLag,
     /// The default chat's messages (Phase 67).
     chat: chat::SharedChat,
     /// Seconds since players' data was last written.
@@ -407,6 +412,9 @@ impl ScriptRuntime {
         let ownership = ownership::SharedOwnership::default();
         server.lua.set_app_data(ownership.clone());
         client.lua.set_app_data(ownership.clone());
+        // Only the server's raycasts are compensated.
+        let lag = lag::SharedLag::default();
+        server.lua.set_app_data(lag.clone());
         let chat = chat::SharedChat::default();
         server.lua.set_app_data(chat.clone());
         client.lua.set_app_data(chat.clone());
@@ -431,6 +439,7 @@ impl ScriptRuntime {
             followers: spline::Followers::default(),
             generators: axcenity_procedural::Generators::default(),
             ownership,
+            lag,
             chat,
             joined: Vec::new(),
             save_clock: 0.0,

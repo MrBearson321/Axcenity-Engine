@@ -22,6 +22,7 @@ mod game;
 mod handshake;
 mod motion;
 mod ownership;
+mod replay;
 mod replicate;
 mod session;
 pub mod streaming;
@@ -35,6 +36,10 @@ pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
 };
 pub use ownership::{CharacterCheck, Owned, OwnedSender, TELEPORT_DISTANCE};
+pub use replay::{
+    BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
+    ReplayFrame, Replays, WirePose, eyes_of,
+};
 pub use replicate::{
     Applied, LevelState, Op, Replicator, Update, WireAnimator, WireChange, WireInstance,
     WireParameter, apply, replicated_parts,
@@ -45,7 +50,7 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 /// A chat message as sent on: trimmed, at most 200 characters, and not
 /// empty, whatever a modified client sends.
 pub(crate) fn chat_text(text: &str) -> Option<String> {
@@ -63,9 +68,13 @@ mod ability_tests;
 #[cfg(test)]
 mod character_tests;
 #[cfg(test)]
+mod lag_tests;
+#[cfg(test)]
 mod multiplayer_tests;
 #[cfg(test)]
 mod object_script_tests;
+#[cfg(test)]
+mod replay_tests;
 #[cfg(test)]
 mod replication_tests;
 #[cfg(test)]

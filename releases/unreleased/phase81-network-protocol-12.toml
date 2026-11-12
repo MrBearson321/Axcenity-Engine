@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "networking"
+title = "Network protocol 12: games on this version can't play with older ones"
+details = "Tools have a LagCompensated property (unified plan Phase 81), so a server sends it to players' devices. A player on an older version is told to update when they join."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

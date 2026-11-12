@@ -32,6 +32,9 @@ struct Params {
     ignore_water: bool,
     /// OverlapParams only: 0 lists every part.
     max_parts: usize,
+    /// RaycastParams only (Phase 81): the Player whose shot this is, so a
+    /// server raycast tests moving parts where they saw them.
+    compensate_for: Option<InstanceId>,
 }
 
 impl Default for Params {
@@ -43,6 +46,7 @@ impl Default for Params {
             respect_can_collide: false,
             ignore_water: false,
             max_parts: 0,
+            compensate_for: None,
         }
     }
 }
@@ -88,6 +92,10 @@ fn get(lua: &Lua, params: &Params, kind: &str, key: &str) -> mlua::Result<mlua::
         "CollisionGroup" => params.collision_group.as_str().into_lua(lua),
         "RespectCanCollide" => Ok(mlua::Value::Boolean(params.respect_can_collide)),
         RAYCAST_ONLY if kind == "RaycastParams" => Ok(mlua::Value::Boolean(params.ignore_water)),
+        "CompensateFor" if kind == "RaycastParams" => match params.compensate_for {
+            Some(player) => LuaInstance(player).into_lua(lua),
+            None => Ok(mlua::Value::Nil),
+        },
         OVERLAP_ONLY if kind == "OverlapParams" => (params.max_parts as f64).into_lua(lua),
         _ => Err(not_a_member(key, kind)),
     }
@@ -129,6 +137,21 @@ fn set(
             mlua::Value::Boolean(on) => params.ignore_water = on,
             _ => return Err(wrong("true or false")),
         },
+        "CompensateFor" if kind == "RaycastParams" => {
+            params.compensate_for = match &value {
+                mlua::Value::Nil => None,
+                _ => {
+                    let id = LuaInstance::from_lua(value.clone(), lua)
+                        .map_err(|_| wrong("a Player or nil"))?
+                        .0;
+                    let class = world(lua)?.get(id).map(|i| i.class());
+                    if class != Some(ClassName::Player) {
+                        return Err(wrong("a Player or nil"));
+                    }
+                    Some(id)
+                }
+            }
+        }
         OVERLAP_ONLY if kind == "OverlapParams" => {
             let count = match value {
                 mlua::Value::Integer(n) => n as f64,
@@ -280,6 +303,29 @@ fn raycast_params(lua: &Lua, value: mlua::Value, method: &str) -> mlua::Result<Q
         })
 }
 
+/// A raycast's params, and whose shot it is for lag compensation: its
+/// `CompensateFor`, else the Player whose compensated Tool's RemoteEvent
+/// handler is running (Phase 81).
+fn raycast_params_and_shooter(
+    lua: &Lua,
+    value: mlua::Value,
+    method: &str,
+) -> mlua::Result<(QueryParams, Option<InstanceId>)> {
+    let set = if value.is_nil() {
+        None
+    } else {
+        LuaRaycastParams::from_lua(value.clone(), lua)
+            .ok()
+            .and_then(|params| params.0.compensate_for)
+    };
+    let params = raycast_params(lua, value, method)?;
+    let shooter = set.or_else(|| {
+        lua.app_data_ref::<crate::lag::Compensating>()
+            .and_then(|compensating| compensating.0)
+    });
+    Ok((params, shooter))
+}
+
 fn overlap_params(lua: &Lua, value: mlua::Value, method: &str) -> mlua::Result<QueryParams> {
     if value.is_nil() {
         return Ok(Params::default().query());
@@ -395,10 +441,32 @@ pub fn workspace_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str
         check_workspace(lua, &this, "Raycast")?;
         let origin = vector3(lua, origin, "Raycast", "origin")?;
         let direction = vector3(lua, direction, "Raycast", "direction")?;
-        let params = raycast_params(lua, params, "Raycast")?;
+        let (params, compensate) = raycast_params_and_shooter(lua, params, "Raycast")?;
         let hit = {
             let world = world(lua)?;
-            axcenity_physics::raycast(&world, &assets(lua), origin, direction, &params)
+            let lag = lua.app_data_ref::<crate::lag::SharedLag>();
+            let lag = lag.as_ref().map(|lag| lag.0.borrow());
+            let rewound = compensate.and_then(|player| {
+                let lag = lag.as_ref()?;
+                crate::lag::rewound_for(lag, &world, player)
+            });
+            match (&lag, rewound) {
+                (Some(lag), Some((time, own))) => axcenity_physics::raycast_rewound(
+                    &world,
+                    &assets(lua),
+                    origin,
+                    direction,
+                    &params,
+                    &|id| {
+                        if own.contains(&id) {
+                            None
+                        } else {
+                            lag.pose_at(id, time)
+                        }
+                    },
+                ),
+                _ => axcenity_physics::raycast(&world, &assets(lua), origin, direction, &params),
+            }
         };
         if let Some(mut rays) = lua.app_data_mut::<crate::DebugRays>() {
             rays.push(crate::DebugRay {
