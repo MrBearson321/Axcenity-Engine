@@ -14,7 +14,7 @@ tags: [system/mesh-edit, csg, modeling]
 # Mesh editing and CSG
 
 > [!summary]
-> `mesh_edit` is the engine's CPU geometry library (22.8k lines): **plane cuts** that close their holes (ear clipping, flat-face refill), **Voronoi fracture** pieces, **BSP booleans** for solid modeling (Union, Negate, Intersect, Separate → `UnionOperation`), and everything the **Model Studio** edits (half-edge `EditMesh`, modeling operations, modifiers, UV unwrapping with its own LSCM solver, texture painting, sculpting with a BVH, retopology, baking, rigging and weights). It writes `.glb`. Runtime users: `physics` (shattering Fractures' pre-generated pieces) and `script` (`UnionAsync` on a worker, default `csg` feature). **Implemented.**
+> `mesh_edit` is the engine's CPU geometry library (19.3k lines): **plane cuts** that close their holes (ear clipping, flat-face refill), **Voronoi fracture** pieces, **BSP booleans** for solid modeling (Union, Negate, Intersect, Separate → `UnionOperation`), and everything the **Model Studio** edits (half-edge `EditMesh`, modeling operations, modifiers, UV unwrapping with its own LSCM solver, texture painting, rigging and weights; sculpting, retopology and baking were removed in Phase 90 for Blender's). It writes `.glb`. Runtime users: `physics` (shattering Fractures' pre-generated pieces) and `script` (`UnionAsync` on a worker, default `csg` feature). **Implemented.**
 
 ## Flows
 
@@ -23,7 +23,7 @@ flowchart LR
   subgraph Editor
     G[Fracture: Generate] --> V["voronoi_pieces: cut by planes<br/>halfway to each seed point"] --> GLB1[name.fracture.glb]
     U[Union / Negate / Intersect] --> B["csg.rs boolean (f64, unit box)<br/>→ closed mesh"] --> GLB2[name.union.glb]
-    MS[Model Studio] --> EM[EditMesh, MeshOp, modifiers,<br/>uv, paint, sculpt, retopo, bake, rig]
+    MS[Model Studio] --> EM[EditMesh, MeshOp, modifiers,<br/>uv, paint, rig]
   end
   GLB1 --> PH["physics fracture.rs: shatter on impact<br/>or fracture:Shatter()"]
   GLB2 --> PART[UnionOperation drawn and collided like a MeshPart]

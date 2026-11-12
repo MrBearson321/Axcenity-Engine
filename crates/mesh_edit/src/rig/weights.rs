@@ -15,7 +15,7 @@ use glam::Vec3;
 use super::{Armature, MAX_INFLUENCES, Skin, nearest_points};
 use crate::half_edge::EditMesh;
 use crate::paint::BrushFalloff;
-use crate::retopo::Reference;
+use crate::reference::Reference;
 
 /// Weights under this are dropped after bone heat.
 const SMALLEST: f32 = 0.01;

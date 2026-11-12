@@ -406,3 +406,27 @@ fn generated_lods_are_the_levels_the_renderer_draws() {
         "the file's own copies, not simplified ones"
     );
 }
+
+/// Phase 90: a sidecar with fields this Axcenity no longer reads (a sculpt
+/// or a retopology reference from an older or newer editor) still opens
+/// with the same shape, and saving again leaves those fields out.
+#[test]
+fn a_sidecar_with_fields_no_longer_read_still_opens_and_saves_without_them() {
+    let doc = doc_of("Head", half_head(), vec![mirror(false)]);
+    let glb = doc.write_glb();
+    let sidecar = doc.write_sidecar(&glb).unwrap();
+    let mut json: serde_json::Value = serde_json::from_slice(&sidecar).unwrap();
+    json["objects"][0]["sculpt"] = serde_json::json!({"mask": [0.5, 1.0], "levels": 2});
+    json["retopo"] = serde_json::json!({"reference": 0});
+    let old = serde_json::to_vec(&json).unwrap();
+
+    let mut reopened = ModelDoc::open(&glb, &std::env::temp_dir(), ModelFormat::Gltf).unwrap();
+    assert_eq!(reopened.read_sidecar(&old, &glb), Ok(1));
+    let mesh = reopened.objects[0].mesh.as_ref().unwrap();
+    assert_eq!(mesh.positions(), doc.objects[0].mesh.as_ref().unwrap().positions());
+    assert_eq!(reopened.objects[0].modifiers, doc.objects[0].modifiers);
+
+    let saved = reopened.write_sidecar(&reopened.write_glb()).unwrap();
+    let text = String::from_utf8(saved).unwrap();
+    assert!(!text.contains("sculpt") && !text.contains("retopo"), "{text}");
+}

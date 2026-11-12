@@ -87,6 +87,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | Range | Status |
 |---|---|
 | Phases 1–80 | **Built**; six hand checks need the developer's PC, Mac or two computers, and Phase 80's 4 × 4 km benchmark scene isn't built yet (the plan's "Audit of 2026-11-12") |
+| Phases 60–61: sculpting, retopology and baking | **Removed** by Phase 90 (narrower Model Studio, done 2026-11-12, about 5,600 lines out): creators sculpt and bake in Blender and import the `.glb`. Rigging keeps the pieces it used (`mesh_edit` `bvh.rs`, `reference.rs`, `remesh.rs`) |
 | Phase 81: lag compensation and replays | **Planned**, after Phase 93 |
 | Phases 82–88: Android and iOS | **Deferred** by policy; every criterion marked so |
 | Phases 89–93: trim and tighten (engine hot-patching out and scripts hot reload with their state kept, like s&box (changed 2026-11-12); narrower Model Studio, one graph canvas, legacy paths, a multithreaded frame) | Phase 89 **done** (scripts keep their top-level locals across a save in Play, [ADR-0023](../Architecture/Architecture-Decisions/ADR-0023-Scripts-Keep-State-Across-Hot-Reload.md); engine hot-patching and its `subsecond`/`dioxus` crates gone, `engine-dev` keeps Rebuild and Relaunch). Phases 90–93 **planned**, in that order (thread "Finish unchecked items in unified plan", 2026-11-12). Phase 93 is about half done already: parallel physics (M3), the renderer's planning pool, the nav worker (M13). Phase 92 bumps the format to 6, since 5 is the release system's engine record |

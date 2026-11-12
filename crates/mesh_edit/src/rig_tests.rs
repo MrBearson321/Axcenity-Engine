@@ -349,7 +349,7 @@ fn normalize_limit_and_influences_give_four_bones_adding_up_to_one() {
     let sum: f32 = skin.weights[0].iter().map(|(_, w)| w).sum();
     assert!((sum - 1.0).abs() < 1e-6);
     // A mesh with other vertices takes each one's nearest weights.
-    let finer = crate::sculpt::subdivide(&mesh).unwrap();
+    let finer = crate::subdivide(&mesh).unwrap();
     assert!(finer.vertex_count() > mesh.vertex_count());
     let fitted = skin.fitted(&finer);
     assert_eq!(fitted.weights.len(), finer.vertex_count());

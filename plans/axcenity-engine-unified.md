@@ -56,7 +56,7 @@ These were decided in the developer's interview of 2026-10-27.
 | Step | Work | Status on main | Fit to today's code |
 | --- | --- | --- | --- |
 | 1 | Phase 89: engine hot-patching out, game files hot reload like s&box (**Changed** 2026-11-12) | Done in this phase's PR. Was: not started. Script reload (Phase 24, `ScriptRuntime::reload_script`) reruns a script from scratch. `hot_patch.rs`, `hot_patch/` and the `hot-patch` feature (`subsecond`, `dioxus-*`) are still in `crates/editor`. | `rebuild.rs`, `relaunch.rs` and `app/engine.rs` stayed in `crates/editor` through the crate split. `blocks` already has a full Luau reader with source spans (`blocks/src/lua.rs`), which wraps scripts' top-level locals. |
-| 2 | Phase 90: a narrower Model Studio | Not started. | Model Studio moved to `crates/editor-model-studio` (G11, #189): delete `sculpt*` and `retopo*` there, not in `editor/src/model_studio/`. The usability audit (MS4) already folded Retopology and Bake away, which agrees with removing them. Rigging still needs `sculpt::remesh::field_mesh` (`rig/template.rs`), `retopo::Reference` (`rig/weights.rs`) and `sculpt::subdivide` (`rig_tests.rs`). Terrain sculpting is a different tool and stays. |
+| 2 | Phase 90: a narrower Model Studio | Done in this phase's PR. Was: not started. | Model Studio moved to `crates/editor-model-studio` (G11, #189): delete `sculpt*` and `retopo*` there, not in `editor/src/model_studio/`. The usability audit (MS4) already folded Retopology and Bake away, which agrees with removing them. Rigging still needs `sculpt::remesh::field_mesh` (`rig/template.rs`), `retopo::Reference` (`rig/weights.rs`) and `sculpt::subdivide` (`rig_tests.rs`). Terrain sculpting is a different tool and stays. |
 | 3 | Phase 91: one graph canvas | Not started (also proposed as V24 by the usability refactor audit). | `node_graph` is now the `editor-node-graph` crate (#193). `block_editor/graph.rs` is 1,436 lines and `animation/graph.rs` 930. The material graph's own view is `editor/src/material_editor/graph.rs`. |
 | 4 | Phase 92: legacy paths, old templates and dead weight | Partly superseded. The genre templates (Phase 69) landed, so the Starter template can go. | `project::FORMAT_VERSION` is already 5 (the release system's engine record, #98 era), so this phase bumps it to **6**, not 5. There are four alpha releases now (`releases/history`: 0.1.0-alpha.1 to .3 and 0.2.0-alpha.1). |
 | 5 | Phase 93: a multithreaded frame | About half done by the roadmap. Physics runs on rapier's parallel feature in its own pool of at most 12 threads with the same results at any thread count (M3 #25, `physics/src/threads.rs`). Frame planning and culling run on the renderer's pool (`render/src/renderer/parallel.rs`). The nav mesh builds on a worker (M13 #32). The retained draw list (M4 #23) removed most of the draw-list build. | Left: animator posing across threads, mesh decoding on a shared pool, per-thread time in the Profiler, the 200-character and 2,000-body benchmark, and test runs with 1 and 8 threads. The modernization report (§ `rayon` usage) asks for the same: posing, audio diff and nav fingerprint over `&World`, applied in index order. "Limited on mobile" is deferred with Milestone 20. |
@@ -1905,6 +1905,8 @@ You can paint in the 3D view (projected to UV through a cached triangle-ID buffe
 
 ## Phase 60: Sculpting
 
+**Removed** in Phase 90 (2026-11-12): creators sculpt in Blender and import the `.glb`. The criteria below record what was built then.
+
 **From**: the developer's interview of 2026-10-27.
 
 ### What to build
@@ -1925,6 +1927,8 @@ You can paint in the 3D view (projected to UV through a cached triangle-ID buffe
 ---
 
 ## Phase 61: Retopology and baking
+
+**Removed** in Phase 90 (2026-11-12): creators retopologise and bake in Blender and import the `.glb`. The criteria below record what was built then.
 
 **From**: the developer's interview of 2026-10-27.
 
@@ -2797,10 +2801,10 @@ First move these into a neutral `mesh_edit` module (for example `remesh.rs` and 
 
 ### Acceptance criteria
 
-- [ ] Rigging a Mixamo-shaped model and painting weights works exactly as before. Phase 62's tests pass.
-- [ ] A model saved with sculpt data before this phase opens with the same shape and saves without that data.
-- [ ] A normal map baked in Blender and imported shows the same detail on a low-poly model in Play.
-- [ ] `mesh_edit` and the editor together are at least 5,000 lines smaller (about 5,800 today, less what moves for rigging).
+- [x] Rigging a Mixamo-shaped model and painting weights works exactly as before. Phase 62's tests pass.
+- [x] A model saved with sculpt data before this phase opens with the same shape and saves without that data. (Sidecars never held sculpt or retopology data, only the mesh they made, so there's nothing to drop and no Output note; `a_sidecar_with_fields_no_longer_read_still_opens_and_saves_without_them` checks that unknown fields are ignored and left out on save.)
+- [ ] A normal map baked in Blender and imported shows the same detail on a low-poly model in Play. (Hand check on the PC, queued; imported normal maps already draw through materials.)
+- [x] `mesh_edit` and the editor together are at least 5,000 lines smaller (about 5,800 today, less what moves for rigging). Measured: 6,184 lines removed, 551 added, 5,633 net (`mesh_edit` 22.8k → 19.3k).
 
 ---
 

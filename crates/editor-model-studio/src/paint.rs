@@ -86,7 +86,7 @@ impl UvProblem {
 }
 
 /// Above this many faces the overlap check is skipped: it's a hint, and
-/// a dense sculpt would take too long.
+/// a dense mesh would take too long.
 const UV_CHECK_FACES: usize = 50_000;
 
 impl Default for PaintState {
