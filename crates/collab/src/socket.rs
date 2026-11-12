@@ -136,7 +136,8 @@ pub type ConnId = u64;
 /// What happened on a host's connections.
 #[derive(Debug, PartialEq, Eq)]
 pub enum NetEvent {
-    Opened(ConnId),
+    /// A connection opened, from this address.
+    Opened(ConnId, std::net::IpAddr),
     Message(ConnId, Vec<u8>),
     Closed(ConnId),
 }
@@ -152,6 +153,8 @@ pub struct Listener {
     events: Option<Receiver<NetEvent>>,
     senders: Arc<Mutex<HashMap<ConnId, Sender<Out>>>>,
     stop: Arc<AtomicBool>,
+    /// Addresses whose connections are closed as they open, until when.
+    turned_away: Arc<Mutex<HashMap<std::net::IpAddr, Instant>>>,
 }
 
 impl Listener {
@@ -165,15 +168,35 @@ impl Listener {
         let senders: Arc<Mutex<HashMap<ConnId, Sender<Out>>>> = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
         let next = Arc::new(AtomicU64::new(1));
+        let turned_away: Arc<Mutex<HashMap<std::net::IpAddr, Instant>>> = Arc::default();
         {
             let senders = senders.clone();
+            let turned_away = turned_away.clone();
             let stop = stop.clone();
             std::thread::Builder::new()
                 .name("team-create-listen".into())
                 .spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
                         match socket.accept() {
-                            Ok((stream, _)) => {
+                            Ok((stream, peer)) => {
+                                // Too many open, or an address that failed
+                                // too often: closed before any TLS work.
+                                let full = senders.lock().expect("senders").len()
+                                    >= crate::limits::CONNECTIONS_MOST;
+                                let barred = {
+                                    let mut barred = turned_away.lock().expect("turned away");
+                                    let now = Instant::now();
+                                    barred.retain(|_, until| *until > now);
+                                    barred.contains_key(&peer.ip())
+                                };
+                                if full || barred {
+                                    log::debug!(
+                                        "Collaborate: closed a connection from {peer} at once"
+                                    );
+                                    drop(stream);
+                                    continue;
+                                }
+                                let ip = peer.ip();
                                 let id = next.fetch_add(1, Ordering::Relaxed);
                                 let (out_in, out) = mpsc::channel();
                                 senders.lock().expect("senders").insert(id, out_in);
@@ -183,7 +206,7 @@ impl Listener {
                                 let _ = std::thread::Builder::new()
                                     .name(format!("team-create-conn-{id}"))
                                     .spawn(move || {
-                                        serve(id, stream, tls, out, &events);
+                                        serve(id, ip, stream, tls, out, &events);
                                         senders.lock().expect("senders").remove(&id);
                                     });
                             }
@@ -203,7 +226,16 @@ impl Listener {
             events: Some(events),
             senders,
             stop,
+            turned_away,
         })
+    }
+
+    /// Closes new connections from `ip` as they open, until `until`.
+    pub fn turn_away(&self, ip: std::net::IpAddr, until: Instant) {
+        self.turned_away
+            .lock()
+            .expect("turned away")
+            .insert(ip, until);
     }
 
     /// Where it listens (with the port picked, if it was 0).
@@ -251,6 +283,7 @@ impl Drop for Listener {
 /// One connection on the host, until it closes.
 fn serve(
     id: ConnId,
+    ip: std::net::IpAddr,
     stream: TcpStream,
     tls: Arc<ServerConfig>,
     out: Receiver<Out>,
@@ -276,7 +309,7 @@ fn serve(
             return;
         }
     };
-    if events.send(NetEvent::Opened(id)).is_err() {
+    if events.send(NetEvent::Opened(id, ip)).is_err() {
         return;
     }
     pump(ws, &out, |bytes| {

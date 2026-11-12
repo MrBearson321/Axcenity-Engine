@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
+use crate::audit::AuditEntry;
 use crate::files::{FileHash, Manifest, Piece};
 use crate::history::Checkpoint;
 use crate::ids::IdBlock;
@@ -26,7 +27,7 @@ use crate::presence::{Camera, ChatLine, Collaborator, Presence, TextCursor};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 6;
+pub const FORMAT: u8 = 7;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -541,6 +542,7 @@ enum WireToHost {
     Chat(String),
     Checkpoint(String),
     Restore(u64),
+    AuditLog,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -617,6 +619,7 @@ impl From<&ToHost> for WireToHost {
             ToHost::Chat(text) => WireToHost::Chat(text.clone()),
             ToHost::Checkpoint(label) => WireToHost::Checkpoint(label.clone()),
             ToHost::Restore(id) => WireToHost::Restore(*id),
+            ToHost::AuditLog => WireToHost::AuditLog,
         }
     }
 }
@@ -659,6 +662,7 @@ impl WireToHost {
             WireToHost::Chat(text) => ToHost::Chat(text),
             WireToHost::Checkpoint(label) => ToHost::Checkpoint(label),
             WireToHost::Restore(id) => ToHost::Restore(id),
+            WireToHost::AuditLog => ToHost::AuditLog,
         })
     }
 }
@@ -716,6 +720,7 @@ enum WireToClient {
     ChatHistory(Vec<ChatLine>),
     Checkpoints(Vec<Checkpoint>),
     HistoryNotice(String),
+    AuditLog(Vec<AuditEntry>),
 }
 
 impl From<&ToClient> for WireToClient {
@@ -832,6 +837,7 @@ impl From<&ToClient> for WireToClient {
             ToClient::ChatHistory(lines) => WireToClient::ChatHistory(lines.clone()),
             ToClient::Checkpoints(list) => WireToClient::Checkpoints(list.clone()),
             ToClient::HistoryNotice(reason) => WireToClient::HistoryNotice(reason.clone()),
+            ToClient::AuditLog(entries) => WireToClient::AuditLog(entries.clone()),
         }
     }
 }
@@ -950,6 +956,7 @@ impl WireToClient {
             WireToClient::ChatHistory(lines) => ToClient::ChatHistory(lines),
             WireToClient::Checkpoints(list) => ToClient::Checkpoints(list),
             WireToClient::HistoryNotice(reason) => ToClient::HistoryNotice(reason),
+            WireToClient::AuditLog(entries) => ToClient::AuditLog(entries),
         })
     }
 }

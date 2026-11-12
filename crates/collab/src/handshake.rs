@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::access::{Access, Member};
-use crate::identity::{self, Fingerprint, Identity, PublicKey};
+use crate::identity::{self, Fingerprint, IdentityProvider, PublicKey};
 use crate::message::MemberId;
 use crate::role::Role;
 
@@ -188,7 +188,7 @@ impl Gate {
                 self.state = GateState::Challenged {
                     nonce,
                     key,
-                    name: name.chars().take(64).collect(),
+                    name: crate::access::tidy_name(&name),
                     color,
                     invite,
                 };
@@ -247,7 +247,7 @@ impl Knock {
     /// For a host whose certificate has fingerprint `cert` (the TLS
     /// connection has checked it). Returns the hello to send first.
     pub fn new(
-        identity: &Identity,
+        identity: &dyn IdentityProvider,
         cert: Fingerprint,
         invite: Option<[u8; 16]>,
         versions: &Versions,
@@ -257,14 +257,14 @@ impl Knock {
             engine: versions.engine.clone(),
             class_defaults: versions.class_defaults,
             key: identity.public_key(),
-            name: identity.name.clone(),
-            color: identity.color,
+            name: identity.display_name().to_owned(),
+            color: identity.display_color(),
             invite: invite.map(|secret| identity::to_hex(&secret)),
         };
         (Knock { cert }, hello.to_bytes())
     }
 
-    pub fn receive(&mut self, bytes: &[u8], identity: &Identity) -> KnockStep {
+    pub fn receive(&mut self, bytes: &[u8], identity: &dyn IdentityProvider) -> KnockStep {
         match Greeting::from_bytes(bytes) {
             Some(Greeting::Challenge { nonce }) => {
                 let nonce = identity::from_hex(&nonce).unwrap_or_default();

@@ -71,6 +71,7 @@ mod spline_content;
 mod splines;
 mod tags;
 pub(crate) mod team;
+mod team_audit;
 mod team_chat;
 mod team_history;
 mod team_panel;

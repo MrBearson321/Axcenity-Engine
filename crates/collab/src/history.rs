@@ -275,7 +275,7 @@ pub fn restore_ops(
     now: &Doc,
     then: &World,
     then_files: &Manifest,
-    fresh: &mut dyn FnMut() -> InstanceId,
+    fresh: &mut dyn FnMut() -> Option<InstanceId>,
     has_file: &dyn Fn(FileHash) -> bool,
 ) -> Result<Restore, String> {
     if then.root() != now.world.root() || then.workspace() != now.world.workspace() {
@@ -294,7 +294,8 @@ pub fn restore_ops(
             _ => false,
         };
         if !same {
-            map.insert(id, fresh());
+            let id_now = fresh().ok_or("The session has run out of Instance IDs")?;
+            map.insert(id, id_now);
         }
     }
     let step = |scratch: &mut Doc, mut op: Op, ops: &mut Vec<Op>| -> Result<(), String> {

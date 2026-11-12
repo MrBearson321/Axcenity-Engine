@@ -68,6 +68,49 @@ impl fmt::Debug for Fingerprint {
     }
 }
 
+/// Who this editor is to a session and how it proves it (C10; design
+/// §6). The handshake asks only this, so another kind of identity can sign
+/// in without the host's checks changing. One kind exists:
+/// [`DeviceKeys`], a key pair made on this computer. A later Axcenity
+/// account would be another, signing with a key its service vouches for.
+pub trait IdentityProvider: Send + Sync {
+    /// What kind it is, for logs ("device keys").
+    fn kind(&self) -> &'static str;
+    /// The name others see.
+    fn display_name(&self) -> &str;
+    /// The colour others see it in.
+    fn display_color(&self) -> [u8; 3];
+    /// The key the host knows this member by.
+    fn public_key(&self) -> PublicKey;
+    /// Signs `message` with that key.
+    fn sign(&self, message: &[u8]) -> Vec<u8>;
+}
+
+/// The identity this computer makes for itself: [`Identity`].
+pub type DeviceKeys = Identity;
+
+impl IdentityProvider for Identity {
+    fn kind(&self) -> &'static str {
+        "device keys"
+    }
+
+    fn display_name(&self) -> &str {
+        &self.name
+    }
+
+    fn display_color(&self) -> [u8; 3] {
+        self.color
+    }
+
+    fn public_key(&self) -> PublicKey {
+        Identity::public_key(self)
+    }
+
+    fn sign(&self, message: &[u8]) -> Vec<u8> {
+        Identity::sign(self, message)
+    }
+}
+
 /// This computer's Collaborate identity: a display name, a colour for
 /// presence, and the key pair.
 pub struct Identity {

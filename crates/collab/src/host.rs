@@ -7,9 +7,11 @@ use std::time::{Duration, Instant};
 use axcenity_core::World;
 
 use crate::apply::{self, Doc, Note, Refusal};
+use crate::audit::{Audit, AuditEntry, AuditKind};
 use crate::files::{self, Assembly, FileHash, FileStore, Manifest, MemoryStore, Piece};
 use crate::ids::{IdAllocator, IdBlock};
 use crate::journal::{self, Handled, Journal};
+use crate::limits::{self, Kind, Limits};
 use crate::live::{self, LiveDoc};
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
@@ -69,9 +71,19 @@ struct Member {
     presence: Presence,
     /// Files they're uploading, by hash.
     uploads: HashMap<FileHash, Assembly>,
-    /// When their last chat lines arrived, for the rate limit.
-    chatted: VecDeque<Instant>,
+    /// What they may still send of each limited kind (C10).
+    limits: Limits,
+    /// Files they asked for that wait for their download budget, the
+    /// first one read already.
+    fetching: VecDeque<FileHash>,
+    fetch_head: Option<(FileHash, files::Bytes)>,
+    /// When each kind of trouble they caused was last written down, so a
+    /// flood is one line a minute in the audit log.
+    noted: BTreeMap<&'static str, Instant>,
 }
+
+/// How often the same trouble from one member goes in the audit log.
+const NOTE_EVERY: Duration = Duration::from_secs(60);
 
 /// The authority of one Collaborate session.
 pub struct Host {
@@ -107,6 +119,12 @@ pub struct Host {
     checkpointed: (Instant, u64),
     /// Who changed the session since the newest checkpoint.
     edited_since: std::collections::BTreeSet<MemberId>,
+    /// Joins, refusals, roles and trouble, for the Owner (C10).
+    audit: Audit,
+    /// Members whose connection should close ([`Host::take_closing`]).
+    closing: Vec<MemberId>,
+    /// Each limited kind's budget ([`limits::budget`]; tests use others).
+    budgets: limits::Budgets,
 }
 
 /// A live document the host keeps.
@@ -160,6 +178,9 @@ impl Host {
             history: None,
             checkpointed: (Instant::now(), 0),
             edited_since: Default::default(),
+            audit: Audit::default(),
+            closing: Vec::new(),
+            budgets: limits::budget,
         }
     }
 
@@ -266,6 +287,15 @@ impl Host {
     pub fn tick(&mut self, now: Instant) -> Vec<Outgoing> {
         self.clock = now;
         let mut out = self.write_back(now, false);
+        let waiting: Vec<MemberId> = self
+            .members
+            .iter()
+            .filter(|(_, m)| m.connected && !m.fetching.is_empty())
+            .map(|(&member, _)| member)
+            .collect();
+        for member in waiting {
+            out.extend(self.serve_fetches(member, now));
+        }
         out.extend(self.hourly_checkpoint(now));
         if now.saturating_duration_since(self.snapshot_at) >= journal::SNAPSHOT_EVERY {
             self.snapshot();
@@ -279,6 +309,13 @@ impl Host {
             out.extend(self.locks_to_everyone());
         }
         out
+    }
+
+    /// Uses `budgets` for members added from now on (tests).
+    #[cfg(test)]
+    pub(crate) fn with_budgets(mut self, budgets: limits::Budgets) -> Host {
+        self.budgets = budgets;
+        self
     }
 
     /// Keeps only `kept` transactions for catching up (tests use a small one
@@ -339,7 +376,10 @@ impl Host {
                 profile: Profile::unnamed(member),
                 presence: Presence::default(),
                 uploads: HashMap::new(),
-                chatted: VecDeque::new(),
+                limits: Limits::new(self.budgets),
+                fetching: VecDeque::new(),
+                fetch_head: None,
+                noted: BTreeMap::new(),
             },
         );
     }
@@ -359,9 +399,11 @@ impl Host {
 
     /// Takes a member out: their transactions are no longer taken.
     pub fn remove_member(&mut self, member: MemberId) -> Vec<Outgoing> {
-        if self.members.remove(&member).is_none() {
+        let Some(m) = self.members.remove(&member) else {
             return Vec::new();
-        }
+        };
+        let text = format!("{} was taken out of the project", m.profile.name);
+        self.audit.record(AuditKind::Removed, Some(member), text);
         let mut out = self.roster_to_everyone();
         let before = self.locks.len();
         self.locks.retain(|_, lock| lock.member != member);
@@ -402,6 +444,11 @@ impl Host {
         let Some(m) = self.members.get_mut(&member) else {
             return Vec::new();
         };
+        if m.role != role {
+            let text = format!("{} is now {role:?} (was {:?})", m.profile.name, m.role);
+            self.audit.record(AuditKind::Role, Some(member), text);
+        }
+        let m = self.members.get_mut(&member).expect("found above");
         m.role = role;
         let mut out = Vec::new();
         if m.connected {
@@ -426,6 +473,8 @@ impl Host {
         m.connected = false;
         m.presence = Presence::default();
         m.uploads.clear();
+        m.fetching.clear();
+        m.fetch_head = None;
         let now = self.clock;
         for lock in self.locks.values_mut() {
             if lock.member == member {
@@ -441,6 +490,38 @@ impl Host {
         if !self.members.contains_key(&member) {
             return Vec::new();
         }
+        // The host's clock moves on with `tick`; budgets also follow the
+        // real one, so a host that isn't ticked still refills them.
+        let now = self.clock.max(Instant::now());
+        let kind = match &message {
+            ToHost::Hello { .. } => Some(Kind::Hello),
+            ToHost::NeedIds => Some(Kind::Ids),
+            ToHost::Presence(_) => Some(Kind::Presence),
+            ToHost::Lock { .. } | ToHost::Unlock { .. } => Some(Kind::Lock),
+            ToHost::DocOpen { .. } => Some(Kind::DocOpen),
+            ToHost::Chat(_) => Some(Kind::Chat),
+            ToHost::Checkpoint(_) => Some(Kind::Checkpoint),
+            ToHost::Restore(_) => Some(Kind::Restore),
+            _ => None,
+        };
+        if let Some(kind) = kind
+            && !self.within(member, kind, 1.0, now)
+        {
+            return match kind {
+                Kind::Checkpoint | Kind::Restore => self.history_notice(
+                    member,
+                    "That was asked for too often: wait a few seconds and try again",
+                ),
+                // A hello can't be dropped (the member would wait for an
+                // answer forever): their connection closes instead, and
+                // they reconnect after their back-off.
+                Kind::Hello => {
+                    self.closing.push(member);
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
+        }
         match message {
             ToHost::Hello { have } => self.hello(member, have),
             ToHost::Submit(transaction) => {
@@ -452,6 +533,9 @@ impl Host {
                 m.last_client_seq = transaction.client_seq;
                 let role = m.role;
                 if let Err(reason) = self.check_files(member, role, &transaction.ops) {
+                    if reason == Refusal::Permission {
+                        self.denied(member, "an edit", now);
+                    }
                     return self.refuse(member, transaction.client_seq, reason);
                 }
                 let m = self.members.get_mut(&member).expect("checked above");
@@ -509,7 +593,18 @@ impl Host {
                 bytes,
             } => {
                 let m = self.members.get_mut(&member).expect("checked above");
-                if !m.connected || !may_change_files(m.role) || self.store.has(hash) {
+                if !m.connected || self.store.has(hash) {
+                    return Vec::new();
+                }
+                if !may_change_files(m.role) {
+                    self.denied(member, "a file upload", now);
+                    return Vec::new();
+                }
+                if at == 0 && m.uploads.len() >= limits::UPLOADS_AT_ONCE {
+                    log::warn!(
+                        "Collaborate: member {} started too many uploads at once; one was dropped",
+                        member.0
+                    );
                     return Vec::new();
                 }
                 match Assembly::add(&mut m.uploads, hash, at, total, &bytes.0) {
@@ -523,38 +618,28 @@ impl Host {
                 Vec::new()
             }
             ToHost::Fetch(hashes) => {
-                if !self.members[&member].connected {
+                let m = self.members.get_mut(&member).expect("checked above");
+                if !m.connected {
                     return Vec::new();
                 }
-                let mut out = Vec::new();
-                for hash in hashes {
-                    match self.store.read(hash) {
-                        Some(bytes) => {
-                            let total = bytes.len() as u64;
-                            out.extend(files::pieces(&bytes).map(|(at, piece)| Outgoing {
-                                to: member,
-                                message: ToClient::File {
-                                    hash,
-                                    at,
-                                    total,
-                                    bytes: Piece(piece),
-                                },
-                            }));
-                        }
-                        None => out.push(Outgoing {
-                            to: member,
-                            message: ToClient::Missing(hash),
-                        }),
-                    }
+                let room = limits::FETCH_QUEUED_MOST.saturating_sub(m.fetching.len());
+                if hashes.len() > room {
+                    log::warn!(
+                        "Collaborate: member {} asked for too many files at once; {} weren't sent",
+                        member.0,
+                        hashes.len() - room
+                    );
                 }
-                out
+                m.fetching.extend(hashes.into_iter().take(room));
+                self.serve_fetches(member, now)
             }
             ToHost::Lock { path } => {
                 let m = &self.members[&member];
-                if !m.connected
-                    || !may_edit_file(m.role, &path)
-                    || files::check_path(&path).is_err()
-                {
+                if !m.connected || files::check_path(&path).is_err() {
+                    return Vec::new();
+                }
+                if !may_edit_file(m.role, &path) {
+                    self.denied(member, "a document lock", now);
                     return Vec::new();
                 }
                 match self.locks.get(&path) {
@@ -603,12 +688,37 @@ impl Host {
             ToHost::Checkpoint(label) => self.save_checkpoint(member, &label),
             ToHost::Restore(id) => self.restore(member, id),
             ToHost::NeedIds => {
-                let block = self.ids.block();
+                let m = &self.members[&member];
+                if !m.connected {
+                    return Vec::new();
+                }
+                if !m.role.can(Capability::EditWorld) {
+                    self.denied(member, "new Instance IDs", now);
+                    return Vec::new();
+                }
+                let Some(block) = self.ids.block() else {
+                    log::error!("Collaborate: the session has run out of Instance IDs");
+                    return Vec::new();
+                };
                 let m = self.members.get_mut(&member).expect("checked above");
                 m.blocks.push(block);
                 vec![Outgoing {
                     to: member,
                     message: ToClient::Ids(block),
+                }]
+            }
+            ToHost::AuditLog => {
+                let m = &self.members[&member];
+                if !m.connected {
+                    return Vec::new();
+                }
+                if m.role != Role::Owner {
+                    self.denied(member, "the audit log", now);
+                    return Vec::new();
+                }
+                vec![Outgoing {
+                    to: member,
+                    message: ToClient::AuditLog(self.audit_log()),
                 }]
             }
         }
@@ -726,7 +836,7 @@ impl Host {
         }
         let block = self.ids.block();
         let m = self.members.get_mut(&member).expect("checked by receive");
-        m.blocks.push(block);
+        m.blocks.extend(block);
         vec![Outgoing {
             to: member,
             message: ToClient::Welcome {
@@ -735,7 +845,7 @@ impl Host {
                 seq: self.seq,
                 last_client_seq,
                 role,
-                ids: Some(block),
+                ids: block,
                 rejected,
                 files: self.doc.files.clone(),
                 session: self.session.clone(),
@@ -744,33 +854,16 @@ impl Host {
         }]
     }
 
-    /// `Chat`: any connected member, Viewers too, at most
-    /// [`presence::CHAT_PER_SECOND`] lines a second; tidied, kept and sent
+    /// `Chat`: any connected member, Viewers too, within the chat budget
+    /// ([`limits::budget`]); tidied, kept and sent
     /// to everyone (the sender too, so everyone sees the host's order).
     fn chat(&mut self, member: MemberId, text: &str) -> Vec<Outgoing> {
-        let now = self.clock;
-        let m = self.members.get_mut(&member).expect("checked by receive");
-        if !m.connected {
-            return Vec::new();
-        }
-        while m
-            .chatted
-            .front()
-            .is_some_and(|&at| now.saturating_duration_since(at) >= Duration::from_secs(1))
-        {
-            m.chatted.pop_front();
-        }
-        if m.chatted.len() >= presence::CHAT_PER_SECOND {
-            log::warn!(
-                "Collaborate: member {} is chatting too fast; a line was dropped",
-                member.0
-            );
+        if !self.members[&member].connected {
             return Vec::new();
         }
         let Some(text) = presence::tidy_chat(text) else {
             return Vec::new();
         };
-        m.chatted.push_back(now);
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
@@ -877,6 +970,7 @@ impl Host {
             }]
         };
         if !may_edit_file(role, &path) {
+            self.denied(member, "a live document edit", Instant::now());
             return refused(Refusal::Permission.to_string());
         }
         let now = self.clock;
@@ -1043,6 +1137,119 @@ impl Host {
     /// status).
     pub fn doc_text(&self, path: &str) -> Option<String> {
         self.live.get(path).map(|open| open.doc.text())
+    }
+
+    /// Takes `cost` from `member`'s budget for `kind`; false, noted in the
+    /// log and the audit log (once a minute), when it's spent.
+    fn within(&mut self, member: MemberId, kind: Kind, cost: f64, now: Instant) -> bool {
+        let m = self.members.get_mut(&member).expect("checked by receive");
+        if m.limits.take(kind, cost, now) {
+            return true;
+        }
+        let name = m.profile.name.clone();
+        log::warn!(
+            "Collaborate: {name} (member {}) is sending too much ({}); some was dropped",
+            member.0,
+            kind.name()
+        );
+        self.note(
+            member,
+            kind.name(),
+            AuditKind::Limited,
+            format!("{name} sent too much ({}); some was dropped", kind.name()),
+            now,
+        );
+        false
+    }
+
+    /// `member` asked for `what`, which their role doesn't allow.
+    fn denied(&mut self, member: MemberId, what: &'static str, now: Instant) {
+        let m = &self.members[&member];
+        let text = format!(
+            "{} ({:?}) asked for {what}, which their role doesn't allow",
+            m.profile.name, m.role
+        );
+        self.note(member, what, AuditKind::Denied, text, now);
+    }
+
+    /// Writes `text` in the audit log unless `member` caused the same
+    /// trouble (`key`) less than a minute ago.
+    fn note(
+        &mut self,
+        member: MemberId,
+        key: &'static str,
+        kind: AuditKind,
+        text: String,
+        now: Instant,
+    ) {
+        let m = self.members.get_mut(&member).expect("checked by receive");
+        if m.noted
+            .get(key)
+            .is_some_and(|&at| now.saturating_duration_since(at) < NOTE_EVERY)
+        {
+            return;
+        }
+        m.noted.insert(key, now);
+        self.audit.record(kind, Some(member), text);
+    }
+
+    /// Sends `member` the files they asked for, as far as their download
+    /// budget goes; the rest wait for [`Host::tick`].
+    fn serve_fetches(&mut self, member: MemberId, now: Instant) -> Vec<Outgoing> {
+        let mut out = Vec::new();
+        let m = self.members.get_mut(&member).expect("checked by caller");
+        while let Some(&hash) = m.fetching.front() {
+            let bytes = match m.fetch_head.take() {
+                Some((head, bytes)) if head == hash => Some(bytes),
+                _ => self.store.read(hash),
+            };
+            let Some(bytes) = bytes else {
+                m.fetching.pop_front();
+                out.push(Outgoing {
+                    to: member,
+                    message: ToClient::Missing(hash),
+                });
+                continue;
+            };
+            let cost = bytes.len().max(1) as f64;
+            if !m.limits.take(Kind::FetchBytes, cost, now) {
+                m.fetch_head = Some((hash, bytes));
+                break;
+            }
+            m.fetching.pop_front();
+            let total = bytes.len() as u64;
+            out.extend(files::pieces(&bytes).map(|(at, piece)| Outgoing {
+                to: member,
+                message: ToClient::File {
+                    hash,
+                    at,
+                    total,
+                    bytes: Piece(piece),
+                },
+            }));
+        }
+        out
+    }
+
+    /// Members whose connections the session should close now (they went
+    /// over a budget that can't just drop messages).
+    pub fn take_closing(&mut self) -> Vec<MemberId> {
+        std::mem::take(&mut self.closing)
+    }
+
+    /// The audit log, oldest first.
+    pub fn audit_log(&self) -> Vec<AuditEntry> {
+        self.audit.entries().cloned().collect()
+    }
+
+    /// Writes the audit log to `file` too (beside the members file).
+    pub fn keep_audit_in(&mut self, file: std::path::PathBuf) {
+        self.audit.keep_in(file);
+    }
+
+    /// Records something only the session knows (joins, refusals, invites).
+    pub fn record(&mut self, kind: AuditKind, member: Option<MemberId>, text: impl Into<String>) {
+        self.audit.record(kind, member, text);
     }
 
     fn refuse(&mut self, member: MemberId, client_seq: u64, reason: Refusal) -> Vec<Outgoing> {
