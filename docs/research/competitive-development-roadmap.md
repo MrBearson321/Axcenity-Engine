@@ -406,7 +406,7 @@ Expand asset management beyond discovery and downloading.
 
 **Priority:** High
 **Existing reference:** G12
-**Status:** Partial. `.axgame` v2 with zstd, file times and threaded unpacking (M9, #61), cooked textures and models, installers for three OSes, `scripts/check-packages.py`. Cooked-only packs are built (G12, #243: Build Game leaves texture sources out). Missing: build profiles and build reports (R13).
+**Status:** Implemented (R13: #268). `.axgame` v2 with zstd, file times and threaded unpacking (M9, #61), cooked textures and models, installers for three OSes, `scripts/check-packages.py`. Cooked-only packs are built (G12, #243: Build Game leaves texture sources out). Build profiles (Release, Development and the project's own in `build-profiles.json`, `project/src/build_profiles.rs`), Asset Check before each build (a profile can stop on problems) and a build report beside the game (`build-report.json` and `.txt`) are built (`docs/project/export.md`).
 
 Improve the game build pipeline.
 
@@ -632,7 +632,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1).
+**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. Improving the sculpting tools is still open.
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -1077,7 +1077,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Import presets and compression profiles | Done (textures, #262) | Texture groups, LOD settings | `.import` presets | Per asset | Presets, platform overrides | R12 | Medium | assets, cook | Implement |
 | Cooked textures and models | Implemented | Cooking | Import cache | Compiled assets | Import pipeline | L2, `crates/cook` | Critical | cook | Keep |
 | Cooked-only game packages | Implemented (#243) | Cooked pak | `.pck` | Compiled | Built player | G12 | High | cook, project | Keep |
-| Build profiles and reports | Missing | Build profiles, cook reports | Export presets | Publish wizard | Build profiles, build report | R13 | High | project | Implement |
+| Build profiles and reports | Implemented (#268) | Build profiles, cook reports | Export presets | Publish wizard | Build profiles, build report | R13 | High | project | Implement |
 
 ### Editor and production
 
@@ -1108,7 +1108,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; editor diagnostics partial | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
-| In-editor modeling | Partial: sculpt and bake to come back (Paul, 12 Nov) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
+| In-editor modeling | Partial: sculpting and baking back (#271), retopology by hand left to Blender | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
 | Humanoid retargeting | Implemented (stage 1) | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Hand-edited maps, profiles |
 | Runtime IK | Implemented | Control Rig | SkeletonIK3D | IK | Animation Rigging | `anim/src/ik_control.rs` | — | anim | Keep |
 
@@ -1150,9 +1150,9 @@ The following is the recommended order for execution. **Status** is on main `514
 | 10 | Humanoid retargeting | G16 | Implemented (stage 1, #244) | Hand-edited maps, profiles, fingers |
 | 11 | Plugin API improvements | G10 | Partial | Owned by the scripting thread (viewport drawing, property rows, importer hooks) |
 | 12 | Advanced asset management | New (R12) | Implemented (#260, #262) | Mesh presets later, if needed |
-| 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
+| 13 | Build pipeline improvements | New (R13) | Implemented (#268) | Build profiles and reports done |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial | Bring sculpting and baking back (Paul's decision, section 2.1) |
+| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
 | 16 | Large-world rendering and authoring | New (R16) | Partial | Streaming diagnostics in the editor |
 | 17 | Visual effects editor | New (R17) | Missing | Design, then curves and an effect asset |
 | 18 | Global illumination improvements | New (R18) | Partial | Measure and document options |
