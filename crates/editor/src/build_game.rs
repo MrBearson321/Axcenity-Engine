@@ -211,8 +211,11 @@ pub fn build_game(
     // Textures the background cooking hasn't reached yet are cooked now,
     // so the game ships every texture ready for the GPU.
     let report = axcenity_cook::cook_project(folder, &AtomicBool::new(false), |_, _| {});
-    let game =
-        project::pack_game(folder).map_err(|err| format!("could not pack the project: {err}"))?;
+    // Texture sources with a cooked copy are left out (G12): the game uses
+    // the copies, which is about half the size of shipping both.
+    let options = project::PackOptions { cooked_only: true };
+    let game = project::pack_game_with(folder, options)
+        .map_err(|err| format!("could not pack the project: {err}"))?;
     // The game's name and icon (CW8.2); a bad icon is said and left out, so
     // the build uses Axcenity's.
     let manifest = project::read_manifest(folder);
@@ -542,6 +545,81 @@ mod tests {
     impl Drop for Scratch {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// G12: a texture with a cooked copy ships empty and listed, and the
+    /// game still draws it and reads its pixels from the copy.
+    #[test]
+    fn a_build_ships_cooked_textures_without_their_sources() {
+        let scratch = Scratch::new("cooked-only");
+        let project = scratch.root.join("project");
+        let texture = "assets/textures/stone.png";
+        fs::create_dir_all(project.join("assets/textures")).unwrap();
+        let source = example("hello-material-graph").join(texture);
+        fs::copy(&source, project.join(texture)).unwrap();
+        let built = scratch.build(ExportTarget::Linux, false);
+        assert_eq!(built.cooked, 1);
+
+        let game = fs::read(scratch.out("game.axgame")).unwrap();
+        let unpacked = scratch.root.join("unpacked");
+        project::unpack_game(&game, &unpacked).unwrap();
+        assert_eq!(fs::metadata(unpacked.join(texture)).unwrap().len(), 0);
+        let listed = fs::read_to_string(unpacked.join(axcenity_assets::COOKED_ONLY_FILE)).unwrap();
+        assert_eq!(listed.trim(), texture);
+
+        let assets = axcenity_assets::Assets::new(&unpacked);
+        let image = assets.texture_pixels_blocking(texture).expect("loads");
+        assert!(image.cooked().is_some(), "from the cooked copy");
+        let original =
+            axcenity_assets::decode_texture(&fs::read(&source).unwrap(), texture).unwrap();
+        assert_eq!(
+            (image.width, image.height),
+            (original.width, original.height)
+        );
+        let mean = image
+            .rgba()
+            .iter()
+            .zip(original.rgba())
+            .map(|(a, b)| f64::from(a.abs_diff(*b)))
+            .sum::<f64>()
+            / original.rgba().len() as f64;
+        assert!(mean < 3.0, "decoded pixels are close to the source: {mean}");
+    }
+
+    /// How much G12 saves on the bigger examples. Cooks a copy of each, so
+    /// it's slow; run by hand:
+    /// `cargo test -p axcenity-editor --release cooked_only_sizes -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn cooked_only_sizes() {
+        fn copy(from: &Path, to: &Path) {
+            fs::create_dir_all(to).unwrap();
+            for entry in fs::read_dir(from).unwrap().flatten() {
+                let target = to.join(entry.file_name());
+                if entry.file_type().unwrap().is_dir() {
+                    copy(&entry.path(), &target);
+                } else {
+                    fs::copy(entry.path(), &target).unwrap();
+                }
+            }
+        }
+        for name in ["hello-pbr", "hello-character", "hello-roads"] {
+            let folder = std::env::temp_dir().join(format!("axcenity-cooked-only-{name}"));
+            let _ = fs::remove_dir_all(&folder);
+            copy(&example(name), &folder);
+            axcenity_cook::cook_project(&folder, &AtomicBool::new(false), |_, _| {});
+            let whole = project::pack_game(&folder).unwrap().len();
+            let options = project::PackOptions { cooked_only: true };
+            let cooked_only = project::pack_game_with(&folder, options).unwrap().len();
+            let mb = |bytes: usize| bytes as f64 / 1_048_576.0;
+            println!(
+                "{name}: {:.1} MB with sources, {:.1} MB cooked only ({:.0}%)",
+                mb(whole),
+                mb(cooked_only),
+                100.0 * cooked_only as f64 / whole as f64
+            );
+            let _ = fs::remove_dir_all(&folder);
         }
     }
 

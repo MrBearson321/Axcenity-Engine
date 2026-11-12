@@ -42,7 +42,7 @@ flowchart LR
 | M6 | Script hot paths | **Done** | #22, #26, #27, #29 |
 | M7 | postcard wire, motion revisions | **Done** | #34 |
 | M8 | Server without GPU or audio | **Done** | #13 |
-| M9 | `.axgame` zstd, times, threaded unpack | **Partly done** (read-in-place and cooked-only are G12) | #61 |
+| M9 | `.axgame` zstd, times, threaded unpack | **Partly done** (cooked-only done in G12; read in place not planned) | #61 |
 | M10 | CI half | **Deferred** (Actions runs for release tags only, CI by hand; [ADR-0018](../Architecture/Architecture-Decisions/ADR-0018-Actions-For-Release-Tags-Only.md)) | policy |
 | M11 | renet secure mode | **Deferred** with internet hosting | policy |
 | M12 | wgpu 30, egui 0.36, egui_dock 0.21, glyphon 0.12 | **Done** | #104 |
@@ -74,7 +74,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |
 | G11 | Split the editor (L6) | In progress: `editor-kit` (#162), the Toolbox tab in `editor-toolbox` (#164), Graphics Benchmark in `editor-benchmark` (#166), the viewport tools in `editor-tools` and the Model Studio in `editor-model-studio` (#189; editor rebuild after an edit 35.5 → 32.5 s in the cloud), the node-graph editor in `editor-node-graph` and the UI Designer in `editor-ui-designer` (editor rebuild after an edit 30.7 s) |
-| G12 | Cooked-only games, read the pack in place | Planned |
+| G12 | Cooked-only games, read the pack in place | **Cooked-only done** (competitive roadmap PR); read in place not planned (unpacking is 30–170 ms) |
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
 | G14–G16 | Run without a player; physics debug views; humanoid retargeting | Planned |
 | TC1–TC8 | Team Create (live collaboration; brief of 2026-11-11 §8): design approved ([ADR-0020](../Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md), #134); TC1 sync core in `collab` (#140); TC2 editor sync (edit journal, capture, two-editor tests, #150); TC3 network and identity (device keys, invites, TLS WebSocket, `--team-host`/`--team-join`, #154); TC4 interface (roster and presence #156, panel, title bar chip, others' selections #160); TC5 files (content-addressed saves with compare-and-swap, document locks, members' mirror folders, conflict copies; sync core #168, editor #169, every document tab and start-screen Join #170); TC6 reliability (host journal and crash recovery, size and rate limits #175; host epochs, members' recovery files, Recovered Changes, read-only when the host leaves, camera follow, Settings > Team Create, #180); TC7 the self-hosted `axcenity-collab` server (persistence, crash recovery, admin command line); tested on two machines over a LAN with a 5-minute cut, both ending identical (2026-11-12, results in `docs/research/team-create.md` §12; PR #195) | Done except TC8, which C12 replaces |

@@ -8,6 +8,11 @@
 //! never shown stale: [`read_cooked`] gives `None` and the source is decoded
 //! as before. A cooked [`Image`] decodes its source's pixels only if
 //! something on the CPU asks for them ([`Image::rgba`]).
+//!
+//! A built game may leave a source out (G12, cooked-only games): the file is
+//! there but empty, and [`COOKED_ONLY_FILE`] lists it, so its cooked copy
+//! counts as current and the CPU's pixels are decoded from the cooked top
+//! level instead ([`decode_top_level`]).
 
 use std::collections::HashMap;
 use std::fs;
@@ -22,6 +27,11 @@ use crate::safe_path;
 /// Where cooked textures go, inside the project folder. Like the rest of
 /// `.axcenity/`, it's this computer's: not exported or backed up.
 pub const COOKED_FOLDER: &str = ".axcenity/imported/textures";
+
+/// In a built game, the texture files whose sources were left out (each
+/// shipped empty) because their cooked copy stands in for them: one project
+/// path a line. Only a game's packer writes it (G12).
+pub const COOKED_ONLY_FILE: &str = ".axcenity/imported/cooked-only.txt";
 
 /// The file extension of a cooked texture.
 pub const COOKED_EXTENSION: &str = "axtex";
@@ -380,7 +390,8 @@ pub fn cooked_format(project: &Path, relative: &str) -> Option<CookedFormat> {
     is_current(project, relative, stamp).then_some(format)
 }
 
-/// Whether the project file `relative` is still what `stamp` was made from.
+/// Whether the project file `relative` is still what `stamp` was made from:
+/// the same file, or one a built game left out for its cooked copy.
 pub(crate) fn is_current(project: &Path, relative: &str, stamp: SourceStamp) -> bool {
     let Some(source) = safe_path(relative).map(|path| project.join(path)) else {
         return false;
@@ -388,9 +399,68 @@ pub(crate) fn is_current(project: &Path, relative: &str, stamp: SourceStamp) -> 
     let Ok(meta) = fs::metadata(&source) else {
         return false;
     };
+    // An emptied file that isn't on the list (or a list that's there but
+    // a file put back) is judged as any other.
+    if meta.len() == 0 && left_out(project, relative) {
+        return true;
+    }
     stamp.len == meta.len()
         && (stamp.modified == modified_nanos(&meta)
             || fs::read(&source).is_ok_and(|bytes| content_hash(&bytes) == stamp.hash))
+}
+
+/// Whether the built game in `project` left out `relative`'s source for its
+/// cooked copy ([`COOKED_ONLY_FILE`]). The list is read once per folder.
+fn left_out(project: &Path, relative: &str) -> bool {
+    type Lists = Mutex<HashMap<PathBuf, Arc<std::collections::HashSet<String>>>>;
+    static LISTS: LazyLock<Lists> = LazyLock::new(Lists::default);
+    let list = {
+        let mut lists = LISTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        lists
+            .entry(project.to_owned())
+            .or_insert_with(|| {
+                let text = fs::read_to_string(project.join(COOKED_ONLY_FILE)).unwrap_or_default();
+                Arc::new(text.lines().map(str::to_owned).collect())
+            })
+            .clone()
+    };
+    list.contains(&relative.replace('\\', "/"))
+}
+
+/// The cooked texture's top level as RGBA8 (4 bytes a pixel, rows from the
+/// top), decoded from its block format on the CPU, for a texture whose
+/// source a built game left out. Close to the source, not equal: BC7 and BC5
+/// lose a little. BC5 holds only red and green (a normal map's X and Y), so
+/// blue is worked out from them as the renderer does and alpha is opaque.
+pub fn decode_top_level(texture: &CookedTexture) -> Option<Vec<u8>> {
+    let (width, height) = (texture.width as usize, texture.height as usize);
+    let level = texture.levels.first()?;
+    let mut pixels = vec![0u32; width * height];
+    let decoded = match texture.format {
+        CookedFormat::Bc7 => texture2ddecoder::decode_bc7(level, width, height, &mut pixels),
+        CookedFormat::Bc5 => texture2ddecoder::decode_bc5(level, width, height, &mut pixels),
+    };
+    decoded.ok()?;
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    {
+        for &pixel in &pixels {
+            // The decoder's pixels are blue, green, red, alpha in memory.
+            let [blue, green, red, alpha] = pixel.to_le_bytes();
+            match texture.format {
+                CookedFormat::Bc7 => rgba.extend_from_slice(&[red, green, blue, alpha]),
+                CookedFormat::Bc5 => {
+                    let unit = |value: u8| value as f32 / 127.5 - 1.0;
+                    let (x, y) = (unit(red), unit(green));
+                    let z = (1.0 - x * x - y * y).max(0.0).sqrt();
+                    let blue = ((z + 1.0) * 127.5).round() as u8;
+                    rgba.extend_from_slice(&[red, green, blue, 255]);
+                }
+            }
+        }
+    }
+    Some(rgba)
 }
 
 /// The project file `relative` as a cooked [`Image`], if it has a current

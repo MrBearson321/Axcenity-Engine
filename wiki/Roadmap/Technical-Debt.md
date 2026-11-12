@@ -27,4 +27,4 @@ Structural problems that make the engine harder to change. Each has a roadmap it
 | Legacy paths, old templates | Dead weight | Phase 92 | Done: format 6 rewrites old clip and block-condition shapes once, the readers lost their legacy branches, `animation:Play()` is an error naming `LoadAnimation`, the Starter template and three unused dependencies are gone |
 | `crates.md` host rows drift from the manifests | Agents read wrong rules | Documentation fix | Fixed on the wiki branch (see [Documentation history](../Changelog/Documentation-History.md#open-documentation-gaps)) |
 | Flaky GPU tests under contention | Noise in local verification | Diagnose `every_example_renders` black frames | Open |
-| `.axgame` unpacks to a temp folder; games ship sources beside cooked copies | Extra disk writes; about twice the size | G12: cooked-only games, read the pack in place | Planned |
+| `.axgame` unpacks to a temp folder; models ship their sources beside cooked copies | Extra disk writes | Read the pack in place; leave model sources out too | Textures done (G12); the rest not planned |
