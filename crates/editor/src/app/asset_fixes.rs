@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axcenity_core::Value;
-use axcenity_project::{self as project, AssetKind, Finding, Fix, Ignored, Site};
+use axcenity_project::{self as project, AssetKind, Finding, FindingKind, Fix, Ignored, Site};
 
 use super::{EditorApp, shown};
 use crate::asset_check::{CheckAction, FixChoice};
@@ -110,6 +110,10 @@ impl EditorApp {
             FixChoice::CopyIn(file) => Fix::CopyIn(file),
             FixChoice::Clear => Fix::Clear,
             FixChoice::Delete => Fix::DeleteFile,
+            FixChoice::Merge => {
+                self.merge_duplicates(findings);
+                return;
+            }
             FixChoice::Locate => match self.locate(&findings[0]) {
                 Some(file) => Fix::CopyIn(file),
                 None => return,
@@ -177,6 +181,41 @@ impl EditorApp {
         }
         self.history
             .record_blobs_and_properties(&mut self.world, label, blobs, properties);
+        self.refresh_asset_check();
+    }
+
+    /// Merges each duplicate file in `findings` into the file it's the same
+    /// as (`project::plan_merge`): one undo step per copy, since a later
+    /// merge reads the files an earlier one rewrote. Then scans again.
+    fn merge_duplicates(&mut self, findings: &[Finding]) {
+        let Some(open) = self.project.as_ref() else {
+            return;
+        };
+        let (folder, level) = (open.folder.clone(), open.level.clone());
+        for finding in findings {
+            if finding.kind != FindingKind::DuplicateFile {
+                continue;
+            }
+            let (copy, keep) = (&finding.owner, &finding.path);
+            let plan = match project::plan_merge(&folder, &self.world, level.as_deref(), copy, keep)
+            {
+                Ok(plan) => plan,
+                Err(err) => {
+                    self.output
+                        .error(format!("Could not merge `{}`: {err}.", file_name(copy)));
+                    continue;
+                }
+            };
+            let label = format!("Merge `{}` into `{}`", file_name(copy), file_name(keep));
+            let changed =
+                plan.properties.len() + plan.files.iter().filter(|w| w.after.is_some()).count();
+            self.apply_move_plan(plan, label.clone());
+            self.output.info(format!(
+                "{label}: {changed} {} now {} `{keep}`.",
+                if changed == 1 { "use" } else { "uses" },
+                if changed == 1 { "names" } else { "name" },
+            ));
+        }
         self.refresh_asset_check();
     }
 

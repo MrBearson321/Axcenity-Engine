@@ -119,6 +119,18 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "The start screen's sidebar shows only its icons, each with a tooltip.",
         ),
         setting(
+            Saving,
+            "Keep a copy of unsaved work",
+            &[
+                "AutoRecover",
+                "Autosave",
+                "Auto save",
+                "Crash recovery",
+                "Power outage",
+            ],
+            "How often unsaved work is copied, so a crash or power cut doesn't lose it.",
+        ),
+        setting(
             Viewport,
             "Show every light's cone",
             &["Light cones", "Spotlight"],
@@ -195,6 +207,18 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "Show constraints",
             &["Welds", "Attachments", "Joints"],
             "Welds as lines between their parts, and every Attachment.",
+        ),
+        setting(
+            Viewport,
+            "Show contacts",
+            &["Physics debug", "Collisions", "Contact points"],
+            "Where parts touch and how hard they push, during Play.",
+        ),
+        setting(
+            Viewport,
+            "Show bodies",
+            &["Physics debug", "Center of mass", "Sleeping"],
+            "Each moving body's center of mass, awake or asleep, during Play.",
         ),
         setting(
             Viewport,

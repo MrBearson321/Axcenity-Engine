@@ -197,6 +197,20 @@ impl Context {
         debugger::set_breakpoints(&self.lua, breakpoints);
     }
 
+    pub fn set_breakpoint_rules(&self, rules: &debugger::BreakpointRules) {
+        debugger::set_breakpoint_rules(&self.lua, rules);
+    }
+
+    /// Asks this side to pause at the next script line it runs, or stops
+    /// asking (see `debugger`).
+    pub fn request_pause(&self, on: bool) {
+        debugger::request_pause(&self.lua, on);
+    }
+
+    pub fn pause_requested(&self) -> bool {
+        debugger::pause_requested(&self.lua)
+    }
+
     /// Where this side is paused at a breakpoint, if it is.
     pub fn pause(&self) -> Option<debugger::Pause> {
         debugger::pause(&self.lua)

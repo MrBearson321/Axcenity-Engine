@@ -129,6 +129,10 @@ impl<'de> Deserialize<'de> for AssetId {
 struct ImportFile {
     format_version: u32,
     uid: AssetId,
+    /// The import preset picked for this file (R12), if one was; else
+    /// its folder's, or Default (`import_presets.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preset: Option<String>,
 }
 
 /// The project path of the sidecar of the file at `relative`.
@@ -158,13 +162,28 @@ pub fn takes_asset_id(path: &str) -> bool {
 
 /// A sidecar's bytes for `id`.
 pub fn encode_import_file(id: AssetId) -> Vec<u8> {
+    encode_import_file_with(id, None)
+}
+
+/// A sidecar's bytes for `id`, with the import preset picked for its file
+/// (R12), if any.
+pub fn encode_import_file_with(id: AssetId, preset: Option<&str>) -> Vec<u8> {
     let file = ImportFile {
         format_version: FORMAT_VERSION,
         uid: id,
+        preset: preset.map(str::to_owned),
     };
     let mut text = serde_json::to_string_pretty(&file).expect("plain data");
     text.push('\n');
     text.into_bytes()
+}
+
+/// The import preset picked for the project file `relative` in its sidecar
+/// (R12), if there's a sidecar that can be read and it names one.
+pub fn read_preset(project: &Path, relative: &str) -> Option<String> {
+    let bytes = fs::read(project.join(import_path(relative))).ok()?;
+    let file: ImportFile = serde_json::from_slice(&bytes).ok()?;
+    file.preset
 }
 
 /// The ID of the project file `relative`, if it has a sidecar that can be
@@ -278,8 +297,13 @@ pub fn give_asset_ids(project: &Path) -> io::Result<usize> {
         let id = match id {
             Some(id) => id,
             None => {
+                // A copy keeps the preset its original's sidecar picked.
                 let id = AssetId::new();
-                write_whole(&project.join(import_path(&path)), &encode_import_file(id))?;
+                let preset = read_preset(project, &path);
+                write_whole(
+                    &project.join(import_path(&path)),
+                    &encode_import_file_with(id, preset.as_deref()),
+                )?;
                 written += 1;
                 id
             }

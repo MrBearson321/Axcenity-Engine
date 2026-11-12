@@ -243,3 +243,54 @@ fn locate_copies_an_outside_file_in_and_a_models_texture_next_to_the_model() {
     let _ = fs::remove_dir_all(&folder);
     let _ = fs::remove_dir_all(&outside);
 }
+
+#[test]
+fn merge_points_a_duplicate_model_at_the_kept_file_and_undo_puts_it_back() {
+    let folder = copy_of_example("hello-animation", "asset-fix-merge");
+    let copy = "assets/models/imported/noodle.fbx";
+    fs::create_dir_all(folder.join("assets/models/imported")).unwrap();
+    fs::copy(folder.join(MODEL), folder.join(copy)).unwrap();
+
+    let mut app = EditorApp::new(Some(&folder));
+    let part = app
+        .world
+        .descendants(app.world.root())
+        .into_iter()
+        .find(|&id| {
+            app.world
+                .get(id)
+                .and_then(|instance| instance.property("MeshId"))
+                .is_some_and(|value| *value == Value::String(MODEL.to_owned()))
+        })
+        .expect("the noodle's MeshPart");
+    app.world
+        .set_property(part, "MeshId", Value::String(copy.to_owned()))
+        .unwrap();
+    app.run_asset_check();
+    let duplicates: Vec<Finding> = shown(&app)
+        .into_iter()
+        .filter(|finding| finding.kind == project::FindingKind::DuplicateFile)
+        .collect();
+    assert_eq!(duplicates.len(), 1, "{:?}", shown(&app));
+    assert_eq!(duplicates[0].owner, copy);
+    assert_eq!(duplicates[0].path, MODEL);
+
+    app.fix_findings(&duplicates, FixChoice::Merge);
+    assert_eq!(mesh_ids(&app), vec![MODEL.to_owned()]);
+    assert!(!folder.join(copy).exists());
+    assert!(
+        shown(&app)
+            .iter()
+            .all(|finding| finding.kind != project::FindingKind::DuplicateFile),
+        "{:?}",
+        shown(&app)
+    );
+
+    app.undo();
+    assert_eq!(mesh_ids(&app), vec![copy.to_owned()]);
+    assert_eq!(
+        fs::read(folder.join(copy)).unwrap(),
+        fs::read(folder.join(MODEL)).unwrap()
+    );
+    let _ = fs::remove_dir_all(&folder);
+}

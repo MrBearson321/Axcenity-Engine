@@ -36,6 +36,7 @@ The editor cooks (BC7 mips via `intel_tex_2`, BC5 normal maps, simplified LODs, 
 
 - Big startup and VRAM wins (4096² map 85 → 21 MiB; Farmhouse 947 → 311 MB).
 - Games ship sources plus copies (larger packages) until sources with copies can be dropped. *Update 2026-11-12 (G12):* Build Game now drops texture sources that have a current copy (empty stand-ins listed in `cooked-only.txt`; the CPU decodes the copy's top level when it needs pixels). Model sources still ship.
+- *Update 2026-11-12 (R12):* import presets choose a texture's format, a size limit or no cooking at all. The choices are small committed JSON (sidecars and `import-presets.json`), not binary copies, so this decision stands.
 - lavapipe/no-BC devices fall back to RGBA8.
 - Revisit formats when mobile is planned (policy).
 

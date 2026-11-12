@@ -57,6 +57,7 @@
 mod api;
 pub mod assembly;
 mod blend;
+mod debug;
 mod drag;
 mod fracture;
 pub mod joints;
@@ -74,6 +75,7 @@ mod vehicles;
 
 pub use api::{GRAVITY, STEP_SECONDS, SyncStats, WIND_DRAG, gravity};
 pub use blend::{Blend, interpolates};
+pub use debug::{DebugBody, DebugContact, DebugView, MAX_DEBUG_CONTACTS};
 pub use mass::Mass;
 pub use query::{
     CastShape, ColliderOutline, Column, PastPose, QueryParams, RayHit, Solid, cast_ray,

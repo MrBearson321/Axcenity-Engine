@@ -38,6 +38,20 @@
 //! step; a coroutine that finishes ends it. Where the coroutine can't yield
 //! (inside a C function), the step goes on to the next line where it can.
 //!
+//! **Conditions, hit counts and logpoints.** A breakpoint can have a
+//! [`BreakpointRule`] ([`set_breakpoint_rules`]). The coroutine still
+//! stops at the line as for any breakpoint, so its locals can be read; then,
+//! once it has yielded and before anything else runs, [`settle`] decides:
+//! a condition that isn't true, or a hit count not yet reached, resumes it
+//! at once; a logpoint writes its message to Output and resumes it. The
+//! scheduler does that resume itself, in a loop ([`scheduler::resume`]), so
+//! a logpoint inside a long loop never nests calls. A line reached by a step
+//! always pauses: rules only decide for breakpoints.
+//!
+//! **Pausing on request.** [`request_pause`] (the editor's Pause button)
+//! pauses the next scheduler coroutine that runs a script line where it can
+//! yield. A game whose scripts are all waiting pauses when one wakes.
+//!
 //! **Errors.** With [`set_pause_on_error`], a scheduler coroutine that fails
 //! pauses Play at the failed line. Luau keeps a failed coroutine's call
 //! stack, so its frames and locals are read as at a breakpoint; Continue
@@ -65,6 +79,34 @@ use crate::{OutputKind, push_output, scheduler, watchdog};
 /// Breakpoints by script path, as the host passes them: line numbers
 /// counting from 1.
 pub type Breakpoints = BTreeMap<String, BTreeSet<usize>>;
+
+/// What decides whether a breakpoint pauses, by script path and line. A
+/// breakpoint without one always pauses.
+pub type BreakpointRules = BTreeMap<(String, usize), BreakpointRule>;
+
+/// A breakpoint's condition, hit count and log message. Each is optional;
+/// all that are set apply, in that order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BreakpointRule {
+    /// A Lua expression evaluated in the paused frame, as a watch is: the
+    /// breakpoint pauses (or logs) only when it's true (not `nil` or
+    /// `false`). One that fails pauses, and Output says why.
+    pub condition: Option<String>,
+    /// Pause (or log) only from this hit on: `3` lets the first two
+    /// passes (where the condition held) run on. Counted from Play's start,
+    /// or from when the rule last changed.
+    pub hit_count: Option<u32>,
+    /// A logpoint: never pause, write this to Output instead, with each
+    /// `{expression}` replaced by its value in the paused frame.
+    pub log: Option<String>,
+}
+
+impl BreakpointRule {
+    /// Whether it does nothing a plain breakpoint wouldn't.
+    pub fn is_plain(&self) -> bool {
+        self.condition.is_none() && self.hit_count.is_none() && self.log.is_none()
+    }
+}
 
 /// The most frames and locals a pause lists, so a deep recursion or a huge
 /// function can't make it slow.
@@ -125,7 +167,16 @@ pub struct Local {
     pub name: String,
     /// The value as text: `12`, `"hello"`, `Door`, `{1, 2, open = true}`.
     pub value: String,
+    /// A table's entries (keys as names, `[1]` for numbers), read without
+    /// its metamethods, for the Locals view to expand: up to
+    /// [`EXPANDED_ENTRIES`] each, two tables deep. Empty for anything else.
+    pub fields: Vec<Local>,
 }
+
+/// The most entries an expanded table lists, and how many tables deep the
+/// Locals view can expand.
+pub const EXPANDED_ENTRIES: usize = 50;
+const EXPANDED_DEPTH: usize = 2;
 
 /// Lives in Lua's app data, where the hook and the scheduler can reach it.
 #[derive(Default)]
@@ -149,6 +200,13 @@ struct Debugger {
     stepping: Option<Stepping>,
     /// Pause when a scheduler coroutine fails ([`set_pause_on_error`]).
     pause_on_error: bool,
+    /// Conditions, hit counts and log messages ([`set_breakpoint_rules`]).
+    rules: BreakpointRules,
+    /// How many times each ruled breakpoint was passed with its condition
+    /// true.
+    hits: BTreeMap<(String, usize), u32>,
+    /// Pause at the next line any scheduler coroutine runs ([`request_pause`]).
+    pause_requested: bool,
 }
 
 /// A step from a pause: the coroutine and where it was.
@@ -225,6 +283,9 @@ struct Stop {
     error: Option<String>,
     /// Paused by a breakpoint on this line.
     breakpoint: bool,
+    /// The breakpoint, not a step or a pause request, paused it, so its
+    /// rule decides ([`settle`]).
+    ruled: bool,
 }
 
 /// Turns the debugger on: every coroutine the scheduler resumes from here
@@ -259,6 +320,41 @@ pub fn pause(lua: &Lua) -> Option<Pause> {
         error: stop.error.clone(),
         breakpoint: stop.breakpoint,
     })
+}
+
+/// Replaces every breakpoint's rule. A breakpoint whose rule changed counts
+/// its hits from zero again. Does nothing without the debugger.
+pub fn set_breakpoint_rules(lua: &Lua, rules: &BreakpointRules) {
+    if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
+        let rules: BreakpointRules = rules
+            .iter()
+            .filter(|(_, rule)| !rule.is_plain())
+            .map(|(at, rule)| (at.clone(), rule.clone()))
+            .collect();
+        let old = std::mem::replace(&mut debugger.rules, rules);
+        let kept: Vec<_> = debugger
+            .hits
+            .keys()
+            .filter(|at| old.get(*at) == debugger.rules.get(*at))
+            .cloned()
+            .collect();
+        debugger.hits.retain(|at, _| kept.contains(at));
+    }
+}
+
+/// Pauses at the next script line a scheduler coroutine runs, where it can
+/// pause (the editor's Pause button). Does nothing without the debugger or
+/// while paused.
+pub fn request_pause(lua: &Lua, on: bool) {
+    if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
+        debugger.pause_requested = on && debugger.paused.is_none();
+    }
+}
+
+/// Whether a pause was asked for and hasn't happened yet.
+pub fn pause_requested(lua: &Lua) -> bool {
+    lua.app_data_ref::<Debugger>()
+        .is_some_and(|debugger| debugger.pause_requested)
 }
 
 /// Whether a scheduler coroutine that fails pauses Play (off by default).
@@ -299,6 +395,7 @@ pub fn failed(lua: &Lua, thread: &Thread, message: &str) {
             stepped: None,
             error: Some(message.to_owned()),
             breakpoint: false,
+            ruled: false,
         });
     }
 }
@@ -452,9 +549,118 @@ pub fn resume_from_pause(lua: &Lua, how: Resume) {
                 depth: stop.depth,
             });
         debugger.holding = None;
+        debugger.pause_requested = false;
         std::mem::take(&mut debugger.held)
     };
     run_held(lua, queue);
+}
+
+/// Called by the scheduler once `thread` has yielded and [`leave`] ran.
+/// If it stopped at a breakpoint with a rule, the rule decides: true means
+/// the breakpoint didn't pause after all (a condition that isn't true, a
+/// hit count not reached, or a logpoint, whose message is now in Output),
+/// so the scheduler resumes `thread` again at once, with no arguments.
+pub fn settle(lua: &Lua, thread: &Thread) -> bool {
+    let (at, rule) = {
+        let Some(debugger) = lua.app_data_ref::<Debugger>() else {
+            return false;
+        };
+        let Some(stop) = debugger
+            .paused
+            .as_ref()
+            .filter(|stop| stop.thread == *thread && stop.yielded && stop.ruled)
+        else {
+            return false;
+        };
+        let at = (stop.path.clone(), stop.line);
+        let Some(rule) = debugger.rules.get(&at).cloned() else {
+            return false;
+        };
+        (at, rule)
+    };
+    let (path, line) = (&at.0, at.1);
+    if let Some(condition) = &rule.condition {
+        match evaluate_value(lua, 0, condition) {
+            Ok(Value::Nil | Value::Boolean(false)) => return carry_on(lua, thread),
+            Ok(_) => {}
+            Err(error) => {
+                push_output(
+                    lua,
+                    OutputKind::Error,
+                    format!(
+                        "{path}:{line}: the breakpoint's condition failed, so Play paused: {error}"
+                    ),
+                );
+                return false;
+            }
+        }
+    }
+    let hits = {
+        let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
+            return false;
+        };
+        let hits = debugger.hits.entry(at.clone()).or_default();
+        *hits = hits.saturating_add(1);
+        *hits
+    };
+    if rule.hit_count.is_some_and(|wanted| hits < wanted) {
+        return carry_on(lua, thread);
+    }
+    if let Some(message) = &rule.log {
+        let text = interpolate(lua, message);
+        push_output(lua, OutputKind::Print, format!("{path}:{line}: {text}"));
+        return carry_on(lua, thread);
+    }
+    false
+}
+
+/// Ends the pause at `thread`'s breakpoint without anyone seeing it: the
+/// scheduler resumes it next, and a step under way goes on.
+fn carry_on(lua: &Lua, thread: &Thread) -> bool {
+    let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
+        return false;
+    };
+    let Some(stop) = debugger.paused.take() else {
+        return false;
+    };
+    debugger.stepping = stop.stepped;
+    if let Some(at) = debugger.held.iter().position(|(held, _, _)| held == thread) {
+        debugger.held.remove(at);
+    }
+    true
+}
+
+/// A logpoint's message with each `{expression}` replaced by its value in
+/// the paused frame: strings as they are, anything else as the Locals view
+/// shows it, and `{error: …}` for one that fails. `{{` and `}}` are braces.
+fn interpolate(lua: &Lua, message: &str) -> String {
+    let tostring: Option<Function> = lua.globals().raw_get("tostring").ok();
+    let mut text = String::new();
+    let mut rest = message;
+    while let Some(open) = rest.find(['{', '}']) {
+        text.push_str(&rest[..open]);
+        let brace = &rest[open..open + 1];
+        let after = &rest[open + 1..];
+        if after.starts_with(brace) {
+            text.push_str(brace);
+            rest = &after[1..];
+            continue;
+        }
+        let Some(close) = after.find('}').filter(|_| brace == "{") else {
+            text.push_str(brace);
+            rest = after;
+            continue;
+        };
+        let expression = &after[..close];
+        match evaluate_value(lua, 0, expression) {
+            Ok(Value::String(value)) => text.push_str(&value.to_string_lossy()),
+            Ok(value) => text.push_str(&describe(&value, tostring.as_ref(), true)),
+            Err(error) => text.push_str(&format!("{{error: {error}}}")),
+        }
+        rest = &after[close + 1..];
+    }
+    text.push_str(rest);
+    text
 }
 
 /// Resumes anything left held while not paused: a breakpoint that couldn't
@@ -526,11 +732,15 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
             .stepping
             .as_ref()
             .is_some_and(|step| step.thread == current && step.reached(&path, line, depth));
-        // A step waits for a line where the coroutine can yield.
+        // A step and a pause request wait for a line where the coroutine
+        // can yield.
         let stepped = stepped && step.yieldable;
-        if !breakpoint && !stepped {
+        let requested = debugger.pause_requested && step.yieldable;
+        if !breakpoint && !stepped && !requested {
             return VmState::Continue;
         }
+        debugger.pause_requested = false;
+        let ruled = breakpoint && !stepped && !requested;
         let stepping = debugger.stepping.take();
         debugger.paused = Some(Stop {
             path: path.clone(),
@@ -543,6 +753,7 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
             stepped: stepping,
             error: None,
             breakpoint,
+            ruled,
         });
     }
     let at_breakpoint = debugger
@@ -572,7 +783,8 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
 impl Debugger {
     /// Whether the step hook has nothing to do: the common case.
     fn is_idle(&self) -> bool {
-        self.breakpoints.is_empty()
+        !self.pause_requested
+            && self.breakpoints.is_empty()
             && self.stepping.is_none()
             && self.paused.is_none()
             && self.holding.is_none()
@@ -811,10 +1023,7 @@ fn read_frames(lua: &Lua, thread: &Thread) -> (Vec<PausedFrame>, Vec<Scope>) {
             let shown = |variables: &[(String, Value)]| -> Vec<Local> {
                 variables
                     .iter()
-                    .map(|(name, value)| Local {
-                        name: name.clone(),
-                        value: describe(value, tostring.as_ref(), true),
-                    })
+                    .map(|(name, value)| shown_local(name.clone(), value, tostring.as_ref(), 0))
                     .collect()
             };
             let frame = PausedFrame {
@@ -840,6 +1049,13 @@ fn read_frames(lua: &Lua, thread: &Thread) -> (Vec<PausedFrame>, Vec<Scope>) {
 /// script's globals. Calls and metamethods run, under the watchdog; a watch
 /// can't wait.
 pub fn evaluate(lua: &Lua, frame: usize, expression: &str) -> Result<String, String> {
+    let value = evaluate_value(lua, frame, expression)?;
+    let tostring: Option<Function> = lua.globals().raw_get("tostring").ok();
+    Ok(describe(&value, tostring.as_ref(), true))
+}
+
+/// [`evaluate`]'s value itself.
+fn evaluate_value(lua: &Lua, frame: usize, expression: &str) -> Result<Value, String> {
     let (variables, globals) = {
         let debugger = lua
             .app_data_ref::<Debugger>()
@@ -880,8 +1096,44 @@ pub fn evaluate(lua: &Lua, frame: usize, expression: &str) -> Result<String, Str
     if thread.is_resumable() {
         return Err("A watch can't wait.".to_owned());
     }
-    let tostring: Option<Function> = lua.globals().raw_get("tostring").ok();
-    Ok(describe(&value, tostring.as_ref(), true))
+    Ok(value)
+}
+
+/// A variable or table entry as the Locals view shows it, with a table's
+/// entries `depth` tables down.
+fn shown_local(name: String, value: &Value, tostring: Option<&Function>, depth: usize) -> Local {
+    let fields = match value {
+        Value::Table(table) if depth < EXPANDED_DEPTH => {
+            let mut fields = Vec::new();
+            for pair in table.pairs::<Value, Value>() {
+                let Ok((key, value)) = pair else {
+                    break;
+                };
+                if fields.len() >= EXPANDED_ENTRIES {
+                    fields.push(Local {
+                        name: "…".to_owned(),
+                        value: "more entries".to_owned(),
+                        fields: Vec::new(),
+                    });
+                    break;
+                }
+                let name = match &key {
+                    Value::String(name) if name.to_str().is_ok_and(|name| is_identifier(&name)) => {
+                        name.to_string_lossy()
+                    }
+                    key => format!("[{}]", describe(key, tostring, false)),
+                };
+                fields.push(shown_local(name, &value, tostring, depth + 1));
+            }
+            fields
+        }
+        _ => Vec::new(),
+    };
+    Local {
+        name,
+        value: describe(value, tostring, true),
+        fields,
+    }
 }
 
 /// A value as text. Tables are listed (one level deep at the top, `{…}`
