@@ -737,7 +737,13 @@ impl EditorApp {
                     };
                     // Laid out as the other pages: the title beside the
                     // icon, the text under both at the window's width.
-                    dialog::header(ui, icons::CHECK_CIRCLE, dialog::Tone::Question, "Ready", None);
+                    dialog::header(
+                        ui,
+                        icons::CHECK_CIRCLE,
+                        dialog::Tone::Question,
+                        "Ready",
+                        None,
+                    );
                     note(ui, text);
                     let next = match setup.open {
                         Some(Purpose::Host) => "Start Session",
