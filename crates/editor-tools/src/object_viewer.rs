@@ -342,22 +342,20 @@ impl ObjectViewer {
         let painter = ui.painter_at(rect);
         if self.is_empty() {
             painter.rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
+            paint_hint(
+                &painter,
+                rect,
                 "Right-click an object in the Explorer, or a model, prefab or material in Assets, \
                  and pick View to look at it here.",
-                egui::FontId::proportional(13.0),
                 ui.visuals().weak_text_color(),
             );
             return;
         }
         let Some(render_state) = render_state else {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
+            paint_hint(
+                &painter,
+                rect,
                 "The Object Viewer needs the wgpu renderer.",
-                egui::FontId::proportional(13.0),
                 ui.visuals().weak_text_color(),
             );
             return;
@@ -449,9 +447,52 @@ fn parts_box(world: &World) -> Option<(Vec3, Vec3)> {
     (low.x <= high.x).then_some((low, high))
 }
 
+/// The hint laid out to fit `rect` (wrapped, with a margin each side).
+fn hint_galley(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    color: egui::Color32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_owned(),
+        egui::FontId::proportional(crate::theme::type_scale::BODY),
+        color,
+        (rect.width() - 24.0).max(40.0),
+    );
+    job.halign = egui::Align::Center;
+    painter.layout_job(job)
+}
+
+/// `text` centred in `rect`, wrapped so it never runs past a narrow tab.
+fn paint_hint(painter: &egui::Painter, rect: egui::Rect, text: &str, color: egui::Color32) {
+    let galley = hint_galley(painter, rect, text, color);
+    // A centred job lays its lines out around x = 0.
+    let top = rect.center().y - galley.size().y / 2.0;
+    painter.galley(egui::pos2(rect.center().x, top), galley, color);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hint_wraps_inside_a_narrow_tab() {
+        let ctx = egui::Context::default();
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            let painter = ui.painter().clone();
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 600.0));
+            let galley = hint_galley(
+                &painter,
+                rect,
+                "Right-click an object in the Explorer, or a model, prefab or material in Assets, \
+                 and pick View to look at it here.",
+                egui::Color32::GRAY,
+            );
+            assert!(galley.size().x <= 236.0, "{}", galley.size().x);
+            assert!(galley.rows.len() > 1, "wrapped");
+        });
+    }
 
     fn world_with_a_tower() -> (World, InstanceId) {
         let mut world = World::new();

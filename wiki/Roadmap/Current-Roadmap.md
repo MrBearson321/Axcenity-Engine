@@ -114,9 +114,9 @@ Audit and plan: `docs/research/cohesion-pass.md` (findings CF1–CF22, phases CP
 | CP4 node catalogue and tooltips | **Done** (#231): catalogue and one tooltip card; shared Diagnostic (CW4.3) deferred |
 | CP5 Object Viewer | **Done** (#232): one tab for Explorer objects, models, prefabs and materials |
 | CP6 physics module split and properties | Done (#233): `physics::api`, drag and rolling friction, ApplyForce/ApplyTorque, momentum |
-| CP7 Team Projects, trust, firewall | In review (#234): Team Projects start page, Who gets in (ask the host), narrower listening, firewall check, How Collaborate works |
+| CP7 Team Projects, trust, firewall | Done (#234): Team Projects start page, Who gets in (ask the host), narrower listening, firewall check, How Collaborate works |
 | CP8 game branding | Done (#235): the manifest's icon and banner with checks, Settings > This project > Branding, the player's game icon, Build Game's `.ico`/`.icns`/PNG, `branding://` paths |
-| CP9 final validation | Planned |
+| CP9 final validation | Done: every crate's tests on main with CP7 and CP8 (only the no-audio tutorial test fails in the cloud), clippy, wiki check, snapshot review (the Object Viewer hint now wraps at 260 pt); hand checks listed in each PR |
 
 ## Tooling for AI clients and releases
 
