@@ -123,6 +123,11 @@ impl HostSession {
         &self.access
     }
 
+    /// "address:port" as invites name the host.
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
     /// Where it listens.
     pub fn local_address(&self) -> SocketAddr {
         self.listener.address()
@@ -234,6 +239,7 @@ impl HostSession {
             session,
             stop,
             thread: Some(thread),
+            say_ended: true,
         }
     }
 
@@ -377,18 +383,28 @@ pub struct Hosting {
     session: Arc<Mutex<HostSession>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// Tell everyone it ended when dropped.
+    say_ended: bool,
 }
 
 impl Hosting {
     pub fn lock(&self) -> MutexGuard<'_, HostSession> {
         self.session.lock().expect("host session")
     }
+
+    /// Stops as a crash would: connections close without a word, so
+    /// members keep trying to reconnect (tests).
+    pub fn stop_without_a_word(mut self) {
+        self.say_ended = false;
+    }
 }
 
 impl Drop for Hosting {
     fn drop(&mut self) {
         // Each connection sends what's queued before it closes.
-        if let Ok(mut session) = self.session.lock() {
+        if self.say_ended
+            && let Ok(mut session) = self.session.lock()
+        {
             session.say_ended();
         }
         self.stop.store(true, Ordering::Relaxed);

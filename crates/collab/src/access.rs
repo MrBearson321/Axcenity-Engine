@@ -126,6 +126,15 @@ pub struct Access {
 }
 
 impl Access {
+    /// A project with no members yet: its first comes through an invite
+    /// (the self-hosted server makes one for an Owner).
+    pub fn empty() -> Access {
+        Access {
+            next_member: 1,
+            ..Access::default()
+        }
+    }
+
     /// A project whose only member is `owner`.
     pub fn owned_by(owner: PublicKey, name: impl Into<String>) -> Access {
         let mut access = Access {

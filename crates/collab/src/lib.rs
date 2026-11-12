@@ -38,6 +38,7 @@ pub mod client;
 pub mod files;
 pub mod handshake;
 pub mod host;
+pub mod hosted;
 pub mod identity;
 pub mod ids;
 pub mod journal;

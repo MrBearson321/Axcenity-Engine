@@ -1,0 +1,23 @@
+[package]
+name = "axcenity-collab-server"
+description = "Team Create's self-hosted server (TC7): hosts a project folder for editors to join, without an editor of its own, saves it, and takes admin commands."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "axcenity-collab"
+path = "src/main.rs"
+
+[dependencies]
+axcenity-collab.workspace = true
+axcenity-core.workspace = true
+axcenity-project.workspace = true
+anyhow.workspace = true
+env_logger.workspace = true
+log.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

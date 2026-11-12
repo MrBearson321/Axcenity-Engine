@@ -57,7 +57,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axcenity_collab::access::{Access, Invite};
-use axcenity_collab::identity::{Fingerprint, Identity};
+use axcenity_collab::hosted::{members_file, session_id, session_world};
+use axcenity_collab::identity::Identity;
 use axcenity_collab::journal;
 use axcenity_collab::mirror::{Change, Mirror};
 use axcenity_collab::session::{HostSession, Hosting, Remote, RemoteEvent};
@@ -65,7 +66,6 @@ use axcenity_collab::socket::{DEFAULT_PORT, HostCert};
 use axcenity_collab::{
     Camera, Client, FolderStore, Host, MemberId, Notice, Presence, Role, ToClient, ToHost,
 };
-use axcenity_core::spline::is_generator;
 use axcenity_project as project;
 
 use crate::start::JoinProgress;
@@ -164,18 +164,6 @@ pub(super) fn save_own_identity(identity: &Identity) -> std::io::Result<()> {
     identity.save(&folder.join("identity.json"))
 }
 
-/// The members file of the project in `project`, named by a hash of its
-/// path.
-fn access_path(folder: &Path, project: &Path) -> PathBuf {
-    let project = project
-        .canonicalize()
-        .unwrap_or_else(|_| project.to_owned());
-    let hash = Fingerprint::of(project.to_string_lossy().as_bytes()).to_hex();
-    folder
-        .join("projects")
-        .join(format!("{}.json", &hash[..16]))
-}
-
 /// True for a file the editor takes in when it changes on disk (what its
 /// watcher reports): scripts, stylesheets, assets (data tables, materials,
 /// behavior trees and dialogues among them), UI Event Graphs, the string
@@ -210,36 +198,6 @@ fn tree_key(world: &World, id: InstanceId) -> Vec<(ClassName, String)> {
     }
     key.reverse();
     key
-}
-
-/// Names a hosted project the same way every time it's hosted from this
-/// computer: its host certificate and its folder.
-fn session_id(cert: &Fingerprint, project: &Path) -> String {
-    let folder = std::path::absolute(project).unwrap_or_else(|_| project.to_owned());
-    let mut bytes = cert.0.to_vec();
-    bytes.extend(folder.to_string_lossy().as_bytes());
-    Fingerprint::of(&bytes).to_hex()[..16].to_owned()
-}
-
-/// `world` as a session starts from: without what SplineMeshes and
-/// SplineScatters made (every copy makes its own).
-fn session_world(mut world: World) -> World {
-    world.stop_recording_edits();
-    let generated: Vec<InstanceId> = world
-        .descendants(world.root())
-        .into_iter()
-        .filter(|&id| world.get(id).is_some_and(|i| is_generator(i.class())))
-        .flat_map(|id| {
-            world
-                .get(id)
-                .map(|i| i.children().to_vec())
-                .unwrap_or_default()
-        })
-        .collect();
-    for id in generated {
-        let _ = world.destroy(id);
-    }
-    world
 }
 
 /// A session's host and each member's waiting messages, in this process.
@@ -542,7 +500,7 @@ impl EditorApp {
         let identity = load_identity(&folder).map_err(|e| format!("your identity: {e}"))?;
         let cert = HostCert::load_or_make(&folder.join("host-certificate.json"))
             .map_err(|e| format!("the host certificate: {e}"))?;
-        let access_path = access_path(&folder, &project);
+        let access_path = members_file(&folder, &project);
         let access = match Access::load(&access_path) {
             Ok(access) => access,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
