@@ -630,7 +630,8 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                 let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
             }
             if let Some(folder) = &snapshots {
-                let name = pane.label().to_lowercase();
+                // A label like "Downloaded / Imported Assets" isn't a file name.
+                let name = pane.label().to_lowercase().replace('/', "-");
                 crate::snapshot::snapshot(
                     &folder.join(format!("panel-{name}-{shape}.png")),
                     size,

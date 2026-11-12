@@ -157,6 +157,7 @@ One PR per phase (bigger phases may split), each from `main`, each with RED/GREE
 ### CP9. Final validation
 
 - UI review with snapshots in light/dark/compact at 1280 and 260-pt panels; performance check (editor idle frame, physics bench); full test run; final report.
+- *Status (CP9 PR):* done on `main` with CP7 and CP8 together. Every crate's tests ran one at a time (42 crates, 4,096 passed; the one failure is `every_tutorial_sample_opens_and_plays_in_the_editor`, which needs an audio device the cloud doesn't have), clippy with `-D warnings` is clean and the wiki check has no errors. The snapshot review (the editor in dark, light and compact; every panel at 260 × 900 and 900 × 260; the start pages) found two things, both fixed: the Object Viewer's empty hint ran past a 260-point tab (it wraps now), and the panel snapshots stopped at "Downloaded / Imported Assets", whose `/` isn't a file name, so the last four panels were never saved. Performance: the physics `step_cost` bench was run in CP6 (`docs/benchmarks.md`); an editor idle-frame time needs a GPU, so it's a hand check on the PC with the others listed in each PR.
 
 ## Known limits of this pass
 
