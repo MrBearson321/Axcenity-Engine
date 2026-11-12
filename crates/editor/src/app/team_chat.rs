@@ -78,10 +78,11 @@ pub(super) fn chat_section(
     world: &World,
     selected: Option<InstanceId>,
 ) -> Option<ChatAction> {
+    // A hosting editor shows its panel a few frames before it's let in.
+    let lines = team.client()?.chat();
     let palette = theme::palette(ui.ctx());
     let mut action = None;
     panel.chat_unread = 0;
-    let lines = team.client().chat();
     let roster = team.roster();
     let now = SystemTime::now();
     widgets::section(icons::CHAT_CIRCLE_TEXT, "Chat").show(ui, |ui| {

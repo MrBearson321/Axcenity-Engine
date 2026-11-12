@@ -43,12 +43,13 @@ pub(super) fn history_section(
     panel: &mut TeamPanel,
     team: &Team,
 ) -> Option<HistoryAction> {
+    // A hosting editor shows its panel a few frames before it's let in.
+    let checkpoints = team.client()?.checkpoints();
     let palette = theme::palette(ui.ctx());
     let mut action = None;
     let role = team.client_role();
     let can_save = role.is_some_and(|role| role.can(axcenity_collab::Capability::SaveCheckpoint));
     let owner = role == Some(MemberRole::Owner);
-    let checkpoints = team.client().checkpoints();
     let now = SystemTime::now();
     widgets::section(icons::CLOCK_COUNTER_CLOCKWISE, "History").show(ui, |ui| {
         if can_save {

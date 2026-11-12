@@ -84,8 +84,8 @@ fn assert_same(a: &EditorApp, b: &EditorApp, hub: &SharedHub) {
         host,
         "the joined editor differs from the session"
     );
-    assert_eq!(a.team.as_ref().unwrap().client().pending(), 0);
-    assert_eq!(b.team.as_ref().unwrap().client().pending(), 0);
+    assert_eq!(a.team.as_ref().unwrap().client().unwrap().pending(), 0);
+    assert_eq!(b.team.as_ref().unwrap().client().unwrap().pending(), 0);
 }
 
 fn rename(app: &mut EditorApp, id: InstanceId, name: &str) {
@@ -333,7 +333,7 @@ fn caught_up(app: &EditorApp, seq: u64) -> bool {
 
 fn team_client(app: &EditorApp) -> Option<&axcenity_collab::Client> {
     let team = app.team.as_ref()?;
-    team.is_joined().then(|| team.client())
+    team.client()
 }
 
 #[test]
@@ -429,8 +429,8 @@ fn what_one_editor_selects_shows_in_the_others_session() {
     // Presence goes out at most 10 times a second.
     std::thread::sleep(std::time::Duration::from_millis(110));
     settle(&mut a, &mut b);
-    let me = a.team.as_ref().unwrap().client().member();
-    let client = b.team.as_ref().unwrap().client();
+    let me = a.team.as_ref().unwrap().client().unwrap().member();
+    let client = b.team.as_ref().unwrap().client().unwrap();
     let seen = client.presences().get(&me).expect("a's presence");
     assert_eq!(seen.selection, [part]);
     assert!(seen.camera.is_some(), "and where a's camera is");
@@ -503,6 +503,9 @@ fn the_panel_offers_share_and_join_then_shows_the_session() {
     let invite = a
         .host_network_session(Some(&team_folder("panel-host")), 0)
         .expect("hosting");
+    // The panel draws before the host has let this editor in.
+    assert!(!a.team().unwrap().is_joined());
+    draw_panel(&mut a, "team-create-hosting");
     let port = invite.host.rsplit(':').next().unwrap();
     let invite = axcenity_collab::access::Invite {
         host: format!("127.0.0.1:{port}"),
@@ -1184,6 +1187,7 @@ fn chat_reaches_the_other_editor_with_an_unread_count_and_instance_links() {
         app.team()
             .unwrap()
             .client()
+            .unwrap()
             .chat()
             .iter()
             .map(|line| line.text.clone())
