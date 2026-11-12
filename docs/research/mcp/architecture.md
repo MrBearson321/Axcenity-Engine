@@ -219,7 +219,7 @@ Terrain generation, Play, tests and saves are not batchable (large state or side
 
 ## 9. High-level versus low-level tools
 
-Estimated for five reference workflows; Phase 7 replaces the estimates with measurements (`docs/mcp/benchmarks.md`).
+Estimated for five reference workflows; Phase 7 replaces the estimates with measurements ([benchmarks](../../mcp/benchmarks.md#reference-workflows): `batch` saves round trips, not tokens; `env_set` 5× fewer tokens).
 
 | Workflow | Low-level only (calls) | With high-level params/tools (calls) | Saved |
 |---|---|---|---|
@@ -271,7 +271,7 @@ Each step is a PR with tests, merged before the next starts depending on it.
 | 4.4 | `full` profile tools | 4.3 | |
 | 5 | Change cursors everywhere, folding, prompts, resource mirrors; small-model pass | 4.x | Local models on Paul's PC |
 | 6 | `docs/mcp/` user docs, client configs, diagnostics (`axcenity-editor --mcp --check`) | 3.4 | |
-| 7 | Benchmarks, confusing-tool review, schema simplification | all | |
+| 7 | Benchmarks, confusing-tool review, schema simplification | all | Done: [benchmarks](../../mcp/benchmarks.md); no schema needed simplifying |
 | later | `view_capture`, Toolbox tools (after #90 lands), Streamable HTTP if a client needs it, `data_edit`, mesh ops | as listed | |
 
 Coordination: G2 (scripts inside objects, #91) changes where scripts live; `script_write` follows whatever lands. G4 (luau-lsp) can later feed `project_check` with type errors. The Toolbox thread owns `crates/toolbox`; MCP only wraps its API. M12 (egui 0.36) touches `EditorApp::update`; the live host's hook is one call there, so the order doesn't matter much, but step 3.4 should land after M12 to avoid a conflict.

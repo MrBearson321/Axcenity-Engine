@@ -10,8 +10,8 @@ use super::super::tests::copy_of_example;
 use super::refs::id_text;
 use super::{Headless, TOOLS, run, tools_for};
 
-struct Opened {
-    app: Headless,
+pub(super) struct Opened {
+    pub(super) app: Headless,
     folder: std::path::PathBuf,
 }
 
@@ -21,7 +21,7 @@ impl Drop for Opened {
     }
 }
 
-fn open(example: &str, test: &str) -> Opened {
+pub(super) fn open(example: &str, test: &str) -> Opened {
     let folder = copy_of_example(example, test);
     let app = EditorApp::new(Some(&folder));
     assert!(app.project.is_some(), "{example} opens");
@@ -32,7 +32,7 @@ fn open(example: &str, test: &str) -> Opened {
 }
 
 /// Calls `tool` with `args` as a client would: arguments checked first.
-fn call(app: &mut Headless, tool: &str, args: Value) -> Result<String, ToolError> {
+pub(super) fn call(app: &mut Headless, tool: &str, args: Value) -> Result<String, ToolError> {
     let spec = TOOLS
         .iter()
         .find(|entry| entry.spec.name == tool)
@@ -2256,14 +2256,14 @@ fn check_reports_the_project_and_prints_client_configs_with_full_paths() {
 
 /// A client of the open editor, as the relay connects it: JSON-RPC lines
 /// over the editor's loopback connection.
-struct LiveClient {
+pub(super) struct LiveClient {
     writer: std::net::TcpStream,
     lines: std::io::Lines<std::io::BufReader<std::net::TcpStream>>,
     next: u64,
 }
 
 impl LiveClient {
-    fn connect(folder: &std::path::Path, mode: Mode) -> LiveClient {
+    pub(super) fn connect(folder: &std::path::Path, mode: Mode) -> LiveClient {
         let hello = super::live::Hello {
             profile: Profile::Standard,
             mode,
@@ -2273,6 +2273,8 @@ impl LiveClient {
         let stream = super::live::connect(folder, &hello)
             .expect("the editor says ok")
             .expect("the editor is listening");
+        // Without it a short answer waits ~40 ms for a delayed ACK.
+        assert!(stream.nodelay().unwrap(), "the relay sends at once");
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(20)))
             .unwrap();
@@ -2310,7 +2312,7 @@ impl LiveClient {
     }
 
     /// A tool's text, and whether it was an error.
-    fn call(&mut self, tool: &str, args: Value) -> (String, bool) {
+    pub(super) fn call(&mut self, tool: &str, args: Value) -> (String, bool) {
         let answer = self.request("tools/call", json!({"name": tool, "arguments": args}));
         let result = &answer["result"];
         (

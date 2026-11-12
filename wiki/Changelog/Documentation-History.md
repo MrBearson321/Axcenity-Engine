@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | MCP server | Step 7 measurements and the TCP_NODELAY fix for live clients | Claude |
 | 2026-11-12 | MCP server | Small-model results and lenient arguments (lists and numbers sent as text) | Claude |
 | 2026-11-11 | Editor architecture, Toolbox | Plugin toolkit: `.axcenity-plugin` packs, scaffold/export, Toolbox Import plugin; start-screen rail crossfade and atmosphere | Cursor |
 | 2026-11-11 | MCP server | `render_stats` tool for the open editor | Claude |
