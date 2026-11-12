@@ -17,6 +17,7 @@ use std::rc::Rc;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::assembly;
 use mlua::{Function, Lua};
+use rustc_hash::FxHashMap;
 
 use crate::instance::{LuaInstance, destroyed, world};
 use crate::types::type_name;
@@ -42,6 +43,97 @@ pub struct Ownership {
     settings: BTreeMap<InstanceId, Owner>,
     /// Who owns each assembly now (by root part), as last worked out.
     current: BTreeMap<InstanceId, InstanceId>,
+    /// The Workspace's parts as last read.
+    parts: PartCache,
+    /// The assemblies as last worked out.
+    grouped: Grouped,
+}
+
+/// The unanchored parts and welds assemblies were last worked out from,
+/// and those assemblies.
+type Grouped = (
+    Vec<InstanceId>,
+    Vec<(InstanceId, InstanceId)>,
+    Vec<Vec<InstanceId>>,
+);
+
+/// The Workspace's parts and whether each is unanchored, so a frame
+/// rereads only the parts that changed: a streaming world has tens of
+/// thousands, nearly all anchored (Phase 80).
+#[derive(Default)]
+struct PartCache {
+    /// The Workspace's structure version the list is up to date with.
+    workspace: Option<u64>,
+    /// Each part, its revision when read, and whether it was unanchored
+    /// then.
+    parts: FxHashMap<InstanceId, (u64, bool)>,
+}
+
+impl PartCache {
+    /// The unanchored parts, by ID.
+    fn unanchored(&mut self, world: &World) -> Vec<InstanceId> {
+        let workspace = world.workspace();
+        let version = world.structure_version_of(workspace);
+        if self.workspace != Some(version) {
+            // Catch up from what moved, as physics does; read everything
+            // again when that isn't known.
+            let moves = self
+                .workspace
+                .and_then(|before| world.workspace_moves_since(before));
+            match moves {
+                Some(moves) => {
+                    // What left (or was destroyed with what it's in) goes.
+                    self.parts
+                        .retain(|&id, _| world.is_descendant_of(id, workspace));
+                    for top in moves {
+                        if !world.is_descendant_of(top, workspace) {
+                            continue;
+                        }
+                        for id in std::iter::once(top).chain(world.descendants_iter(top)) {
+                            if let Some(part) = world.get(id)
+                                && part.class().is_base_part()
+                            {
+                                self.parts
+                                    .insert(id, (part.revision(), is_unanchored(part)));
+                            }
+                        }
+                    }
+                }
+                None => {
+                    self.parts = world
+                        .descendants_iter(workspace)
+                        .filter_map(|id| {
+                            let part = world.get(id)?;
+                            part.class()
+                                .is_base_part()
+                                .then(|| (id, (part.revision(), is_unanchored(part))))
+                        })
+                        .collect();
+                }
+            }
+            self.workspace = Some(version);
+        }
+        let mut unanchored = Vec::new();
+        for (&id, (revision, loose)) in &mut self.parts {
+            if let Some(part) = world.get(id)
+                && part.revision() != *revision
+            {
+                *revision = part.revision();
+                *loose = is_unanchored(part);
+            }
+            if *loose {
+                unanchored.push(id);
+            }
+        }
+        // Assemblies don't depend on the order; comparing with last
+        // frame's list does.
+        unanchored.sort_unstable();
+        unanchored
+    }
+}
+
+fn is_unanchored(part: &axcenity_core::Instance) -> bool {
+    part.property("Anchored").and_then(Value::as_bool) == Some(false)
 }
 
 fn ownership(lua: &Lua) -> mlua::Result<Rc<RefCell<Ownership>>> {
@@ -172,23 +264,15 @@ pub fn owned_parts(
     world: &World,
 ) -> BTreeMap<InstanceId, Vec<InstanceId>> {
     let mut ownership = shared.0.borrow_mut();
-    let parts: Vec<InstanceId> = world
-        .descendants_iter(world.workspace())
-        .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
-        .collect();
-    let unanchored: Vec<InstanceId> = parts
-        .iter()
-        .copied()
-        .filter(|&id| {
-            world
-                .get(id)
-                .and_then(|i| i.property("Anchored"))
-                .and_then(Value::as_bool)
-                == Some(false)
-        })
-        .collect();
+    let unanchored = ownership.parts.unanchored(world);
     let welds = assembly::welds(world);
-    let groups = assembly::group(&unanchored, &welds);
+    // The same parts and welds make the same assemblies.
+    if ownership.grouped.0 != unanchored || ownership.grouped.1 != welds {
+        let groups = assembly::group(&unanchored, &welds);
+        ownership.grouped = (unanchored, welds, groups);
+    }
+    let ownership = &mut *ownership;
+    let groups = &ownership.grouped.2;
     let players: Vec<InstanceId> = world
         .get(world.players())
         .map(|service| {
@@ -203,7 +287,7 @@ pub fn owned_parts(
     let mut owned: BTreeMap<InstanceId, Vec<InstanceId>> = BTreeMap::new();
     let mut current = BTreeMap::new();
     for members in groups {
-        let root = assembly::root(world, &members);
+        let root = assembly::root(world, members);
         let setting = ownership.settings.get(&root).copied();
         let driver = members.iter().find_map(|&id| {
             let seat = world.get(id)?;
@@ -233,7 +317,10 @@ pub fn owned_parts(
         };
         if let Some(owner) = owner {
             current.insert(root, owner);
-            owned.entry(owner).or_default().extend(members);
+            owned
+                .entry(owner)
+                .or_default()
+                .extend(members.iter().copied());
         }
     }
     // Settings for assemblies that are gone go with them.

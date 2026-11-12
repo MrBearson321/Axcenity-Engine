@@ -16,7 +16,9 @@
 //! everyone, and each player's share of it goes through their
 //! [`PeerStream`].
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+
+use rustc_hash::FxHashSet;
 
 use axcenity_core::streaming::{Partition, Settings};
 use axcenity_core::{InstanceId, Vector3, World};
@@ -48,7 +50,7 @@ pub struct PeerStream {
     /// The roots of the units they have.
     in_units: BTreeSet<InstanceId>,
     /// The units' members they have, and new Instances passed on.
-    sent: HashSet<InstanceId>,
+    sent: FxHashSet<InstanceId>,
     regions: Vec<Region>,
     /// `RequestStreamAroundAsync` calls waiting for their region.
     waiting: Vec<(u64, Vector3)>,
@@ -362,8 +364,8 @@ fn wants_new(
         return stream.in_units.contains(&units[unit].root);
     }
     // Inside a Model that loads and unloads: only while it's loaded.
-    if let Some(root) = units.iter().find(|unit| unit.root == parent) {
-        return stream.in_units.contains(&root.root);
+    if let Some(unit) = partition.unit_rooted_at(parent) {
+        return stream.in_units.contains(&units[unit].root);
     }
     // A new loose part goes if it's near, as the next tick would decide.
     let Some(instance) = world.get(id) else {
@@ -398,13 +400,13 @@ fn rebuild_parts(world: &World, partition: &Partition, stream: &mut PeerStream) 
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()));
     stream.parts.extend(members);
     // And what's always there.
-    stream
-        .parts
-        .extend(world.descendants_iter(world.workspace()).filter(|&id| {
-            !partition.is_member(id)
-                && !stream.sent.contains(&id)
-                && world.get(id).is_some_and(|i| i.class().is_base_part())
-        }));
+    stream.parts.extend(
+        partition
+            .always_there()
+            .iter()
+            .copied()
+            .filter(|id| !stream.sent.contains(id)),
+    );
     stream.parts.sort_unstable();
 }
 
@@ -456,12 +458,12 @@ fn reconcile(
         .copied()
         .filter(|root| !admitted_roots.contains(root))
         .collect();
-    let mut leaving: HashSet<InstanceId> = HashSet::new();
+    let mut leaving: FxHashSet<InstanceId> = FxHashSet::default();
     for root in left {
         stream.in_units.remove(&root);
         streamed_out.push(root.to_bits());
-        if let Some(unit) = units.iter().find(|unit| unit.root == root) {
-            leaving.extend(unit.members.iter().copied());
+        if let Some(unit) = partition.unit_rooted_at(root) {
+            leaving.extend(units[unit].members.iter().copied());
         }
     }
     let mut destroys = Vec::new();

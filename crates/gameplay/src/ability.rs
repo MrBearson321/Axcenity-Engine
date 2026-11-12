@@ -638,7 +638,11 @@ impl Abilities {
         let mut abilities = Vec::new();
         let mut effects = Vec::new();
         for place in [world.workspace(), world.players()] {
-            for id in world.descendants_iter(place) {
+            // The class index, not a walk: a big world has tens of
+            // thousands of parts and few of these (Phase 80).
+            for id in world.all_below(place, |class| {
+                matches!(class, ClassName::Ability | ClassName::Effect)
+            }) {
                 match class_of(world, id) {
                     Some(ClassName::Ability) => abilities.push(id),
                     Some(ClassName::Effect) => effects.push(id),

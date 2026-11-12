@@ -16,7 +16,9 @@
 //! and shows them [`DELAY`] behind the newest, between two of them, so
 //! parts move smoothly whatever arrives when.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use rustc_hash::FxHashMap;
 
 use axcenity_core::{Instance, InstanceId, MOTION_PROPERTIES, Value, Vector3, World};
 
@@ -263,7 +265,7 @@ impl MotionSender {
         if parts == self.ids.as_slice() {
             return;
         }
-        let mut had: HashMap<InstanceId, Tracked> = self
+        let mut had: FxHashMap<InstanceId, Tracked> = self
             .ids
             .drain(..)
             .zip(self.parts.drain(..))

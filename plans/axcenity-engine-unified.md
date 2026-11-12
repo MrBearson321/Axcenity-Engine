@@ -60,7 +60,7 @@ These were decided in the developer's interview of 2026-10-27.
 | 3 | Phase 91: one graph canvas | Done in this phase's PR, except the line-count goal (see the phase). | `node_graph` is now the `editor-node-graph` crate (#193). `block_editor/graph.rs` is 1,436 lines and `animation/graph.rs` 930. The material graph's own view is `editor/src/material_editor/graph.rs`. |
 | 4 | Phase 92: legacy paths, old templates and dead weight | Done in this phase's PR (format 6; see the phase). | `project::FORMAT_VERSION` is already 5 (the release system's engine record, #98 era), so this phase bumps it to **6**, not 5. There are four alpha releases now (`releases/history`: 0.1.0-alpha.1 to .3 and 0.2.0-alpha.1). |
 | 5 | Phase 93: a multithreaded frame | Built in this phase's PR apart from the desktop measurement (see the phase). Before it, about half done by the roadmap. Physics runs on rapier's parallel feature in its own pool of at most 12 threads with the same results at any thread count (M3 #25, `physics/src/threads.rs`). Frame planning and culling run on the renderer's pool (`render/src/renderer/parallel.rs`). The nav mesh builds on a worker (M13 #32). The retained draw list (M4 #23) removed most of the draw-list build. | Left: animator posing across threads, mesh decoding on a shared pool, per-thread time in the Profiler, the 200-character and 2,000-body benchmark, and test runs with 1 and 8 threads. The modernization report (§ `rayon` usage) asks for the same: posing, audio diff and nav fingerprint over `&World`, applied in index order. "Limited on mobile" is deferred with Milestone 20. |
-| 6 | Phase 80's open criterion: the 4 × 4 km benchmark | No benchmark scene exists for it. | Build a generated 50,000-part, 4 × 4 km scene as an ignored bench test. Measuring it needs the reference machine (the developer's PC). |
+| 6 | Phase 80's open criterion: the 4 × 4 km benchmark | Correction: `bench_50000_parts_streaming` (player) existed and measured about 14 ms on the host but about 18 ms with a joined player, over budget. Only a whole-frame scene for every host was missing. | Built the streaming world as a project (`--make-streaming`) and cut the server's per-frame passes over every part (see Phase 80). Ticking needs the desktop's numbers. |
 | 7 | Phase 81: lag compensation and replays | Not started. | Builds on `net` replication (Phases 63 to 66), not on Collaborate, which is a separate editor-sync system with its own thread. Replays record the replication stream, so they don't need cross-machine determinism, which the development policy rules out. |
 
 **Hand checks.** These need a person, the developer's PC or Mac, or two computers. They stay unticked until checked, and the PC and Mac are booked through the project's coordinator.
@@ -430,6 +430,14 @@ It runs after the Animator and before drawing. It suits hands on a steering whee
 - [x] Teleporting after `RequestStreamAroundAsync` lands on loaded ground.
 - [x] A Persistent model is always there on every client, and scripts that check `StreamingState` don't error.
 - [x] A project with streaming off plays exactly as before.
+
+**Built (unified-plan remainder, 2026-11-12).** The 4 × 4 km world is now a project every host can measure: `axcenity-test --make-streaming <folder>` (`testing/src/streaming_world.rs`) writes 50,000 anchored parts in Models of 8, 64 ground tiles, 1,000 crates and a script that tours each player around the map with `RequestStreamAroundAsync`. Its first run put the server with one joined player at 21.9 ms a frame in the cloud container (Network send 16.7 ms); after ownership, replication and the partition stopped reading every part every frame it is 4.2 ms (Network send 2.0 ms), and the test runner 4.8 → 3.3 ms (`docs/benchmarks.md`, "The streaming world (Phase 80)"). Criterion 1 stays open until the player and the server with one joined player are measured on the reference desktop:
+
+```text
+cargo run --release -p axcenity-testing -- --make-streaming target/streaming
+cargo run --release -p axcenity-player  -- target/streaming --bench 600
+cargo run --release -p axcenity-server  -- target/streaming --bench 600 --bench-clients 1
+```
 
 ---
 

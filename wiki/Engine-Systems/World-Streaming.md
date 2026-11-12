@@ -6,8 +6,8 @@ implementation: partial
 crates: [core, scene, net, physics, render]
 source: [crates/core/src/streaming.rs, crates/scene/src/streaming.rs, crates/net/src/streaming.rs, crates/render/src/renderer/uploads.rs]
 docs: [docs/architecture/streaming.md]
-verified: 2026-11-11
-verified_commit: 19c7179d
+verified: 2026-11-12
+verified_commit: 81874e76
 tags: [system/streaming, large-worlds]
 ---
 
@@ -20,7 +20,7 @@ tags: [system/streaming, large-worlds]
 
 ```mermaid
 flowchart LR
-  P["core::streaming::Partition<br/>(rebuilt when Workspace/Players<br/>structure version changes)"] --> NS["net::streaming Streams<br/>per player: MinRadius now, out to TargetRadius<br/>nearest first, 4,000 Instances/s"]
+  P["core::streaming::Partition<br/>(split again when the Workspace's<br/>structure or the characters change)"] --> NS["net::streaming Streams<br/>per player: MinRadius now, out to TargetRadius<br/>nearest first, 4,000 Instances/s"]
   P --> SS["scene::Streaming (host's screen)<br/>in range of the camera"]
   SS --> DL[build_draw_list leaves the rest out]
   SS --> GPU["GPU frees after KEEP_UNDRAWN_FRAMES;<br/>background uploads when back in range"]
@@ -36,11 +36,14 @@ flowchart LR
 
 **Measured** (`bench_50000_parts_streaming`, RX 9070 XT, release): 50,000 parts over 4 km: 6.2 ms physics, 0.7 ms streaming, against a 16.7 ms budget (`docs/architecture/streaming.md`).
 
+**Measured** (streaming world, `axcenity-test --make-streaming`, Container, release, `--bench 600`): the server with one joined player went from 21.9 to 4.2 ms a frame, Network send 16.7 → 2.0 ms, after ownership, replication and the partition stopped reading every part every frame. A teleport's tick sends up to a second's budget at once (about 14 ms here). The desktop numbers that tick the plan's criterion are still to be taken ([Optimization log](../Performance/Optimization-Log.md)).
+
 ## Limitations
 
 - A flat Model with thousands of loose parts is one unit; big maps must be nested in Models or Folders to stream.
 - A texture draws white until its background upload finishes.
 - Editing always shows everything; Play streams around the camera.
+- A change to the Workspace's tree still splits the whole partition again (about 12 ms for 51,000 parts in the container); ownership and physics catch up from the moves log instead.
 
 ## Related documentation
 
