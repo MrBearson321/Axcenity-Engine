@@ -518,6 +518,81 @@ fn dragging_part_tools_height_handle_resizes_the_part_as_one_undo_step() {
     assert!(app.plugins.entries[index].handles.is_empty());
 }
 
+/// Roadmap G10: a plugin's attribute row sets the attribute as an undo
+/// step and tells the plugin; Align to Grid's Snap to Grid button row snaps
+/// the part it's clicked for.
+#[test]
+fn plugin_properties_rows_set_attributes_and_buttons_call_the_plugin() {
+    let folder = copy_of_example("hello-plugins", "plugin-rows");
+    let speed = folder.join("plugins").join("speed");
+    std::fs::create_dir_all(&speed).unwrap();
+    std::fs::write(
+        speed.join("plugin.json"),
+        r#"{ "name": "Speed", "version": "1.0.0" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        speed.join("init.lua"),
+        "local row = plugin:AddPropertyRow({ Attribute = 'Speed', Default = 16, Class = 'BasePart', Min = 0, Max = 50 })\n\
+         row.Changed:Connect(function(part, value) print('speed', part.Name, value) end)\n",
+    )
+    .unwrap();
+    let mut app = EditorApp::new(None);
+    app.open(&folder);
+    let crate_part = part(&app, "Crate");
+    app.select_many(vec![crate_part]);
+    let speed = plugin_index(&app, "project/speed");
+    let row = app.plugins.entries[speed].rows[0].id;
+    let names: Vec<_> = app
+        .plugins
+        .property_rows()
+        .iter()
+        .map(|rows| rows.name.to_owned())
+        .collect();
+    assert_eq!(names, ["Align to Grid", "Speed"]);
+
+    app.plugin_row_action(
+        crate_part,
+        crate::properties::RowAction::Set {
+            plugin: speed,
+            row,
+            name: "Speed".into(),
+            value: Value::Number(20.0),
+        },
+    );
+    let attribute = |app: &EditorApp| {
+        app.world
+            .get(crate_part)
+            .unwrap()
+            .attribute("Speed")
+            .cloned()
+    };
+    assert_eq!(attribute(&app), Some(Value::Number(20.0)));
+    assert_eq!(
+        app.history.undo_label(),
+        Some("Set attribute Speed of Crate")
+    );
+    assert!(
+        console(&app).contains(&"speed\tCrate\t20".to_owned()),
+        "{:?}",
+        console(&app)
+    );
+    app.undo();
+    assert_eq!(attribute(&app), None);
+
+    let align = plugin_index(&app, "project/align-to-grid");
+    let snap_row = app.plugins.entries[align].rows[0].id;
+    app.plugin_row_action(
+        crate_part,
+        crate::properties::RowAction::Click {
+            plugin: align,
+            row: snap_row,
+        },
+    );
+    assert_eq!(position(&app, crate_part), Vector3::new(2.0, 2.0, -4.0));
+    assert_eq!(app.history.undo_label(), Some("Snap to Grid"));
+}
+
 #[test]
 fn turning_a_plugin_off_takes_its_tab_and_buttons_away() {
     let mut app = opened("plugin-off");

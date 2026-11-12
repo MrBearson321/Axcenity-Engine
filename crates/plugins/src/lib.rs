@@ -16,11 +16,12 @@ pub mod bundle;
 mod draw;
 pub mod files;
 mod manifest;
+mod rows;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use axcenity_core::{InstanceId, RecordedChange, Vector3, World};
+use axcenity_core::{InstanceId, RecordedChange, Value, Vector3, World};
 use axcenity_script::{EditRuntime, OutputLine};
 use mlua::{IntoLuaMulti, MultiValue};
 
@@ -35,6 +36,7 @@ pub use manifest::{
     ENTRY_FILE, Found, MANIFEST_FILE, Manifest, Origin, PLUGINS_FOLDER, Permission, find_plugins,
     plugin_files,
 };
+pub use rows::{MAX_ROWS, PropertyRow, RowKind};
 pub use serde_json::Value as Json;
 
 use api::{PluginState, SignalKey};
@@ -171,6 +173,7 @@ impl Plugin {
             env: None,
             drawings: Default::default(),
             handles: Default::default(),
+            rows: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -228,6 +231,41 @@ impl Plugin {
         let mut state = api::state(self.runtime.lua()).ok()?;
         std::mem::take(&mut state.handles.changed)
             .then(|| state.handles.handles.values().cloned().collect())
+    }
+
+    /// Its Properties rows, when they changed since the last call.
+    pub fn take_rows(&self) -> Option<Vec<PropertyRow>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.rows.changed).then(|| state.rows.rows.values().cloned().collect())
+    }
+
+    /// The Properties button row numbered `row` was clicked for
+    /// `instance`: fires its `Activated(instance)`.
+    pub fn activate_row(&self, world: &mut World, row: u64, instance: InstanceId) {
+        if self.has_row(row) && world.contains(instance) {
+            let instance = axcenity_script::LuaInstance(instance);
+            self.fire(world, SignalKey::RowActivated(row), instance);
+        }
+    }
+
+    /// The attribute row numbered `row` was edited on `instance` (the
+    /// editor already set the attribute): fires its `Changed(instance,
+    /// value)`.
+    pub fn row_changed(&self, world: &mut World, row: u64, instance: InstanceId, value: &Value) {
+        if !self.has_row(row) || !world.contains(instance) {
+            return;
+        }
+        let lua = self.runtime.lua();
+        let Ok(value) = axcenity_script::system::value_to_lua(lua, value) else {
+            return;
+        };
+        let instance = axcenity_script::LuaInstance(instance);
+        self.fire(world, SignalKey::RowChanged(row), (instance, value));
+    }
+
+    fn has_row(&self, row: u64) -> bool {
+        self.state()
+            .is_some_and(|state| state.rows.rows.contains_key(&row))
     }
 
     /// The user dragged the handle numbered `id` to `position`: moves it

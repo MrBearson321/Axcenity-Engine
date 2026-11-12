@@ -90,6 +90,44 @@ type HandleOptions = {
 	Axis: Vector3?,
 }
 
+--- A row a plugin added to the Properties panel.
+declare extern type PluginPropertyRow with
+	--- A button row: fires with the Instance when it's clicked.
+	Activated: PluginSignal
+	--- An attribute row: fires with the Instance and the new value after the user edits it there (the attribute is already set, as its own undo step).
+	Changed: PluginSignal
+	--- Takes the row out of the Properties panel and disconnects its events.
+	function Remove(self): ()
+end
+
+--- An attribute shown as a row of its own in the Properties panel.
+type PropertyRowInfo = {
+	--- The attribute it edits.
+	Attribute: string,
+	--- What it shows (and its type) while the attribute isn't set: a boolean, number, string, Vector3, Vector2, Color3, UDim2, CFrame or EnumItem.
+	Default: any,
+	--- It shows for Instances of this class (IsA), such as "BasePart" (left out: every Instance).
+	Class: string?,
+	--- Its name in the panel (left out: the attribute's name).
+	Label: string?,
+	--- Shown when the mouse is over its name.
+	Tooltip: string?,
+	--- For numbers: the smallest value (with Max, a slider).
+	Min: number?,
+	--- For numbers: the largest value.
+	Max: number?,
+}
+
+--- A button in the Properties panel.
+type PropertyButtonInfo = {
+	--- The button's text.
+	Label: string,
+	--- It shows for Instances of this class (IsA) (left out: every Instance).
+	Class: string?,
+	--- Shown when the mouse is over it.
+	Tooltip: string?,
+}
+
 --- What a dock widget starts with.
 type DockWidgetInfo = {
 	--- The tab's title (left out: the widget's id).
@@ -130,6 +168,10 @@ declare extern type Plugin with
 	function DrawText(self, position: Vector3, text: string, options: DrawOptions?): PluginDrawing
 	--- Removes everything the plugin drew.
 	function ClearDrawings(self): ()
+	--- Shows an attribute of the selected Instance as a row of its own in the Properties panel, under the plugin's name. Editing it there sets the attribute as an undo step. At most 64 rows.
+	function AddPropertyRow(self, info: PropertyRowInfo): PluginPropertyRow
+	--- A button in the Properties panel, under the plugin's name, for the selected Instance.
+	function AddPropertyButton(self, info: PropertyButtonInfo): PluginPropertyRow
 	--- A handle at `position` the user can drag in the Scene View while editing; the Move snap applies. At most 256 at once.
 	function CreateHandle(self, position: Vector3, options: HandleOptions?): PluginHandle
 end

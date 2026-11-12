@@ -1,6 +1,7 @@
 -- Align to Grid: a ribbon button that snaps the selected parts to whole
 -- studs. The whole snap is one undo step. While parts are selected, the
--- Scene View shows where each would go.
+-- Scene View shows where each would go, and each part's Properties has a
+-- Snap to Grid button.
 
 local GRID = 1
 
@@ -28,6 +29,15 @@ local function showTargets()
 end
 
 Selection.SelectionChanged:Connect(showTargets)
+
+-- The same snap for one part, as a button in its Properties.
+local snapRow = plugin:AddPropertyButton({ Label = "Snap to Grid", Class = "BasePart", Tooltip = "Snap this part to 1 stud" })
+snapRow.Activated:Connect(function(part)
+	local position = part.Position
+	part.Position = Vector3.new(snap(position.X), snap(position.Y), snap(position.Z))
+	ChangeHistoryService:SetWaypoint("Snap to Grid")
+	showTargets()
+end)
 
 local toolbar = plugin:CreateToolbar("Align")
 local button = toolbar:CreateButton("Align to Grid", "Snap the selected parts to 1 stud", "grid-four")

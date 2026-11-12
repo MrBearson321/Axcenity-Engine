@@ -530,6 +530,77 @@ fn a_handle_moves_where_it_is_dragged_and_fires_its_events() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+#[test]
+fn properties_rows_are_declared_and_fire_when_used() {
+    let folder = temp_folder("rows");
+    let found = project_with_plugin(
+        &folder,
+        "rows",
+        MANIFEST,
+        "local speed = plugin:AddPropertyRow({ Attribute = 'Speed', Default = 16, Class = 'BasePart', Min = 0, Max = 50, Tooltip = 'How fast' })\n\
+         local spin = plugin:AddPropertyButton({ Label = 'Spin', Class = 'Part' })\n\
+         spin.Activated:Connect(function(part) part.Orientation = Vector3.new(0, 90, 0) print('spun', part.Name) end)\n\
+         speed.Changed:Connect(function(part, value) print('speed', part.Name, value) end)\n\
+         for _, bad in { { Attribute = 'Bad name', Default = 1 }, { Attribute = 'X' }, { Attribute = 'X', Default = 1, Class = 'Nope' },\n\
+         \t{ Attribute = 'X', Default = 1, Min = 5, Max = 1 }, { Attribute = 'X', Default = {} } } do\n\
+         \tprint(pcall(plugin.AddPropertyRow, plugin, bad))\n\
+         end\n\
+         print(pcall(plugin.AddPropertyButton, plugin, {}))\n\
+         local gone = plugin:AddPropertyRow({ Attribute = 'Gone', Default = true, Label = 'Gone' })\n\
+         gone:Remove()\n",
+    );
+    let mut world = World::new();
+    let crate_part = part(&mut world, "Crate", Vector3::new(0.0, 0.0, 0.0));
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed.len(), 6, "{printed:?}");
+    for (line, says) in printed.iter().zip([
+        "isn't an attribute name",
+        "needs a Default",
+        "isn't a class name",
+        "Min is more than Max",
+        "Default: an attribute can be",
+        "needs a Label",
+    ]) {
+        assert!(line.starts_with("false\t") && line.contains(says), "{line}");
+    }
+    let rows = plugin.take_rows().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0],
+        PropertyRow {
+            id: rows[0].id,
+            class: "BasePart".into(),
+            label: "Speed".into(),
+            tooltip: "How fast".into(),
+            kind: RowKind::Attribute {
+                name: "Speed".into(),
+                default: Value::Number(16.0),
+                min: Some(0.0),
+                max: Some(50.0),
+            },
+        }
+    );
+    assert!(rows[0].applies_to(ClassName::Part) && !rows[0].applies_to(ClassName::Model));
+    assert_eq!(
+        (rows[1].label.as_str(), &rows[1].kind),
+        ("Spin", &RowKind::Button)
+    );
+    assert_eq!(plugin.take_rows(), None);
+
+    plugin.activate_row(&mut world, rows[1].id, crate_part);
+    assert_eq!(
+        world.get(crate_part).unwrap().property("Orientation"),
+        Some(&Value::Vector3(Vector3::new(0.0, 90.0, 0.0)))
+    );
+    plugin.row_changed(&mut world, rows[0].id, crate_part, &Value::Number(20.0));
+    // A row that's gone does nothing.
+    plugin.activate_row(&mut world, 999, crate_part);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed, ["spun\tCrate", "speed\tCrate\t20"]);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// The luau-lsp file names every global, method, field and event the
 /// plugin API has.
 #[test]
@@ -579,6 +650,10 @@ fn the_definitions_name_the_whole_plugin_api() {
         "Position: Vector3",
         "Dragged: PluginSignal",
         "DragEnded: PluginSignal",
+        "function AddPropertyRow(",
+        "function AddPropertyButton(",
+        "Activated: PluginSignal",
+        "Changed: PluginSignal",
     ];
     for name in names {
         assert!(
@@ -587,7 +662,12 @@ fn the_definitions_name_the_whole_plugin_api() {
         );
     }
     // Every method a plugin's Lua can call is in the file.
-    let api = [include_str!("api.rs"), include_str!("draw.rs")].concat();
+    let api = [
+        include_str!("api.rs"),
+        include_str!("draw.rs"),
+        include_str!("rows.rs"),
+    ]
+    .concat();
     for line in api.lines() {
         let line = line.trim();
         for start in ["methods.add_method(\"", "fields.add_field_method_get(\""] {

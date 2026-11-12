@@ -115,6 +115,13 @@ impl EditorApp {
             return;
         }
         let mut style_edit = None;
+        let mut row_action = None;
+        // Plugins only run while editing.
+        let plugin_rows = if editing {
+            self.plugins.property_rows()
+        } else {
+            Vec::new()
+        };
         // What this editor is dragging, for the others (C6).
         if !ui.input(|input| input.pointer.any_down()) {
             self.team_panel.editing_field = None;
@@ -124,7 +131,11 @@ impl EditorApp {
             if editing {
                 style_edit = style_panel::show(ui, world, selected, stylesheets);
             }
+            if let Some(instance) = selected.and_then(|id| world.get(id)) {
+                row_action = properties::plugin_sections(ui, instance, &plugin_rows, None);
+            }
         });
+        drop(plugin_rows);
         // Other panels may already be drawn this frame, so draw again to
         // show the change everywhere.
         if let (Some(id), Some(edit)) = (selected, edit) {
@@ -138,6 +149,10 @@ impl EditorApp {
         }
         if let (Some(id), Some(edit)) = (selected, style_edit) {
             self.apply_style(id, edit);
+            ui.ctx().request_repaint();
+        }
+        if let (Some(id), Some(action)) = (selected, row_action) {
+            self.plugin_row_action(id, action);
             ui.ctx().request_repaint();
         }
     }

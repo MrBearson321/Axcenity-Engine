@@ -61,6 +61,9 @@ pub struct Entry {
     /// Its handles in the Scene View (`plugin:CreateHandle`), as of its
     /// last call.
     pub handles: Vec<axcenity_plugins::Handle>,
+    /// Its rows in the Properties panel (`plugin:AddPropertyRow`), as of
+    /// its last call.
+    pub rows: Vec<axcenity_plugins::PropertyRow>,
 }
 
 /// How many of a plugin's errors the panel keeps.
@@ -121,6 +124,26 @@ pub struct Plugins {
     new_plugin: Option<NewPlugin>,
     /// A status line under the toolbar (scaffold / import / export).
     pub notice: Option<String>,
+}
+
+impl Plugins {
+    /// The running plugins' Properties rows, for the panel.
+    pub fn property_rows(&self) -> Vec<crate::properties::PluginRows<'_>> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.running.is_some() && !entry.rows.is_empty())
+            .map(|(plugin, entry)| crate::properties::PluginRows {
+                plugin,
+                name: entry
+                    .found
+                    .manifest
+                    .as_ref()
+                    .map_or("Plugin", |m| m.name.as_str()),
+                rows: &entry.rows,
+            })
+            .collect()
+    }
 }
 
 /// What's typed in the New Plugin… form.
