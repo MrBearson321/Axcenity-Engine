@@ -267,15 +267,23 @@ impl EditorApp {
             log::warn!("Collaborate: couldn't start the session's journal: {error}");
         }
         let access_path = members_file(&data, &root);
-        let mut session = HostSession::start(
+        // Where members will reach it, besides loopback (CW7.3).
+        let binds = super::collab_trust::host_binds(
+            port,
+            &super::collab_trust::addresses_of(&address),
+            self.team_panel.listen_everywhere,
+            &mut self.output,
+        );
+        let mut session = HostSession::start_on(
             host,
             Access::from_list(&list),
             Some(access_path),
             &cert,
-            std::net::SocketAddr::from(([0, 0, 0, 0], port)),
+            &binds,
             Some(address.clone()),
         )
         .map_err(|e| format!("couldn't listen on port {port}: {e}"))?;
+        session.set_trust(self.team_panel.trust);
         session.set_hosted_by(Some(me));
         let members = session.access().members_list();
         let loopback = session.loopback();

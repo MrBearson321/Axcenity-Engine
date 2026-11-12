@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use crate::access::{self, Access, Invite, Member};
 use crate::audit::{self, AuditKind};
-use crate::handshake::{Gate, GateStep, Knock, KnockStep, Versions};
+use crate::handshake::{Asking, Gate, GateStep, Knock, KnockStep, Trust, Versions};
 use crate::host::Host;
 use crate::identity::{Fingerprint, IdentityProvider};
 use crate::limits;
@@ -40,6 +40,33 @@ pub fn lan_address() -> Option<IpAddr> {
     socket.connect("192.0.2.1:9").ok()?;
     let ip = socket.local_addr().ok()?.ip();
     (!ip.is_unspecified()).then_some(ip)
+}
+
+/// Where a host listens on `port` (cohesion pass CW7.3): this computer
+/// itself (the hosting editor joins over loopback), plus `reach`, the
+/// Tailscale addresses when hosting over Tailscale, or this computer's
+/// address on its network otherwise. With `everywhere`, or when neither is
+/// known, every interface, as before.
+pub fn listen_addresses(port: u16, reach: &[IpAddr], everywhere: bool) -> Vec<SocketAddr> {
+    let any = vec![SocketAddr::from(([0, 0, 0, 0], port))];
+    if everywhere {
+        return any;
+    }
+    let reach: Vec<IpAddr> = if reach.is_empty() {
+        lan_address().into_iter().collect()
+    } else {
+        reach.to_vec()
+    };
+    if reach.is_empty() {
+        return any;
+    }
+    let mut addresses = vec![SocketAddr::from(([127, 0, 0, 1], port))];
+    for ip in reach {
+        if !ip.is_loopback() && !addresses.iter().any(|a| a.ip() == ip) {
+            addresses.push(SocketAddr::new(ip, port));
+        }
+    }
+    addresses
 }
 
 /// The host's side of a session: who's connected, who's still knocking,
@@ -68,6 +95,22 @@ pub struct HostSession {
     rates: HashMap<ConnId, (Instant, u32)>,
     /// The members list version last sent to everyone who may host.
     shared: u64,
+    /// Whom the person hosting is asked about before they get in.
+    trust: Trust,
+    /// Joiners waiting for the person hosting, oldest first.
+    asks: Vec<JoinRequest>,
+}
+
+/// Someone waiting for the person hosting to let them in (cohesion pass
+/// CW7.2): who they say they are, the device key they signed in with,
+/// the role they'd have and where they connect from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JoinRequest {
+    /// Pass it to [`HostSession::answer_join`].
+    pub id: ConnId,
+    pub asking: Asking,
+    pub address: IpAddr,
+    pub since: Instant,
 }
 
 /// The most messages a member may send in one second (TC6). An editor
@@ -87,6 +130,19 @@ impl HostSession {
         bind: SocketAddr,
         address: Option<String>,
     ) -> io::Result<HostSession> {
+        Self::start_on(host, access, access_path, cert, &[bind], address)
+    }
+
+    /// [`start`](Self::start), listening on each of `binds` (see
+    /// [`listen_addresses`]).
+    pub fn start_on(
+        host: Host,
+        access: Access,
+        access_path: Option<PathBuf>,
+        cert: &HostCert,
+        binds: &[SocketAddr],
+        address: Option<String>,
+    ) -> io::Result<HostSession> {
         // Everyone who's a member is on the roster, connected or not.
         let mut host = host;
         for member in access.members() {
@@ -102,7 +158,7 @@ impl HostSession {
         if let Some(path) = &access_path {
             host.keep_audit_in(audit::file_beside(path));
         }
-        let listener = Listener::bind(bind, cert)?;
+        let listener = Listener::bind_all(binds, cert)?;
         let port = listener.address().port();
         let address = address.unwrap_or_else(|| {
             let ip = lan_address().unwrap_or(IpAddr::from([127, 0, 0, 1]));
@@ -123,6 +179,8 @@ impl HostSession {
             conns: HashMap::new(),
             rates: HashMap::new(),
             shared: 0,
+            trust: Trust::default(),
+            asks: Vec::new(),
         })
     }
 
@@ -152,6 +210,47 @@ impl HostSession {
     }
 
     /// Names the session in invites made from now on ("Castle Game").
+    /// Whom to ask about from now on. Joiners already waiting keep
+    /// waiting.
+    pub fn set_trust(&mut self, trust: Trust) {
+        self.trust = trust;
+    }
+
+    pub fn trust(&self) -> Trust {
+        self.trust
+    }
+
+    /// Joiners waiting for an answer, oldest first.
+    pub fn join_requests(&self) -> &[JoinRequest] {
+        &self.asks
+    }
+
+    /// Lets the joiner `id` in, or turns them away. Does nothing if they
+    /// left or were already answered.
+    pub fn answer_join(&mut self, id: ConnId, allow: bool) {
+        let Some(index) = self.asks.iter().position(|ask| ask.id == id) else {
+            return;
+        };
+        let ask = self.asks.remove(index);
+        let Some((gate, ip, _)) = self.gates.get_mut(&id) else {
+            return;
+        };
+        let ip = *ip;
+        let step = gate.answer(allow, &mut self.access, access::now());
+        if !allow {
+            self.host_mut().record(
+                AuditKind::Refused,
+                None,
+                format!(
+                    "Didn't let {} in (device {}, from {ip})",
+                    ask.asking.name,
+                    ask.asking.key.fingerprint().short()
+                ),
+            );
+        }
+        self.gate_step(id, ip, step);
+    }
+
     pub fn set_name(&mut self, name: Option<String>) {
         self.name = name.filter(|n| !n.trim().is_empty());
     }
@@ -318,7 +417,7 @@ impl HostSession {
                     self.listener.close(conn);
                     return;
                 }
-                let gate = Gate::new(self.cert, self.versions.clone());
+                let gate = Gate::new(self.cert, self.versions.clone()).with_trust(self.trust);
                 self.gates.insert(conn, (gate, ip, Instant::now()));
             }
             NetEvent::Message(conn, bytes) => {
@@ -345,30 +444,17 @@ impl HostSession {
                     }
                 } else if let Some((gate, ip, _)) = self.gates.get_mut(&conn) {
                     let ip = *ip;
-                    match gate.receive(&bytes, &mut self.access, access::now()) {
-                        GateStep::Reply(reply) => self.listener.send(conn, reply),
-                        GateStep::Admit { member, reply } => {
-                            self.gates.remove(&conn);
-                            self.listener.send(conn, reply);
-                            self.admit(conn, member);
-                        }
-                        GateStep::Refuse { reason, reply } => {
-                            log::info!("Collaborate: refused a joiner: {reason}");
-                            self.gates.remove(&conn);
-                            self.listener.send(conn, reply);
-                            self.listener.close(conn);
-                            self.host_mut().record(
-                                AuditKind::Refused,
-                                None,
-                                format!("Turned away a joiner from {ip}: {reason}"),
-                            );
-                            self.failed(ip);
-                        }
+                    if gate.is_asking() {
+                        // Nothing more is expected until the host answers.
+                        return;
                     }
+                    let step = gate.receive(&bytes, &mut self.access, access::now());
+                    self.gate_step(conn, ip, step);
                 }
             }
             NetEvent::Closed(conn) => {
                 self.gates.remove(&conn);
+                self.asks.retain(|ask| ask.id != conn);
                 self.rates.remove(&conn);
                 if let Some(member) = self.members.remove(&conn)
                     && self.conns.get(&member) == Some(&conn)
@@ -424,14 +510,59 @@ impl HostSession {
         });
     }
 
+    /// Carries out what a joiner's handshake step says.
+    fn gate_step(&mut self, conn: ConnId, ip: IpAddr, step: GateStep) {
+        match step {
+            GateStep::Reply(reply) => self.listener.send(conn, reply),
+            GateStep::Admit { member, reply } => {
+                self.gates.remove(&conn);
+                self.listener.send(conn, reply);
+                self.admit(conn, member);
+            }
+            GateStep::Refuse { reason, reply } => {
+                log::info!("Collaborate: refused a joiner: {reason}");
+                self.gates.remove(&conn);
+                self.listener.send(conn, reply);
+                self.listener.close(conn);
+                self.host_mut().record(
+                    AuditKind::Refused,
+                    None,
+                    format!("Turned away a joiner from {ip}: {reason}"),
+                );
+                self.failed(ip);
+            }
+            GateStep::Ask(asking) => {
+                log::info!("Collaborate: {} asks to join from {ip}", asking.name);
+                self.asks.push(JoinRequest {
+                    id: conn,
+                    asking,
+                    address: ip,
+                    since: Instant::now(),
+                });
+            }
+        }
+    }
+
     /// Closes connections that haven't finished the handshake in
-    /// [`limits::KNOCK_TIME`].
+    /// [`limits::KNOCK_TIME`], and turns away joiners the host hasn't
+    /// answered in [`limits::ASK_TIME`].
     fn close_slow_knockers(&mut self) {
         let now = Instant::now();
+        let unanswered: Vec<ConnId> = self
+            .asks
+            .iter()
+            .filter(|ask| now.duration_since(ask.since) >= limits::ASK_TIME)
+            .map(|ask| ask.id)
+            .collect();
+        for conn in unanswered {
+            self.answer_join(conn, false);
+        }
         let slow: Vec<ConnId> = self
             .gates
             .iter()
-            .filter(|(_, (_, _, opened))| now.duration_since(*opened) >= limits::KNOCK_TIME)
+            .filter(|(_, (gate, _, opened))| {
+                !gate.is_asking() && now.duration_since(*opened) >= limits::KNOCK_TIME
+            })
             .map(|(&conn, _)| conn)
             .collect();
         for conn in slow {

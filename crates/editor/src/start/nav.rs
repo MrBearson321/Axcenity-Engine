@@ -27,7 +27,7 @@ const HEADER_FOLDED: f32 = 72.0;
 pub(super) const TOP_BAR_HEIGHT: f32 = 52.0;
 /// Narrower than this, the top bar's tabs drop their names (each keeps a
 /// tooltip) and the version moves into the logo's tooltip.
-const TOP_BAR_ROOM_FOR_NAMES: f32 = 900.0;
+const TOP_BAR_ROOM_FOR_NAMES: f32 = 1040.0;
 
 /// Where the start screen's navigation goes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -94,12 +94,18 @@ impl StartNav {
 
 /// The pages, in the order both layouts list them: the page, its icon, its
 /// name, and what its tooltip adds.
-const PAGES: [(Page, &str, &str, &str); 5] = [
+const PAGES: [(Page, &str, &str, &str); 6] = [
     (
         Page::Projects,
         icons::SQUARES_FOUR,
         "Projects",
         "Your projects, and templates to start from",
+    ),
+    (
+        Page::Team,
+        icons::USERS_THREE,
+        "Team Projects",
+        "Make games with others: join a session, share a project, rejoin one",
     ),
     (
         Page::Global,

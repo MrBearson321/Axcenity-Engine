@@ -48,6 +48,12 @@ pub(crate) struct TeamPanel {
     /// "Let others host from my computer" is off (Settings > Collaborate,
     /// the Project section; Collaborate 2.0 P6).
     pub(crate) no_host_offer: bool,
+    /// Whom a session this editor hosts asks about before letting them in
+    /// (Settings > Collaborate, cohesion pass CW7.2).
+    pub(crate) trust: axcenity_collab::handshake::Trust,
+    /// Host on every network instead of only the one others reach this
+    /// computer by (CW7.3).
+    pub(crate) listen_everywhere: bool,
     /// The name being typed for a new checkpoint (C9).
     pub(crate) checkpoint_label: String,
     /// The checkpoint the Owner pressed Restore on, asking once more.
@@ -113,7 +119,17 @@ impl TeamPanel {
         };
         let ready = if self.setup.done { " ready" } else { "" };
         let offer = if self.no_host_offer { " nohost" } else { "" };
-        format!("{role} {lifetime}{ready}{offer}")
+        let trust = match self.trust {
+            axcenity_collab::handshake::Trust::InviteHolders => "",
+            axcenity_collab::handshake::Trust::AskNewMembers => " ask-new",
+            axcenity_collab::handshake::Trust::AskEveryone => " ask-all",
+        };
+        let listen = if self.listen_everywhere {
+            " listen-all"
+        } else {
+            ""
+        };
+        format!("{role} {lifetime}{ready}{offer}{trust}{listen}")
     }
 
     /// Reads what [`TeamPanel::to_text`] wrote; unknown words keep the
@@ -128,6 +144,9 @@ impl TeamPanel {
                 "month" => self.invite_lifetime = InviteLifetime::Month,
                 "ready" => self.setup.done = true,
                 "nohost" => self.no_host_offer = true,
+                "ask-new" => self.trust = axcenity_collab::handshake::Trust::AskNewMembers,
+                "ask-all" => self.trust = axcenity_collab::handshake::Trust::AskEveryone,
+                "listen-all" => self.listen_everywhere = true,
                 _ => {}
             }
         }
@@ -870,7 +889,7 @@ impl EditorApp {
         settings::page_title(
             ui,
             "Collaborate",
-            "How others see you in a session, and the invites you make.",
+            "How others see you in a session, the invites you make, and who gets in.",
         );
         let palette = theme::palette(ui.ctx());
         let weak = |ui: &mut egui::Ui, text: &str| {
@@ -963,6 +982,8 @@ impl EditorApp {
             "If a session's host leaves or is lost, it can go on from this computer (it \
              listens on port 47810). Off: this computer is never picked.",
         );
+        ui.add_space(theme::space::M);
+        self.trust_settings(ui);
     }
 
     /// File > Share with Collaborate…: opens the panel and hosts.

@@ -25,6 +25,7 @@ mod learn;
 mod nav;
 mod pages;
 mod reference;
+mod team;
 mod tilt;
 
 use cards::*;
@@ -36,6 +37,7 @@ pub use nav::{NavLayout, StartNav};
 pub(crate) use pages::ago;
 use pages::*;
 use reference::Reference;
+use team::TeamPage;
 
 use crate::dialog;
 use crate::theme::{self, Palette, icons, type_scale};
@@ -156,6 +158,7 @@ pub fn remember(recent: &mut Vec<ProjectLink>, project: ProjectLink) {
 }
 
 /// What was picked on the start screen.
+#[derive(Debug)]
 pub enum StartAction {
     OpenDialog,
     Open(PathBuf),
@@ -167,6 +170,14 @@ pub enum StartAction {
     Join(axcenity_collab::access::Invite),
     /// Stop joining: Cancel while the Join dialog waits.
     CancelJoin,
+    /// Open this project and host a session for it (Team Projects).
+    Host(PathBuf),
+    /// Rejoin a team project's session from this computer's record of it.
+    Rejoin(Box<axcenity_collab::project::ProjectRecord>),
+    /// The Collaborate setup wizard.
+    SetUpCollaborate,
+    /// Settings, at Collaborate.
+    CollaborateSettings,
 }
 
 /// How joining a Collaborate session from the start screen is going, for
@@ -200,6 +211,7 @@ impl JoinProgress {
 enum Page {
     #[default]
     Projects,
+    Team,
     Global,
     Learn,
     Docs,
@@ -311,6 +323,7 @@ pub struct StartScreen {
     /// The last problem with something that has no dialog of its own.
     notice: Option<String>,
     global: GlobalPage,
+    team: TeamPage,
     learn: Learn,
     docs: Docs,
     reference: Reference,
@@ -499,6 +512,10 @@ impl StartScreen {
         let now = ctx.input(|input| input.time);
         if self.arrived.is_none_or(|(shown, _)| shown != self.page) {
             self.arrived = Some((self.page, now));
+            // Team Projects reads its records again each time it's shown.
+            if self.page != Page::Team {
+                self.forget_team_projects();
+            }
         }
         let arrived_at = self.arrived.map_or(now, |(_, at)| at);
         let arrival = theme::arrival(&ctx, arrived_at, 0.0, PAGE_SECONDS, theme::curve::SETTLE);
@@ -521,6 +538,11 @@ impl StartScreen {
                         match self.page {
                             Page::Projects => {
                                 if let Some(picked) = self.projects_page(ui, &ctx, projects) {
+                                    action = Some(picked);
+                                }
+                            }
+                            Page::Team => {
+                                if let Some(picked) = self.team_page(ui, projects) {
                                     action = Some(picked);
                                 }
                             }
@@ -550,7 +572,10 @@ impl StartScreen {
             });
         ui.advance_cursor_after_rect(full);
         if let Some(opened) = self.dialogs(&ctx, projects) {
-            action = Some(StartAction::Open(opened));
+            action = Some(self.opened_new(opened));
+        } else if self.dialog.is_none() {
+            // New Team Project…'s dialog was closed without a project.
+            self.team.host_new = false;
         }
         if let Some(asked) = self.join_asked.take() {
             action = Some(asked);

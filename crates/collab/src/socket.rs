@@ -160,10 +160,31 @@ pub struct Listener {
 impl Listener {
     /// Listens on `address` (port 0 picks a free one) with `cert`.
     pub fn bind(address: SocketAddr, cert: &HostCert) -> io::Result<Listener> {
+        Self::bind_all(&[address], cert)
+    }
+
+    /// Listens on each of `addresses` with `cert` (cohesion pass CW7.3:
+    /// loopback and one network's address rather than every interface).
+    /// The first one's port is used for the rest when they ask for port 0.
+    pub fn bind_all(addresses: &[SocketAddr], cert: &HostCert) -> io::Result<Listener> {
         let tls = cert.server_config()?;
-        let socket = TcpListener::bind(address)?;
+        let (first, rest) = addresses
+            .split_first()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "nowhere to listen"))?;
+        let socket = TcpListener::bind(first)?;
         socket.set_nonblocking(true)?;
         let address = socket.local_addr()?;
+        let mut sockets = vec![socket];
+        for extra in rest {
+            let port = if extra.port() == 0 {
+                address.port()
+            } else {
+                extra.port()
+            };
+            let socket = TcpListener::bind(SocketAddr::new(extra.ip(), port))?;
+            socket.set_nonblocking(true)?;
+            sockets.push(socket);
+        }
         let (events_in, events) = mpsc::channel();
         let senders: Arc<Mutex<HashMap<ConnId, Sender<Out>>>> = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
@@ -177,7 +198,11 @@ impl Listener {
                 .name("team-create-listen".into())
                 .spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
-                        match socket.accept() {
+                        let accepted = sockets.iter().find_map(|socket| match socket.accept() {
+                            Err(error) if error.kind() == io::ErrorKind::WouldBlock => None,
+                            other => Some(other),
+                        });
+                        match accepted.unwrap_or_else(|| Err(io::ErrorKind::WouldBlock.into())) {
                             Ok((stream, peer)) => {
                                 // Too many open, or an address that failed
                                 // too often: closed before any TLS work.

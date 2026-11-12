@@ -332,6 +332,33 @@ impl Access {
         Ok(self.add(key, name.to_owned(), color, role))
     }
 
+    /// The role [`admit`](Self::admit) would give `key` now, without
+    /// using the invite.
+    pub fn would_admit(
+        &self,
+        key: &PublicKey,
+        invite: Option<[u8; 16]>,
+        now: u64,
+    ) -> Result<Role, AccessRefusal> {
+        if let Some(member) = self.member(key) {
+            return Ok(member.role);
+        }
+        let secret = invite.ok_or(AccessRefusal::NotInvited)?;
+        let hash = Fingerprint::of(&secret);
+        let issued = self
+            .invites
+            .iter()
+            .find(|issued| issued.secret == hash)
+            .ok_or(AccessRefusal::UnknownInvite)?;
+        if issued.used {
+            return Err(AccessRefusal::InviteUsed);
+        }
+        if now > issued.expires {
+            return Err(AccessRefusal::InviteExpired);
+        }
+        Ok(issued.role)
+    }
+
     /// Changes a member's role. False if there's no such member.
     pub fn set_role(&mut self, member: MemberId, role: Role) -> bool {
         let Some(found) = self.members.iter_mut().find(|m| m.id == member) else {

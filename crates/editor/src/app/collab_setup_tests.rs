@@ -81,9 +81,12 @@ fn the_checks_name_the_address_and_find_a_busy_port() {
     let busy = TcpListener::bind("0.0.0.0:0").unwrap();
     let port = busy.local_addr().unwrap().port();
     let checks = host_checks(&tailnet(None), port);
-    assert_eq!(checks.len(), 2, "no name to look up without MagicDNS");
+    assert_eq!(checks.len(), 3, "no name to look up without MagicDNS");
     assert_eq!(checks[0].outcome, Ok(format!("100.101.102.103:{port}")));
     assert!(checks[1].outcome.is_err() && checks[1].warning);
+    // The firewall is only read, and never stops setup.
+    assert_eq!(checks[2].what, super::collab_setup::FIREWALL_CHECK);
+    assert!(checks[2].warning);
 
     drop(busy);
     let checks = host_checks(&tailnet(None), port);

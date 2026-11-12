@@ -28,6 +28,7 @@ mod assets;
 mod behavior_trees;
 mod block_undo;
 mod chrome;
+mod collab_trust;
 mod collision_groups;
 mod command_palette;
 mod commands;
@@ -1797,6 +1798,7 @@ impl EditorApp {
         self.update_install_frame();
         self.settings_window(ctx);
         self.recovered_changes_window(ctx);
+        self.join_requests_window(ctx);
         self.collab_setup_windows(ctx);
         self.repo_ui_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
@@ -1919,6 +1921,8 @@ mod collab_repo_tests;
 mod collab_scenario_tests;
 #[cfg(test)]
 mod collab_setup_tests;
+#[cfg(test)]
+mod collab_trust_tests;
 #[cfg(test)]
 mod decal_tests;
 #[cfg(test)]

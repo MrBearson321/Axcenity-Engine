@@ -77,6 +77,13 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
             StartNav::default(),
         ),
         (
+            "start-team",
+            Page::Team,
+            None,
+            theme::ThemeChoice::Dark,
+            StartNav::default(),
+        ),
+        (
             "start-learn",
             Page::Learn,
             None,
@@ -801,6 +808,7 @@ fn the_top_bar_lists_the_same_pages_across_the_top() {
         let mut lefts = Vec::new();
         for page in [
             "Projects",
+            "Team Projects",
             "Global Assets",
             "Learn",
             "Documentation",
@@ -1264,6 +1272,7 @@ fn only_reading_pages_sit_on_the_reading_glass() {
     let page = Rect::from_min_size(pos2(220.0, 0.0), vec2(1000.0, 800.0));
     for (shown, reads) in [
         (Page::Projects, false),
+        (Page::Team, false),
         (Page::Global, false),
         (Page::Learn, true),
         (Page::Docs, true),
@@ -1339,4 +1348,163 @@ fn scrolled_reading_pages_stay_inside_the_glass() {
         }
         assert!(page_text > 5, "{shown:?}: the page drew its text");
     }
+}
+
+fn team_record(name: &str, folder: &Path, hosted: bool) -> axcenity_collab::project::ProjectRecord {
+    use axcenity_collab::project::{HostCard, ProjectRecord, SessionState};
+    ProjectRecord {
+        id: format!("{name}-id"),
+        name: name.to_owned(),
+        folder: folder.to_owned(),
+        members: None,
+        hosts: if hosted {
+            vec![HostCard {
+                member: None,
+                address: "pauls-pc.tail1.ts.net:47800".to_owned(),
+                cert: axcenity_collab::identity::Fingerprint([0; 32]),
+            }]
+        } else {
+            Vec::new()
+        },
+        last_host: Some("Paul".to_owned()),
+        state: SessionState::Offline,
+        repository: None,
+        updated: 0,
+    }
+}
+
+#[test]
+fn the_team_projects_page_lists_records_and_shares_projects() {
+    let here = std::env::temp_dir().join(format!("axcenity-team-page-test-{}", std::process::id()));
+    std::fs::create_dir_all(&here).unwrap();
+    std::fs::write(here.join(axcenity_project::MANIFEST_FILE), "{}").unwrap();
+    // "Castle" is a team project already; "Obby" isn't, so it's offered to share.
+    let mut projects = vec![
+        ProjectLink {
+            name: "Castle".to_owned(),
+            description: String::new(),
+            folder: here.clone(),
+        },
+        link("Obby"),
+    ];
+    let mut start = StartScreen::default();
+    start.show_team_page();
+    assert!(start.wants_team_projects());
+    start.set_team_projects(vec![
+        team_record("Castle", &here, true),
+        team_record("Racer", Path::new("not-a-folder/Racer"), false),
+    ]);
+    assert!(!start.wants_team_projects());
+
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    let mut clock = 0.0;
+    let mut frame = |start: &mut StartScreen, events: Vec<egui::Event>| {
+        clock += 10.0;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 900.0))),
+            time: Some(clock),
+            events,
+            ..Default::default()
+        };
+        let mut picked = None;
+        let output = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let brand = Brand::load(ui.ctx());
+                picked = start.show(ui, &mut projects, &brand);
+            });
+        });
+        (drawn_text(&output), picked)
+    };
+    let click = |drawn: &[(String, f32, f32, f32, f32)], text: &str| {
+        let (_, left, right, top, bottom) = drawn
+            .iter()
+            .rfind(|(found, ..)| found == text)
+            .unwrap_or_else(|| panic!("`{text}` is drawn: {drawn:?}"));
+        let at = pos2((left + right) / 2.0, (top + bottom) / 2.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        vec![egui::Event::PointerMoved(at), button(true), button(false)]
+    };
+    frame(&mut start, Vec::new());
+    let (drawn, _) = frame(&mut start, Vec::new());
+    find(&drawn, "label: Team Projects");
+    find(&drawn, "label: Castle");
+    find(&drawn, "label: Hosted by Paul · Offline");
+    find(&drawn, "label: Racer");
+    find(&drawn, "label: Obby");
+    // A team project isn't offered again under "Share a project".
+    let shares = drawn
+        .iter()
+        .filter(|(text, ..)| text == "Host Session…")
+        .count();
+    assert_eq!(shares, 1, "{drawn:?}");
+
+    // Rejoin the first record (the one with a host).
+    let rejoin = drawn
+        .iter()
+        .filter(|(text, ..)| text == "Rejoin")
+        .min_by(|a, b| a.3.total_cmp(&b.3))
+        .cloned()
+        .unwrap();
+    let at = pos2((rejoin.1 + rejoin.2) / 2.0, (rejoin.3 + rejoin.4) / 2.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let (_, picked) = frame(
+        &mut start,
+        vec![egui::Event::PointerMoved(at), press(true), press(false)],
+    );
+    match picked {
+        Some(StartAction::Rejoin(record)) => assert_eq!(record.name, "Castle"),
+        other => panic!("Rejoin asked for {other:?}"),
+    }
+
+    let (drawn, _) = frame(&mut start, Vec::new());
+    let (_, picked) = frame(&mut start, click(&drawn, "Host Session…"));
+    assert!(
+        matches!(&picked, Some(StartAction::Host(folder)) if folder == Path::new("Obby")),
+        "{picked:?}"
+    );
+
+    let (drawn, _) = frame(&mut start, Vec::new());
+    let (_, picked) = frame(&mut start, click(&drawn, "Set Up Collaborate…"));
+    assert!(matches!(picked, Some(StartAction::SetUpCollaborate)));
+    let (drawn, _) = frame(&mut start, Vec::new());
+    let (_, picked) = frame(&mut start, click(&drawn, "Collaborate Settings"));
+    assert!(matches!(picked, Some(StartAction::CollaborateSettings)));
+
+    // New Team Project…: the New Project dialog, and what it makes is hosted.
+    let (drawn, _) = frame(&mut start, Vec::new());
+    frame(&mut start, click(&drawn, "New Team Project…"));
+    assert!(matches!(start.dialog, Some(Dialog::New { .. })));
+    assert!(matches!(
+        start.opened_new(PathBuf::from("New Game")),
+        StartAction::Host(_)
+    ));
+    assert!(matches!(
+        start.opened_new(PathBuf::from("Another")),
+        StartAction::Open(_)
+    ));
+    start.dialog = None;
+
+    // How Collaborate works opens its page.
+    let (drawn, _) = frame(&mut start, Vec::new());
+    frame(&mut start, click(&drawn, "How Collaborate works"));
+    assert!(
+        matches!(start.page, Page::Learn | Page::Docs),
+        "{:?}",
+        start.page
+    );
+    // The page's records are read again when it's shown next.
+    frame(&mut start, Vec::new());
+    assert!(start.team.records.is_none());
+    std::fs::remove_dir_all(&here).ok();
 }
