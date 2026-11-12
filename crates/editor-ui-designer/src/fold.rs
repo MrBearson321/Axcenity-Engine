@@ -104,7 +104,7 @@ impl Section {
     }
 
     /// Opens or folds it, as a click on its header would.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_open(self, ctx: &egui::Context, open: bool) {
         ctx.data_mut(|data| data.insert_temp(self.id(), open));
     }

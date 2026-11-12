@@ -1,6 +1,6 @@
 [package]
 name = "axcenity-editor-tools"
-description = "The Axcenity editor's viewport tools: the transform gizmo, snapping, the shortcut table and the posing preview, shared by the editor and its studios."
+description = "The Axcenity editor's viewport tools (the transform gizmo, snapping, the shortcut table, the posing preview) and the small editor types its panel crates share."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 axcenity-anim.workspace = true
 axcenity-assets.workspace = true
+axcenity-character.workspace = true
 axcenity-core.workspace = true
 axcenity-editor-kit.workspace = true
 axcenity-render.workspace = true
@@ -24,6 +25,8 @@ axcenity-workspace-hack.workspace = true
 test-support = []
 
 [dev-dependencies]
+# The built-in props' prefabs, read in `props.rs`'s tests.
+axcenity-project.workspace = true
 axcenity-editor-kit = { workspace = true, features = ["test-support"] }
 
 [lints]

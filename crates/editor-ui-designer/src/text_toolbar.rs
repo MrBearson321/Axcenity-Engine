@@ -12,7 +12,7 @@ use eframe::egui;
 use axcenity_ui::UiState;
 
 use super::{DesignerAction, DesignerScene, state_style_action};
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::responsive;
 use crate::theme::icons;
 use crate::widgets;

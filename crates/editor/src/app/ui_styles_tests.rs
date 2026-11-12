@@ -292,3 +292,60 @@ fn code_and_animation_links_write_handlers_find_mentions_and_animate() {
     )));
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Moved from `style_panel.rs` when it left the editor: it draws the
+/// Properties panel around the Style section.
+#[test]
+fn the_style_section_draws_under_the_properties() {
+    use axcenity_core::Value;
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let frame = world.create(ClassName::Frame).unwrap();
+    world.set_name(frame, "Panel").unwrap();
+    world
+        .set_property(frame, "Class", Value::String("hud".to_owned()))
+        .unwrap();
+    world.set_parent(frame, Some(gui)).unwrap();
+    let css = ".hud {\n  width: 280px;\n  background-color: #142238;\n  border-radius: 8px;\n}\n";
+    let (stylesheet, _) = axcenity_ui::parse_stylesheet("ui.css", css);
+    let stylesheets = [stylesheet];
+    let mut edits = Vec::new();
+    let mut draw = |ui: &mut egui::Ui| {
+        egui::Panel::right("properties")
+            .default_size(320.0)
+            .show(ui, |ui| {
+                crate::properties::show(
+                    ui,
+                    &world,
+                    &Default::default(),
+                    Some(frame),
+                    false,
+                    &[],
+                    |ui| {
+                        edits.extend(crate::style_panel::show(
+                            ui,
+                            &world,
+                            Some(frame),
+                            &stylesheets,
+                        ));
+                    },
+                );
+            });
+    };
+    match std::env::var_os("AXCENITY_SNAPSHOTS") {
+        Some(folder) => crate::snapshot::snapshot(
+            &std::path::PathBuf::from(folder).join("style-section.png"),
+            egui::vec2(340.0, 900.0),
+            vec![Vec::new(); 3],
+            &mut draw,
+        ),
+        None => {
+            let ctx = crate::theme::test_context();
+            for _ in 0..3 {
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
+            }
+        }
+    }
+    assert!(edits.is_empty(), "drawing alone edits nothing: {edits:?}");
+}

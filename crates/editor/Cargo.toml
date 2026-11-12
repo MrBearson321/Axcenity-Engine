@@ -18,8 +18,10 @@ axcenity-core.workspace = true
 axcenity-editor-benchmark.workspace = true
 axcenity-editor-kit.workspace = true
 axcenity-editor-model-studio.workspace = true
+axcenity-editor-node-graph.workspace = true
 axcenity-editor-toolbox.workspace = true
 axcenity-editor-tools.workspace = true
+axcenity-editor-ui-designer.workspace = true
 axcenity-gameplay.workspace = true
 axcenity-mcp.workspace = true
 axcenity-mesh-edit.workspace = true
@@ -78,6 +80,8 @@ axcenity-editor-kit = { workspace = true, features = ["test-support"] }
 axcenity-editor-benchmark = { workspace = true, features = ["test-support"] }
 # Model Studio docs (a cube, a chair, a rigged humanoid) for the editor's tests.
 axcenity-editor-model-studio = { workspace = true, features = ["test-support"] }
+# The UI Designer's inspector sections and drags for the editor's tests.
+axcenity-editor-ui-designer = { workspace = true, features = ["test-support"] }
 # Gizmo drags, snapping boxes and shortcut checks for the editor's tests.
 axcenity-editor-tools = { workspace = true, features = ["test-support"] }
 # Draws editor UI offscreen in tests (see `snapshot.rs`).

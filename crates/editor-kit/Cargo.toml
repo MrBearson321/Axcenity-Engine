@@ -11,6 +11,8 @@ axcenity-anim.workspace = true
 axcenity-core.workspace = true
 axcenity-render.workspace = true
 axcenity-scene.workspace = true
+# CSS colours in stylesheet tabs (`css_syntax`).
+axcenity-ui.workspace = true
 eframe.workspace = true
 egui-phosphor.workspace = true
 serde.workspace = true

@@ -1,6 +1,6 @@
 //! The editor's shared UI base: the design system ([`theme`]), its controls
 //! ([`widgets`]), layouts that fit narrow panels ([`responsive`]), colour
-//! swatches, Lua syntax colours, mouse-wheel and screen-space helpers, and
+//! swatches, Lua and CSS syntax colours, mouse-wheel and screen-space helpers, and
 //! offscreen snapshots for drawing tests.
 //!
 //! The editor and its panel crates build on it (roadmap G11: splitting the
@@ -8,6 +8,7 @@
 //! nothing about the editor's state.
 
 pub mod color_palette;
+pub mod css_syntax;
 pub mod lua_syntax;
 pub mod responsive;
 pub mod screen;

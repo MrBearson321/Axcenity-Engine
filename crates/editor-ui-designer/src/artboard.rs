@@ -21,7 +21,7 @@ use super::{
     DesignerAction, DesignerScene, FIT_MARGIN, Guide, MAX_ZOOM, MIN_ZOOM, PaletteItem, TextEditing,
     Toggle, UiDesigner, container_for, drop_offset, panels, reset_anchor_action, safe_insets,
 };
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::theme::{self, icons};
 use crate::ui_handles::{self, Grip, Handles, UiDrag};
 use crate::widgets;
@@ -1427,7 +1427,7 @@ fn paint_guide(painter: &egui::Painter, view: &View, guide: Guide) {
 
 /// A rough drawing of UI draw items with egui's painter, for when there's
 /// no GPU renderer (drawing tests). `origin` is where pixel 0, 0 is.
-pub(crate) fn sketch<'a>(
+pub fn sketch<'a>(
     painter: &egui::Painter,
     origin: egui::Pos2,
     pixels_per_point: f32,

@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [editor, mesh_edit, anim, blocks, ui]
-source: [crates/editor-model-studio/src/lib.rs, crates/editor/src/animation.rs, crates/editor/src/sequencer.rs, crates/editor/src/ui_designer.rs, crates/editor/src/material_editor.rs, crates/editor/src/material_graph.rs, crates/editor/src/block_editor.rs, crates/editor/src/node_graph.rs, crates/editor/src/behavior_tree.rs, crates/editor/src/dialogue_editor.rs, crates/editor/src/data_table.rs, crates/editor/src/terrain_studio.rs]
+source: [crates/editor-model-studio/src/lib.rs, crates/editor/src/animation.rs, crates/editor/src/sequencer.rs, crates/editor-ui-designer/src/lib.rs, crates/editor/src/material_editor.rs, crates/editor/src/material_graph.rs, crates/editor/src/block_editor.rs, crates/editor-node-graph/src/lib.rs, crates/editor/src/behavior_tree.rs, crates/editor/src/dialogue_editor.rs, crates/editor/src/data_table.rs, crates/editor/src/terrain_studio.rs]
 docs: [docs/editor/model-studio.md, docs/editor/import.md, docs/project/sequences.md, docs/ui.md, docs/editor/assets.md, docs/scripting/blocks.md, docs/scripting/graphs.md, docs/terrain.md, docs/research/usability/usability-audit.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -20,9 +20,9 @@ The editor's tabs beyond the Scene, Explorer and Properties. Each is a module (o
 | Model Studio | the `editor-model-studio` crate (G11) | Meshes: modeling ops, modifiers, UVs, paint, sculpt, retopology, bake, rig, weights, pose | `.glb` + `.meshedit.json` sidecar | `mesh_edit` ([Mesh editing and CSG](../Engine-Systems/Mesh-Editing-and-CSG.md)) |
 | Animation | `animation.rs`, `animation/` | Clips (dope sheet, curves, Record), state machines (Blueprint-style), posing, IK | `*.anim.json`, `*.statemachine.json` | `anim` |
 | Sequencer | `sequencer.rs` | Cutscene sequences on a timeline (reuses Animation's dope sheet and curves) | `*.sequence.json` | `anim::sequence`, `script::sequence` |
-| UI Designer | `ui_designer.rs`, `ui_designer/` | ScreenGuis on an artboard (anchors, rulers, palette, inspector), Event Graph, Live Preview | world + `ui/*.uigraph.json` | `ui`, `blocks-runtime::ui_graph` |
+| UI Designer | the `editor-ui-designer` crate (G11) | ScreenGuis on an artboard (anchors, rulers, palette, inspector), Event Graph, Live Preview | world + `ui/*.uigraph.json` | `ui`, `blocks-runtime::ui_graph` |
 | Material | `material_editor.rs`, `material_graph.rs` | Material files: values, maps, presets, shading, water, WGSL shader, material graph | `*.material.json` (graph compiled to WGSL in the editor) | `render` surface shaders |
-| Blocks / Graph | `block_editor.rs`, `block_editor/graph.rs`, `node_graph.rs` | Block scripts as blocks or nodes | `*.blocks.json` | `blocks`, `blocks-runtime` |
+| Blocks / Graph | `block_editor.rs`, `block_editor/graph.rs`, the `editor-node-graph` crate | Block scripts as blocks or nodes | `*.blocks.json` | `blocks`, `blocks-runtime` |
 | Behavior Tree | `behavior_tree.rs` | Behavior trees on the node-graph editor | `*.behaviortree.json` | `nav::behavior` |
 | Dialogue | `dialogue_editor.rs` | Dialogues | `*.dialogue.json` | `script::dialogue` |
 | Data Table | `data_table.rs` | Data tables | `*.data.json` | `assets::data_table`, `DataService` |
@@ -46,7 +46,7 @@ Tools in Sculpt, Materials and Terrain rows; generation and erosion run as `terr
 
 ## Shared pieces
 
-- **One node-graph editor** (`node_graph.rs`) serves block Graph view, UI Event Graphs, behavior trees, dialogues and material graphs. Phase 91 ("One graph canvas") plans to finish unifying canvases.
+- **One node-graph editor** (the `editor-node-graph` crate) serves block Graph view, UI Event Graphs, behavior trees, dialogues and material graphs. Phase 91 ("One graph canvas") plans to finish unifying canvases.
 - **Preview canvases** (`animation::preview::Canvas`) run a small World through `scene` so previews draw what Play draws.
 
 ## Related documentation

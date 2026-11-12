@@ -26,6 +26,7 @@ use crate::luau_check::{Diagnostic, Severity};
 use crate::side_warnings::SideWarning;
 use crate::theme::{self, icons};
 use crate::{css_syntax, lua_syntax};
+pub use axcenity_editor_kit::widgets::locked_banner;
 
 mod assist;
 
@@ -85,24 +86,6 @@ pub struct ScriptTab {
     /// In a Team Create session, who else is editing this file: the tab is
     /// read-only until they save or close it. The app sets it each frame.
     pub editing_elsewhere: Option<String>,
-}
-
-/// Team Create: `who` is editing the document shown, so it's read-only
-/// here. Every document tab says it the same way.
-pub fn locked_banner(ui: &mut egui::Ui, who: &str) {
-    let warning = ui.visuals().warn_fg_color;
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(theme::with_icon(
-                icons::LOCK,
-                &format!(
-                    "{who} is editing this file. It's read-only here until they save or close it."
-                ),
-            ))
-            .color(warning),
-        )
-        .wrap(),
-    );
 }
 
 impl ScriptTab {
