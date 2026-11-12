@@ -16,18 +16,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::access::Member;
 use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
 use crate::audit::AuditEntry;
 use crate::files::{FileHash, Manifest, Piece};
 use crate::history::Checkpoint;
+use crate::identity::{Fingerprint, PublicKey};
 use crate::ids::IdBlock;
-use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
+use crate::message::{Have, MemberId, Snapshot, TailEntry, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
 use crate::presence::{Camera, ChatLine, Collaborator, Presence, TextCursor};
+use crate::project::{HostCard, MembersList};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 8;
+pub const FORMAT: u8 = 10;
 
 /// Set in the first byte of a message whose postcard is zstd-packed (C11).
 const PACKED: u8 = 0x80;
@@ -586,6 +589,26 @@ enum WireToHost {
     Checkpoint(String),
     Restore(u64),
     AuditLog,
+    HostCard(String, Fingerprint),
+    Tail(Vec<WireTail>),
+}
+
+/// A [`TailEntry`]: seq, author, client_seq, label, ops.
+type WireTail = (u64, u32, u64, String, Vec<WireOp>);
+
+/// A [`HostCard`]: member, address, certificate.
+type WireCard = (Option<u32>, String, Fingerprint);
+
+fn card(card: &HostCard) -> WireCard {
+    (card.member.map(|m| m.0), card.address.clone(), card.cert)
+}
+
+fn unwire_card((member, address, cert): WireCard) -> HostCard {
+    HostCard {
+        member: member.map(MemberId),
+        address,
+        cert,
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -663,6 +686,21 @@ impl From<&ToHost> for WireToHost {
             ToHost::Checkpoint(label) => WireToHost::Checkpoint(label.clone()),
             ToHost::Restore(id) => WireToHost::Restore(*id),
             ToHost::AuditLog => WireToHost::AuditLog,
+            ToHost::HostCard { address, cert } => WireToHost::HostCard(address.clone(), *cert),
+            ToHost::Tail(entries) => WireToHost::Tail(
+                entries
+                    .iter()
+                    .map(|e| {
+                        (
+                            e.seq,
+                            e.author.0,
+                            e.client_seq,
+                            e.label.clone(),
+                            ops(&e.ops),
+                        )
+                    })
+                    .collect(),
+            ),
         }
     }
 }
@@ -706,6 +744,21 @@ impl WireToHost {
             WireToHost::Checkpoint(label) => ToHost::Checkpoint(label),
             WireToHost::Restore(id) => ToHost::Restore(id),
             WireToHost::AuditLog => ToHost::AuditLog,
+            WireToHost::HostCard(address, cert) => ToHost::HostCard { address, cert },
+            WireToHost::Tail(entries) => ToHost::Tail(
+                entries
+                    .into_iter()
+                    .map(|(seq, author, client_seq, label, list)| {
+                        Ok(TailEntry {
+                            seq,
+                            author: MemberId(author),
+                            client_seq,
+                            label,
+                            ops: unwire_ops(list)?,
+                        })
+                    })
+                    .collect::<Result<_, WireError>>()?,
+            ),
         })
     }
 }
@@ -764,6 +817,67 @@ enum WireToClient {
     Checkpoints(Vec<Checkpoint>),
     HistoryNotice(String),
     AuditLog(Vec<AuditEntry>),
+    Members(WireMembers),
+    Successors(Vec<WireCard>, u32),
+    HandingOff(Option<WireCard>, u64),
+    SendTail(u64),
+}
+
+/// A [`MembersList`] on the wire. Its own shape because a [`Member`]'s
+/// file form leaves out an empty account, which postcard (no field names)
+/// can't read back.
+#[derive(Serialize, Deserialize)]
+pub struct WireMembers {
+    version: u64,
+    next_member: u32,
+    members: Vec<WireMember>,
+}
+
+/// One member on the wire: ID, key, name, colour, role, account.
+type WireMember = (u32, PublicKey, String, [u8; 3], Role, Option<String>);
+
+impl From<&MembersList> for WireMembers {
+    fn from(list: &MembersList) -> WireMembers {
+        WireMembers {
+            version: list.version,
+            next_member: list.next_member,
+            members: list
+                .members
+                .iter()
+                .map(|m| {
+                    (
+                        m.id.0,
+                        m.key,
+                        m.name.clone(),
+                        m.color,
+                        m.role,
+                        m.account.clone(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<WireMembers> for MembersList {
+    fn from(wire: WireMembers) -> MembersList {
+        MembersList {
+            version: wire.version,
+            next_member: wire.next_member,
+            members: wire
+                .members
+                .into_iter()
+                .map(|(id, key, name, color, role, account)| Member {
+                    id: MemberId(id),
+                    key,
+                    name,
+                    color,
+                    role,
+                    account,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<&ToClient> for WireToClient {
@@ -881,6 +995,14 @@ impl From<&ToClient> for WireToClient {
             ToClient::Checkpoints(list) => WireToClient::Checkpoints(list.clone()),
             ToClient::HistoryNotice(reason) => WireToClient::HistoryNotice(reason.clone()),
             ToClient::AuditLog(entries) => WireToClient::AuditLog(entries.clone()),
+            ToClient::Members(list) => WireToClient::Members(list.into()),
+            ToClient::Successors { hosts, next_id } => {
+                WireToClient::Successors(hosts.iter().map(card).collect(), *next_id)
+            }
+            ToClient::HandingOff { to, last_seq } => {
+                WireToClient::HandingOff(to.as_ref().map(card), *last_seq)
+            }
+            ToClient::SendTail { after } => WireToClient::SendTail(*after),
         }
     }
 }
@@ -1000,6 +1122,16 @@ impl WireToClient {
             WireToClient::Checkpoints(list) => ToClient::Checkpoints(list),
             WireToClient::HistoryNotice(reason) => ToClient::HistoryNotice(reason),
             WireToClient::AuditLog(entries) => ToClient::AuditLog(entries),
+            WireToClient::Members(list) => ToClient::Members(list.into()),
+            WireToClient::Successors(hosts, next_id) => ToClient::Successors {
+                hosts: hosts.into_iter().map(unwire_card).collect(),
+                next_id,
+            },
+            WireToClient::HandingOff(to, last_seq) => ToClient::HandingOff {
+                to: to.map(unwire_card),
+                last_seq,
+            },
+            WireToClient::SendTail(after) => ToClient::SendTail { after },
         })
     }
 }

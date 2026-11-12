@@ -47,7 +47,6 @@ mod find_in_scripts;
 mod game_tests;
 mod global_assets;
 mod history;
-mod hot_patch;
 mod import_dialog;
 mod layout;
 mod levels;

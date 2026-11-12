@@ -37,6 +37,13 @@ pub enum Capability {
 }
 
 impl Role {
+    /// True for a member who may host the project when its host leaves
+    /// (Collaborate 2.0): anyone who may change it. A Viewer never hosts,
+    /// so is never sent the members list.
+    pub fn may_host(self) -> bool {
+        self.can(Capability::EditWorld)
+    }
+
     pub fn can(self, capability: Capability) -> bool {
         use Capability::*;
         match self {

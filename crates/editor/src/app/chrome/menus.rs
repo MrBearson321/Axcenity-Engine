@@ -514,6 +514,7 @@ impl EditorApp {
                     }
                     self.update_chip(ui);
                     self.team_chip(ui);
+                    self.repo_chip(ui);
                     if self.playing() {
                         playing_badge(ui, self.paused());
                     }
