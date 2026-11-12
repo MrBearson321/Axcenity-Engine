@@ -338,6 +338,20 @@ pub enum BlockKind {
         seat: String,
         body: Vec<Block>,
     },
+    /// When one property of an object changes
+    /// (`GetPropertyChangedSignal`), whoever changed it.
+    WhenPropertyChanged {
+        target: String,
+        property: String,
+        body: Vec<Block>,
+    },
+    /// When one attribute of an object changes, is added or removed
+    /// (`GetAttributeChangedSignal`).
+    WhenAttributeChanged {
+        target: String,
+        attribute: String,
+        body: Vec<Block>,
+    },
     /// When a ProximityPrompt is triggered: its action pressed, or held
     /// for its `HoldDuration` (Phase 44).
     WhenPromptTriggered {
@@ -373,6 +387,12 @@ pub enum BlockKind {
     },
     WaitUntil {
         condition: Expression,
+    },
+    /// Waits until an object's event next fires (`signal:Wait()`), such as
+    /// a part's `Touched`.
+    WaitForEvent {
+        target: String,
+        event: String,
     },
     Repeat {
         count: Expression,
@@ -516,6 +536,12 @@ pub enum BlockKind {
     SetProperty {
         target: String,
         property: String,
+        value: Expression,
+    },
+    /// Sets one of an object's attributes (`SetAttribute`); nil removes it.
+    SetAttribute {
+        target: String,
+        attribute: String,
         value: Expression,
     },
 
@@ -1070,6 +1096,8 @@ impl BlockKind {
                 | BlockKind::WhenAgentSenses { .. }
                 | BlockKind::WhenSplineReached { .. }
                 | BlockKind::WhenSeatOccupied { .. }
+                | BlockKind::WhenPropertyChanged { .. }
+                | BlockKind::WhenAttributeChanged { .. }
                 | BlockKind::WhenPromptTriggered { .. }
                 | BlockKind::WhenPartClicked { .. }
                 | BlockKind::WhenCommandRun { .. }
@@ -1120,6 +1148,8 @@ impl BlockKind {
             | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::WhenSplineReached { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
+            | BlockKind::WhenPropertyChanged { body, .. }
+            | BlockKind::WhenAttributeChanged { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
             | BlockKind::WhenCommandRun { body, .. }
@@ -1224,6 +1254,8 @@ impl BlockKind {
             | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::WhenSplineReached { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
+            | BlockKind::WhenPropertyChanged { body, .. }
+            | BlockKind::WhenAttributeChanged { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
             | BlockKind::Unattached { body }
@@ -1272,6 +1304,7 @@ impl BlockKind {
             | BlockKind::SetText { text: e, .. }
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
+            | BlockKind::SetAttribute { value: e, .. }
             | BlockKind::SetValue { value: e, .. }
             | BlockKind::SetDestination { position: e, .. }
             | BlockKind::SetVelocity { velocity: e, .. }
@@ -1463,6 +1496,7 @@ impl BlockKind {
             | BlockKind::SetText { text: e, .. }
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
+            | BlockKind::SetAttribute { value: e, .. }
             | BlockKind::SetValue { value: e, .. }
             | BlockKind::SetDestination { position: e, .. }
             | BlockKind::SetVelocity { velocity: e, .. }
@@ -1616,6 +1650,12 @@ pub enum Expression {
     Property {
         target: String,
         property: String,
+    },
+    /// One of an object's attributes (`GetAttribute`), nil when it has none
+    /// by that name.
+    Attribute {
+        target: String,
+        attribute: String,
     },
     /// `workspace:Raycast(origin, direction)`.
     Raycast {

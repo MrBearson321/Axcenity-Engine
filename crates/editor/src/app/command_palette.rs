@@ -32,7 +32,7 @@ pub(super) enum Overlay {
 }
 
 impl Overlay {
-    const ALL: [Overlay; 8] = [
+    pub(super) const ALL: [Overlay; 8] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -43,7 +43,7 @@ impl Overlay {
         Overlay::Culling,
     ];
 
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Overlay::Colliders => "Colliders",
             Overlay::Raycasts => "Raycasts",
@@ -56,7 +56,7 @@ impl Overlay {
         }
     }
 
-    fn flag(self, overlays: &mut viewport::OverlayToggles) -> &mut bool {
+    pub(super) fn flag(self, overlays: &mut viewport::OverlayToggles) -> &mut bool {
         match self {
             Overlay::Colliders => &mut overlays.colliders,
             Overlay::Raycasts => &mut overlays.raycasts,
@@ -184,6 +184,8 @@ pub(super) enum Command {
     PauseOnErrors,
     /// Play, or Continue at a breakpoint.
     Play,
+    /// Run without a player (roadmap G14).
+    Run,
     Stop,
     Tool(Tool),
     Snap(SnapSwitch),
@@ -854,6 +856,14 @@ impl EditorApp {
             ),
         );
         add(
+            Command::Run,
+            "Run",
+            &ribbon("Game"),
+            &["Run without a player", "Simulate"],
+            None,
+            when(!playing && project, "Open a project, and press Stop."),
+        );
+        add(
             Command::Stop,
             "Stop",
             &ribbon("Game"),
@@ -1195,6 +1205,11 @@ impl EditorApp {
                     self.continue_play();
                 } else if !playing && self.project.is_some() {
                     self.play();
+                }
+            }
+            Command::Run => {
+                if !playing && self.project.is_some() {
+                    self.run();
                 }
             }
             Command::Stop => self.stop(),

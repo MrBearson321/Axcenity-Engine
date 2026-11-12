@@ -46,6 +46,7 @@ use glyphon::{
 pub use gpu_particles::MAX_GPU_PARTICLES;
 pub use gpu_timer::FramePass;
 pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
+pub use ray_tracing::RayTracingStats;
 pub use surface_shaders::{ShaderError, SurfaceShader};
 
 mod atmosphere_sky;
@@ -70,6 +71,7 @@ mod parallel;
 mod post;
 mod probe_bake;
 mod probes;
+mod ray_tracing;
 mod realtime_gi;
 mod skinning;
 mod sprites;
@@ -231,6 +233,9 @@ pub struct RenderStats {
     /// Bytes of buffers: instances, lights, tiles, uniforms, UI vertices
     /// and GPU particles.
     pub buffer_bytes: u64,
+    /// Hardware ray tracing's acceleration structures this frame: all zero
+    /// while nothing traces rays.
+    pub ray_tracing: RayTracingStats,
 }
 
 impl RenderStats {
@@ -268,18 +273,22 @@ impl Renderer {
             starting.elapsed().as_millis()
         );
 
+        let mut descriptor = wgpu::DeviceDescriptor {
+            label: Some("axcenity device"),
+            // Cooked textures go up as BC7 where the GPU reads it
+            // (every desktop GPU); otherwise they're decoded. Timestamps
+            // are asked for where the GPU has them, for the frame-rate
+            // readout and `--bench`; frames are only timed while
+            // `set_gpu_timing` is on.
+            required_features: adapter.features()
+                & (wgpu::Features::TEXTURE_COMPRESSION_BC | wgpu::Features::TIMESTAMP_QUERY),
+            ..Default::default()
+        };
+        // Hardware ray tracing where the GPU has it, for the optional ray
+        // traced effects.
+        crate::adapters::with_ray_queries(&adapter, &mut descriptor);
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("axcenity device"),
-                // Cooked textures go up as BC7 where the GPU reads it
-                // (every desktop GPU); otherwise they're decoded. Timestamps
-                // are asked for where the GPU has them, for the frame-rate
-                // readout and `--bench`; frames are only timed while
-                // `set_gpu_timing` is on.
-                required_features: adapter.features()
-                    & (wgpu::Features::TEXTURE_COMPRESSION_BC | wgpu::Features::TIMESTAMP_QUERY),
-                ..Default::default()
-            })
+            .request_device(&descriptor)
             .await
             .context("could not open the graphics device")?;
         log::debug!(

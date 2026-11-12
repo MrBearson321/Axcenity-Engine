@@ -11,6 +11,7 @@ mod ribbon_menus;
 mod toolbar;
 mod windows;
 
+pub(super) use menus::HISTORY_ROWS;
 use windows::*;
 pub(super) use windows::{paused_panel, playing_badge};
 

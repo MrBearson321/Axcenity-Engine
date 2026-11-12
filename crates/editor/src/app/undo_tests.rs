@@ -288,6 +288,7 @@ fn clip_controller_and_prefab_edits_undo_as_one_step_and_survive_saving() {
     assert!(!folder.join(copy).exists());
 
     let take = axcenity_assets::Take {
+        skeleton: Default::default(),
         name: "Moves".into(),
         duration: 1.0,
         frame_rate: 30.0,

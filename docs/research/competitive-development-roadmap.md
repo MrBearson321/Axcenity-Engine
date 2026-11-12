@@ -73,7 +73,7 @@ In particular (status checked on main `5143a5a`):
 | G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines |
 | G14 | Run without a player | **Missing** |
 | G15 | Physics debug views | **Partial**: collider wireframes, rays, Size boxes; no contacts, sleeping or centers of mass |
-| G16 | Humanoid retargeting | **Missing** |
+| G16 | Humanoid retargeting | **Implemented** (stage 1: roles by bone name and rest-pose correction; hand-edited maps and profiles later) |
 
 **Important:** These existing tasks must not be recreated as duplicate implementations or competing PRs. Extend their existing plans and update their implementation status as necessary.
 
@@ -1109,7 +1109,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | World streaming | Implemented at runtime; editor diagnostics partial | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
 | In-editor modeling | Partial: sculpt and bake to come back (Paul, 12 Nov) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
-| Humanoid retargeting | Missing | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Implement |
+| Humanoid retargeting | Implemented (stage 1) | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Hand-edited maps, profiles |
 | Runtime IK | Implemented | Control Rig | SkeletonIK3D | IK | Animation Rigging | `anim/src/ik_control.rs` | — | anim | Keep |
 
 ### Multiplayer, online and platforms
@@ -1147,7 +1147,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 7 | Debugger stepping and watches | G6 | Implemented (#131) | Nothing now (coroutine limit recorded) |
 | 8 | UI prefabs | G5 | Implemented (#122) | Nothing |
 | 9 | Cooked-only games | G12 | Missing | Ship cooked only |
-| 10 | Humanoid retargeting | G16 | Missing | Bone maps and rest-pose correction |
+| 10 | Humanoid retargeting | G16 | Implemented (stage 1) | Hand-edited maps, profiles, fingers |
 | 11 | Plugin API improvements | G10 | Partial | Viewport drawing, property rows, importer hooks |
 | 12 | Advanced asset management | New (R12) | Partial | Duplicates, import presets |
 | 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |

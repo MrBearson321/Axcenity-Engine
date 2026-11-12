@@ -496,6 +496,7 @@ mod tests {
 
     fn take(name: &str, seconds: f32) -> Take {
         Take {
+            skeleton: Default::default(),
             name: name.into(),
             duration: seconds,
             frame_rate: 30.0,

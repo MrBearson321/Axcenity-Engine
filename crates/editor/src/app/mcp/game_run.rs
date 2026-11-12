@@ -62,6 +62,8 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
 fn play(host: &mut Host, seconds: f64, limit: usize) -> Outcome {
     let app = &mut host.app;
     let from = app.output.total();
+    // The game as players see it, even if Run was last used.
+    app.play_settings.run = false;
     app.start_session(None);
     if !app.playing() {
         let lines = own_lines(app.output.since(from));

@@ -74,6 +74,7 @@ fn only_the_tabs_a_file_needs_are_shown_in_order() {
     assert_eq!(dialog.current(), Tab::Materials);
 
     let take = axcenity_assets::Take {
+        skeleton: Default::default(),
         name: "Walk".into(),
         duration: 1.0,
         frame_rate: 30.0,
@@ -176,6 +177,7 @@ fn the_summary_says_what_import_creates_and_where() {
     );
 
     let take = axcenity_assets::Take {
+        skeleton: Default::default(),
         name: "Walk".into(),
         duration: 1.0,
         frame_rate: 30.0,

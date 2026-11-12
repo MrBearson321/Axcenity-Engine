@@ -412,6 +412,31 @@ mod tests {
         assert!((takes[2].duration - 1.0).abs() < 1e-3);
         assert_eq!(takes[0].frame_rate, 30.0);
         assert_eq!(takes[0].frames(), 60);
+        // Each take knows the skeleton it was made for, so it can be
+        // retargeted: the scene root and the file's bones (not the rigid Hat).
+        let names = |bones: &[crate::Bone]| -> Vec<String> {
+            bones.iter().map(|bone| bone.name.clone()).collect()
+        };
+        for take in &takes {
+            assert_eq!(
+                names(&take.skeleton),
+                ["", "Root", "Mid", "Top"],
+                "{}",
+                take.name
+            );
+            for bone in take.skeleton.iter() {
+                if let Some(parent) = bone.parent {
+                    assert!(parent < take.skeleton.len(), "parents come first");
+                }
+            }
+            for track in &take.tracks {
+                assert!(
+                    names(&take.skeleton).contains(&track.bone),
+                    "{}",
+                    track.bone
+                );
+            }
+        }
     }
 
     #[test]

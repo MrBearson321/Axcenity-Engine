@@ -67,8 +67,8 @@ pub(crate) use graph::view_of;
 pub struct ObjectInfo {
     pub path: String,
     pub class: ClassName,
-    /// For an Animator, the names its controller has, to offer in its
-    /// blocks' menus. Empty for anything else.
+    /// For an Animator, the names its controller has, and for anything
+    /// with attributes, their names, to offer in its blocks' menus.
     pub names: Vec<(NameKind, String)>,
 }
 
@@ -91,6 +91,12 @@ pub enum NameKind {
     DataTable,
     /// A column of a data table, suggested from the same entry.
     Column,
+    /// An attribute's name, suggested from the attributes the object has
+    /// in the editor.
+    Attribute,
+    /// One of an object's events, such as `Touched`, suggested from its
+    /// class.
+    Signal,
 }
 
 /// The objects' entry for ReplicatedStorage: the empty path, which no
@@ -113,6 +119,8 @@ impl NameKind {
             NameKind::Bindable => "Scored",
             NameKind::DataTable => "weapons",
             NameKind::Column => "Damage",
+            NameKind::Attribute => "Health",
+            NameKind::Signal => "Touched",
         }
     }
 
@@ -128,6 +136,8 @@ impl NameKind {
             NameKind::Bindable => "BindableEvent",
             NameKind::DataTable => "data table",
             NameKind::Column => "column",
+            NameKind::Attribute => "attribute",
+            NameKind::Signal => "event",
         }
     }
 }
@@ -310,6 +320,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
         | BlockKind::WhenCommandRun { .. }
+        | BlockKind::WhenPropertyChanged { .. }
+        | BlockKind::WhenAttributeChanged { .. }
         | BlockKind::Unattached { .. }
         | BlockKind::RunScript { .. }
         | BlockKind::OnSignal { .. }
@@ -326,6 +338,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::ForEachPartInRadius { .. }
         | BlockKind::ForEachPartTouching { .. }
         | BlockKind::WaitForChild { .. }
+        | BlockKind::WaitForEvent { .. }
         | BlockKind::DestroyAfter { .. }
         | BlockKind::DefineFunction { .. }
         | BlockKind::While { .. }
@@ -365,6 +378,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::ScrollTo { .. }
         | BlockKind::SetValue { .. }
         | BlockKind::SetProperty { .. }
+        | BlockKind::SetAttribute { .. }
         | BlockKind::SetToneMapping { .. }
         | BlockKind::SetClockTime { .. }
         | BlockKind::SetAtmosphere { .. }
@@ -430,6 +444,7 @@ fn reporter_category(expression: &Expression) -> Category {
         Expression::Variable { .. } => Category::Variables,
         Expression::Property { property, .. } if property == "CurrentState" => Category::Animation,
         Expression::Property { .. }
+        | Expression::Attribute { .. }
         | Expression::TouchingPart
         | Expression::PartUnderMouse
         | Expression::KeyDown { .. }
@@ -1167,6 +1182,15 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Slot(seconds, SlotKind::Number),
             label("seconds"),
         ])],
+        BlockKind::WaitForEvent { target, event } => {
+            let path = target.clone();
+            vec![Row(vec![
+                label("wait until"),
+                Object(target, Filter::Any),
+                Part::Name(event, NameKind::Signal, path),
+                label("fires"),
+            ])]
+        }
         BlockKind::WaitForChild { target, name } => {
             let path = target.clone();
             vec![Row(vec![
@@ -1296,6 +1320,30 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("is run, help"),
             Slot(help, SlotKind::Text),
         ])],
+        BlockKind::WhenPropertyChanged {
+            target, property, ..
+        } => {
+            let class = class_of(objects, target);
+            vec![Row(vec![
+                label("when"),
+                Property(property, class),
+                label("of"),
+                Object(target, Filter::Any),
+                label("changes"),
+            ])]
+        }
+        BlockKind::WhenAttributeChanged {
+            target, attribute, ..
+        } => {
+            let path = target.clone();
+            vec![Row(vec![
+                label("when attribute"),
+                Part::Name(attribute, NameKind::Attribute, path),
+                label("of"),
+                Object(target, Filter::Any),
+                label("changes"),
+            ])]
+        }
         BlockKind::WhenSeatOccupied { seat, .. } => vec![Row(vec![
             label("when someone sits on"),
             Object(seat, Filter::Seats),
@@ -1394,6 +1442,21 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             vec![Row(vec![
                 label("set"),
                 Property(property, class),
+                label("of"),
+                Object(target, Filter::Any),
+                label("to"),
+                Slot(value, SlotKind::Any),
+            ])]
+        }
+        BlockKind::SetAttribute {
+            target,
+            attribute,
+            value,
+        } => {
+            let path = target.clone();
+            vec![Row(vec![
+                label("set attribute"),
+                Part::Name(attribute, NameKind::Attribute, path),
                 label("of"),
                 Object(target, Filter::Any),
                 label("to"),
@@ -1700,6 +1763,15 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
             let class = class_of(objects, target);
             vec![
                 Property(property, class),
+                label("of"),
+                Object(target, Filter::Any),
+            ]
+        }
+        Expression::Attribute { target, attribute } => {
+            let path = target.clone();
+            vec![
+                label("attribute"),
+                Part::Name(attribute, NameKind::Attribute, path),
                 label("of"),
                 Object(target, Filter::Any),
             ]
