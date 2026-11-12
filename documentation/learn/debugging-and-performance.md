@@ -1,5 +1,5 @@
 ---
-description: Output and errors, breakpoints, the Developer Console (F9), the Profiler's Game, Graphics and Memory tabs, visual overlays, game tests and keeping a game fast.
+description: Output and errors, changing scripts while the game runs, breakpoints, the Developer Console (F9), the Profiler's Game, Graphics and Memory tabs, visual overlays, game tests and keeping a game fast.
 icon: bug
 samples: [hello-script, hello-character]
 ---
@@ -11,6 +11,10 @@ samples: [hello-script, hello-character]
 The **Output** panel shows what scripts `print()` and every warning and error. An error starts with the script and line, such as `scripts/Door.server.lua:12:`; click it to open the script at that line. A block script's error highlights the block it came from. Errors are written in plain words: what went wrong, and often what to do about it.
 
 Use `print()` for quick checks of what a script sees.
+
+## Changing a script while the game runs
+
+Save a script during Play and it runs its new code at once, without Stop. The game keeps its state: the script's top-level `local`s keep the values they had, so a score, a counter or a part the script made carries on. A local whose starting value you edited takes the new value, and ending its line with `-- @reset` always starts it fresh. A changed ModuleScript is picked up by every script that uses it. Output says which values were kept, such as `Reloaded Door.server.lua, kept count and part`. A script with a mistake in it isn't run: the last good version keeps going until you fix it. Models, textures, sounds and clips you change on disk swap in during Play too.
 
 ## Breakpoints
 

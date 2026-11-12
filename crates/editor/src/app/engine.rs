@@ -1,5 +1,6 @@
 //! Rebuilding the engine in the background and relaunching into it with the
-//! session (unified Phase 25). Only a debug editor run from the source tree
+//! session (unified Phase 25). Only a debug editor built with the dev-only
+//! `engine-dev` feature (Phase 89) and run from the source tree
 //! has any of this: `Rebuilds::source` is `None` otherwise, so Settings has
 //! no Engine page, nothing is watched and nothing is built. The build itself
 //! is `rebuild.rs`; the handoff to the new editor is `relaunch.rs`. These
@@ -7,7 +8,6 @@
 
 use super::*;
 
-use crate::hot_patch::{HotPatch, Verdict};
 use crate::rebuild::BuildMessage;
 use crate::relaunch::{self, Handoff, TabHandoff, View};
 
@@ -23,20 +23,8 @@ impl EditorApp {
         let Some(source) = self.rebuilds.source.clone() else {
             return;
         };
-        if !self.rebuilds.hot_patch_checked {
-            self.rebuilds.hot_patch_checked = true;
-            self.rebuilds.hot_patch = HotPatch::connect(&source, ctx);
-            if self.rebuilds.hot_patch.is_some() {
-                self.output.info(
-                    "Hot-patching: dx is serving this editor, so a change to function bodies \
-                     in the engine runs from the next frame. Other engine changes rebuild and \
-                     relaunch.",
-                );
-            }
-        }
         let rebuilds = &mut self.rebuilds;
-        // Hot-patching always watches: it decides between a patch and a rebuild.
-        let watch = rebuilds.on_change || rebuilds.hot_patch.is_some();
+        let watch = rebuilds.on_change;
         if watch && rebuilds.watcher.is_none() {
             let watcher = source.watch();
             let ctx = ctx.clone();
@@ -51,13 +39,8 @@ impl EditorApp {
             .map(axcenity_project::Watcher::changes)
             .unwrap_or_default();
         if !changed.is_empty() {
-            if self.rebuilds.hot_patch.is_some() {
-                self.hot_patch_or_rebuild(ctx, &changed);
-            } else {
-                self.rebuild_engine(ctx, &changed);
-            }
+            self.rebuild_engine(ctx, &changed);
         }
-        self.follow_hot_patch(ctx);
         self.follow_engine_build(ctx);
     }
 
@@ -75,90 +58,6 @@ impl EditorApp {
             ));
         }
         self.start_engine_build(ctx);
-    }
-
-    /// Engine code changed while dx serves the editor: a change to function
-    /// bodies waits for dx's patch, and anything else rebuilds and relaunches.
-    fn hot_patch_or_rebuild(&mut self, ctx: &egui::Context, changed: &[String]) {
-        let Some(hot) = &mut self.rebuilds.hot_patch else {
-            return;
-        };
-        match hot.verdict() {
-            Verdict::Unchanged => {}
-            Verdict::Unpatchable(why) => {
-                hot.waiting = None;
-                if hot.held {
-                    self.rebuild_engine(ctx, changed);
-                } else {
-                    hot.held = true;
-                    self.output.warning(format!(
-                        "Can't hot-patch this change: {why}. The editor keeps running the code \
-                         it has, and rebuilds and relaunches instead."
-                    ));
-                    self.rebuild_engine(ctx, &[]);
-                }
-            }
-            Verdict::Patchable(_) if hot.held => self.rebuild_engine(ctx, changed),
-            Verdict::Patchable(_) => {
-                // dx starts its patch again on each change, so the wait does too.
-                hot.waiting = Some(Instant::now());
-                self.output.info(format!(
-                    "Engine code changed ({}): only function bodies, so dx patches them into \
-                     the running editor.",
-                    quoted_list(&changed.iter().map(String::as_str).collect::<Vec<_>>())
-                ));
-            }
-        }
-    }
-
-    /// Acts on a patch dx applied: the next frame runs it if the sources it
-    /// came from could be patched. A change that waited too long for its
-    /// patch rebuilds and relaunches instead.
-    fn follow_hot_patch(&mut self, ctx: &egui::Context) {
-        let playing = self.playing();
-        let Some(hot) = &mut self.rebuilds.hot_patch else {
-            return;
-        };
-        if hot.take_patch() {
-            hot.waiting = None;
-            match hot.verdict() {
-                Verdict::Unpatchable(why) => {
-                    if !hot.held {
-                        hot.held = true;
-                        self.output.warning(format!(
-                            "dx sent a patch the running editor can't take: {why}. It keeps \
-                             running the code it has, and rebuilds and relaunches instead."
-                        ));
-                        self.rebuild_engine(ctx, &[]);
-                    }
-                }
-                verdict => {
-                    hot.held = false;
-                    hot.accept();
-                    let files = match verdict {
-                        Verdict::Patchable(files) => format!(
-                            " ({})",
-                            quoted_list(&files.iter().map(String::as_str).collect::<Vec<_>>())
-                        ),
-                        _ => String::new(),
-                    };
-                    let play = if playing { ", and Play carries on" } else { "" };
-                    self.output.info(format!(
-                        "Hot-patched the running editor{files}: the next frame runs the new \
-                         code{play}."
-                    ));
-                }
-            }
-        } else if hot.waiting.is_some_and(|since| since.elapsed() >= hot.wait) {
-            hot.waiting = None;
-            let seconds = hot.wait.as_secs();
-            self.output.warning(format!(
-                "dx sent no patch within {seconds} s, so the editor rebuilds and relaunches \
-                 instead. dx's terminal says why (a patch that didn't build, or code it doesn't \
-                 patch)."
-            ));
-            self.rebuild_engine(ctx, &[]);
-        }
     }
 
     /// Starts `cargo build` for the editor, in its own target folder.
@@ -576,31 +475,6 @@ impl EditorApp {
             let ctx = ui.ctx().clone();
             self.start_engine_build(&ctx);
         }
-        ui.add_space(16.0);
-        widgets::section_label(ui, "Hot-patching");
-        let hot_patching = match &self.rebuilds.hot_patch {
-            Some(hot) if hot.held => {
-                "On, waiting for a rebuild: the last change can't be patched, so the editor \
-                 runs the code it has until it relaunches."
-            }
-            Some(_) => {
-                "On: dx is serving this editor. A change to function bodies runs from the next \
-                 frame, also during Play. Other engine changes rebuild and relaunch, whatever \
-                 the setting above."
-            }
-            None if cfg!(feature = "hot-patch") => {
-                "Off: start the editor with `dx serve --hot-patch` (see the README) to patch \
-                 function bodies in without relaunching."
-            }
-            None => {
-                "Off: this editor was built without the `hot-patch` feature. The README says \
-                 how to start it with dx."
-            }
-        };
-        ui.add(
-            egui::Label::new(egui::RichText::new(hot_patching).color(palette.text_secondary))
-                .wrap(),
-        );
         ui.add_space(16.0);
         widgets::section_label(ui, "Source");
         for (label, path) in [

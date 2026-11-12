@@ -36,6 +36,7 @@ Decisions with long-term consequences, so later work doesn't silently reverse th
 | [ADR-0020](ADR-0020-Team-Create-Session-Authority-And-Operations.md) | Team Create: one session authority ordering typed operations; device-key identities until accounts exist | Accepted; D3, TC8 and the name superseded by ADR-0021 | 2026-11-11 |
 | [ADR-0021](ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md) | Collaborate: Tailscale as the guided connection, Lua scripts as live `yrs` documents relayed by the host, an identity-provider seam instead of a hosted account service | Accepted | 2026-11-12 |
 | [ADR-0022](ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md) | Persistent Collaborate projects: the session host is replaceable by a deterministic successor, ownership stays in the shared members list, optional Git remote for checkpoints | Accepted | 2026-11-12 |
+| [ADR-0023](ADR-0023-Scripts-Keep-State-Across-Hot-Reload.md) | Saved scripts keep their top-level locals across a reload in Play (s&box-style); engine hot-patching removed | Accepted | 2026-11-12 |
 
 ## Superseded and changed decisions found in the plans
 
@@ -49,6 +50,7 @@ Earlier decisions that later work replaced. They live in the plans' "Architectur
 | Behavior trees with their own graph editor | `plans/axcenity-engine-v2.md` | One generic node-graph editor for UI Event Graphs and behavior trees (unified plan, "Changed") | 2026-10-25 |
 | `.axpkg` needs a new zip dependency | `plans/axcenity-engine-v3.md` | Reuses the pinned `zip` (unified plan, "Changed") | 2026-10-25 |
 | File watching by polling, not `notify` | `docs/editor/scripts.md` (earlier) | `notify` events with a polling fallback (I10, PR #9) | 2026-11-10 |
+| Hot-patching engine code with `subsecond` and `dx` | unified Phase 26 | Removed; saved scripts keep their state instead ([ADR-0023](ADR-0023-Scripts-Keep-State-Across-Hot-Reload.md), Phase 89) | 2026-11-12 |
 | Each host hand-orders its frame from `frame-loop.md` | v1–v3 | One schedule ([ADR-0006](ADR-0006-One-Shared-Frame-Schedule.md)) | 2026-11-10 |
 | Reliable network messages and snapshots in JSON | Phase 63–64 | postcard (M7, protocol 10); `Hello`/`Refused` stay JSON | 2026-11-10 |
 | Roadmap L1 (typed property slots) "do after M2 and M4" | modernization report | Measured and parked: name lookups ~9% of S10k (PR #59, recorded in PR #87) | 2026-11-10 |

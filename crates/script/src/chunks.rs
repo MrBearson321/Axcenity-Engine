@@ -188,6 +188,24 @@ fn long_bracket_close(text: &str) -> Option<String> {
 /// A `--!native` script ([`wants_native`]) is compiled to machine code as
 /// it loads, unless the debugger is installed: the debugger steps through
 /// lines with Luau's hooks, which only the interpreter runs.
+/// [`load`], with `script`'s top-level locals wrapped for hot reload when
+/// it's on (`hot_reload`). Wrapped code that doesn't compile (a wrapper bug;
+/// the source itself was checked) loads as written instead.
+pub fn load_hot(
+    lua: &Lua,
+    script: axcenity_core::InstanceId,
+    path: &str,
+    source: &str,
+    env: Table,
+) -> mlua::Result<Function> {
+    match crate::hot_reload::prepare(lua, script, source, &env)? {
+        Some(wrapped) => {
+            load(lua, path, &wrapped, env.clone()).or_else(|_| load(lua, path, source, env))
+        }
+        None => load(lua, path, source, env),
+    }
+}
+
 pub fn load(lua: &Lua, path: &str, source: &str, env: Table) -> mlua::Result<Function> {
     let native = wants_native(source) && !crate::debugger::is_installed(lua);
     if !native {
