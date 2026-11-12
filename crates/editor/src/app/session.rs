@@ -171,7 +171,7 @@ impl EditorApp {
         ));
     }
     /// Opens `project`, read with its models and textures into `assets`.
-    fn open_loaded(
+    pub(super) fn open_loaded(
         &mut self,
         project: axcenity_project::Project,
         assets: Assets,
@@ -351,6 +351,8 @@ impl EditorApp {
         self.replace_world(project.world);
         // A session hosted from here that stopped without ending (TC6).
         self.recover_team_session();
+        // Work an editor that stopped without saving left behind.
+        self.autorecover_opened();
     }
     /// Puts `world` in place of the world being edited, with nothing
     /// selected and a new undo history (its steps belong to the old world).
@@ -1175,6 +1177,7 @@ impl EditorApp {
             Answer::DontSave => {
                 if !matches!(discard, Discard::CloseTab(_)) {
                     self.discard_unsaved();
+                    self.autorecover_done();
                 }
                 if let Discard::CloseTab(path) = &discard {
                     let source = self
@@ -1251,6 +1254,8 @@ impl EditorApp {
     /// Nothing is written here: Save wrote what was to be kept, and "Don't
     /// Save" means what wasn't is dropped (`documents.rs`).
     pub(super) fn finish_closing_project(&mut self) {
+        // Saved or let go by now: nothing to recover.
+        self.autorecover_done();
         self.animation = AnimationStudio::default();
         self.asset_check.clear();
         // The session was this project's (or ended for good with it).
