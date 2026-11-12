@@ -38,6 +38,7 @@ pub mod capture;
 pub mod client;
 pub mod election;
 pub mod files;
+pub mod firewall;
 pub mod handshake;
 pub mod history;
 pub mod host;

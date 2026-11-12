@@ -9,7 +9,7 @@ use axcenity_core::{ClassName, Value, World};
 
 use crate::access::{self, Access, INVITE_LIFETIME_SECONDS, Invite};
 use crate::client::{Client, Notice};
-use crate::handshake::{Greeting, Versions};
+use crate::handshake::{Greeting, Trust, Versions};
 use crate::host::Host;
 use crate::identity::{self, Fingerprint, Identity};
 use crate::role::Role;
@@ -856,4 +856,134 @@ fn whoever_may_host_keeps_the_members_list_and_a_viewer_never_gets_it() {
     // Another computer could host with it: same members, roles and Owner.
     let access = Access::from_list(sam.client().members_list().unwrap());
     assert_eq!(access.members(), hosting.lock().access().members());
+}
+
+/// Steps `member` until the host has a join request, and returns it.
+fn asked(hosting: &Hosting, member: &mut Member) -> crate::session::JoinRequest {
+    let mut found = None;
+    until(&mut [member], "the host to be asked", |_| {
+        found = hosting.lock().join_requests().first().cloned();
+        found.is_some()
+    });
+    found.unwrap()
+}
+
+#[test]
+fn asking_new_members_waits_for_the_host_and_lets_members_back_in() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, _cert) = host(&owner_id, None);
+    hosting.lock().set_trust(Trust::AskNewMembers);
+    let invite = hosting.lock().invite(Role::Viewer, INVITE_LIFETIME_SECONDS);
+    let mut sam = Member::invited(&invite, "Sam");
+    let request = asked(&hosting, &mut sam);
+    assert_eq!(request.asking.name, "Sam");
+    assert_eq!(request.asking.role, Role::Viewer);
+    assert!(!request.asking.member, "Sam is new");
+    assert!(request.address.is_loopback());
+    // Waiting isn't refused or let in, however long the knock takes.
+    for _ in 0..20 {
+        sam.step();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(sam.client.is_none() && sam.refused.is_none());
+    hosting.lock().answer_join(request.id, true);
+    converge(&hosting, &mut [&mut sam]);
+    assert!(hosting.lock().join_requests().is_empty());
+
+    // Sam is a member now: a reconnect isn't asked about.
+    sam.drop_connection();
+    converge(&hosting, &mut [&mut sam]);
+    assert!(hosting.lock().join_requests().is_empty());
+}
+
+#[test]
+fn a_joiner_the_host_turns_away_is_refused_and_the_invite_stays_unused() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, _cert) = host(&owner_id, None);
+    hosting.lock().set_trust(Trust::AskEveryone);
+    let invite = hosting.lock().invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+    let mut eve = Member::invited(&invite, "Eve");
+    let request = asked(&hosting, &mut eve);
+    hosting.lock().answer_join(request.id, false);
+    assert!(refused(&mut eve).contains("didn't let you in"));
+    assert_eq!(hosting.lock().access().members().len(), 1);
+    let audit = hosting.lock().host().audit_log();
+    assert!(
+        audit.iter().any(|e| e.text.contains("Didn't let Eve in")),
+        "{audit:?}"
+    );
+    // The invite wasn't used: someone the host lets in can still use it.
+    let mut sam = Member::invited(&invite, "Sam");
+    let request = asked(&hosting, &mut sam);
+    hosting.lock().answer_join(request.id, true);
+    converge(&hosting, &mut [&mut sam]);
+}
+
+#[test]
+fn a_bad_invite_is_refused_without_asking_the_host() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, cert) = host(&owner_id, None);
+    hosting.lock().set_trust(Trust::AskEveryone);
+    let address = hosting.lock().loopback();
+    let stranger = Arc::new(Identity::new("Eve", [0, 0, 0]));
+    let mut eve = Member::new(Remote::join(address, cert.fingerprint(), None, stranger));
+    assert!(refused(&mut eve).contains("ask its owner for an invite"));
+    assert!(hosting.lock().join_requests().is_empty());
+}
+
+#[test]
+fn a_host_listens_on_loopback_and_the_network_it_uses_not_everywhere() {
+    use crate::session::listen_addresses;
+    use std::net::{IpAddr, SocketAddr};
+    let tailscale: IpAddr = "100.64.1.2".parse().unwrap();
+    assert_eq!(
+        listen_addresses(47800, &[tailscale], false),
+        [
+            SocketAddr::from(([127, 0, 0, 1], 47800)),
+            SocketAddr::new(tailscale, 47800)
+        ]
+    );
+    assert_eq!(
+        listen_addresses(47800, &[tailscale], true),
+        [SocketAddr::from(([0, 0, 0, 0], 47800))]
+    );
+    // Loopback is never listed twice.
+    assert_eq!(
+        listen_addresses(0, &["127.0.0.1".parse().unwrap()], false),
+        [SocketAddr::from(([127, 0, 0, 1], 0))]
+    );
+}
+
+/// Two loopback addresses stand in for loopback and a network's address.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_listener_on_two_addresses_takes_connections_on_both_with_one_port() {
+    let cert = HostCert::generate();
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let session = HostSession::start_on(
+        Host::new(sample()),
+        Access::owned_by(owner_id.public_key(), "Paul"),
+        None,
+        &cert,
+        &[
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.2:0".parse().unwrap(),
+        ],
+        None,
+    )
+    .unwrap();
+    let port = session.local_address().port();
+    let hosting = session.serve();
+    let invite = hosting.lock().invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+    let mut sam = Member::new(Remote::join_invite(
+        &Invite {
+            host: format!("127.0.0.2:{port}"),
+            ..invite
+        },
+        Arc::new(Identity::new("Sam", [1, 2, 3])),
+    ));
+    let mut owner = Member::owner(&hosting, &cert, owner_id);
+    converge(&hosting, &mut [&mut owner, &mut sam]);
+    // Nothing listens on a third address.
+    assert!(std::net::TcpStream::connect(("127.0.0.3", port)).is_err());
 }

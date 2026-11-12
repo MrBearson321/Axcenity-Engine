@@ -429,7 +429,7 @@ pub fn check_reachable(host: &str, timeout: Duration) -> Result<(), String> {
     })
 }
 
-fn command(program: &Path) -> Command {
+pub(crate) fn command(program: &Path) -> Command {
     #[allow(unused_mut)]
     let mut command = Command::new(program);
     // From a windowed program, don't flash a console window.

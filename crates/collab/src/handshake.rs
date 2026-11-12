@@ -104,10 +104,54 @@ fn signed(nonce: &[u8], cert: &Fingerprint) -> Vec<u8> {
     [SIGNED, nonce, &cert.0].concat()
 }
 
+/// Who the host lets in without asking the person hosting (cohesion
+/// pass CW7.2). Whoever is let in still needs a valid invite or to be a
+/// member already; asking only adds the host's say.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Trust {
+    /// A valid invite lets someone in, and they're a member from then on.
+    #[default]
+    InviteHolders,
+    /// Members rejoin without asking; someone joining with an invite for
+    /// the first time waits until the host lets them in.
+    AskNewMembers,
+    /// Every join waits until the host lets them in.
+    AskEveryone,
+}
+
+impl Trust {
+    pub const ALL: [Trust; 3] = [
+        Trust::InviteHolders,
+        Trust::AskNewMembers,
+        Trust::AskEveryone,
+    ];
+
+    /// Whether a join by a member (`known`) or a newcomer waits for the host.
+    pub fn asks(self, known: bool) -> bool {
+        match self {
+            Trust::InviteHolders => false,
+            Trust::AskNewMembers => !known,
+            Trust::AskEveryone => true,
+        }
+    }
+}
+
+/// Someone waiting for the host to let them in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asking {
+    pub name: String,
+    pub key: PublicKey,
+    /// The role they'd have: a member's own, or the invite's.
+    pub role: Role,
+    /// True for a member rejoining, false for someone new.
+    pub member: bool,
+}
+
 /// The host's side of one connection's handshake.
 pub struct Gate {
     cert: Fingerprint,
     versions: Versions,
+    trust: Trust,
     state: GateState,
 }
 
@@ -115,6 +159,13 @@ enum GateState {
     Waiting,
     Challenged {
         nonce: [u8; 32],
+        key: PublicKey,
+        name: String,
+        color: [u8; 3],
+        invite: Option<[u8; 16]>,
+    },
+    /// Signed in; waiting for the host's answer ([`Gate::answer`]).
+    Asking {
         key: PublicKey,
         name: String,
         color: [u8; 3],
@@ -132,6 +183,29 @@ pub enum GateStep {
     Admit { member: Member, reply: Vec<u8> },
     /// Send this and close the connection.
     Refuse { reason: String, reply: Vec<u8> },
+    /// Ask the person hosting; send nothing until [`Gate::answer`].
+    Ask(Asking),
+}
+
+fn admit(
+    access: &mut Access,
+    key: PublicKey,
+    name: &str,
+    color: [u8; 3],
+    invite: Option<[u8; 16]>,
+    now: u64,
+) -> GateStep {
+    match access.admit(key, name, color, invite, now) {
+        Ok(member) => GateStep::Admit {
+            reply: Greeting::Admitted {
+                member: member.id,
+                role: member.role,
+            }
+            .to_bytes(),
+            member,
+        },
+        Err(why) => refuse(format!("{why}")),
+    }
 }
 
 fn refuse(reason: impl Into<String>) -> GateStep {
@@ -152,8 +226,39 @@ impl Gate {
         Gate {
             cert,
             versions,
+            trust: Trust::default(),
             state: GateState::Waiting,
         }
+    }
+
+    /// Asks the person hosting before letting in whom `trust` says.
+    pub fn with_trust(mut self, trust: Trust) -> Gate {
+        self.trust = trust;
+        self
+    }
+
+    /// True while the joiner waits for the host's answer.
+    pub fn is_asking(&self) -> bool {
+        matches!(self.state, GateState::Asking { .. })
+    }
+
+    /// The host's answer to an [`GateStep::Ask`]: lets them in (if their
+    /// invite still works) or turns them away.
+    pub fn answer(&mut self, allow: bool, access: &mut Access, now: u64) -> GateStep {
+        let state = std::mem::replace(&mut self.state, GateState::Done);
+        let GateState::Asking {
+            key,
+            name,
+            color,
+            invite,
+        } = state
+        else {
+            return refuse("That isn't how joining a Collaborate session starts.");
+        };
+        if !allow {
+            return refuse("The host didn't let you in.");
+        }
+        admit(access, key, &name, color, invite, now)
     }
 
     pub fn receive(&mut self, bytes: &[u8], access: &mut Access, now: u64) -> GateStep {
@@ -213,17 +318,28 @@ impl Gate {
                 if !key.verifies(&signed(&nonce, &self.cert), &signature) {
                     return refuse("Signing in failed: the key didn't match.");
                 }
-                match access.admit(key, &name, color, invite, now) {
-                    Ok(member) => GateStep::Admit {
-                        reply: Greeting::Admitted {
-                            member: member.id,
-                            role: member.role,
-                        }
-                        .to_bytes(),
+                // Only someone the access rules would let in is asked
+                // about, so a bad invite is turned away at once.
+                let role = match access.would_admit(&key, invite, now) {
+                    Ok(role) => role,
+                    Err(why) => return refuse(format!("{why}")),
+                };
+                let member = access.member(&key).is_some();
+                if self.trust.asks(member) {
+                    self.state = GateState::Asking {
+                        key,
+                        name: name.clone(),
+                        color,
+                        invite,
+                    };
+                    return GateStep::Ask(Asking {
+                        name,
+                        key,
+                        role,
                         member,
-                    },
-                    Err(why) => refuse(format!("{why}")),
+                    });
                 }
+                admit(access, key, &name, color, invite, now)
             }
             _ => refuse("That isn't how joining a Collaborate session starts."),
         }

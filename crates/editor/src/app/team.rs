@@ -109,6 +109,9 @@ pub const OLD_JOIN_FLAG: &str = "--team-join";
 pub enum TeamStart {
     Host,
     Join(Invite),
+    /// Host Session… from the start screen's Team Projects page: the setup
+    /// wizard if Collaborate was never set up, else the Start Session dialog.
+    Dialog,
 }
 
 impl TeamStart {
@@ -604,6 +607,10 @@ impl EditorApp {
                 ));
             }),
             TeamStart::Join(invite) => self.join_network_session(&invite, None),
+            TeamStart::Dialog => {
+                self.start_collaborate_session();
+                Ok(())
+            }
         };
         if let Err(error) = result {
             self.output.error(format!("Collaborate: {error}"));
@@ -734,16 +741,31 @@ impl EditorApp {
                  as a crash would lose the changes since the last save"
             ));
         }
-        let mut session = HostSession::start(
-            host,
-            access,
-            Some(access_path),
-            &cert,
-            std::net::SocketAddr::from(([0, 0, 0, 0], port)),
-            None,
-        )
-        .map_err(|e| format!("couldn't listen on port {port}: {e}"))?;
+        // Only over Tailscale when hosting over it, else only on this
+        // computer's network, besides loopback (cohesion pass CW7.3).
+        let reach: Vec<std::net::IpAddr> = if tailscale {
+            let cli = axcenity_collab::tailscale::Cli::find();
+            match axcenity_collab::tailscale::state(
+                cli.as_ref()
+                    .map(|c| c as &dyn axcenity_collab::tailscale::Runner),
+            ) {
+                axcenity_collab::tailscale::State::Running(net) => net.addresses,
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        let binds = super::collab_trust::host_binds(
+            port,
+            &reach,
+            self.team_panel.listen_everywhere,
+            &mut self.output,
+        );
+        let mut session =
+            HostSession::start_on(host, access, Some(access_path), &cert, &binds, None)
+                .map_err(|e| format!("couldn't listen on port {port}: {e}"))?;
         session.set_name(name);
+        session.set_trust(self.team_panel.trust);
         let reach = if tailscale {
             match axcenity_collab::tailscale::advertise(&mut session) {
                 axcenity_collab::tailscale::State::Running(net) => Some(format!(

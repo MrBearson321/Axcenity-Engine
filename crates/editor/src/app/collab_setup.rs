@@ -215,7 +215,29 @@ pub(crate) fn host_checks(net: &Tailnet, port: u16) -> Vec<CheckResult> {
         },
         warning: true,
     });
+    checks.push(firewall_check());
     checks
+}
+
+/// The firewall check's title, which the Check page offers Allow beside.
+pub(crate) const FIREWALL_CHECK: &str = "The firewall lets others connect";
+
+/// What this computer's firewall says about the editor listening
+/// (cohesion pass CW7.4). Only reads; a warning, since a rule may be
+/// added when the first session starts.
+pub(crate) fn firewall_check() -> CheckResult {
+    let verdict = std::env::current_exe()
+        .map(|program| axcenity_collab::firewall::check(&program))
+        .unwrap_or_else(|e| axcenity_collab::firewall::Verdict::Unknown(e.to_string()));
+    CheckResult {
+        what: FIREWALL_CHECK.to_owned(),
+        outcome: match &verdict {
+            axcenity_collab::firewall::Verdict::Allowed
+            | axcenity_collab::firewall::Verdict::Off => Ok(verdict.explain()),
+            _ => Err(verdict.explain()),
+        },
+        warning: true,
+    }
 }
 
 /// Asks Tailscale how it is every [`WATCH_EVERY`] on its own thread, while
@@ -565,6 +587,7 @@ impl EditorApp {
         let setup = &mut self.team_panel.setup;
         let page = setup.page.unwrap_or(Page::Welcome);
         let step = setup.state.as_ref().map(Step::of);
+        let mut firewall_asked: Option<Result<(), String>> = None;
         let (pick, dismissed) = dialog::modal(ctx, "collaborate setup", 460.0, |ui| {
             let palette = theme::palette(ui.ctx());
             match page {
@@ -669,6 +692,7 @@ impl EditorApp {
                 }
                 Page::Check => {
                     let title = "Checking this computer";
+                    let mut allow_firewall = false;
                     dialog::header(ui, icons::SHIELD_CHECK, dialog::Tone::Question, title, None);
                     if let Some(step) = &step {
                         note(ui, &step.guidance().1);
@@ -698,10 +722,40 @@ impl EditorApp {
                                                 .family(theme::medium_family()),
                                         );
                                         note(ui, text);
+                                        // Only on the person's click, never
+                                        // by itself; Windows asks to approve.
+                                        if cfg!(windows)
+                                            && check.what == FIREWALL_CHECK
+                                            && check.outcome.is_err()
+                                            && ui
+                                                .add(widgets::button(
+                                                    widgets::Role::Secondary,
+                                                    Some(icons::SHIELD_CHECK),
+                                                    "Allow through the firewall…",
+                                                    &palette,
+                                                ))
+                                                .on_hover_text(
+                                                    "Adds one rule letting Axcenity accept \
+                                                     connections on its port on private \
+                                                     networks, and removes rules blocking it. \
+                                                     Windows asks you to approve.",
+                                                )
+                                                .clicked()
+                                        {
+                                            allow_firewall = true;
+                                        }
                                     });
                                 });
                             }
                         }
+                    }
+                    if allow_firewall {
+                        let result = std::env::current_exe().map_err(|e| e.to_string()).and_then(
+                            |program| {
+                                axcenity_collab::firewall::allow_on_windows(&program, DEFAULT_PORT)
+                            },
+                        );
+                        firewall_asked = Some(result);
                     }
                     let blocked = setup.checks.as_ref().is_none_or(|checks| {
                         checks.iter().any(|c| c.outcome.is_err() && !c.warning)
@@ -759,6 +813,16 @@ impl EditorApp {
                 }
             }
         });
+        match firewall_asked {
+            Some(Ok(())) => self.output.info(
+                "Collaborate: Windows asks you to approve the firewall rule; then click Check \
+                 again",
+            ),
+            Some(Err(error)) => self.output.warning(format!(
+                "Collaborate: couldn't change the firewall: {error}"
+            )),
+            None => {}
+        }
         let pick = if dismissed { Some(Pick::Close) } else { pick };
         let Some(pick) = pick else {
             return;

@@ -6,7 +6,7 @@ samples: [hello-touched]
 
 # Collaborate: set up and work together
 
-Collaborate lets several people edit one project at the same time, each in their own editor. One person **hosts** the session from their editor; the others **join** with an invite link. What you can do once you're in a session is in [Projects](projects.md#collaborate-editing-together); this page is about getting there.
+Collaborate lets several people edit one project at the same time, each in their own editor. One person **hosts** the session from their editor; the others **join** with an invite link. What you can do once you're in a session is in [Projects](projects.md#collaborate-editing-together); this page is about getting there. What needs a host, where files live, who gets in and which outside services are involved are in [How Collaborate works](how-collaborate-works.md). The start screen's **Team Projects** page lists the projects you collaborate on.
 
 > **Experimental.** Collaborate is new. Keep backups of a shared project (**File > Back Up Project**).
 
@@ -26,7 +26,7 @@ Choose **File > Set Up Collaborate…** (or just **Start Collaborate Session…*
 2. **Install Tailscale**: **Download Tailscale** opens its download page for your system. Run the installer (it may ask for your computer's password), then come back to the editor.
 3. **Open Tailscale** appears if it's installed but not running: open the Tailscale app. Its icon appears next to the clock (Windows) or in the menu bar (Mac).
 4. **Sign in to Tailscale**: **Sign in** opens Tailscale's sign-in page in your browser. When it says you're connected, come back.
-5. **Checking this computer** shows this computer's Tailscale name (such as `pauls-pc.tail1234.ts.net`), and that the port Collaborate uses is free. **Continue**.
+5. **Checking this computer** shows this computer's Tailscale name (such as `pauls-pc.tail1234.ts.net`), that the port Collaborate uses is free, and what the firewall says. If Windows' firewall blocks Axcenity, **Allow through the firewall…** fixes it (Windows asks you to approve). **Continue**.
 6. **Ready**. The Output panel says how long setup took (on this computer only; it isn't sent anywhere). The goal is under five minutes.
 
 ## Start a session
@@ -34,6 +34,7 @@ Choose **File > Set Up Collaborate…** (or just **Start Collaborate Session…*
 1. Open your project and choose **File > Start Collaborate Session…**.
 2. Name the session (people see the name when they join), choose whether the invite lets someone **Edit** or **Only look**, and how long it works (1, 7 or 30 days). Choose **Start Session**.
 3. **Your session is running** shows the invite link. **Copy link** and send it by chat or email. Each link works once; make more from the **Collaborate** panel.
+4. If **Settings > Collaborate > Who gets in** asks about joiners, a **Someone wants to join** window shows each one's name, device key, role and address: **Let in** or **Turn away**.
 
 Keep your editor open while others work: the session runs in it. A team that wants a session that doesn't depend on anyone's editor can run the Collaborate server, `axcenity-collab <project folder>`, on an always-on computer.
 
@@ -91,7 +92,9 @@ Without a network, keep working. Checkpoints are kept on your computer, the chip
 |---|---|
 | **Can't reach … yet. Still trying…** with a `.ts.net` name | Check Tailscale is on and signed in on your computer. If you use your own Tailscale account, ask the host to share their computer with you (above). |
 | **Can't reach … yet** with a number address | The host's invite works only on their network. Ask them to set up Tailscale and send a new invite. |
-| Windows asks whether to allow Axcenity on networks | Choose **Allow**. Hosting needs it. |
+| Windows asks whether to allow Axcenity on networks | Choose **Allow**. Hosting needs it. If you dismissed it, **File > Set Up Collaborate…** checks the firewall and offers **Allow through the firewall…**. |
+| Joining says **Signing in…** for a long time | The host may be asked to let you in. Ask them to choose **Let in**. |
+| **The host didn't let you in** | The host turned the join away, or didn't answer in two minutes. Ask them, then join again with the same link. |
 | **this invite was already used** or **has expired** | Ask the host for a new link. |
 | Tailscale says **waiting for approval** | Your Tailscale network's admin approves new computers. Ask them, or use your own account. |
 | Joined, but you can't change anything | You joined as a viewer. The host can make you an Editor in the **Collaborate** panel. |

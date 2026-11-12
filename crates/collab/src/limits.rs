@@ -143,6 +143,10 @@ pub const KNOCKING_MOST: usize = 64;
 /// How long a connection has to finish the handshake.
 pub const KNOCK_TIME: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long a joiner waits for the person hosting to let them in (when
+/// the host asks, cohesion pass CW7.2) before they're turned away.
+pub const ASK_TIME: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Handshakes one address may fail in [`FAILURES_WINDOW`] before its new
 /// connections are closed until the window has passed.
 pub const FAILURES_MOST: u32 = 10;

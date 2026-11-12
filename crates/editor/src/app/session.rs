@@ -95,6 +95,10 @@ impl EditorApp {
             }
             Err(err) => {
                 self.open_failed(&loading.folder, &err);
+                // Host Session… was for the project that didn't open.
+                if self.team_start == Some(super::team::TeamStart::Dialog) {
+                    self.team_start = None;
+                }
                 self.follow_pending_handoff(false);
                 // Output isn't shown without a project, so say it on the start screen.
                 if self.project.is_none()
@@ -1354,6 +1358,10 @@ impl EditorApp {
     pub(super) fn start_screen(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         self.follow_start_join();
+        if self.start.wants_team_projects() {
+            let records = self.collaborate_projects(None);
+            self.start.set_team_projects(records);
+        }
         let picked = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
             .show(ui, |ui| {
@@ -1375,6 +1383,25 @@ impl EditorApp {
             Some(StartAction::Settings) => self.settings.open = true,
             Some(StartAction::Join(invite)) => self.join_from_start(&invite, None),
             Some(StartAction::CancelJoin) => self.cancel_team_join(),
+            Some(StartAction::Host(folder)) => {
+                // Hosted once it opens (`start_pending_team`).
+                self.team_start = Some(super::team::TeamStart::Dialog);
+                self.begin_open(ctx, &folder);
+            }
+            Some(StartAction::Rejoin(record)) => {
+                if self.team.is_some() {
+                    self.cancel_team_join();
+                }
+                self.start.show_joining();
+                if let Err(error) = self.rejoin_project(&record, None) {
+                    self.start.join_failed(error);
+                }
+            }
+            Some(StartAction::SetUpCollaborate) => self.set_up_collaborate(),
+            Some(StartAction::CollaborateSettings) => {
+                self.settings.page = super::settings::SettingsPage::TeamCreate;
+                self.settings.open = true;
+            }
             None => {}
         }
     }
