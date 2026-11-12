@@ -43,7 +43,7 @@ Play (F5) autosaves if needed, clones the World (every `InstanceId` stays valid)
 
 ## Plugins
 
-Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin folders, project-only file access, and an API (`plugin`, toolbars, dock widgets, `Selection`, `ChangeHistoryService`, mouse, settings) run in `script`'s long-lived `EditRuntime` against the edit world. Creators scaffold, pack and share plugins as `.axcenity-plugin` zips (`plugins::bundle`); the Plugins panel and Toolbox **Packs ▸ Import plugin…** install them. Undo, the ribbon and dock tabs are the editor's (`app/plugins.rs`). Keep `definitions/axcenity-plugin.d.luau` in step with `api.rs` (a test checks). The player must never depend on `plugins`.
+Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin folders, project-only file access, and an API (`plugin`, toolbars, dock widgets, `Selection`, `ChangeHistoryService`, mouse, settings, retained viewport drawing in `draw.rs`) run in `script`'s long-lived `EditRuntime` against the edit world. Creators scaffold, pack and share plugins as `.axcenity-plugin` zips (`plugins::bundle`); the Plugins panel and Toolbox **Packs ▸ Import plugin…** install them. Undo, the ribbon and dock tabs are the editor's (`app/plugins.rs`). Keep `definitions/axcenity-plugin.d.luau` in step with `api.rs` (a test checks). The player must never depend on `plugins`.
 
 ## Recent additions (2026-11-11)
 

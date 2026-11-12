@@ -989,6 +989,17 @@ impl EditorApp {
             .iter()
             .any(|entry| entry.running.is_some())
             .then(|| self.plugin_has_mouse());
+        // Plugins only run while editing, so their drawings go in Play.
+        let plugin_drawings: Vec<&axcenity_plugins::Drawing> = if self.playing() {
+            Vec::new()
+        } else {
+            self.plugins
+                .entries
+                .iter()
+                .filter(|entry| entry.running.is_some())
+                .flat_map(|entry| &entry.drawings)
+                .collect()
+        };
         let mut console = self.dev_console_items();
         let emits = std::mem::take(&mut self.pending_emits);
         let debug_rays = self
@@ -1085,6 +1096,7 @@ impl EditorApp {
                                 .map(|tool| tool.first.map(|first| first.point)),
                             spline_editing,
                             plugin_mouse,
+                            plugin_drawings,
                             play_camera: match sequence.and_then(|p| p.camera) {
                                 Some(shot) => Some(crate::viewport::PlayCamera {
                                     shown: axcenity_script::CameraView {

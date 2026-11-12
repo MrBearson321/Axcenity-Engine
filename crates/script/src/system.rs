@@ -21,7 +21,7 @@ use axcenity_save::Saves;
 use mlua::{AnyUserData, Function, IntoLuaMulti, Lua, Table, Thread};
 
 pub use crate::cframe::{LuaCFrame, to_vec3};
-pub use crate::types::LuaVector3;
+pub use crate::types::{LuaColor3, LuaVector3};
 
 use crate::input::PromptInput;
 use crate::{ScriptRuntime, Side};

@@ -67,6 +67,7 @@ mod input;
 mod legend;
 mod move_overlay;
 mod overlays;
+mod plugin_drawings;
 mod view_cube;
 mod view_mode;
 use overlays::*;
@@ -396,6 +397,9 @@ pub struct ViewportScene<'a> {
     /// While plugins run (outside Play): whether one has the left button
     /// (`plugin:Activate(true)`), which then neither selects nor drags.
     pub plugin_mouse: Option<bool>,
+    /// What running plugins draw over the Scene View (`plugin:DrawLine`
+    /// and the rest; roadmap G10). Empty during Play.
+    pub plugin_drawings: Vec<&'a axcenity_plugins::Drawing>,
     /// The camera during Play (`Session::shown_camera`, with whether the
     /// game holds the view). A controller's or a script's camera doesn't
     /// move the fly camera, so Stop shows it where it was.
@@ -1046,6 +1050,7 @@ impl Viewport {
             constraint_pick,
             spline_editing,
             plugin_mouse,
+            plugin_drawings,
             play_camera,
             graphics,
             others,
@@ -1524,6 +1529,9 @@ impl Viewport {
         }
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
+        }
+        if !plugin_drawings.is_empty() {
+            plugin_drawings::paint(&ui.painter_at(rect), &screen, &plugin_drawings);
         }
         if let Some(physics) = physics {
             paint_physics(&ui.painter_at(rect), &screen, physics, overlays);

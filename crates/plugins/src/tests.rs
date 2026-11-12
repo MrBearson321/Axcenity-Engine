@@ -381,6 +381,93 @@ fn settings_selection_destroy_and_the_mouse() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+#[test]
+fn drawings_stay_until_removed_and_the_host_hears_only_of_changes() {
+    let folder = temp_folder("draw");
+    let found = project_with_plugin(
+        &folder,
+        "draw",
+        MANIFEST,
+        "local line = plugin:DrawLine(Vector3.new(0, 0, 0), Vector3.new(0, 5, 0))\n\
+         plugin:DrawBox(CFrame.new(1, 2, 3) * CFrame.Angles(0, math.rad(90), 0), Vector3.new(2, -4, 6),\n\
+         \t{ Color = Color3.new(0, 1, 0), Thickness = 99 })\n\
+         plugin:DrawBox(Vector3.new(0, 1, 0), Vector3.new(1, 1, 1))\n\
+         plugin:DrawSphere(Vector3.new(0, 0, 0), -3)\n\
+         plugin:DrawText(Vector3.new(0, 4, 0), 'Spawn', { Thickness = 20 })\n\
+         print(tostring(line))\n\
+         print(pcall(plugin.DrawLine, plugin, Vector3.new(0, 0, 0), Vector3.new(0 / 0, 0, 0)))\n\
+         local button = plugin:CreateToolbar('Draw'):CreateButton('Clear')\n\
+         button.Click:Connect(function()\n\
+         \tline:SetColor(Color3.new(1, 0, 0))\n\
+         \tline:Remove()\n\
+         \tline:Remove()\n\
+         end)\n\
+         local all = plugin:CreateToolbar('Draw'):CreateButton('All')\n\
+         all.Click:Connect(function() plugin:ClearDrawings() end)\n\
+         local none = plugin:CreateToolbar('Draw'):CreateButton('None')\n\
+         none.Click:Connect(function() end)\n",
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<_> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed[0], "PluginDrawing");
+    assert!(printed[1].starts_with("false\t"), "{}", printed[1]);
+    assert!(printed[1].contains("finite"), "{}", printed[1]);
+
+    let drawings = plugin.take_drawings().unwrap();
+    assert_eq!(drawings.len(), 5);
+    assert_eq!(
+        drawings[0],
+        Drawing {
+            shape: Shape::Line {
+                from: Vector3::new(0.0, 0.0, 0.0),
+                to: Vector3::new(0.0, 5.0, 0.0),
+            },
+            color: DEFAULT_COLOR,
+            thickness: DEFAULT_THICKNESS,
+        }
+    );
+    let Shape::Box { cframe, size } = &drawings[1].shape else {
+        panic!("{:?}", drawings[1]);
+    };
+    assert_eq!(cframe.position, Vector3::new(1.0, 2.0, 3.0));
+    assert!((cframe.rotation[1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+    // Sizes and radii are lengths; widths are kept in range.
+    assert_eq!(*size, Vector3::new(2.0, 4.0, 6.0));
+    assert_eq!(drawings[1].color, axcenity_core::Color3::new(0.0, 1.0, 0.0));
+    assert_eq!(drawings[1].thickness, 32.0);
+    assert!(
+        matches!(&drawings[2].shape, Shape::Box { cframe, .. } if cframe.rotation == [0.0, 0.0, 0.0, 1.0])
+    );
+    assert!(matches!(
+        drawings[3].shape,
+        Shape::Sphere { radius: 3.0, .. }
+    ));
+    assert!(matches!(&drawings[4].shape, Shape::Text { text, .. } if text == "Spawn"));
+    assert_eq!(drawings[4].thickness, 20.0);
+    // Nothing new to draw until something changes.
+    assert_eq!(plugin.take_drawings(), None);
+
+    let button = |name: &str| {
+        plugin.toolbars()[0]
+            .buttons
+            .iter()
+            .find(|b| b.name == name)
+            .unwrap()
+            .id
+    };
+    plugin.click(&mut world, button("None"));
+    assert_eq!(plugin.take_drawings(), None);
+    plugin.click(&mut world, button("Clear"));
+    assert_eq!(plugin.take_drawings().unwrap().len(), 4);
+    plugin.click(&mut world, button("All"));
+    assert_eq!(plugin.take_drawings(), Some(Vec::new()));
+    plugin.click(&mut world, button("All"));
+    assert_eq!(plugin.take_drawings(), None);
+    assert!(errors(&plugin).is_empty(), "{:?}", errors(&plugin));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// The luau-lsp file names every global, method, field and event the
 /// plugin API has.
 #[test]
@@ -419,6 +506,13 @@ fn the_definitions_name_the_whole_plugin_api() {
         "Hit: CFrame",
         "Target: Instance?",
         "Connected: boolean",
+        "function DrawLine(",
+        "function DrawBox(",
+        "function DrawSphere(",
+        "function DrawText(",
+        "function ClearDrawings(",
+        "function Remove(",
+        "function SetColor(",
     ];
     for name in names {
         assert!(
@@ -427,7 +521,7 @@ fn the_definitions_name_the_whole_plugin_api() {
         );
     }
     // Every method a plugin's Lua can call is in the file.
-    let api = include_str!("api.rs");
+    let api = [include_str!("api.rs"), include_str!("draw.rs")].concat();
     for line in api.lines() {
         let line = line.trim();
         for start in ["methods.add_method(\"", "fields.add_field_method_get(\""] {
