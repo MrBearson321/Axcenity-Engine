@@ -139,6 +139,7 @@ fn graphics_settings_survive_a_restart() {
         chromatic_aberration: None,
         sharpen: Some(false),
         motion_blur: Some(MotionBlurQuality::Low),
+        ray_tracing_distance: Some(300.0),
     };
     let mut storage = MemoryStorage::default();
     eframe::App::save(&mut app, &mut storage);

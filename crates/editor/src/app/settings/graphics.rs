@@ -337,6 +337,8 @@ pub(super) fn graphics_page(
             }
         });
     ui.add_space(space::L);
+    ray_tracing_section(ui, settings, capabilities, &preset);
+    ui.add_space(space::L);
     section(ui, "In use");
     let effective = settings.effective(capabilities);
     let shadows = match effective.shadow_quality.map() {
@@ -398,6 +400,14 @@ pub(super) fn graphics_page(
     } else {
         "Real-time GI: off (light probe volumes keep their bakes)"
     });
+    ui.label(if effective.ray_queries {
+        format!(
+            "Ray tracing: available, up to {} studs (no ray traced effects on)",
+            effective.ray_tracing_distance.round()
+        )
+    } else {
+        "Ray tracing: not available on this GPU".to_owned()
+    });
     ui.label(match effective.cloud_quality.steps() {
         (0, _) => "Clouds: Low, a flat sheet".to_owned(),
         (steps, _) => format!(
@@ -450,4 +460,66 @@ pub(super) fn graphics_page(
         )
         .color(palette.text_secondary),
     );
+}
+
+/// Hardware ray tracing: whether this GPU can, and how far rays reach. Each
+/// ray traced effect is its own switch here, off unless turned on
+/// (`docs/rendering/ray-tracing.md`).
+fn ray_tracing_section(
+    ui: &mut egui::Ui,
+    settings: &mut GraphicsSettings,
+    capabilities: &Capabilities,
+    preset: &GraphicsSettings,
+) {
+    let palette = theme::palette(ui.ctx());
+    section(ui, "Ray tracing");
+    ui.label(
+        egui::RichText::new(if capabilities.ray_queries {
+            "This GPU can ray trace. No ray traced effects yet: View Mode > Ray Hits shows \
+             what rays would hit."
+        } else {
+            "This GPU can't ray trace (it needs DirectX 12 ray tracing tier 1.1, Vulkan ray \
+             queries or Metal on macOS 15). Everything is drawn without it."
+        })
+        .color(palette.text_secondary),
+    );
+    egui::Grid::new("ray tracing settings")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            found_label(ui, "Ray tracing distance");
+            ui.horizontal(|ui| {
+                let mut custom = settings.ray_tracing_distance.is_some();
+                if ui
+                    .checkbox(&mut custom, "")
+                    .on_hover_text(
+                        "Off, the preset's distance is used. Farther traces more of the world \
+                         and costs more to keep up to date.",
+                    )
+                    .changed()
+                {
+                    settings.ray_tracing_distance = custom.then(|| preset.ray_tracing_distance());
+                }
+                match &mut settings.ray_tracing_distance {
+                    Some(distance) => {
+                        ui.add(
+                            egui::DragValue::new(distance)
+                                .range(RAY_TRACING_DISTANCE_RANGE)
+                                .speed(5.0)
+                                .suffix(" studs"),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Preset ({} studs)",
+                                preset.ray_tracing_distance()
+                            ))
+                            .color(palette.text_secondary),
+                        );
+                    }
+                }
+            });
+            ui.end_row();
+        });
 }
