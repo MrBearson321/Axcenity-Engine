@@ -15,11 +15,18 @@
 //! (recovery says so); a half-written last entry (the host stopped while
 //! writing it) is left out.
 //!
+//! Beside them, `handled` keeps the newest transaction number the host
+//! handled from each member, across runs of the host and clean ends (C5).
+//! A member whose copy is from an earlier run sends its unconfirmed edits
+//! again; the host's join message says which of them it already has (the
+//! ones it wrote down just before it stopped), so they don't apply twice.
+//!
 //! A member keeps a recovery file the same way: their edits the host
 //! hasn't confirmed ([`save_unsent`]), written while they're offline, so
 //! an editor that stops before the connection comes back sends them the
 //! next time it joins ([`Client::recover_unsent`](crate::Client::recover_unsent)).
 
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -29,7 +36,7 @@ use axcenity_core::World;
 
 use crate::apply::{self, Doc, Graveyard};
 use crate::host::Logged;
-use crate::message::{Snapshot, ToClient, ToHost};
+use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Transaction;
 use crate::role::Role;
 use crate::wire;
@@ -38,6 +45,10 @@ use crate::wire;
 pub const FOLDER: &str = ".axcenity/teamcreate";
 const SNAPSHOT_FILE: &str = "snapshot";
 const JOURNAL_FILE: &str = "journal";
+const HANDLED_FILE: &str = "handled";
+
+/// The newest transaction number handled from each member.
+pub type Handled = BTreeMap<MemberId, u64>;
 const UNSENT_FILE: &str = "unsent";
 
 /// How often the host writes a fresh snapshot while things change.
@@ -61,6 +72,9 @@ pub struct Recovered {
     pub replayed: usize,
     /// The newest transaction in it.
     pub seq: u64,
+    /// The newest transaction number handled from each member, the
+    /// journal's included.
+    pub handled: Handled,
 }
 
 impl Journal {
@@ -71,9 +85,11 @@ impl Journal {
         world: &World,
         graveyard: &Graveyard,
         seq: u64,
+        handled: &Handled,
     ) -> io::Result<Journal> {
         let folder = project.join(FOLDER);
         fs::create_dir_all(&folder)?;
+        write_whole(&folder, HANDLED_FILE, &handled_text(handled))?;
         write_snapshot(&folder, world, graveyard, seq)?;
         let file = File::create(folder.join(JOURNAL_FILE))?;
         Ok(Journal {
@@ -104,7 +120,16 @@ impl Journal {
     /// empties the journal. The snapshot goes in first, whole, so a stop
     /// partway leaves the old snapshot and journal, or the new snapshot
     /// with entries it already has (recovery skips those).
-    pub fn snapshot(&mut self, world: &World, graveyard: &Graveyard, seq: u64) -> io::Result<()> {
+    /// `handled` is written first: the numbers only grow, and the
+    /// journal's entries still count until the new snapshot replaces it.
+    pub fn snapshot(
+        &mut self,
+        world: &World,
+        graveyard: &Graveyard,
+        seq: u64,
+        handled: &Handled,
+    ) -> io::Result<()> {
+        write_whole(&self.folder, HANDLED_FILE, &handled_text(handled))?;
         write_snapshot(&self.folder, world, graveyard, seq)?;
         self.file = File::create(self.folder.join(JOURNAL_FILE))?;
         self.since_snapshot = 0;
@@ -112,8 +137,11 @@ impl Journal {
     }
 
     /// The session ended cleanly: nothing to recover.
-    pub fn end(self) -> io::Result<()> {
+    /// `handled` stays: a member's edits from this session may reach a
+    /// later one.
+    pub fn end(self, handled: &Handled) -> io::Result<()> {
         drop(self.file);
+        write_whole(&self.folder, HANDLED_FILE, &handled_text(handled))?;
         remove(&self.folder.join(JOURNAL_FILE))?;
         remove(&self.folder.join(SNAPSHOT_FILE))
     }
@@ -146,15 +174,14 @@ pub fn recover(project: &Path) -> io::Result<Option<Recovered>> {
     };
     let mut doc = Doc::new(world);
     doc.graveyard = graveyard;
-    let journal = match fs::read(folder.join(JOURNAL_FILE)) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(error),
-    };
+    let journal = read_journal(&folder)?;
+    let mut handled = handled(project);
     let mut replayed = 0;
     for entry in entries(&journal) {
         let Ok(ToClient::Accepted {
             seq: entry_seq,
+            author,
+            client_seq,
             ops,
             ..
         }) = wire::decode_to_client(entry)
@@ -162,6 +189,7 @@ pub fn recover(project: &Path) -> io::Result<Option<Recovered>> {
             log::warn!("Collaborate: a journal entry couldn't be read; recovery stops there");
             break;
         };
+        note_handled(&mut handled, author, client_seq);
         // Already in the snapshot (it was written after this entry).
         if entry_seq <= seq {
             continue;
@@ -180,13 +208,74 @@ pub fn recover(project: &Path) -> io::Result<Option<Recovered>> {
         graveyard: doc.graveyard,
         replayed,
         seq,
+        handled,
     }))
+}
+
+/// The newest transaction number the host handled from each member, as
+/// [`Journal::snapshot`] last wrote it (none when it never did).
+pub fn handled(project: &Path) -> Handled {
+    fs::read_to_string(project.join(FOLDER).join(HANDLED_FILE))
+        .map(|text| read_handled(&text))
+        .unwrap_or_default()
+}
+
+/// Adds that the host handled `member`'s transaction `client_seq`.
+pub fn note_handled(handled: &mut Handled, member: MemberId, client_seq: u64) {
+    let newest = handled.entry(member).or_default();
+    *newest = (*newest).max(client_seq);
+}
+
+/// "member number" lines, one a member.
+fn handled_text(handled: &Handled) -> Vec<u8> {
+    let mut text = String::new();
+    for (member, seq) in handled {
+        text.push_str(&format!("{} {seq}\n", member.0));
+    }
+    text.into_bytes()
+}
+
+fn read_handled(text: &str) -> Handled {
+    let mut handled = Handled::new();
+    for line in text.lines() {
+        let mut words = line.split_whitespace();
+        if let (Some(Ok(member)), Some(Ok(seq))) = (
+            words.next().map(str::parse::<u32>),
+            words.next().map(str::parse::<u64>),
+        ) {
+            note_handled(&mut handled, MemberId(member), seq);
+        }
+    }
+    handled
+}
+
+fn read_journal(folder: &Path) -> io::Result<Vec<u8>> {
+    match fs::read(folder.join(JOURNAL_FILE)) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Removes what [`recover`] reads, once the recovered World is in the
 /// editor (or the owner chose not to keep it).
+///
+/// What the journal handled from each member is kept (in `handled`), so
+/// the next run of the host knows which re-sent edits it already has.
 pub fn discard(project: &Path) -> io::Result<()> {
     let folder = project.join(FOLDER);
+    let mut kept = handled(project);
+    for entry in entries(&read_journal(&folder)?) {
+        if let Ok(ToClient::Accepted {
+            author, client_seq, ..
+        }) = wire::decode_to_client(entry)
+        {
+            note_handled(&mut kept, author, client_seq);
+        }
+    }
+    if !kept.is_empty() {
+        write_whole(&folder, HANDLED_FILE, &handled_text(&kept))?;
+    }
     remove(&folder.join(JOURNAL_FILE))?;
     remove(&folder.join(SNAPSHOT_FILE))
 }
