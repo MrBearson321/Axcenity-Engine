@@ -52,6 +52,8 @@ pub struct HostSession {
     versions: Versions,
     /// "address:port" as invites name it.
     address: String,
+    /// The session's name, carried by invites (C4).
+    name: Option<String>,
     gates: HashMap<ConnId, Gate>,
     members: HashMap<ConnId, MemberId>,
     conns: HashMap<MemberId, ConnId>,
@@ -102,6 +104,7 @@ impl HostSession {
             cert: cert.fingerprint(),
             versions: Versions::this(),
             address,
+            name: None,
             gates: HashMap::new(),
             members: HashMap::new(),
             conns: HashMap::new(),
@@ -134,6 +137,15 @@ impl HostSession {
         self.address = address;
     }
 
+    /// Names the session in invites made from now on ("Castle Game").
+    pub fn set_name(&mut self, name: Option<String>) {
+        self.name = name.filter(|n| !n.trim().is_empty());
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     /// Where it listens.
     pub fn local_address(&self) -> SocketAddr {
         self.listener.address()
@@ -163,6 +175,7 @@ impl HostSession {
             host: self.address.clone(),
             cert: self.cert,
             secret,
+            name: self.name.clone(),
         }
     }
 

@@ -196,11 +196,13 @@ impl Server {
         if options.address.is_none() && options.tailscale {
             use axcenity_collab::tailscale::{State, advertise};
             said.push(match advertise(&mut session) {
-                State::Running(net) => format!(
-                    "Reachable over Tailscale as {} ({}). Members on other tailnets need this \
-                     computer shared with them (Tailscale admin console: Machines › … › Share).",
+                // No login or tailnet name: logs get shared, and both are
+                // often an email address. Plain ASCII, as Windows consoles
+                // may read the log in another code page.
+                State::Running(_) => format!(
+                    "Reachable over Tailscale as {}. Members on other tailnets need this \
+                     computer shared with them (Tailscale admin console: Machines > ... > Share).",
                     session.address(),
-                    net.login.as_deref().unwrap_or("signed in")
                 ),
                 other => format!(
                     "{} Invites name this computer's address on its network.",

@@ -338,6 +338,17 @@ impl StartScreen {
         });
     }
 
+    /// Opens the Join dialog with `link` filled in, for a link the system
+    /// handed over (clicked in a browser or chat): joining waits for the
+    /// user to press Join, having seen whose session it is (C4).
+    pub fn offer_join(&mut self, link: String) {
+        self.dialog = Some(Dialog::Join {
+            link,
+            error: None,
+            waiting: false,
+        });
+    }
+
     /// Shows the Join dialog following a join already asked for (from the
     /// dialog itself, or the command line).
     pub fn show_joining(&mut self) {

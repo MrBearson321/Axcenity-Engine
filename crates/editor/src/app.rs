@@ -63,6 +63,7 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod collab_setup;
 mod inventory;
 mod sky;
 mod solid;
@@ -1745,6 +1746,7 @@ impl EditorApp {
         self.update_install_frame();
         self.settings_window(ctx);
         self.recovered_changes_window(ctx);
+        self.collab_setup_windows(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
@@ -1851,6 +1853,8 @@ mod tool_window_tests;
 #[cfg(test)]
 mod tour_snapshots;
 
+#[cfg(test)]
+mod collab_setup_tests;
 #[cfg(test)]
 mod decal_tests;
 #[cfg(test)]

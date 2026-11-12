@@ -31,6 +31,8 @@ pub(crate) struct TeamPanel {
     /// Where following last put the camera: if it's elsewhere now, the
     /// user moved it, and following stops.
     pub(crate) followed_to: Option<[f32; 3]>,
+    /// The setup wizard and Start Session dialog (C4).
+    pub(crate) setup: super::collab_setup::Setup,
     /// This computer's identity, for Settings > Collaborate (read when the
     /// page first shows).
     identity: Option<Result<Identity, String>>,
@@ -64,7 +66,7 @@ impl InviteLifetime {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             InviteLifetime::Day => "1 day",
             InviteLifetime::Week => "7 days",
@@ -88,7 +90,8 @@ impl TeamPanel {
             InviteLifetime::Week => "week",
             InviteLifetime::Month => "month",
         };
-        format!("{role} {lifetime}")
+        let ready = if self.setup.done { " ready" } else { "" };
+        format!("{role} {lifetime}{ready}")
     }
 
     /// Reads what [`TeamPanel::to_text`] wrote; unknown words keep the
@@ -101,6 +104,7 @@ impl TeamPanel {
                 "day" => self.invite_lifetime = InviteLifetime::Day,
                 "week" => self.invite_lifetime = InviteLifetime::Week,
                 "month" => self.invite_lifetime = InviteLifetime::Month,
+                "ready" => self.setup.done = true,
                 _ => {}
             }
         }
@@ -281,9 +285,9 @@ impl EditorApp {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(
-                        "Hosts a session from this editor on port 47810 and makes an invite \
-                         link for an Editor. Others on your network (or a VPN such as \
-                         Tailscale) join with it.",
+                        "Hosts a session from this editor and makes an invite link. With \
+                         Tailscale set up, people anywhere can join with it; without, people \
+                         on your network.",
                     )
                     .color(palette.text_weak),
                 )
@@ -307,9 +311,9 @@ impl EditorApp {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(
-                        "Paste the invite link you were sent. Open your own copy of the \
-                         project first: until project files are shared, scripts, terrain \
-                         and assets come from your copy.",
+                        "Paste the invite link you were sent. The session's project opens \
+                         here once its files arrive. If the host uses Tailscale, you need \
+                         Tailscale running too (File > Set Up Collaborate…).",
                     )
                     .color(palette.text_weak),
                 )
@@ -317,7 +321,7 @@ impl EditorApp {
             );
             ui.add(
                 egui::TextEdit::singleline(&mut self.team_panel.link)
-                    .hint_text("axcenity://teamcreate/join?…")
+                    .hint_text("axcenity://collaborate/join?…")
                     .desired_width(f32::INFINITY),
             );
             let join = widgets::button(
@@ -619,14 +623,7 @@ impl EditorApp {
         match action {
             Action::Share => {
                 self.team_panel.problem = None;
-                match self.host_collaborate_session() {
-                    Ok(invite) => self.output.info(format!(
-                        "Collaborate: hosting on {}. Invite: {}",
-                        invite.host,
-                        invite.link()
-                    )),
-                    Err(error) => self.team_panel.problem = Some(error),
-                }
+                self.start_collaborate_session();
             }
             Action::Join => {
                 self.team_panel.problem = None;
@@ -850,10 +847,13 @@ impl EditorApp {
     }
 
     /// File > Share with Collaborate…: opens the panel and hosts.
+    /// File > Start Collaborate Session…: setup the first time, then the
+    /// Start Session dialog (C4).
     pub(in crate::app) fn share_with_team_create(&mut self) {
-        self.layout.open(Pane::TeamCreate);
         if self.team.is_none() {
-            self.team_action(Action::Share);
+            self.start_collaborate_session();
+        } else {
+            self.layout.open(Pane::TeamCreate);
         }
     }
 
@@ -865,8 +865,15 @@ impl EditorApp {
         });
     }
 
-    /// File > Join Collaborate…: opens the panel, where the link goes.
+    /// File > Join Collaborate…: setup the first time, then the panel,
+    /// where the link goes.
     pub(in crate::app) fn join_team_create(&mut self) {
-        self.layout.open(Pane::TeamCreate);
+        if self.team_panel.setup.done || self.team.is_some() {
+            self.layout.open(Pane::TeamCreate);
+        } else {
+            self.team_panel
+                .setup
+                .open(super::collab_setup::Purpose::Join);
+        }
     }
 }

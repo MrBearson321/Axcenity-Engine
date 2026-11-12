@@ -1240,4 +1240,24 @@ fn the_join_dialog_asks_for_a_link_then_says_how_joining_goes() {
     start.join_failed("this invite was already used".to_owned());
     let drawn = draw(&mut start);
     find(&drawn, "this invite was already used");
+
+    // A link the system handed over is only offered: it says whose session
+    // it is and waits for Join (C4).
+    start.offer_join(
+        "axcenity://collaborate/join?host=pauls-pc.tail1.ts.net:47810&cert=".to_owned()
+            + &"ab".repeat(32)
+            + "&invite="
+            + &"cd".repeat(16)
+            + "&name=Castle%20Game",
+    );
+    assert_eq!(start.join_dialog(), Some((false, None, None)));
+    let drawn = draw(&mut start);
+    find(
+        &drawn,
+        "“Castle Game”, hosted by pauls-pc.tail1.ts.net:47810",
+    );
+    find(
+        &drawn,
+        "Join only if you expected this invite. It's reached over Tailscale",
+    );
 }

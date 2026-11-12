@@ -199,9 +199,11 @@ fn main() -> eframe::Result {
     }
     // `--collab-host` or `--collab-join <link>` after the project folder
     // (the old `--team-*` flags too): a Collaborate session to start once it
-    // opens (`app/team.rs`). Without a folder, `--collab-join <link>` or a
-    // bare invite link (as the OS passes one) joins from the start screen.
+    // opens (`app/team.rs`). Without a folder, `--collab-join <link>` joins
+    // from the start screen, and a bare invite link (as the OS passes one)
+    // is offered there, to join with a click.
     let mut rest: Vec<String> = Vec::new();
+    let mut offered: Option<String> = None;
     let (folder, handoff) = match first {
         Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {
             (None, args.next().map(PathBuf::from))
@@ -210,8 +212,10 @@ fn main() -> eframe::Result {
             rest.push(app::team::JOIN_FLAG.to_owned());
             (None, None)
         }
+        // A bare link is how the system hands over one that was clicked:
+        // the start screen offers to join, and waits for the user (C4).
         Some(link) if axcenity_collab::access::is_link(&link.to_string_lossy()) => {
-            rest.push(link.to_string_lossy().into_owned());
+            offered = Some(link.to_string_lossy().into_owned());
             (None, None)
         }
         other => (other.map(PathBuf::from), None),
@@ -276,6 +280,8 @@ fn main() -> eframe::Result {
                 app.begin_open(ctx, folder);
             } else if let Some(app::team::TeamStart::Join(invite)) = &team_start {
                 app.join_from_start(invite, None);
+            } else if let Some(link) = offered {
+                app.offer_join(link);
             }
             Ok(Box::new(app))
         }),

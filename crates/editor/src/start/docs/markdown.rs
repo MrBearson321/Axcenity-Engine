@@ -125,6 +125,7 @@ pub(crate) fn icon(name: &str) -> &'static str {
         "globe" => icons::GLOBE,
         "image" => icons::IMAGE,
         "brackets" => icons::BRACKETS_CURLY,
+        "users" => icons::USERS_THREE,
         _ => icons::BOOK_OPEN,
     }
 }
@@ -157,6 +158,7 @@ pub(crate) const ICON_NAMES: &[&str] = &[
     "globe",
     "image",
     "brackets",
+    "users",
 ];
 
 /// A small pill naming a page's status. Stable pages have none.

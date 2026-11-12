@@ -202,6 +202,15 @@ impl EditorApp {
                     {
                         self.join_team_create();
                     }
+                    if ui
+                        .button(theme::with_icon(icons::GEAR, "Set Up Collaborate…"))
+                        .on_hover_text(
+                            "Get Tailscale ready so people anywhere can join your sessions.",
+                        )
+                        .clicked()
+                    {
+                        self.set_up_collaborate();
+                    }
 
                     ui.separator();
                     widgets::section_label(ui, "Publish");

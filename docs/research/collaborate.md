@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3's cloud part is built (§5.1); its two-machine test over Tailscale waits for Paul's PC and Mac. C4 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 is built (§5.1); the PC side of its two-machine test passed over Tailscale and the Mac's join is next (§5.3). C4's wizard, Start Session dialog, link handling and setup guide are built (§5.4). C5 onwards follow the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -146,6 +146,20 @@ The invite names the host by its MagicDNS name (falling back to its `100.x` addr
 - What `tailscale status --json` and `tailscale up --json` say on each platform (the macOS App Store client's CLI lives inside the app), recorded as test fixtures.
 - Whether accepting a share needs the joiner to be the Owner or an Admin of their own tailnet (Tailscale's docs say so; true for anyone with a personal tailnet, a blocker inside a company tailnet the wizard must explain).
 
+**Found on Paul's PC (Windows, Tailscale 1.104.6, 2026-11-12):** `status --json` has every key the parser reads (`BackendState`, `Self.DNSName` with its trailing dot, `Self.HostName`, `Self.TailscaleIPs`, `CurrentTailnet.MagicDNSEnabled`, `User`); the CLI is on the `PATH` and at `C:\Program Files\Tailscale\tailscale.exe`. `tailscale up --json` on a machine that's already connected prints nothing and leaves it as it was, so the wizard only runs it when signing in is the next step. `axcenity-collab` advertised `<machine>.<tailnet>.ts.net:47810`, and the PC reached itself by that name over the Tailscale interface. Allow rules for the server appeared in Windows Defender Firewall (Private and Public) after its first listen, which is what the Defender prompt leaves when it's allowed (Paul to confirm he saw it): Plan A holds, and the setup guide tells people to choose Allow. The server's log printed the signed-in login, which is often an email address, and PowerShell 5.1 garbled its `›` and `…`: the line now names only the address, in ASCII.
+
+### 5.4 The setup wizard and Start Session (C4)
+
+**Built:** `crates/editor/src/app/collab_setup.rs`. **File > Set Up Collaborate…** (and the first **Start** or **Join** on a computer) opens a wizard of four pages, Welcome, Tailscale, Check and Ready, in the editor's `dialog` pieces. The Tailscale page follows the installed Tailscale's state, asked by a background thread every two seconds while the wizard is open (never on the UI thread, nothing when it's closed): Install (opens the download page for the system), Open, Sign in (runs `tailscale up --json` on a thread and opens the sign-in page it gives), Waiting for approval, Turn on, Connecting; it moves on to Check by itself when Tailscale connects, and back if it disconnects. Check confirms the machine has an address others can use, that its MagicDNS name resolves to its own Tailscale addresses, and that port 47810 is free (both warnings, not blockers). **Same network only** skips Tailscale on any page. Each setup is timed per step on the computer only, and Output says "Setup took 2 min 10 s (installing Tailscale 1 min 40 s, signing in 29 s)", with a note when it went over five minutes. Finishing is kept in settings (`ready` in the `team_create` key), so later Starts go straight to **Start Collaborate Session**: the session's name (the project folder's by default), Edit or Only look, and how long the invite works; then **Your session is running** with the link, **Copy link**, and, over Tailscale, what someone with their own account needs plus **Share in Tailscale** (the admin console's Machines page; sharing has no CLI or API for this). Invite links carry the session's name (`&name=`, percent-encoded, at most 80 characters, control characters refused).
+
+**Joining:** the start screen's Join window shows whose session a link is ("“Castle Game”, hosted by …") and, for a `.ts.net` host, that Tailscale must be on, before anything connects. While a join can't reach the host, the waiting line adds the usual causes for a Tailscale host in plain words. A bare link on the command line, as the system passes a clicked one, only fills in the Join window: joining waits for the user's click (the C4 security criterion); `--collab-join` still joins at once.
+
+**Links open the editor:** the Windows installer registers `axcenity:` under `HKCU\Software\Classes` (removed on uninstall) and the Linux desktop entry declares `x-scheme-handler/axcenity` with `%U`. Not done: macOS delivers clicked links as an Apple Event, which eframe doesn't pass on, so the bundle doesn't claim the scheme yet; and a second launch opens a second editor instead of handing the link to the running one.
+
+**Tests:** `collab_setup_tests.rs` (each Tailscale state gives one plain step, the timer, the checks finding a busy port, setup kept between runs, every page drawn and following Tailscale, Start Session hosting with the name in the invite) and the start screen's Join test (an offered link waits and says whose session it is). Snapshots of every page: `AXCENITY_SNAPSHOTS=<folder> cargo test -p axcenity-editor --bin axcenity-editor -- collab_setup_tests` (in a cloud container, install `mesa-vulkan-drivers` for a software adapter). The user's guide is `documentation/learn/collaborate.md`. The in-editor documentation viewer can't show images, so the guide is words and the wizard is the illustrated part; images in Learn pages are a later change to `start/docs`.
+
+**Still to do in C4:** time a first setup by someone new to Tailscale on Paul's machines (the five-minute criterion), and a later session (under one minute).
+
 ## 6. Identity, authorization and the Django account manager (C10, C12)
 
 Today: an `Identity` (name, colour, Ed25519 key) per machine, a members file on the host mapping public keys to roles, and invites that bind a new key to a role. Tailscale adds a *network* identity (the tailnet login) that is shown but never grants anything; the brief's "being on the tailnet doesn't mean you can edit" is already how the host works.
@@ -158,10 +172,10 @@ Seams to add (no new service, no placeholder backend):
 
 ## 7. Other gaps found
 
-- **Invite links don't open Axcenity.** No `axcenity://` handler is registered by the Windows installer, the macOS bundle or the Linux desktop file, and a second editor launch doesn't hand the link to the running one. C4.
+- **Invite links don't open Axcenity.** Windows and Linux done in C4 (§5.4); macOS and handing a link to an editor that's already open are left.
 - **No LAN discovery for sessions** (games have it). Not needed once Tailscale is the path; skipped.
 - **Version History checkpoints of a member's mirror** were left from TC6. C9.
-- **UI snapshots of the panel** were taken on Paul's PC in the hardware test; the wizard needs its own. C4.
+- **UI snapshots of the panel** were taken on Paul's PC in the hardware test; the wizard's are made by its tests (§5.4).
 - **The double apply after a host stops** right after writing an edit (TC6 "Left"). C5.
 
 ## 8. Phased plan C1–C12

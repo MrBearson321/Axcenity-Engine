@@ -582,10 +582,37 @@ impl StartScreen {
                         (_, false) => {
                             field_label(ui, &palette, "Invite link");
                             let field = ui.add(
-                                dialog::text_field(link).hint_text("axcenity://teamcreate/join?…"),
+                                dialog::text_field(link).hint_text("axcenity://collaborate/join?…"),
                             );
                             if link.is_empty() && !field.has_focus() && error.is_none() {
                                 field.request_focus();
+                            }
+                            // Whose session it is, before anything connects:
+                            // a link can arrive from anywhere.
+                            if let Ok(invite) = axcenity_collab::access::Invite::parse(link.trim())
+                            {
+                                let what = match &invite.name {
+                                    Some(name) => format!("“{name}”, hosted by {}", invite.host),
+                                    None => format!("A session hosted by {}", invite.host),
+                                };
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(what).strong());
+                                let tailscale = if axcenity_collab::tailscale::is_tailscale_host(
+                                    &invite.host,
+                                ) {
+                                    " It's reached over Tailscale, so Tailscale must be on here."
+                                } else {
+                                    ""
+                                };
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!(
+                                            "Join only if you expected this invite.{tailscale}"
+                                        ))
+                                        .color(palette.text_weak),
+                                    )
+                                    .wrap(),
+                                );
                             }
                             error_line(ui, &palette, error.as_deref());
                             let (picked, cancel) = dialog_buttons(
