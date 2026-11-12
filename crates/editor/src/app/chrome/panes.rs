@@ -1264,6 +1264,9 @@ impl EditorApp {
             .then(|| self.tabs.get(&path).map(|tab| tab.text.clone()))
             .flatten();
         egui::CentralPanel::default().show(ui, |ui| self.tabs.show(ui, &path, &self.world));
+        if let Some(definition) = self.tabs.take_definition() {
+            self.go_to_definition(&ctx, definition);
+        }
         if let Some(previous_source) = previous_source {
             let current_source = self
                 .tabs

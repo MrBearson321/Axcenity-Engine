@@ -1,4 +1,5 @@
 use super::*;
+use crate::script_completion::Definition;
 use crate::scripts::{ScriptTabs, editor_id};
 use crate::theme;
 
@@ -224,4 +225,32 @@ fn the_code_tab_completes_from_the_keyboard() {
     let tab = tabs.get(path).unwrap();
     assert_eq!(tab.text, format!("{source}.{second}"));
     assert!(!tab.assist.is_open());
+}
+
+/// F12 in a real code tab with the cursor on a local's use moves to the
+/// line it's declared on; on an API member it asks the editor to open the
+/// API Reference (G4's Go to Definition).
+#[test]
+fn f12_goes_to_a_local_declaration_or_hands_out_an_api_entry() {
+    let path = "scripts/door.server.lua";
+    // The cursor starts at the end, just after the use of `open`.
+    let source = "local open = false\n\nprint(open";
+    let mut tabs = ScriptTabs::default();
+    tabs.open(path, source, None);
+    let ctx = theme::test_context();
+    frame(&ctx, &mut tabs, path, source, Vec::new());
+    frame(&ctx, &mut tabs, path, source, vec![key(egui::Key::F12)]);
+    let tab = tabs.get(path).unwrap();
+    assert_eq!(tab.highlighted, Some(1), "the declaration's line is shown");
+    assert_eq!(tabs.take_definition(), None, "nothing to open outside");
+
+    let path = "scripts/wait.server.lua";
+    let source = "task.wait";
+    tabs.open(path, source, None);
+    frame(&ctx, &mut tabs, path, source, Vec::new());
+    frame(&ctx, &mut tabs, path, source, vec![key(egui::Key::F12)]);
+    let Some(Definition::Api(name)) = tabs.take_definition() else {
+        panic!("an API entry to open");
+    };
+    assert!(name.contains("wait"), "{name}");
 }

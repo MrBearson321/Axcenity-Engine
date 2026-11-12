@@ -54,6 +54,21 @@ pub struct Item {
     pub doc: String,
 }
 
+/// Where Go to Definition (F12 in a code tab) takes the name at the cursor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Definition {
+    /// Declared in this script (a local, a function, a parameter or a loop
+    /// variable): the byte where its name is written there.
+    Here(usize),
+    /// An Instance in the world being edited (`workspace.Door`, a
+    /// `require`d ModuleScript): opened as a double-click on its Explorer row
+    /// opens it, so a script shows in its tab.
+    Instance(InstanceId),
+    /// A member or global of the engine's API, by its API Reference name
+    /// (`BasePart.Touched`, `task.wait`).
+    Api(String),
+}
+
 /// What can replace the word before the cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Completions {
@@ -237,6 +252,136 @@ fn api() -> &'static Api {
             }
         }
         api
+    })
+}
+
+/// Where the name at byte `cursor` of `source` is defined (roadmap G4):
+/// its declaration in the script, the Instance a chain names, or the API
+/// entry of a member or global. `None` for a keyword, a string, a comment,
+/// or a name nothing here can follow.
+pub fn definition_at(source: &str, cursor: usize, world: &World) -> Option<Definition> {
+    let cursor = floor_char(source, cursor);
+    let start = source[..cursor]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_word(*c))
+        .last()
+        .map_or(cursor, |(at, _)| at);
+    let end = source[cursor..]
+        .char_indices()
+        .find(|(_, c)| !is_word(*c))
+        .map_or(source.len(), |(at, _)| cursor + at);
+    let word = &source[start..end];
+    if !is_identifier(word) || KEYWORDS.contains(&word) || in_string_or_comment(source, start) {
+        return None;
+    }
+    let api = api();
+    let receiver = receiver_start(source, end);
+    if receiver == start {
+        let code = without_strings_and_comments(source);
+        if let Some(at) = declared_at(&code[..end], word).or_else(|| global_function(&code, word)) {
+            return Some(Definition::Here(at));
+        }
+        return match word {
+            "game" => Some(Definition::Instance(world.root())),
+            "workspace" => Some(Definition::Instance(world.workspace())),
+            _ if api.libraries.contains_key(word)
+                || api.globals.iter().any(|entry| entry.name == word) =>
+            {
+                Some(Definition::Api(word.to_owned()))
+            }
+            _ => None,
+        };
+    }
+    let mut resolver = Resolver::new(source, start, world);
+    if let Some(Ty::Instance { id: Some(id), .. }) = resolver.chain(&source[receiver..end]) {
+        return Some(Definition::Instance(id));
+    }
+    // A member: the API entry on what's before the `.` or `:`.
+    let colon = source[..start].ends_with(':');
+    let owner = resolver.chain(&source[receiver..start - 1])?;
+    let entry = member(api, &owner, word, colon).or_else(|| member(api, &owner, word, !colon))?;
+    Some(Definition::Api(entry.qualified_name()))
+}
+
+/// Where the last declaration of `name` in `code` (strings and comments
+/// blanked) writes it: `local a, name`, `local function name`, `function
+/// name(`, a parameter `function (x, name)`, or `for _, name in`.
+fn declared_at(code: &str, name: &str) -> Option<usize> {
+    let mut line_end = code.len();
+    loop {
+        let line_start = code[..line_end].rfind('\n').map_or(0, |at| at + 1);
+        let line = &code[line_start..line_end];
+        let found = whole_words(line, name)
+            .filter(|&at| declares(&line[..at]))
+            .last();
+        if let Some(at) = found {
+            return Some(line_start + at);
+        }
+        if line_start == 0 {
+            return None;
+        }
+        line_end = line_start - 1;
+    }
+}
+
+/// Whether a name written after `prefix` (the start of its line) is being
+/// declared there.
+fn declares(prefix: &str) -> bool {
+    let names = |text: &str| {
+        text.chars()
+            .all(|c| is_word(c) || matches!(c, ' ' | '\t' | ',' | ':' | '?' | '|' | '<' | '>'))
+    };
+    let trimmed = prefix.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("local ") {
+        let rest = rest.trim_start();
+        if rest.is_empty() || rest == "function " || names(rest) {
+            return true;
+        }
+    }
+    if trimmed == "function " {
+        return true;
+    }
+    if let Some(rest) = trimmed.strip_prefix("for ") {
+        return names(rest) && !rest.contains(':');
+    }
+    // A parameter: `function name(a, ` or `function(`.
+    if let Some(open) = prefix.rfind('(')
+        && names(&prefix[open + 1..])
+    {
+        let head = prefix[..open].trim_end();
+        let head = head.trim_end_matches(|c: char| is_word(c) || c == '.' || c == ':');
+        return head.trim_end().ends_with("function");
+    }
+    false
+}
+
+/// A global `function name(` anywhere in `code`, declared after its use.
+fn global_function(code: &str, name: &str) -> Option<usize> {
+    let mut offset = 0;
+    for line in code.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("function ")
+            && rest.trim_start().starts_with(name)
+            && rest.trim_start()[name.len()..]
+                .trim_start()
+                .starts_with('(')
+        {
+            let at = line.len() - rest.trim_start().len();
+            return Some(offset + at);
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// The byte where each whole-word `word` starts in `text`.
+fn whole_words<'a>(text: &'a str, word: &'a str) -> impl Iterator<Item = usize> + 'a {
+    text.match_indices(word).filter_map(move |(at, _)| {
+        let end = at + word.len();
+        let before_ok = !text[..at].chars().next_back().is_some_and(is_word);
+        let after_ok = !text[end..].chars().next().is_some_and(is_word);
+        (before_ok && after_ok).then_some(at)
     })
 }
 
