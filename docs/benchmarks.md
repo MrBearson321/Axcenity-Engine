@@ -138,7 +138,7 @@ The server had no clients connected, so its Network send is the replication diff
 - **Characters cost 2.8 ms with one player character**: the controller's ray probes against 10,000 parts.
 - **Scripts are cheap at this load**: 200 scripts cost about 0.3 ms in step and 0.9–1.5 ms in Heartbeat (100 handlers writing `Orientation`). Their cost shows up elsewhere: the spinners' writes reach physics and the draw list.
 - **The draw list is 8 ms** for S10k on the CPU, before any GPU work (roadmap M4, retained draw items).
-- **Opening S10k is slow**: about 5.5 s in release for its 10 MB `world.json` (a 61-frame `--bench 1` run took 7.1 s in all), and about 30 s in a debug build. Loading is measured here only roughly; it isn't one of the frame steps.
+- **Opening S10k was slow**: about 5.5 s in release for its 10 MB `world.json` (a 61-frame `--bench 1` run took 7.1 s in all), and about 30 s in a debug build. Almost all of it was one quadratic step, fixed in C11 (below): it now opens in 0.19 s in release and 0.8 s in debug. Loading is measured here only roughly; it isn't one of the frame steps.
 - **A frame without drawing is 17–19 ms**, already over a 60 fps budget on this machine before rendering, and the server alone is about 10 ms.
 
 ### Loading ahead in the player (I11)
@@ -592,6 +592,32 @@ The roadmap said to measure the ratio before compressing `.axgame` files. Each e
 - **Unpacking on several threads** makes up for the decompression; on one thread hello-roads took 520 ms.
 - **The bigger size cost is shipping each texture twice**: a cooked game carries both the source image and its cooked copy (hello-roads: 393 MB before cooking, 830 MB after). Leaving out sources that have a current cooked copy would about halve such games, but the player still reads a source's pixels for some uses, so that's a separate change.
 - **Reading in place** (no temporary copy) would need a file layer under the project loader, `assets`, `scene` and the player (about 600 file calls); with unpacking at 30–170 ms here it isn't the bottleneck.
+
+### Collaborate on S10k (C11)
+
+What a Collaborate session costs, measured on S10k (10,388 Instances, 200 scripts) on the cloud container (4 vCPUs), release build. All of these are ignored tests, run by hand:
+
+```sh
+cargo test -p axcenity-collab --release --lib perf_tests -- --ignored --nocapture
+cargo test -p axcenity-editor --release --bin axcenity-editor idle_session -- --ignored --nocapture
+```
+
+**Joining.** The join message (the session's World) is 953 KiB in postcard. Messages of 16 KiB or more are now packed with zstd at level 1 when that saves at least an eighth (`wire.rs`, format 8): S10k's goes as 82 KiB (9%), packed in about 1 ms and unpacked in 0.6 ms, against 24 ms to encode and 43 ms to decode the message itself. Level 3 gave 99 KiB and level 9 70 KiB in 9 ms, so level 1 stays. The 200 scripts' 65 KiB pack to 1 KiB. Unpacking is bounded: a packed frame must state its size, and nothing over the receiver's limit (32 MiB to the host, 1 GiB to a member) is unpacked.
+
+| Step, two editors over real sockets on this computer | Time |
+|---|---|
+| Start hosting S10k | 0.13–0.19 s |
+| A member joins (connect, sign in, World, files caught up) | 0.30–0.38 s |
+| The member opens the session's files as its project | 0.35 s (was 5.9 s) |
+| Four members join in process, every message through `wire` | 0.49 s |
+
+These are on one computer. Over Tailscale the member also waits for the bytes: about 82 KiB of World and the scripts (packed too, as file pieces), so a join of S10k should stay well under the 10 s goal on any link faster than about 1 Mbit/s; a two-machine run is still to be recorded. At 82 KiB, sending the World in pieces (snapshot streaming) isn't needed for S10k: over a 10 Mbit/s Tailscale link it's about 70 ms. It stays a C11 option for worlds an order of magnitude bigger.
+
+**The member's open was the old world load.** A member writes the session's World to its folder and opens the folder as a project. That took 5.9 s, all in `parse_world`: each Instance looked up its prefab segment (`prefab::segment_of`), which lists every sibling, so the Workspace's 10,000 children cost 10,000² name comparisons. The segment is needed only inside a prefab copy, so it's now found only there. `project::load` of S10k went 5.66 → 0.19 s in release (`parse_world` 4.84 → 0.14 s; reading the JSON alone is 35 ms) and about 30 → 0.8 s in debug. Every editor and player opening a big project gains the same.
+
+**Idle.** With nothing changing, `team_frame` on the hosting editor costs a median of 12–19 µs and a mean of 48–57 µs a frame; on the member a median of 2–3 µs and a mean of 34–36 µs (300 frames 16 ms apart). Both are under the 0.1 ms goal. The mean is mostly one frame in 31: every 0.5 s each editor's folder is compared with the session's files (`Mirror::sync`, for saves made outside the editor), about 0.4 ms in the collab crate (0.2 ms of it listing and reading the length and time of S10k's 209 synced files) and about 1 ms in the editor frame. One member run had a single 26 ms frame among those (others' worst was 1.1–1.4 ms); it didn't repeat. In process, without the editor, an idle host tick is 59 ns and an idle member's capture 37 ns.
+
+**Presence and chat.** A busy member's presence (ten selected, the camera, a field being dragged, a caret in a script) is 125 bytes up and 126 down. Each editor sends at most 10 a second and only when it changed, the host drops one that didn't change, and each connection writes everything queued before one flush, so four busy members are about 19 KiB a second through the host (160 messages). Chat is held to 5 lines a second by the client and the host's budget. Nothing more to coalesce at this size.
 
 ### Calibrating against the rendering baseline
 

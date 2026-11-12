@@ -1235,3 +1235,27 @@ fn released_format(name: &str) -> u32 {
 fn the_release_files_list_this_world_format() {
     assert_eq!(released_format("world"), WORLD_FORMAT_VERSION);
 }
+
+/// Reading a parent with many children takes time in proportion to them.
+/// Each child used to look up its prefab segment among all its siblings,
+/// so S10k's 10,000 took 5.5 s in release and 30 s in debug; 20,000 would
+/// take minutes. Now this is about a second in a debug build.
+#[test]
+fn a_parent_with_many_children_reads_quickly() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    for _ in 0..20_000 {
+        let part = world.create(ClassName::Part).unwrap();
+        world.set_parent(part, Some(workspace)).unwrap();
+    }
+    let text = write_world(&world);
+    let started = std::time::Instant::now();
+    let read = parse_world(&text).unwrap();
+    let spent = started.elapsed();
+    let workspace = read.get(read.workspace()).unwrap();
+    assert_eq!(workspace.children().len(), 20_000);
+    assert!(
+        spent < std::time::Duration::from_secs(20),
+        "20,000 siblings took {spent:?} to read"
+    );
+}

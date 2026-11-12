@@ -212,6 +212,11 @@ pub fn link(
     git.set_remote(dir, REMOTE, &spec.url)?;
     let result = link_to_remote(git, dir, remote.empty, &branch, author);
     if result.is_err() {
+        if created {
+            // The history made a moment ago held nothing yet: the folder
+            // goes back to not being a repository.
+            let _ = std::fs::remove_dir_all(dir.join(".git"));
+        }
         // Leave the folder's remote as it was.
         match &previous {
             Some(url) => {
@@ -271,6 +276,25 @@ fn link_to_remote(
             }
         }
     }
+}
+
+/// After an adoption: brings back from the repository each of `paths`
+/// the folder doesn't have (a session member's copy, which never holds
+/// some files, such as the World's own, before it uploads). Paths the
+/// folder has are left alone.
+pub fn bring_back_missing(git: &Git, dir: &Path, paths: &[String]) -> Result<(), GitError> {
+    let missing: Vec<&str> = paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !dir.join(path).exists())
+        .collect();
+    // A few hundred at a time keeps the command line short everywhere.
+    for chunk in missing.chunks(200) {
+        let mut args = vec!["checkout", "--quiet", "HEAD", "--"];
+        args.extend(chunk);
+        git.run(dir, &args)?;
+    }
+    Ok(())
 }
 
 /// After an adoption with differences: the folder's version wins, as a
@@ -478,6 +502,62 @@ mod tests {
         let log = git.log(&mine, "HEAD", 5).unwrap();
         assert_eq!(log.len(), 2, "the remote's commit is still the one before");
         assert_eq!(log[1].author, "Sam");
+    }
+
+    #[test]
+    fn a_copy_gets_back_only_the_missing_files_it_names() {
+        let git = git();
+        let (_remote, url) = bare_remote(&git);
+        let theirs = temp("theirs");
+        write(&theirs, "world.json", "{\"old\":1}");
+        write(&theirs, "levels/Two.json", "two");
+        write(&theirs, "scripts/Gone.lua", "gone");
+        write(&theirs, "scripts/Kept.lua", "old");
+        link(&git, &theirs, &spec(&url), &author("Paul")).unwrap();
+        // A session copy: no World files, one script deleted, one changed.
+        let copy = temp("copy");
+        write(&copy, "scripts/Kept.lua", "new");
+        let (_, linked) = link(&git, &copy, &spec(&url), &author("Sam")).unwrap();
+        let Linked::Adopted { differences } = linked else {
+            panic!("{linked:?}")
+        };
+        let not_carried: Vec<String> = differences
+            .into_iter()
+            .map(|c| c.path)
+            .filter(|p| !p.starts_with("scripts/"))
+            .chain(["scripts/Kept.lua".to_owned()])
+            .collect();
+        bring_back_missing(&git, &copy, &not_carried).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(copy.join("world.json")).unwrap(),
+            "{\"old\":1}"
+        );
+        assert!(copy.join("levels/Two.json").exists());
+        // What the copy has stays; what it deleted stays deleted.
+        assert_eq!(
+            std::fs::read_to_string(copy.join("scripts/Kept.lua")).unwrap(),
+            "new"
+        );
+        assert!(!copy.join("scripts/Gone.lua").exists());
+    }
+
+    #[test]
+    fn a_failed_first_link_leaves_no_history_behind() {
+        let git = git();
+        let (_remote, url) = bare_remote(&git);
+        let theirs = temp("theirs");
+        write(&theirs, "a.txt", "a");
+        link(&git, &theirs, &spec(&url), &author("Paul")).unwrap();
+        // The remote answers but its branch can't be fetched.
+        let project = temp("project");
+        write(&project, "b.txt", "b");
+        let spec = RemoteSpec {
+            branch: Some("missing".into()),
+            ..spec(&url)
+        };
+        assert!(link(&git, &project, &spec, &author("Sam")).is_err());
+        assert!(!project.join(".git").exists());
+        assert!(project.join("b.txt").exists());
     }
 
     #[test]

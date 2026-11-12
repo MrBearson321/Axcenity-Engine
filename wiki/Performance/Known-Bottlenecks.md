@@ -24,7 +24,7 @@ Open performance issues, each with its evidence class. When one is fixed, move i
 | Shadow views copy 176-byte instances, read 88 | Measured (byte counts) | `render` | Slim shadow instance stream | L5 |
 | GPU fill at 1440p Ultra in dense alpha foliage (forest ~14 ms GPU; Farmhouse ~40 ms frame) | Measured | Shadows, lighting, overdraw | LOD on heavy project models, shadow LOD (rejected once: changed the trees' look) | L5 |
 | A cooked game ships each texture twice (hello-roads 393 → 830 MB) | Measured | `project/src/packed.rs` | Ship cooked only, read the pack in place | G12 |
-| Opening a 10 MB `world.json` takes ~5.5 s release, ~30 s debug | Measured (rough) | `project::load` | Faster parsing or a binary world cache | — |
+| Collaborate's folder check (`Mirror::sync`) costs ~1 ms every 0.5 s on S10k, the bulk of an idle session's ~50 µs mean | Measured | `collab/src/mirror.rs` | Move the look to a worker or follow the editor's file watcher, if bigger projects need it | — |
 | Instance property reads cost ~4,000 instructions, mostly mlua | Measured (Callgrind) | `script/src/instance.rs` + mlua | mlua `__index` specialization upstream, or native `vector` | L3 |
 | Vertex-heavy scenes pay ~5% for the skin field on every instance | Measured | `render` | Separate pipelines for skinned items | — |
 | Editor repaints everything each Play frame | Measured in the design-system audit (A9) | `editor` | — (V7 and V8, visible-rows-only Explorer and Console, landed in #73) | Design system |

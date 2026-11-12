@@ -1016,7 +1016,7 @@ fn keep_until_a_save() {
 fn end_unsaved_then_save(project: &std::path::Path) {
     let (mut a, b) = session_with_a_crate(project, "end-unsaved");
     drop(b);
-    a.leave_team_session();
+    a.end_team_session();
     assert!(axcenity_collab::journal::has_recovery(project));
     assert!(a.save());
     assert!(!axcenity_collab::journal::has_recovery(project));
@@ -1030,7 +1030,7 @@ fn when_the_host_ends_the_session_the_joiner_stays_open_read_only() {
 fn host_ends_the_session() {
     let project = copy_of_example("hello-part", "team-host-leaves");
     let (mut a, mut b) = session_with_a_crate(&project, "host-leaves");
-    a.leave_team_session();
+    a.end_team_session();
     let start = std::time::Instant::now();
     while !matches!(
         b.team().map(|t| t.status()),
@@ -1324,4 +1324,78 @@ fn the_owner_restores_a_checkpoint_for_everyone_from_the_panel() {
         team_client(&b).unwrap().checkpoints()[0].label,
         "Before restoring \u{201c}Before the rename\u{201d}"
     );
+}
+
+/// C11: what an idle Collaborate session adds to each editor frame, on
+/// S10k, with the host and a member over real sockets on this computer.
+/// Run by hand, in release:
+/// `cargo test -p axcenity-editor --release --bin axcenity-editor idle_session -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, run by hand"]
+fn idle_session_cost_on_s10k() {
+    use std::time::{Duration, Instant};
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-editor-s10k-collab-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&folder);
+    axcenity_testing::s10k::write(&folder).unwrap();
+    let started = Instant::now();
+    let mut a = EditorApp::new(Some(&folder));
+    let open = started.elapsed();
+    let parts = a.world.descendants(a.world.root()).len();
+    let started = Instant::now();
+    let invite = a
+        .host_network_session(Some(&team_folder("s10k-host")), 0)
+        .expect("hosting");
+    let hosted = started.elapsed();
+    let mut b = EditorApp::new(Some(&copy_of_example("hello-touched", "s10k-joiner")));
+    let started = Instant::now();
+    b.join_network_session(&over_loopback(invite), Some(&team_folder("s10k-joiner")))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq) && b.world.descendants(b.world.root()).len() >= parts
+    });
+    let joined = started.elapsed();
+    // Then the member opens the session's files as its project.
+    let started = Instant::now();
+    settle_net(&mut a, &mut b, |_, b| {
+        let mirror = b.team.as_ref().and_then(|t| t.files_folder());
+        mirror.is_some() && b.project.as_ref().map(|p| p.folder.as_path()) == mirror
+    });
+    let opened = started.elapsed();
+    println!(
+        "S10k ({parts} Instances): opened in {open:?}, hosting took {hosted:?}, a member \
+         joined in {joined:?} and opened the session's files in {opened:?} more"
+    );
+    let frames = 300;
+    let mut host_frames = Vec::with_capacity(frames);
+    let mut member_frames = Vec::with_capacity(frames);
+    for _ in 0..frames {
+        let t = Instant::now();
+        a.team_frame();
+        host_frames.push(t.elapsed());
+        let t = Instant::now();
+        b.team_frame();
+        member_frames.push(t.elapsed());
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    for (who, mut times) in [("hosting editor", host_frames), ("member", member_frames)] {
+        let slow: Vec<_> = (0..times.len())
+            .filter(|&i| times[i] > Duration::from_micros(500))
+            .collect();
+        println!("{who}: frames over 0.5 ms: {slow:?}");
+        times.sort();
+        let mean = times.iter().sum::<Duration>() / times.len() as u32;
+        println!(
+            "idle {who}, per frame: mean {mean:?}, median {:?}, 99th {:?}, most {:?}",
+            times[times.len() / 2],
+            times[times.len() * 99 / 100],
+            times[times.len() - 1]
+        );
+    }
+    b.leave_team_session();
+    a.leave_team_session();
+    let _ = std::fs::remove_dir_all(&folder);
 }

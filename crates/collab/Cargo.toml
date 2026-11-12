@@ -20,7 +20,12 @@ serde_json.workspace = true
 tungstenite.workspace = true
 thiserror.workspace = true
 yrs.workspace = true
+zstd.workspace = true
 axcenity-workspace-hack.workspace = true
+
+[dev-dependencies]
+# S10k, the standard measurement scene (C11's measurements).
+axcenity-testing.workspace = true
 
 [lints]
 workspace = true
