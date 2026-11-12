@@ -27,8 +27,8 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use super::{DesignerAction, DesignerScene, DesignerTab, UiDesigner, screen_guis, sketch};
-use crate::animation::preview::Canvas;
-use crate::properties::Edit;
+use crate::edit::Edit;
+use crate::preview::Canvas;
 use crate::theme::{self, icons};
 use crate::tree::Insertable;
 use crate::widgets;
@@ -53,7 +53,7 @@ pub struct Slide {
 
 /// Every slide: each ScreenGui in the Workspace in tree order, then its
 /// [`screen_slides`].
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn slides(world: &World) -> Vec<Slide> {
     screen_guis(world)
         .into_iter()
@@ -276,13 +276,13 @@ impl UiDesigner {
     }
 
     /// The slide shown large in the Pages tab, among its ScreenGui's.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn slide(&self) -> usize {
         self.slide
     }
 
     /// Forgets the slides' canvases, for drawing with another renderer.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn forget_canvases(&mut self) {
         self.slide_canvases.clear();
         self.canvas = Canvas::default();

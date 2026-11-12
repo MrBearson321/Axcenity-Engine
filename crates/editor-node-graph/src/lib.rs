@@ -42,7 +42,13 @@ use eframe::egui::{
     self, Color32, CornerRadius, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2,
 };
 
-use crate::theme::{self, icons};
+// The editor kit's and tools' modules under the names this code used inside
+// the editor, so `crate::theme`, `crate::shortcuts` and so on work.
+use axcenity_editor_kit::color_palette;
+#[cfg(test)]
+use axcenity_editor_kit::snapshot;
+use axcenity_editor_kit::theme::{self, icons};
+use axcenity_editor_tools::shortcuts;
 pub use draw::draw_wire;
 use draw::{NodeDraw, draw_node, scale_style};
 use menu::{MenuChoice, NodeMenu};

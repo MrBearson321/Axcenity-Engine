@@ -343,6 +343,12 @@ fn every_tool_is_short_flat_and_in_budget() {
         instructions <= 150,
         "instructions take ~{instructions} tokens"
     );
+    // The full profile names the Toolbox tools up front.
+    let full = super::setup(Profile::Full, None).instructions;
+    assert!(full.contains("toolbox_search, then toolbox_get"), "{full}");
+    assert!(estimate_tokens(&full) <= 175, "{full}");
+    let standard = super::setup(Profile::Standard, None).instructions;
+    assert!(!standard.contains("toolbox"), "{standard}");
     // Budgets from docs/research/mcp/tool-inventory.md.
     for (profile, budget) in [
         (Profile::Lite, 2100),
@@ -2264,8 +2270,16 @@ pub(super) struct LiveClient {
 
 impl LiveClient {
     pub(super) fn connect(folder: &std::path::Path, mode: Mode) -> LiveClient {
+        Self::connect_with(folder, mode, Profile::Standard)
+    }
+
+    pub(super) fn connect_with(
+        folder: &std::path::Path,
+        mode: Mode,
+        profile: Profile,
+    ) -> LiveClient {
         let hello = super::live::Hello {
-            profile: Profile::Standard,
+            profile,
             mode,
             import_folders: Vec::new(),
             probe: false,
@@ -2673,4 +2687,340 @@ fn view_capture_draws_the_scene_as_a_png_from_the_camera_an_object_or_a_point() 
     // Reading changes nothing: no undo step.
     let history = ok(host, "history", json!({}));
     assert!(history.starts_with("0 steps to undo"), "{history}");
+}
+
+#[test]
+fn toolbox_search_and_get_bring_an_asset_in_as_one_undo_step() {
+    let mut opened = open("hello-part", "mcp-toolbox");
+    let assets = std::env::temp_dir().join(format!(
+        "axcenity-mcp-toolbox-assets-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&assets);
+    let project = opened.folder.clone();
+    let host = &mut opened.app;
+    // Never the network: ambientCG's answers from memory.
+    host.session.toolbox_http = Some(std::sync::Arc::new(
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(true),
+    ));
+    host.session.asset_dir = Some(assets.clone());
+    let found = ok(host, "toolbox_search", json!({"query": "fabric"}));
+    assert!(
+        found.starts_with("1 of 1 texture result for \"fabric\"\nambientcg:Fabric086 · Fabric 086 · CC0 · 1K 2K · JPG"),
+        "{found}"
+    );
+    assert!(found.contains("\nnot searched: Poly Haven"), "{found}");
+    assert!(
+        found.ends_with("toolbox_get {\"key\":\"ambientcg:Fabric086\"}"),
+        "{found}"
+    );
+    let wrong = call(
+        host,
+        "toolbox_search",
+        json!({"query": "rain", "kind": "sound", "source": "ambientcg"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    let wrong = call(host, "toolbox_get", json!({"key": "Fabric086"})).unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    assert!(wrong.to_string().contains("ambientcg:Ground054"), "{wrong}");
+
+    let got = ok(host, "toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+    let set = "assets/textures/Fabric086/Fabric086.texture.json";
+    assert!(
+        got.starts_with(&format!(
+            "got Fabric 086 (1K JPG, CC0 1.0): texture set {set}, material assets/materials/"
+        )),
+        "{got}"
+    );
+    assert!(got.ends_with("undo \"AI (test): Get Fabric 086\""), "{got}");
+    let material = got
+        .split("material ")
+        .nth(1)
+        .and_then(|rest| rest.split(" · ").next())
+        .unwrap()
+        .to_owned();
+    assert!(project.join(set).is_file(), "{got}");
+    assert!(project.join(&material).is_file(), "{got}");
+    // The material is ready to assign.
+    ok(
+        host,
+        "material_edit",
+        json!({"action": "assign", "path": material, "id": "Workspace/Block"}),
+    );
+    ok(host, "history", json!({"action": "undo"}));
+    // One undo takes the texture set and the material away; redo brings them back.
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join(set).exists(), "{got}");
+    assert!(!project.join(&material).exists(), "{got}");
+    ok(host, "history", json!({"action": "redo"}));
+    assert!(project.join(set).is_file() && project.join(&material).is_file());
+    // Got again: from the asset directory (nothing fetched), and the same
+    // material, not a second one.
+    host.session.toolbox_http = Some(std::sync::Arc::new(
+        crate::toolbox_panel::agent::testing::fabric_on_ambientcg(false),
+    ));
+    let again = ok(host, "toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+    assert!(again.contains(&format!("material {material} ·")), "{again}");
+    let materials = std::fs::read_dir(project.join("assets/materials"))
+        .unwrap()
+        .count();
+    assert_eq!(materials, 1, "{again}");
+    let _ = std::fs::remove_dir_all(&assets);
+}
+
+/// Answers as `inner` does, but only once `open` is set: a slow network.
+struct Gate {
+    inner: axcenity_toolbox::http::Fixture,
+    open: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl axcenity_toolbox::http::Http for Gate {
+    fn fetch(
+        &self,
+        url: &str,
+        limit: u64,
+        out: &mut dyn std::io::Write,
+    ) -> Result<u64, axcenity_toolbox::SourceError> {
+        while !self.open.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        self.inner.fetch(url, limit, out)
+    }
+}
+
+#[test]
+fn the_open_editor_keeps_drawing_while_a_toolbox_download_runs() {
+    use super::live::Live;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let folder = copy_of_example("hello-part", "mcp-live-toolbox");
+    let assets = std::env::temp_dir().join(format!(
+        "axcenity-mcp-live-toolbox-assets-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&assets);
+    let mut app = EditorApp::new(Some(&folder));
+    let mut live = Live::start(&folder, axcenity_mcp::Waker(Arc::new(|| {}))).unwrap();
+    let open = Arc::new(AtomicBool::new(false));
+    let gate: Arc<dyn axcenity_toolbox::http::Http> = Arc::new(Gate {
+        inner: crate::toolbox_panel::agent::testing::fabric_on_ambientcg(true),
+        open: open.clone(),
+    });
+    let dir = assets.clone();
+    live.prepare = Some(Box::new(move |session| {
+        session.toolbox_http = Some(gate.clone());
+        session.asset_dir = Some(dir.clone());
+    }));
+    let client_folder = folder.clone();
+    let client = std::thread::spawn(move || {
+        let mut client = LiveClient::connect_with(&client_folder, Mode::Edit, Profile::Full);
+        let got = client.call("toolbox_get", json!({"key": "ambientcg:Fabric086"}));
+        let after = client.call("object_create", json!({"kind": "Block", "name": "After"}));
+        (got, after)
+    });
+    // Frames go on while the download waits: none of them blocks.
+    let set = folder.join("assets/textures/Fabric086/Fabric086.texture.json");
+    let started = std::time::Instant::now();
+    let mut frames = 0;
+    while !client.is_finished() {
+        assert!(started.elapsed().as_secs() < 60, "the client finished");
+        let frame = std::time::Instant::now();
+        live.drain(&mut app);
+        assert!(
+            frame.elapsed().as_millis() < 500,
+            "a frame waited for the download"
+        );
+        frames += 1;
+        if frames == 200 {
+            assert!(
+                !set.exists(),
+                "nothing is installed before the download ends"
+            );
+            open.store(true, Ordering::SeqCst);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let ((got, failed), (after, _)) = client.join().unwrap();
+    assert!(frames > 200, "{frames}: {got} {after}");
+    assert!(!failed, "{got}");
+    assert!(
+        got.starts_with("got Fabric 086 (1K JPG, CC0 1.0): texture set"),
+        "{got}"
+    );
+    assert!(set.is_file());
+    // The client's next call was answered after, in order.
+    assert!(after.contains("\"After\""), "{after}");
+    let labels = app.history.undo_labels();
+    assert!(
+        labels.contains(&"AI (Live Test): Get Fabric 086"),
+        "{labels:?}"
+    );
+    drop(live);
+    let _ = std::fs::remove_dir_all(&folder);
+    let _ = std::fs::remove_dir_all(&assets);
+}
+
+#[test]
+fn data_edit_lists_shows_creates_and_changes_tables_as_undo_steps() {
+    let mut opened = open("hello-data", "mcp-data");
+    let project = opened.folder.clone();
+    let host = &mut opened.app;
+    let list = ok(host, "data_edit", json!({}));
+    assert!(
+        list.starts_with("2 tables\nammo · 2 rows · Name string, Count integer\nweapons · "),
+        "{list}"
+    );
+    assert!(
+        list.contains("Kind enum:Melee,Ranged, Ammo row:ammo"),
+        "{list}"
+    );
+    let shown = ok(
+        host,
+        "data_edit",
+        json!({"action": "show", "table": "weapons", "keys": ["sword", "axe"]}),
+    );
+    assert!(
+        shown.contains("\nsword {\"Ammo\":\"\",\"Damage\":"),
+        "{shown}"
+    );
+    assert!(shown.ends_with("\nno rows axe"), "{shown}");
+
+    // A cell changed: saved at once, and what the game reads.
+    let changed = ok(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "rows": {"sword": {"Damage": 99}}}),
+    );
+    assert!(
+        changed.starts_with("changed assets/data/weapons.data.json: changed sword"),
+        "{changed}"
+    );
+    assert!(
+        changed.ends_with("undo \"AI (test): Table weapons\""),
+        "{changed}"
+    );
+    let damage = |host: &Headless| {
+        let table = host.app.assets.data_table("weapons").unwrap();
+        let column = table.column("Damage").unwrap().clone();
+        table.row("sword").unwrap().cell(&column)
+    };
+    assert_eq!(damage(host), axcenity_assets::Cell::Number(99.0));
+    let file = std::fs::read_to_string(project.join("assets/data/weapons.data.json")).unwrap();
+    assert!(file.contains("\"Damage\": 99"), "{file}");
+
+    // Wrong values are refused before anything is written, saying where.
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "rows": {"sword": {"Damage": "lots"}}}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    assert!(
+        wrong.message.contains("row `sword`'s `Damage` must be"),
+        "{wrong}"
+    );
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "rows": {"sword": {"Speed": 3}}}),
+    )
+    .unwrap_err();
+    assert!(
+        wrong
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("columns: Damage, Range"),
+        "{wrong}"
+    );
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "weapons", "columns": {"Speed": "float"}}),
+    )
+    .unwrap_err();
+    assert!(
+        wrong.fix.as_deref().unwrap().starts_with("types: number"),
+        "{wrong}"
+    );
+    let wrong = call(
+        host,
+        "data_edit",
+        json!({"action": "show", "table": "../world"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+
+    // A new table with a column, a reference and a row; then a row and a
+    // column taken away.
+    let made = ok(
+        host,
+        "data_edit",
+        json!({"action": "create", "table": "loot", "columns": {"Chance": "number", "Item": "row:weapons", "Rare": "boolean"}, "rows": {"gem": {"Chance": 0.5, "Item": "sword"}, "coin": {}}}),
+    );
+    assert!(
+        made.starts_with("created assets/data/loot.data.json · scripts read it with DataService:GetTable(\"loot\")"),
+        "{made}"
+    );
+    assert!(
+        made.contains("\n2 rows · columns: Chance number, Item row:weapons, Rare boolean"),
+        "{made}"
+    );
+    let again = call(
+        host,
+        "data_edit",
+        json!({"action": "create", "table": "loot"}),
+    )
+    .unwrap_err();
+    assert!(
+        again.fix.as_deref().unwrap().contains("action set"),
+        "{again}"
+    );
+    ok(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "loot", "rows": {"coin": null}, "columns": {"Rare": null}}),
+    );
+    let loot = ok(
+        host,
+        "data_edit",
+        json!({"action": "show", "table": "loot"}),
+    );
+    assert_eq!(
+        loot,
+        "loot · 1 rows · columns: Chance number, Item row:weapons\ngem {\"Chance\":0.5,\"Item\":\"sword\"}"
+    );
+    // Undo goes back a step at a time: the row and column, then the table.
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(
+        ok(
+            host,
+            "data_edit",
+            json!({"action": "show", "table": "loot"})
+        )
+        .contains("\ncoin ")
+    );
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join("assets/data/loot.data.json").exists());
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(damage(host), axcenity_assets::Cell::Number(10.0));
+
+    // A table with unsaved changes in the Data Table tab is left alone.
+    let path = "assets/data/ammo.data.json";
+    host.app.data_tables.open(&project, path).unwrap();
+    host.app
+        .data_tables
+        .edit(crate::data_table::TableEdit::AddRow)
+        .unwrap();
+    let locked = call(
+        host,
+        "data_edit",
+        json!({"action": "set", "table": "ammo", "rows": {"arrows": {"Count": 1}}}),
+    )
+    .unwrap_err();
+    assert_eq!(locked.code, Code::Locked, "{locked}");
+    assert!(ok(host, "data_edit", json!({})).contains("unsaved changes in the Data Table tab"));
 }

@@ -224,7 +224,7 @@ fn allowed(folders: &[PathBuf], text: &str) -> Result<PathBuf, ToolError> {
 
 /// What the import step added to the tree: the new objects not inside
 /// another new one.
-fn new_roots(app: &super::super::EditorApp) -> Vec<InstanceId> {
+pub(super) fn new_roots(app: &super::super::EditorApp) -> Vec<InstanceId> {
     // The import selects what it placed, as Insert does.
     let world = &app.world;
     let picked: Vec<InstanceId> = app.selection.clone();

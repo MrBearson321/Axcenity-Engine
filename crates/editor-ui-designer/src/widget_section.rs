@@ -7,7 +7,7 @@ use axcenity_core::{ClassName, InstanceId, Value};
 use eframe::egui;
 
 use super::{DesignerAction, DesignerScene};
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::responsive;
 
 /// The section, for a widget; nothing for anything else. Each change is one

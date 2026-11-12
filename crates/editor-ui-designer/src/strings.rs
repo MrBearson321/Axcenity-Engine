@@ -9,7 +9,7 @@ use axcenity_core::{ClassName, InstanceId, StringTable, Value};
 use eframe::egui;
 
 use super::{DesignerAction, DesignerScene, UiDesigner};
-use crate::properties::Edit;
+use crate::edit::Edit;
 use crate::theme::{self, icons};
 use crate::{responsive, widgets};
 

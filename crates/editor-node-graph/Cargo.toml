@@ -1,0 +1,21 @@
+[package]
+name = "axcenity-editor-node-graph"
+description = "The Axcenity editor's generic node-graph editor: nodes, pins, wires, comments and the node menu, shared by the UI Event Graph, behavior trees, dialogues and material graphs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-blocks.workspace = true
+axcenity-editor-kit.workspace = true
+axcenity-editor-tools.workspace = true
+eframe.workspace = true
+serde_json.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[dev-dependencies]
+axcenity-editor-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

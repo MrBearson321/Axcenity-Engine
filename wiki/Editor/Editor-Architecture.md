@@ -3,7 +3,7 @@ title: Editor architecture
 type: system
 status: current
 implementation: implemented
-crates: [editor, editor-kit, editor-tools, editor-model-studio, plugins]
+crates: [editor, editor-kit, editor-tools, editor-model-studio, editor-node-graph, editor-ui-designer, plugins]
 source: [crates/editor/src/main.rs, crates/editor/src/script_completion.rs, crates/editor/src/scripts/assist.rs, crates/editor/src/luau_check.rs, crates/editor/src/app/luau_checks.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor-kit/src/lib.rs, crates/editor-kit/src/theme.rs, crates/editor-kit/src/widgets.rs, crates/editor-kit/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/editor/src/start/nav.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs, crates/plugins/src/bundle.rs]
 docs: [docs/architecture.md, docs/editor/shell.md, docs/architecture/play-mode.md, docs/editor/selection.md, docs/editor/transforms.md, docs/editor/tree.md, docs/editor/scripts.md, docs/editor/plugins.md, crates/editor/CLAUDE.md]
 verified: 2026-11-11
@@ -79,7 +79,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 
 ## Limitations
 
-- One giant crate (~186k lines; about 32k more now in its sub-crates); `EditorApp` has ~118 fields. G11 (L6) splits it one step at a time: first the shared UI base into `editor-kit` (4.5k), then one panel family per crate: the Toolbox tab (`editor-toolbox`, 4k), Graphics Benchmark (`editor-benchmark`, 3k) and the Model Studio (`editor-model-studio`, 13k). The viewport tools the Model Studio shares with the editor (gizmo, snapping, the shortcut table, Animation's posing and preview) moved under it into `editor-tools` (7k). Each keeps its old path in the editor through a re-export, so moves stay pure.
+- One giant crate (now ~168k lines; about 50k more are in its sub-crates); `EditorApp` has ~118 fields. G11 (L6) splits it one step at a time: first the shared UI base into `editor-kit` (4.8k), then one panel family per crate: the Toolbox tab (`editor-toolbox`, 4k), Graphics Benchmark (`editor-benchmark`, 3k), the Model Studio (`editor-model-studio`, 13k), the generic node-graph editor (`editor-node-graph`, 2.6k) and the UI Designer with its style panel and UI handles (`editor-ui-designer`, 13.5k). What those panels share with the editor moved under them into `editor-tools` (9k): gizmo, snapping, the shortcut table, Animation's posing and preview, and small types and rules (`Edit`, `Field`, the Assets panel's tiles, the Instance-tree rules). Each keeps its old path in the editor through a re-export, so moves stay pure.
 - egui repaints the whole editor every Play frame; panics while *drawing* the Play world aren't caught yet.
 - Editor Play can't host or join a real network game (loopback only).
 

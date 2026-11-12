@@ -1,0 +1,39 @@
+[package]
+name = "axcenity-editor-ui-designer"
+description = "The Axcenity editor's UI Designer: the artboard, rulers, anchors, inspector, styles, pages and Event Graph for ScreenGuis, plus the style panel and on-screen UI handles."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-blocks.workspace = true
+axcenity-core.workspace = true
+axcenity-editor-kit.workspace = true
+axcenity-editor-node-graph.workspace = true
+axcenity-editor-tools.workspace = true
+axcenity-project.workspace = true
+axcenity-render.workspace = true
+axcenity-scene.workspace = true
+# The Event Graph's Live Preview runs the graph's script (`event_graph.rs`).
+axcenity-script.workspace = true
+axcenity-sim.workspace = true
+axcenity-ui.workspace = true
+eframe.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[features]
+# Test helpers (the inspector's sections, drags without a window) for the
+# editor's tests. Turn it on from `[dev-dependencies]` only.
+test-support = [
+    "axcenity-editor-kit/test-support",
+    "axcenity-editor-tools/test-support",
+]
+
+[dev-dependencies]
+axcenity-editor-kit = { workspace = true, features = ["test-support"] }
+axcenity-editor-tools = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

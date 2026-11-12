@@ -140,7 +140,7 @@ impl LivePreview {
 
 impl UiDesigner {
     /// Which tab shows.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn tab(&self) -> DesignerTab {
         self.tab
     }
@@ -166,19 +166,19 @@ impl UiDesigner {
     }
 
     /// The Live Preview, while it runs.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn live(&self) -> Option<&LivePreview> {
         self.live.as_ref()
     }
 
     /// Starts (or stops) the Live Preview on the next frame, as its button does.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn toggle_live_preview(&mut self) {
         self.live_wanted = true;
     }
 
     /// Picks a tab, as clicking it does.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_tab(&mut self, tab: DesignerTab) {
         self.tab = tab;
     }
@@ -366,7 +366,7 @@ impl UiDesigner {
             return;
         };
         if let Some(who) = pane.locked_by {
-            crate::scripts::locked_banner(ui, who);
+            crate::widgets::locked_banner(ui, who);
         }
         let editable = scene.editing && pane.locked_by.is_none();
         let objects = axcenity_project::graph_objects(scene.world, gui);

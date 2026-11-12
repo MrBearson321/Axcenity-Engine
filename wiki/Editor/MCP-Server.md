@@ -57,8 +57,10 @@ sequenceDiagram
 ```
 
 - With the setting off, or no editor listening, `--mcp` runs headless and writes `.axcenity/mcp-headless.lock`; the editor warns on opening such a project, and a headless server refuses writes while an editor listens, so two copies never overwrite each other.
+- `data_edit` (full profile) edits data tables as files through `DataTable::from_json` (validation for free), written at once with one `record_asset` undo step; it refuses a table the Data Table tab has unsaved changes to.
 - `render_stats` (full profile) reads the viewport's last frame (`EditorApp::last_drawn`) and the Profiler's Play readout; without the window it says to connect to the editor.
-- Every live client is a session of its own over one shared change log. Writes are refused while the editor plays. A long call (`game_run`) holds the window: there are no job handles yet.
+- `toolbox_search` and `toolbox_get` (full profile) are the Toolbox tab's search and Get through `editor_toolbox::agent` (the same sources, licence filter, package choice, asset directory and installs; a texture also gets a material). They are the only tools that reach the network; a get is one undo step for the project's files, and the package stays in the asset directory. Tests answer from memory (`agent::testing`, `Session::toolbox_http`, `Session::asset_dir`).
+- Every live client is a session of its own over one shared change log. Writes are refused while the editor plays. A long call (`game_run`) holds the window. The Toolbox tools' network half runs on its own thread (`mcp::after`, `Session::later`, `Live::pending`) and finishes on the editor when done, the client's later calls waiting behind it.
 
 ## Development guidance
 
