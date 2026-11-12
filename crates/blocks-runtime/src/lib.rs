@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod behavior_tree;
@@ -371,7 +371,6 @@ pub enum BlockKind {
         seconds: Expression,
     },
     WaitUntil {
-        #[serde(deserialize_with = "condition")]
         condition: Expression,
     },
     Repeat {
@@ -382,17 +381,14 @@ pub enum BlockKind {
         body: Vec<Block>,
     },
     RepeatUntil {
-        #[serde(deserialize_with = "condition")]
         condition: Expression,
         body: Vec<Block>,
     },
     If {
-        #[serde(deserialize_with = "condition")]
         condition: Expression,
         body: Vec<Block>,
     },
     IfElse {
-        #[serde(deserialize_with = "condition")]
         condition: Expression,
         then_body: Vec<Block>,
         else_body: Vec<Block>,
@@ -1541,33 +1537,6 @@ impl BlockKind {
             _ => Vec::new(),
         }
     }
-}
-
-/// Reads a condition slot: a reporter, or the `{ left, operator, right }`
-/// comparison the first block scripts saved, which becomes a compare block.
-fn condition<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Expression, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Slot {
-        Expression(Expression),
-        Legacy {
-            left: Expression,
-            operator: Comparison,
-            right: Expression,
-        },
-    }
-    Ok(match Slot::deserialize(deserializer)? {
-        Slot::Expression(expression) => expression,
-        Slot::Legacy {
-            left,
-            operator,
-            right,
-        } => Expression::Compare {
-            op: operator,
-            left: Box::new(left),
-            right: Box::new(right),
-        },
-    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

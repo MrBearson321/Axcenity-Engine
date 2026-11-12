@@ -39,6 +39,7 @@ mod levels;
 mod migrate;
 mod migrate_animation;
 mod migrate_physics;
+mod migrate_shapes;
 mod object_scripts;
 mod package;
 mod packed;
@@ -68,7 +69,9 @@ pub use stylesheets::*;
 pub use templates::*;
 pub use ui_graphs::*;
 
-use axcenity_blocks_runtime::{Block, BlockKind, BlockScript, reserve_block_ids, translate};
+#[cfg(test)]
+use axcenity_blocks_runtime::{Block, BlockKind};
+use axcenity_blocks_runtime::{BlockScript, reserve_block_ids, translate};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -157,8 +160,9 @@ pub const CLIENT_BLOCK_SCRIPT_SUFFIX: &str = ".client.blocks.json";
 /// Phase 7) is the one clip format and state machines; format 4 (Phase 34)
 /// physical properties, which keep older Metal parts' physics; format 5
 /// (release system Phase 7) the engine that created and last saved the
-/// project ([`EngineRecord`]).
-pub const FORMAT_VERSION: u32 = 5;
+/// project ([`EngineRecord`]); format 6 (unified Phase 92) rewrites the
+/// file shapes from before format 3 that the readers no longer take.
+pub const FORMAT_VERSION: u32 = 6;
 
 /// Which Axcenity versions made and last saved a project (`engine` in the
 /// manifest, format 5). Only for telling people what a project needs; the

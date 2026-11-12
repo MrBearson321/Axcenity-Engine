@@ -278,17 +278,18 @@ fn code_and_animation_links_write_handlers_find_mentions_and_animate() {
     let animations = animations_of(&app.world, start);
     assert_eq!(animations.len(), 1);
     let animation_path = lua_path(&app.world, animations[0]).unwrap();
+    let play = format!("{animation_path}.Parent:LoadAnimation({animation_path}):Play()");
     act(
         &mut app,
         DesignerAction::AddHandler {
             id: start,
             event: "Activated".into(),
-            body: Some(format!("{animation_path}:Play()")),
+            body: Some(play.clone()),
         },
     );
     let text = &app.tabs.get(&made).unwrap().text;
     assert!(text.ends_with(&format!(
-        "workspace.{gui_name}.Start.Activated:Connect(function()\n\t{animation_path}:Play()\nend)\n"
+        "workspace.{gui_name}.Start.Activated:Connect(function()\n\t{play}\nend)\n"
     )));
     let _ = std::fs::remove_dir_all(&folder);
 }

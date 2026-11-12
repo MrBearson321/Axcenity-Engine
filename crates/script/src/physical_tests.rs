@@ -186,7 +186,7 @@ print(pcall(function() return PhysicalProperties.new("heavy") end))
         Some(&Value::PhysicalProperties(None))
     );
     assert_eq!(Material::Ice.physical().friction_weight, 3.0);
-    assert_ne!(Material::Metal.physical(), PhysicalProperties::LEGACY);
+    assert_ne!(Material::Metal.physical(), PhysicalProperties::CLASSIC);
 }
 
 #[test]

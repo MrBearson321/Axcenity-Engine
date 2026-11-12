@@ -8,9 +8,6 @@ pub enum Template {
     Baseplate,
     /// Nothing at all.
     Empty,
-    /// A small lit scene: a baseplate, a glowing part that spins, a pad that
-    /// changes colour when touched, and the block script doing both.
-    Starter,
     /// The genre templates (Phase 69): whole small games, each a folder in
     /// the repository's `templates/` with the shared pause and settings
     /// menu (`templates/shared/`) copied in.
@@ -30,10 +27,9 @@ const SHARED_FOLDER: &str = "shared";
 include!(concat!(env!("OUT_DIR"), "/template_files.rs"));
 
 impl Template {
-    pub const ALL: [Template; 8] = [
+    pub const ALL: [Template; 7] = [
         Template::Baseplate,
         Template::Empty,
-        Template::Starter,
         Template::FirstPerson,
         Template::ThirdPerson,
         Template::Vehicle,
@@ -41,8 +37,9 @@ impl Template {
         Template::Arena,
     ];
 
-    /// The templates that start from (almost) nothing.
-    pub const BLANK: [Template; 3] = [Template::Baseplate, Template::Empty, Template::Starter];
+    /// The templates that start from (almost) nothing. (The Starter scene
+    /// went in unified Phase 92: the genre templates replace it.)
+    pub const BLANK: [Template; 2] = [Template::Baseplate, Template::Empty];
 
     /// The playable genre templates.
     pub const GAMES: [Template; 5] = [
@@ -57,7 +54,6 @@ impl Template {
         match self {
             Template::Baseplate => "Baseplate",
             Template::Empty => "Empty",
-            Template::Starter => "Starter scene",
             Template::FirstPerson => "First Person",
             Template::ThirdPerson => "Third Person",
             Template::Vehicle => "Vehicle",
@@ -70,9 +66,6 @@ impl Template {
         match self {
             Template::Baseplate => "A grey baseplate to build on.",
             Template::Empty => "An empty world, for starting from nothing.",
-            Template::Starter => {
-                "A lit scene with a spinning neon part and a touch pad, run by blocks."
-            }
             Template::FirstPerson => {
                 "Shoot targets in first person with a blaster, with ammo on the HUD."
             }
@@ -90,7 +83,7 @@ impl Template {
     /// The template's folder in `templates/`, for the genre templates.
     pub fn folder(self) -> Option<&'static str> {
         match self {
-            Template::Baseplate | Template::Empty | Template::Starter => None,
+            Template::Baseplate | Template::Empty => None,
             Template::FirstPerson => Some("first-person"),
             Template::ThirdPerson => Some("third-person"),
             Template::Vehicle => Some("vehicle"),
@@ -135,7 +128,6 @@ impl Template {
         match self {
             Template::Baseplate => BASEPLATE_WORLD,
             Template::Empty => EMPTY_WORLD,
-            Template::Starter => STARTER_WORLD,
             // The genre templates have their own `world.json`.
             _ => EMPTY_WORLD,
         }
@@ -179,123 +171,6 @@ pub(super) const BASEPLATE_WORLD: &str = r#"{
   }
 }
 "#;
-
-pub(super) const STARTER_WORLD: &str = r#"{
-  "format_version": 1,
-  "workspace": {
-    "children": [
-      {
-        "class": "Part",
-        "name": "Baseplate",
-        "properties": {
-          "Anchored": true,
-          "Locked": true,
-          "Position": [0, -0.5, 0],
-          "Size": [60, 1, 60],
-          "Color": [0.35, 0.37, 0.4]
-        }
-      },
-      {
-        "class": "Part",
-        "name": "Spinner",
-        "properties": {
-          "Anchored": true,
-          "Position": [0, 5, 0],
-          "Size": [6, 1, 1],
-          "Color": [0.3, 0.75, 1],
-          "Material": "Neon",
-          "CastShadow": false
-        },
-        "children": [
-          {
-            "class": "PointLight",
-            "name": "Glow",
-            "properties": {
-              "Color": [0.3, 0.75, 1],
-              "Brightness": 2,
-              "Range": 18
-            }
-          }
-        ]
-      },
-      {
-        "class": "Part",
-        "name": "Pillar",
-        "properties": {
-          "Anchored": true,
-          "Position": [-8, 3, -4],
-          "Size": [2, 6, 2],
-          "Color": [0.85, 0.8, 0.7]
-        }
-      },
-      {
-        "class": "Part",
-        "name": "Pad",
-        "properties": {
-          "Anchored": true,
-          "Position": [8, 0.25, 4],
-          "Size": [6, 0.5, 6],
-          "Color": [0.95, 0.65, 0.2]
-        }
-      },
-      {
-        "class": "Part",
-        "name": "Ball",
-        "properties": {
-          "Position": [8, 10, 4],
-          "Shape": "Ball",
-          "Size": [2, 2, 2],
-          "Color": [0.9, 0.3, 0.35]
-        }
-      }
-    ]
-  },
-  "lighting": {
-    "properties": {
-      "ShadowSoftness": 0.35,
-      "ToneMapping": "Neutral"
-    }
-  }
-}
-"#;
-
-/// The block script of the starter scene: spin the neon part, and turn the
-/// pad green when something lands on it.
-pub(super) fn starter_blocks() -> BlockScript {
-    use axcenity_blocks_runtime::Expression;
-    let vector = |x, y, z| Expression::Vector3 { x, y, z };
-    BlockScript {
-        blocks: vec![
-            Block::new(BlockKind::WhenStarted {
-                body: vec![Block::new(BlockKind::Forever {
-                    body: vec![Block::new(BlockKind::TurnBy {
-                        target: "Spinner".to_owned(),
-                        rotation: vector(0.0, 2.0, 0.0),
-                    })],
-                })],
-            }),
-            Block::new(BlockKind::WhenTouched {
-                part: "Pad".to_owned(),
-                body: vec![
-                    Block::new(BlockKind::SetColor {
-                        target: "Pad".to_owned(),
-                        color: Expression::Color3 {
-                            r: 0.3,
-                            g: 0.85,
-                            b: 0.45,
-                        },
-                    }),
-                    Block::new(BlockKind::Print {
-                        value: Expression::Text {
-                            value: "Something landed on the pad!".to_owned(),
-                        },
-                    }),
-                ],
-            }),
-        ],
-        ..Default::default()
-    }
-}
 
 /// Makes a new project called `name` in a new folder inside `parent`, with a
 /// baseplate in its world, and returns the folder. See [`create_project_from`].
@@ -354,13 +229,6 @@ pub fn create_project_from(
             None => Ok(()),
         }
         .and_then(|()| fs::write(&path, bytes).map_err(SaveError::new(&path)));
-    }
-    if template == Template::Starter && written.is_ok() {
-        let path = folder
-            .join(SCRIPTS_FOLDER)
-            .join("Starter.server.blocks.json");
-        let blocks = serde_json::to_string_pretty(&starter_blocks()).unwrap_or_default();
-        written = write_through_temporary(&path, &blocks);
     }
     if let Err(err) = written {
         // Don't leave a half-made project behind.

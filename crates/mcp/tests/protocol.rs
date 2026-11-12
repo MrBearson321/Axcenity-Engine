@@ -155,7 +155,7 @@ fn start_pair() -> Client {
     }
 }
 
-async fn legacy_client() -> Client {
+async fn older_protocol_client() -> Client {
     let mut client = start_pair();
     let init = client
         .request(
@@ -187,7 +187,7 @@ fn text_of(response: &Value) -> &str {
 
 #[tokio::test]
 async fn a_2025_client_lists_tools_with_their_annotations_and_flat_schemas() {
-    let mut client = legacy_client().await;
+    let mut client = older_protocol_client().await;
     let list = client.request("tools/list", json!({})).await;
     let tools = list["result"]["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
@@ -210,7 +210,7 @@ async fn a_2025_client_lists_tools_with_their_annotations_and_flat_schemas() {
 
 #[tokio::test]
 async fn a_2025_client_calls_a_tool_and_the_engine_sees_its_name_and_arguments() {
-    let mut client = legacy_client().await;
+    let mut client = older_protocol_client().await;
     let call = client
         .request(
             "tools/call",
@@ -226,7 +226,7 @@ async fn a_2025_client_calls_a_tool_and_the_engine_sees_its_name_and_arguments()
 
 #[tokio::test]
 async fn a_picture_comes_back_as_image_content_after_the_text() {
-    let mut client = legacy_client().await;
+    let mut client = older_protocol_client().await;
     let call = client
         .request(
             "tools/call",
@@ -242,7 +242,7 @@ async fn a_picture_comes_back_as_image_content_after_the_text() {
 
 #[tokio::test]
 async fn errors_are_tool_results_a_model_can_read() {
-    let mut client = legacy_client().await;
+    let mut client = older_protocol_client().await;
     // From the engine.
     let call = client
         .request(
@@ -319,7 +319,7 @@ async fn a_2026_client_discovers_the_server_and_calls_without_a_handshake() {
 
 #[tokio::test]
 async fn prompts_are_listed_and_filled_in_with_their_arguments() {
-    let mut client = legacy_client().await;
+    let mut client = older_protocol_client().await;
     let list = client.request("prompts/list", json!({})).await;
     let prompt = &list["result"]["prompts"][0];
     assert_eq!(prompt["name"], "build", "{list}");
@@ -349,7 +349,7 @@ async fn prompts_are_listed_and_filled_in_with_their_arguments() {
 
 #[tokio::test]
 async fn resources_mirror_read_tools_and_reading_one_runs_its_tool() {
-    let mut client = legacy_client().await;
+    let mut client = older_protocol_client().await;
     let list = client.request("resources/list", json!({})).await;
     let uris: Vec<&str> = list["result"]["resources"]
         .as_array()

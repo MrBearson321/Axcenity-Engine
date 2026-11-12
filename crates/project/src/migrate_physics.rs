@@ -2,7 +2,7 @@
 //! (Phase 34).
 //!
 //! Before format 4 every part weighed, gripped and bounced the same
-//! (`PhysicalProperties::LEGACY`). Plastic, Glass and Neon still do, but
+//! (`PhysicalProperties::CLASSIC`). Plastic, Glass and Neon still do, but
 //! Metal is dense now. So each Metal Part in the world and the prefabs
 //! that has no `CustomPhysicalProperties` gets the old values as its own,
 //! and the world simulates as it did. Metal parts made after the upgrade
@@ -36,10 +36,10 @@ fn keep_old_physics(json: &mut Json) -> bool {
                     .and_then(Json::as_str)
                     .and_then(Material::from_name)
                     .unwrap_or(Material::Plastic);
-                if material.physical() != PhysicalProperties::LEGACY
+                if material.physical() != PhysicalProperties::CLASSIC
                     && !properties.contains_key("CustomPhysicalProperties")
                 {
-                    let old = PhysicalProperties::LEGACY;
+                    let old = PhysicalProperties::CLASSIC;
                     properties.insert(
                         "CustomPhysicalProperties".to_owned(),
                         serde_json::json!({
@@ -122,13 +122,13 @@ mod tests {
         };
         assert_eq!(
             custom("Ball"),
-            Some(Value::PhysicalProperties(Some(PhysicalProperties::LEGACY)))
+            Some(Value::PhysicalProperties(Some(PhysicalProperties::CLASSIC)))
         );
         // Glass has the old values anyway; a part's own are kept.
         assert_eq!(custom("Block"), Some(Value::PhysicalProperties(None)));
         let tuned = PhysicalProperties {
             density: 3.0,
-            ..PhysicalProperties::LEGACY
+            ..PhysicalProperties::CLASSIC
         };
         assert_eq!(
             custom("Tuned"),

@@ -264,12 +264,6 @@ fn every_template_makes_a_project_that_loads_cleanly() {
                     .unwrap();
                 assert!(project.world.is_locked(plate), "a new baseplate is locked");
             }
-            Template::Starter => {
-                assert!(parts > 3);
-                let script = &project.scripts[0];
-                assert!(script.source.contains("workspace.Spinner.Orientation"));
-                assert!(script.source.contains("workspace.Pad.Touched:Connect"));
-            }
             // The genre templates' own tests are `axcenity-testing`'s
             // `templates` tests; here, what they all have.
             _ => {

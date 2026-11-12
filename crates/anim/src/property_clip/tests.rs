@@ -414,24 +414,6 @@ fn keys_must_fit_their_property() {
 }
 
 #[test]
-fn older_position_only_clips_still_read_the_same() {
-    let text = r#"{
-  "format_version": 1,
-  "kind": "property",
-  "duration": 1.5,
-  "loop": false,
-  "tracks": [
-    { "id": "position", "target": ".", "property": "Position",
-      "keys": [ { "id": "k1", "time": 0.0, "value": [0, 2, 0], "interp": "Linear" },
-                { "id": "k2", "time": 1.5, "value": [0, 8, 0], "interp": "Linear" } ] }
-  ],
-  "events": [ { "time": 1.4, "name": "Opened" } ]
-}"#;
-    let clip = PropertyClip::from_json(text).unwrap();
-    assert_eq!(clip.evaluate(0.75)[0].value, vec![0.0, 5.0, 0.0]);
-}
-
-#[test]
 fn target_paths_go_from_the_root() {
     let mut world = World::new();
     let door = world.create(ClassName::Model).unwrap();

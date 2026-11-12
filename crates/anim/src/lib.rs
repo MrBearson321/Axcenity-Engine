@@ -57,10 +57,10 @@ pub use easing::{DEFAULT_BEZIER, Easing, EasingDirection, EasingStyle, cubic_bez
 pub use feet::{GroundHit, GroundProbe};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendSpace, BlendSpaceChild, BlendTree,
-    CLIP_EXTENSION, ClipEvent, ClipFile, Condition, DEFAULT_BLEND, FileError, Interp,
-    LEGACY_CONTROLLER_EXTENSION, LayerDef, LayerMode, Motion, ParameterDef, PropertyKeyframe,
-    PropertyName, PropertyTrack, ReturnDef, ReturnWhen, SHARED_FOLDER, STATE_MACHINE_EXTENSION,
-    StateDef, StateMachineFile, TakeLink, Test, TransitionDef, blend_weights, with_returns,
+    CLIP_EXTENSION, ClipEvent, ClipFile, Condition, DEFAULT_BLEND, FileError, Interp, LayerDef,
+    LayerMode, Motion, ParameterDef, PropertyKeyframe, PropertyName, PropertyTrack, ReturnDef,
+    ReturnWhen, SHARED_FOLDER, STATE_MACHINE_EXTENSION, StateDef, StateMachineFile, TakeLink, Test,
+    TransitionDef, blend_weights, with_returns,
 };
 pub use property_clip::{
     Applied, EvaluatedProperty, Placement, PropertyClip, apply_evaluated, blend_evaluated,

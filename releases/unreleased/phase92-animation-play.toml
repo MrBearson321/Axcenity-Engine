@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "scripting"
+title = "animation:Play(), Stop(), Pause() and Resume() are now errors that name the fix"
+details = "These Animation methods were kept from before AnimationTracks. Each now raises an error such as \"animation:Play() was removed: use local track = animator:LoadAnimation(animation), then track:Play()\". Play the Animation through its Animator instead (pause with track:AdjustSpeed(0)). AutoPlay still works, and the UI Designer's Play on click writes the LoadAnimation form."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -10,7 +10,7 @@ A project is a folder. Everything in it is a readable text file (except your own
 
 ## Create and open
 
-- **New Project** (start screen, or **File > New Project…**) asks for a template, a name and a folder. **Baseplate** gives you a locked grey floor to build on, **Empty** nothing at all, and **Starter scene** a lit scene with a few blocks. The genre templates are small finished games to learn from and build on: **First Person** (a character with a blaster), **Third Person** (a course with coins and a checkpoint), **Vehicle** (a car and timed laps), **Top Down** and **Multiplayer Arena**. Each comes with a game menu and saves.
+- **New Project** (start screen, or **File > New Project…**) asks for a template, a name and a folder. **Baseplate** gives you a locked grey floor to build on, and **Empty** nothing at all. The genre templates are small finished games to learn from and build on: **First Person** (a character with a blaster), **Third Person** (a course with coins and a checkpoint), **Vehicle** (a car and timed laps), **Top Down** and **Multiplayer Arena**. Each comes with a game menu and saves.
 - **Open Project** (start screen, or **File > Open Project…**) opens any project folder. The start screen shows your last four projects under **Recent**, then **All projects** (up to 100, as cards or a list, with search and sort); a card's **⋯** menu (or a right-click) has Open, Settings, Version History, Show in File Manager, Remove from List (the files stay) and Delete (permanent, after you confirm).
 - From a terminal, `axcenity-editor <folder>` opens a project directly.
 

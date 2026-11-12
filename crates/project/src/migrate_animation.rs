@@ -21,10 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-use axcenity_anim::{
-    ANIMATIONS_FOLDER, CLIP_EXTENSION, ClipFile, LEGACY_CONTROLLER_EXTENSION,
-    STATE_MACHINE_EXTENSION, StateMachineFile,
-};
+use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, STATE_MACHINE_EXTENSION};
 use serde_json::Value as Json;
 
 use crate::WORLD_FILE;
@@ -33,6 +30,9 @@ use crate::WORLD_FILE;
 const SKIP_ROOT_DIRS: &[&str] = &[".axcenity", ".git", "target", "node_modules"];
 const PREFABS_FOLDER: &str = "assets/prefabs";
 const PREFAB_EXTENSION: &str = ".prefab.json";
+/// What state machines were called before animation format 2, as animator
+/// controllers.
+const CONTROLLER_EXTENSION: &str = ".controller.json";
 
 /// Runs the step on the project in `folder`.
 pub(crate) fn migrate(folder: &Path) -> Result<(), String> {
@@ -54,13 +54,13 @@ pub(crate) fn migrate(folder: &Path) -> Result<(), String> {
 
     for path in &clips {
         let text = read(folder, path)?;
-        let clip = ClipFile::from_json(&text)
+        let clip = crate::migrate_shapes::read_clip(&text)
             .map_err(|err| format!("could not upgrade `{path}`: {err}"))?;
         write_moved(folder, path, &moved(path), &clip.to_json())?;
     }
     for path in &controllers {
         let text = read(folder, path)?;
-        let mut machine = StateMachineFile::from_json(&text)
+        let mut machine = crate::migrate_shapes::read_state_machine(&text)
             .map_err(|err| format!("could not upgrade `{path}`: {err}"))?;
         for state in &mut machine.states {
             for clip in state.motion.clips_mut() {
@@ -138,7 +138,7 @@ fn find_files(
             let relative = relative.to_string_lossy().replace('\\', "/");
             if name.ends_with(CLIP_EXTENSION) {
                 clips.push(relative);
-            } else if name.ends_with(LEGACY_CONTROLLER_EXTENSION) {
+            } else if name.ends_with(CONTROLLER_EXTENSION) {
                 controllers.push(relative);
             }
         }
@@ -151,7 +151,7 @@ fn find_files(
 /// `taken` (other than its own) gets a number.
 fn destination(path: &str, taken: &BTreeSet<String>) -> String {
     let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
-    let (stem, extension) = if let Some(stem) = file.strip_suffix(LEGACY_CONTROLLER_EXTENSION) {
+    let (stem, extension) = if let Some(stem) = file.strip_suffix(CONTROLLER_EXTENSION) {
         (stem, STATE_MACHINE_EXTENSION)
     } else {
         (
@@ -289,7 +289,7 @@ fn write_moved(folder: &Path, from: &str, to: &str, text: &str) -> Result<(), St
     Ok(())
 }
 
-fn write(path: &Path, text: &str) -> Result<(), String> {
+pub(crate) fn write(path: &Path, text: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("could not create `{}`: {err}", parent.display()))?;
@@ -307,6 +307,7 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axcenity_anim::{ClipFile, StateMachineFile};
     use axcenity_core::{ClassName, Value};
 
     /// A format 2 project: a noodle with an Animator playing a controller

@@ -62,7 +62,7 @@ If true, playback repeats instead of firing Completed at the end.
 Animation.Completed: Signal
 ```
 
-Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.
+Fires when the Animation, played by AutoPlay, reaches the end of a clip that doesn't loop. The handler gets no arguments.
 
 #### AnimationEvent
 
@@ -70,7 +70,7 @@ Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The h
 Animation.AnimationEvent: Signal
 ```
 
-Fires when `animation:Play()` passes one of the clip's events. The handler gets the event's name.
+Fires when the Animation, played by AutoPlay, passes one of the clip's events. The handler gets the event's name.
 
 ### Functions
 
@@ -80,7 +80,7 @@ Fires when `animation:Play()` passes one of the clip's events. The handler gets 
 Animation:Play(): ()
 ```
 
-Plays this Animation's clip from the start, through the Animator on the same parent. `animator:LoadAnimation(animation)` is the newer way, with fades and weights.
+Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 
 #### Stop
 
@@ -88,7 +88,7 @@ Plays this Animation's clip from the start, through the Animator on the same par
 Animation:Stop(): ()
 ```
 
-Stops playback and goes back to the start of the clip.
+Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 
 #### Pause
 
@@ -96,7 +96,7 @@ Stops playback and goes back to the start of the clip.
 Animation:Pause(): ()
 ```
 
-Pauses at the current time. Resume continues from there.
+Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 
 #### Resume
 
@@ -104,5 +104,5 @@ Pauses at the current time. Resume continues from there.
 Animation:Resume(): ()
 ```
 
-Continues after Pause.
+Removed (an error that names the fix): `animator:LoadAnimation(animation)` gives an AnimationTrack to play, stop and pause instead.
 

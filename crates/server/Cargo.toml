@@ -21,7 +21,6 @@ axcenity-script.workspace = true
 axcenity-sim.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
-log.workspace = true
 profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 

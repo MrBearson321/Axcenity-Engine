@@ -1836,28 +1836,15 @@ fn the_animation_examples_blocks_drive_its_animator() {
 }
 
 #[test]
-fn the_first_saved_format_still_loads() {
+fn the_first_saved_condition_shape_is_left_to_the_project_upgrade() {
+    // Format 6 projects rewrite it as a compare block (`project`'s
+    // `migrate_shapes.rs`); the reader takes only blocks.
     let saved = r#"{ "blocks": [ { "id": 1, "kind": { "type": "when_started", "body": [
         { "id": 2, "kind": { "type": "if_else",
           "condition": { "left": { "type": "number", "value": 1 }, "operator": "less",
                          "right": { "type": "variable", "name": "x" } },
           "then_body": [], "else_body": [] } } ] } } ] }"#;
-    let script: BlockScript = serde_json::from_str(saved).unwrap();
-    let BlockKind::WhenStarted { body } = &script.blocks[0].kind else {
-        panic!("{script:?}");
-    };
-    let BlockKind::IfElse { condition, .. } = &body[0].kind else {
-        panic!("{body:?}");
-    };
-    assert_eq!(
-        *condition,
-        Expression::Compare {
-            op: Comparison::Less,
-            left: boxed(number(1.0)),
-            right: boxed(variable("x")),
-        }
-    );
-    assert!(translate(&script).unwrap().source.contains("if 1 < x then"));
+    assert!(serde_json::from_str::<BlockScript>(saved).is_err());
 }
 
 #[test]

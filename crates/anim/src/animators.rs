@@ -8,7 +8,7 @@
 //!    each of its layers, by the layer's weight and mask;
 //! 2. what plays on top, oldest start first: AnimationTracks from
 //!    `animator:LoadAnimation`, by their weight (fading in and out), and
-//!    Animations played with `animation:Play()` (or `AutoPlay`).
+//!    Animations played with `AutoPlay`.
 //!
 //! On a MeshPart with a skeleton they pose its bones; on anything they set
 //! the properties their tracks key. A Ragdoll in the MeshPart overrides the
@@ -57,9 +57,9 @@ pub enum AnimatorEvent {
     /// The Animator's `AnimationEvent`: its state machine's clip passed this
     /// event.
     Marker { animator: InstanceId, name: String },
-    /// An Animation's `AnimationEvent`, from `animation:Play()`.
+    /// An Animation's `AnimationEvent`, from AutoPlay.
     AnimationMarker { animation: InstanceId, name: String },
-    /// An Animation's `Completed`: `animation:Play()` reached the end of a
+    /// An Animation's `Completed`: AutoPlay reached the end of a
     /// clip it doesn't loop.
     AnimationCompleted { animation: InstanceId },
     /// An AnimationTrack's `KeyframeReached` (and its
@@ -826,8 +826,7 @@ impl Animators {
         );
     }
 
-    /// Takes `animation:Play()`, `Stop`, `Pause` and `Resume` and moves its
-    /// playback on. A layer once it has been played (it keeps its last
+    /// Takes a play (AutoPlay) or stop request and moves its playback on. A layer once it has been played (it keeps its last
     /// frame after it ends or stops).
     #[allow(clippy::too_many_arguments)]
     fn run_animation(
@@ -852,9 +851,9 @@ impl Animators {
             let looping = instance.property("Looped").and_then(Value::as_bool) == Some(true);
             (path, enabled, speed, looping)
         };
-        let requested = world.property_animation(animation).is_some_and(|state| {
-            state.play || state.stop || state.pause || state.resume || state.order > 0
-        });
+        let requested = world
+            .property_animation(animation)
+            .is_some_and(|state| state.play || state.stop || state.order > 0);
         if path.is_empty() || !requested {
             return None;
         }
@@ -871,20 +870,10 @@ impl Animators {
         }
         if std::mem::take(&mut state.stop) {
             state.playing = false;
-            state.paused = false;
             state.time = 0.0;
-        }
-        if std::mem::take(&mut state.pause) && state.playing {
-            state.playing = false;
-            state.paused = true;
-        }
-        if std::mem::take(&mut state.resume) && state.paused {
-            state.playing = true;
-            state.paused = false;
         }
         if std::mem::take(&mut state.play) {
             state.playing = true;
-            state.paused = false;
             state.time = 0.0;
             state.order = order.unwrap_or(state.order.max(1));
             running.seen.remove(&animation);

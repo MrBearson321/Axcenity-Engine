@@ -5001,12 +5001,12 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Animation,
         "Completed",
-        "Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.",
+        "Fires when the Animation, played by AutoPlay, reaches the end of a clip that doesn't loop. The handler gets no arguments.",
     ),
     (
         ClassName::Animation,
         "AnimationEvent",
-        "Fires when `animation:Play()` passes one of the clip's events. The handler gets the event's name.",
+        "Fires when the Animation, played by AutoPlay, passes one of the clip's events. The handler gets the event's name.",
     ),
     (
         ClassName::AnimationTrack,

@@ -163,7 +163,7 @@ impl AnimationTrackState {
     }
 }
 
-/// One [`Animation`](crate::ClassName::Animation)'s `animation:Play()`
+/// One [`Animation`](crate::ClassName::Animation)'s AutoPlay
 /// playback, through the Animator on its parent.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropertyAnimationState {
@@ -171,16 +171,10 @@ pub struct PropertyAnimationState {
     pub time: f64,
     /// Advancing when true.
     pub playing: bool,
-    /// True after Pause until Resume or Play/Stop.
-    pub paused: bool,
-    /// Script asked to Play from the start.
+    /// Asked to play from the start (AutoPlay, or an editor preview).
     pub play: bool,
-    /// Script asked to Stop (time back to 0, not playing).
+    /// Asked to stop (time back to 0, not playing).
     pub stop: bool,
-    /// Script asked to Pause.
-    pub pause: bool,
-    /// Script asked to Resume from a pause.
-    pub resume: bool,
     /// Seek to this time on the next host update.
     pub seek: Option<f64>,
     /// When it last started (see [`AnimatorState::start_order`]).

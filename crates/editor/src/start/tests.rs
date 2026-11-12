@@ -93,7 +93,7 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
         (
             "start-new-project",
             Page::Projects,
-            Some(Template::Starter),
+            Some(Template::Empty),
             theme::ThemeChoice::Dark,
             StartNav::default(),
         ),
@@ -1105,10 +1105,7 @@ fn the_start_screen_look_draws_at_rest_hovered_and_sliding() {
     };
     let pointers = [
         ("start-look-rest", None),
-        (
-            "start-look-hover-template",
-            Some(corner_of("Starter scene")),
-        ),
+        ("start-look-hover-template", Some(corner_of("Empty"))),
         ("start-look-hover-game", Some(corner_of("Vehicle"))),
         ("start-look-hover-project", Some(corner_of("Lava Obby"))),
     ];

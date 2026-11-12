@@ -34,7 +34,7 @@ With no project open, the editor shows the start screen. Its sidebar has:
 
 ## Your first project
 
-1. Press **New Project**. Pick a template: **Baseplate** (a grey floor), **Empty**, **Starter scene**, or a playable genre template (**First Person**, **Third Person**, **Vehicle**, **Top Down**, **Multiplayer Arena**). Give it a name and a folder, then create it.
+1. Press **New Project**. Pick a template: **Baseplate** (a grey floor), **Empty**, or a playable genre template (**First Person**, **Third Person**, **Vehicle**, **Top Down**, **Multiplayer Arena**). Give it a name and a folder, then create it.
 2. The project opens. The 3D **Scene** is in the middle, the **Explorer** (every object in the game) and **Properties** (the selected object's settings) are on the right, and the **Console** is at the bottom.
 3. On the **Home** tab of the ribbon, press **Block**. A new part appears in front of the camera and is selected.
 4. Press **2** for the Move tool and drag an arrow to move the block. **3** resizes and **4** rotates. **1** goes back to Select.

@@ -23,8 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::easing::{DEFAULT_BEZIER, Easing, cubic_bezier};
 
-/// The version these files are written in. Newer ones are refused; format 1
-/// files are read and turned into this shape.
+/// The version these files are written in. Newer and older ones are
+/// refused: the project upgrade (format 3, `project`'s
+/// `migrate_animation.rs`) rewrote every format 1 file in this shape.
 pub const FORMAT_VERSION: u32 = 2;
 /// Where the editor keeps clips and state machines.
 pub const ANIMATIONS_FOLDER: &str = "assets/animations";
@@ -32,8 +33,6 @@ pub const ANIMATIONS_FOLDER: &str = "assets/animations";
 pub const SHARED_FOLDER: &str = "Shared";
 pub const CLIP_EXTENSION: &str = ".anim.json";
 pub const STATE_MACHINE_EXTENSION: &str = ".statemachine.json";
-/// What state machines were called before format 2, as animator controllers.
-pub const LEGACY_CONTROLLER_EXTENSION: &str = ".controller.json";
 /// The name a transition's `from` uses for "from whatever state is playing".
 pub const ANY_STATE: &str = "Any State";
 
@@ -144,12 +143,8 @@ impl ClipFile {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as u32;
         check_version(version)?;
-        // The current shape is read from the text, so a mistake names its line.
-        let clip = if version < FORMAT_VERSION {
-            legacy_clip(value)?
-        } else {
-            parse::<Self>(text)?
-        };
+        // Read from the text, so a mistake names its line.
+        let clip = parse::<Self>(text)?;
         if !clip.duration.is_finite() || clip.duration < 0.0 {
             return Err(FileError(
                 "its duration must be a number of seconds, 0 or more".into(),
@@ -167,105 +162,6 @@ impl ClipFile {
     pub fn to_json(&self) -> String {
         to_json(self)
     }
-}
-
-/// A clip saved before format 2, as a take clip (`source`, `take`, `start`,
-/// `end`, `speed`) or a property clip (`"kind": "property"`), in the one
-/// shape. A take clip's speed becomes its duration, and its events (seconds
-/// of the take from its start) become seconds of the clip.
-fn legacy_clip(value: serde_json::Value) -> Result<ClipFile, FileError> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct TakeClip {
-        #[serde(rename = "format_version")]
-        _format_version: u32,
-        source: String,
-        take: String,
-        start: f64,
-        end: f64,
-        #[serde(default = "one")]
-        speed: f64,
-        #[serde(rename = "loop", default = "yes")]
-        looping: bool,
-        #[serde(default)]
-        root_motion: bool,
-        #[serde(default)]
-        events: Vec<ClipEvent>,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct PropertyClip {
-        #[serde(rename = "format_version")]
-        _format_version: u32,
-        kind: String,
-        duration: f64,
-        #[serde(rename = "loop", default = "yes")]
-        looping: bool,
-        #[serde(default)]
-        tracks: Vec<PropertyTrack>,
-        #[serde(default)]
-        events: Vec<ClipEvent>,
-    }
-    if value.get("kind").is_some() {
-        let clip: PropertyClip = serde_json::from_value(value)
-            .map_err(|err| FileError(format!("it isn't a valid property clip: {err}")))?;
-        if clip.kind != "property" {
-            return Err(FileError(format!(
-                "unknown clip kind `{}` (expected `property` or a take clip)",
-                clip.kind
-            )));
-        }
-        return Ok(ClipFile {
-            format_version: FORMAT_VERSION,
-            duration: clip.duration,
-            looping: clip.looping,
-            link: None,
-            tracks: clip.tracks,
-            events: clip.events,
-        });
-    }
-    let clip: TakeClip = serde_json::from_value(value)
-        .map_err(|err| FileError(format!("it isn't a valid take clip: {err}")))?;
-    if !(clip.start.is_finite() && clip.end.is_finite() && clip.speed.is_finite()) {
-        return Err(FileError("its start, end and speed must be numbers".into()));
-    }
-    let length = (clip.end - clip.start).max(0.0);
-    let speed = clip.speed.abs().max(1e-3);
-    let backwards = clip.speed < 0.0;
-    let (start, end) = if backwards {
-        (clip.end, clip.start)
-    } else {
-        (clip.start, clip.end)
-    };
-    let events = clip
-        .events
-        .into_iter()
-        .map(|event| {
-            let into = if backwards {
-                length - event.time
-            } else {
-                event.time
-            };
-            ClipEvent {
-                time: into.clamp(0.0, length) / speed,
-                name: event.name,
-            }
-        })
-        .collect();
-    Ok(ClipFile {
-        format_version: FORMAT_VERSION,
-        duration: length / speed,
-        looping: clip.looping,
-        link: Some(TakeLink {
-            source: clip.source,
-            take: clip.take,
-            start,
-            end,
-            root_motion: clip.root_motion,
-        }),
-        tracks: Vec::new(),
-        events,
-    })
 }
 
 /// A named moment in a clip.
@@ -982,6 +878,11 @@ fn check_version(version: u32) -> Result<(), FileError> {
             "it was saved by a newer version of Axcenity (format {version}); please update"
         )));
     }
+    if version < FORMAT_VERSION {
+        return Err(FileError(format!(
+            "it is in an older animation format ({version}); open its project in the editor to upgrade it"
+        )));
+    }
     Ok(())
 }
 
@@ -1008,14 +909,10 @@ pub fn write_file(path: &Path, text: &str) -> std::io::Result<()> {
 /// `assets/animations/hero/Walk.anim.json`).
 pub fn clip_name(path: &str) -> &str {
     let file = path.rsplit('/').next().unwrap_or(path);
-    [
-        CLIP_EXTENSION,
-        STATE_MACHINE_EXTENSION,
-        LEGACY_CONTROLLER_EXTENSION,
-    ]
-    .into_iter()
-    .find_map(|extension| file.strip_suffix(extension))
-    .unwrap_or(file)
+    [CLIP_EXTENSION, STATE_MACHINE_EXTENSION]
+        .into_iter()
+        .find_map(|extension| file.strip_suffix(extension))
+        .unwrap_or(file)
 }
 
 /// A name with only letters, digits, spaces, `-` and `_`, for a file name
@@ -1194,50 +1091,17 @@ mod tests {
     }
 
     #[test]
-    fn format_1_clips_and_controllers_read_as_the_one_shape() {
-        let take = ClipFile::from_json(
-            r#"{ "format_version": 1, "source": "a.fbx", "take": "T", "start": 1, "end": 3,
-                 "speed": 2, "loop": false, "root_motion": true,
-                 "events": [ { "time": 1.0, "name": "Step" } ] }"#,
-        )
-        .unwrap();
-        let link = take.link.as_ref().unwrap();
-        assert_eq!((link.source.as_str(), link.take.as_str()), ("a.fbx", "T"));
-        assert_eq!((link.start, link.end, link.root_motion), (1.0, 3.0, true));
-        // Twice as fast: 2 seconds of the take in 1 of the clip.
-        assert_eq!(take.duration, 1.0);
-        assert_eq!(take.speed(), 2.0);
-        assert!(!take.looping);
-        assert_eq!(take.events[0].time, 0.5);
-        // Backwards: the link runs from the end to the start.
-        let back = ClipFile::from_json(
-            r#"{ "format_version": 1, "source": "a.fbx", "take": "T", "start": 0, "end": 2,
-                 "speed": -1, "events": [ { "time": 0.5, "name": "Step" } ] }"#,
-        )
-        .unwrap();
-        let link = back.link.as_ref().unwrap();
-        assert_eq!((link.start, link.end), (2.0, 0.0));
-        assert_eq!(back.speed(), -1.0);
-        assert_eq!(back.events[0].time, 1.5);
-        let property = ClipFile::from_json(
-            r#"{ "format_version": 1, "kind": "property", "duration": 1.5, "loop": false,
-                 "tracks": [ { "id": "p", "target": ".", "property": "Position",
-                   "keys": [ { "id": "k", "time": 0, "value": [0, 2, 0] } ] } ] }"#,
-        )
-        .unwrap();
-        assert!(property.link.is_none());
-        assert_eq!(property.tracks.len(), 1);
-        assert_eq!(property.format_version, FORMAT_VERSION);
-        // Left-out fields take their defaults.
-        let plain = ClipFile::from_json(
+    fn format_1_clips_and_state_machines_are_refused_and_say_to_upgrade() {
+        // The project upgrade to format 3 rewrote them; nothing reads them
+        // here any more (Phase 92).
+        let clip = ClipFile::from_json(
             r#"{ "format_version": 1, "source": "a.fbx", "take": "T", "start": 0, "end": 2 }"#,
         )
-        .unwrap();
-        assert_eq!(plain.speed(), 1.0);
-        assert!(plain.looping);
-        let controller = StateMachineFile::from_json(r#"{ "format_version": 1 }"#).unwrap();
-        assert!(controller.states.is_empty());
-        assert_eq!(controller.format_version, FORMAT_VERSION);
+        .unwrap_err();
+        assert!(clip.0.contains("older animation format (1)"), "{clip}");
+        assert!(clip.0.contains("upgrade"), "{clip}");
+        let machine = StateMachineFile::from_json(r#"{ "format_version": 1 }"#).unwrap_err();
+        assert!(machine.0.contains("older animation format"), "{machine}");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Genre templates
 
-New Project's playable templates (unified Phase 69): First Person, Third Person, Vehicle, Top Down and Multiplayer Arena, beside Baseplate, Empty and Starter scene. Code: `crates/project/src/templates.rs` (`Template`, `create_project_from`), `crates/project/build.rs`, and the editor's `start.rs` and `start/dialogs.rs`.
+New Project's playable templates (unified Phase 69): First Person, Third Person, Vehicle, Top Down and Multiplayer Arena, beside Baseplate and Empty (the Starter scene went in unified Phase 92: the genre templates replace it; projects made from it are unaffected). Code: `crates/project/src/templates.rs` (`Template`, `create_project_from`), `crates/project/build.rs`, and the editor's `start.rs` and `start/dialogs.rs`.
 
 ## Where they live
 
