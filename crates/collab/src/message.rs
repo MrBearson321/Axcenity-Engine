@@ -71,6 +71,12 @@ pub enum ToHost {
     Lock { path: String },
     /// Done editing it.
     Unlock { path: String },
+    /// Opens the live document of a script or stylesheet (C7): the host
+    /// answers with what a copy that has seen `state_vector` lacks (an
+    /// empty one for a copy with nothing yet).
+    DocOpen { path: String, state_vector: Vec<u8> },
+    /// A change to an open live document: a `yrs` v1 update.
+    DocUpdate { path: String, update: Vec<u8> },
 }
 
 /// From the host to a client.
@@ -142,4 +148,22 @@ pub enum ToClient {
     Locks(BTreeMap<String, MemberId>),
     /// The owner ended the session (or quit): nothing more comes (TC6).
     Ended,
+    /// Answers `DocOpen`: what the member's copy lacked, and what the
+    /// host's has seen (so the member sends what the host lacks).
+    DocState {
+        path: String,
+        update: Vec<u8>,
+        state_vector: Vec<u8>,
+        /// The document's origin: a copy from another can't merge with it.
+        origin: u64,
+    },
+    /// Another member's change to a live document, as the host applied it.
+    DocUpdate {
+        path: String,
+        update: Vec<u8>,
+        author: MemberId,
+    },
+    /// The host didn't take the member's change to a live document, and
+    /// why. Their copy should open the document again.
+    DocRefused { path: String, reason: String },
 }

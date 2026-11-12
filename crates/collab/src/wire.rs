@@ -25,7 +25,7 @@ use crate::presence::{Camera, Collaborator, Presence};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 3;
+pub const FORMAT: u8 = 4;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -535,6 +535,8 @@ enum WireToHost {
     Fetch(Vec<FileHash>),
     Lock(String),
     Unlock(String),
+    DocOpen(String, Blob),
+    DocUpdate(String, Blob),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -591,6 +593,12 @@ impl From<&ToHost> for WireToHost {
             ToHost::Fetch(hashes) => WireToHost::Fetch(hashes.clone()),
             ToHost::Lock { path } => WireToHost::Lock(path.clone()),
             ToHost::Unlock { path } => WireToHost::Unlock(path.clone()),
+            ToHost::DocOpen { path, state_vector } => {
+                WireToHost::DocOpen(path.clone(), Blob(state_vector.clone()))
+            }
+            ToHost::DocUpdate { path, update } => {
+                WireToHost::DocUpdate(path.clone(), Blob(update.clone()))
+            }
         }
     }
 }
@@ -622,6 +630,14 @@ impl WireToHost {
             WireToHost::Fetch(hashes) => ToHost::Fetch(hashes),
             WireToHost::Lock(path) => ToHost::Lock { path },
             WireToHost::Unlock(path) => ToHost::Unlock { path },
+            WireToHost::DocOpen(path, state_vector) => ToHost::DocOpen {
+                path,
+                state_vector: state_vector.0,
+            },
+            WireToHost::DocUpdate(path, update) => ToHost::DocUpdate {
+                path,
+                update: update.0,
+            },
         })
     }
 }
@@ -672,6 +688,9 @@ enum WireToClient {
     Missing(FileHash),
     Locks(BTreeMap<String, u32>),
     Ended,
+    DocState(String, Blob, Blob, u64),
+    DocUpdate(String, Blob, u32),
+    DocRefused(String, String),
 }
 
 impl From<&ToClient> for WireToClient {
@@ -765,6 +784,25 @@ impl From<&ToClient> for WireToClient {
                     .collect(),
             ),
             ToClient::Ended => WireToClient::Ended,
+            ToClient::DocState {
+                path,
+                update,
+                state_vector,
+                origin,
+            } => WireToClient::DocState(
+                path.clone(),
+                Blob(update.clone()),
+                Blob(state_vector.clone()),
+                *origin,
+            ),
+            ToClient::DocUpdate {
+                path,
+                update,
+                author,
+            } => WireToClient::DocUpdate(path.clone(), Blob(update.clone()), author.0),
+            ToClient::DocRefused { path, reason } => {
+                WireToClient::DocRefused(path.clone(), reason.clone())
+            }
         }
     }
 }
@@ -867,6 +905,18 @@ impl WireToClient {
                     .collect(),
             ),
             WireToClient::Ended => ToClient::Ended,
+            WireToClient::DocState(path, update, state_vector, origin) => ToClient::DocState {
+                path,
+                update: update.0,
+                state_vector: state_vector.0,
+                origin,
+            },
+            WireToClient::DocUpdate(path, update, author) => ToClient::DocUpdate {
+                path,
+                update: update.0,
+                author: MemberId(author),
+            },
+            WireToClient::DocRefused(path, reason) => ToClient::DocRefused { path, reason },
         })
     }
 }

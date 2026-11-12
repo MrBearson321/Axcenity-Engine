@@ -340,6 +340,9 @@ impl HostSession {
 
     /// The session ended cleanly: the host's journal goes (TC6).
     pub fn end_cleanly(&mut self) {
+        // Typing in live documents not written yet goes to the files first.
+        let out = self.host.write_back_now();
+        self.route(out);
         self.host.end_journal();
     }
 

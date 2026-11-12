@@ -173,6 +173,7 @@ fn check_no_resync(net: &mut Net, seed: u64, seen: &mut Seen) {
                 Notice::Joined | Notice::Arrived { .. } | Notice::Left { .. } => {}
                 Notice::Resynced => panic!("seed {seed}: a copy disagreed with the host"),
                 Notice::HostLeft => panic!("seed {seed}: the host never ends here"),
+                Notice::DocRefused { .. } => panic!("seed {seed}: no live documents here"),
                 Notice::Refused { .. } => seen.refused += 1,
                 Notice::Changed { notes, .. } => {
                     for note in notes {

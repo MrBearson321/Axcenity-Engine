@@ -52,7 +52,7 @@
 // The in-process hub is for tests; menus that end a session come in TC4.
 #![cfg_attr(not(test), allow(dead_code))]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -171,6 +171,11 @@ pub(super) fn load_own_identity() -> Result<Identity, String> {
 }
 
 /// Saves a changed name or colour for the next session.
+/// Whether the document at `path` is edited live in a session (C7).
+fn is_live_path(path: &str) -> bool {
+    axcenity_collab::live::is_live(path) && axcenity_collab::files::is_synced(path)
+}
+
 pub(super) fn save_own_identity(identity: &Identity) -> std::io::Result<()> {
     if cfg!(test) {
         return Ok(());
@@ -315,6 +320,9 @@ pub(crate) struct Team {
     unsent_loaded: bool,
     /// The session's name, from the invite this editor joined with (C4).
     pub(crate) session_name: Option<String>,
+    /// Open live documents (C7), by path: the text the tab and the
+    /// document last agreed on (`None` until the host's arrives).
+    live: BTreeMap<String, Option<String>>,
 }
 
 impl Team {
@@ -336,6 +344,7 @@ impl Team {
             unsent_kept: None,
             unsent_loaded: false,
             session_name: None,
+            live: BTreeMap::new(),
         }
     }
 
@@ -1070,6 +1079,7 @@ impl EditorApp {
         }
         self.team_file_changes(file_changes, file_problem);
         self.open_team_mirror_when_ready();
+        self.team_live_docs();
         self.team_locks();
         self.keep_unsent();
         self.follow_member();
@@ -1344,10 +1354,11 @@ impl EditorApp {
         if self.team.is_none() {
             return;
         }
+        // Live scripts and stylesheets are edited by everyone at once.
         let wanted: std::collections::BTreeSet<String> = self
             .unsaved_documents()
             .into_iter()
-            .filter(|path| axcenity_collab::files::is_synced(path))
+            .filter(|path| axcenity_collab::files::is_synced(path) && !is_live_path(path))
             .collect();
         let Some(team) = self.team.as_mut() else {
             return;
@@ -1364,7 +1375,91 @@ impl EditorApp {
         }
         let team = self.team.as_ref().expect("checked above");
         for tab in self.tabs.iter_mut() {
-            tab.editing_elsewhere = team.editing_elsewhere(&tab.path);
+            tab.editing_elsewhere = team.editing_elsewhere(&tab.path).filter(|_| !tab.live);
+        }
+    }
+
+    /// Whether the live document of the tab at `path` has the host's text.
+    #[cfg(test)]
+    pub(crate) fn live_doc_ready(&self, path: &str) -> bool {
+        self.team
+            .as_ref()
+            .and_then(|team| team.live.get(path))
+            .is_some_and(Option::is_some)
+    }
+
+    /// Live scripts and stylesheets (C7): each open script or stylesheet
+    /// tab edits its file's live document, with everyone at once, instead
+    /// of asking to be the one editing it. Typing goes to the document,
+    /// others' typing comes back into the tab with the cursor kept in
+    /// place, and Undo takes back only this member's typing.
+    fn team_live_docs(&mut self) {
+        for tab in self.tabs.iter_mut() {
+            tab.live = false;
+        }
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        let Some(client) = team
+            .client
+            .as_mut()
+            .filter(|c| c.is_joined() && !c.host_left())
+        else {
+            return;
+        };
+        let mut open = std::collections::BTreeSet::new();
+        for tab in self.tabs.iter_mut() {
+            if is_live_path(&tab.path) {
+                open.insert(tab.path.clone());
+            }
+        }
+        team.live.retain(|path, _| {
+            let keep = open.contains(path);
+            if !keep {
+                client.close_doc(path);
+            }
+            keep
+        });
+        for path in &open {
+            if !team.live.contains_key(path) {
+                client.open_doc(path);
+                team.live.insert(path.clone(), None);
+            }
+        }
+        let changed: std::collections::BTreeSet<String> =
+            client.take_doc_changes().into_iter().collect();
+        for tab in self.tabs.iter_mut() {
+            let Some(agreed) = team.live.get_mut(&tab.path) else {
+                continue;
+            };
+            tab.live = true;
+            let Some(doc) = client.doc_text(&tab.path) else {
+                continue;
+            };
+            let mut refresh = changed.contains(&tab.path);
+            match agreed {
+                // First time: the document wins, unless this tab had
+                // changes of its own, which go into it.
+                None if tab.unsaved() && tab.text != doc => {
+                    client.edit_doc(&tab.path, &tab.text);
+                }
+                None => refresh = true,
+                Some(last) if *last != tab.text => {
+                    client.edit_doc(&tab.path, &tab.text);
+                }
+                Some(_) => {}
+            }
+            if let Some(undo) = tab.live_undo.take() {
+                refresh |= if undo {
+                    client.undo_doc(&tab.path)
+                } else {
+                    client.redo_doc(&tab.path)
+                };
+            }
+            if refresh && let Some(text) = client.doc_text(&tab.path) {
+                tab.take_remote_text(text);
+            }
+            *agreed = Some(tab.text.clone());
         }
     }
 
@@ -1533,6 +1628,13 @@ impl EditorApp {
                     "Collaborate: this copy disagreed with the session and was reloaded \
                      (your unsent edits were kept)",
                 ),
+                Notice::DocRefused { path, reason } => {
+                    self.output.warning(format!(
+                        "Collaborate: typing in {path} was refused: {reason}"
+                    ));
+                    self.toasts
+                        .warning(format!("Your typing in {path} wasn't taken: {reason}"));
+                }
             }
         }
     }

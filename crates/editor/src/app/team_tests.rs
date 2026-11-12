@@ -732,7 +732,7 @@ fn a_ui_graph_a_teammate_saves_runs_its_new_version_here() {
 }
 
 #[test]
-fn a_joining_editor_gets_the_files_and_its_saves_reach_the_host() {
+fn a_joining_editor_gets_the_files_and_types_in_scripts_with_the_host() {
     let project = copy_of_example("hello-touched", "team-files-host");
     let mut a = EditorApp::new(Some(&project));
     let invite = a
@@ -761,33 +761,39 @@ fn a_joining_editor_gets_the_files_and_its_saves_reach_the_host() {
     assert_eq!(scripts(&a), scripts(&b));
     assert_eq!(dump(&a.world), dump(&b.world));
 
-    // The joiner edits a script: the host's editor shows it read-only.
+    // Scripts are live (C7): both editors type in the same script at
+    // once, neither tab locks, and each sees the other's typing.
     let (path, _, source) = scripts(&b).remove(0);
     b.tabs.open(&path, &source, None);
     a.tabs.open(&path, &source, None);
-    b.tabs.get_mut(&path).unwrap().text = format!("{source}\n-- edited by the joiner\n");
-    settle_net(&mut a, &mut b, |a, _| {
-        a.tabs
-            .get(&path)
-            .is_some_and(|tab| tab.editing_elsewhere.is_some())
+    settle_net(&mut a, &mut b, |a, b| {
+        a.live_doc_ready(&path) && b.live_doc_ready(&path)
     });
-    // Saving sends it; the host's editor reads it in and the tab frees up.
-    assert!(b.save_tab(&path));
-    settle_net(&mut a, &mut b, |a, _| {
-        std::fs::read_to_string(project.join(&path))
-            .is_ok_and(|text| text.ends_with("-- edited by the joiner\n"))
-            && a.tabs
-                .get(&path)
-                .is_some_and(|tab| tab.editing_elsewhere.is_none())
+    b.tabs.get_mut(&path).unwrap().text = format!("{source}-- from the joiner\n");
+    a.tabs.get_mut(&path).unwrap().text = format!("-- from the host\n{source}");
+    let both = format!("-- from the host\n{source}-- from the joiner\n");
+    settle_net(&mut a, &mut b, |a, b| {
+        a.tabs.get(&path).unwrap().text == both && b.tabs.get(&path).unwrap().text == both
+    });
+    for app in [&a, &b] {
+        let tab = app.tabs.get(&path).unwrap();
+        assert!(tab.live && tab.editing_elsewhere.is_none());
+    }
+    // Once the typing settles, the host writes it to its file, and the
+    // tabs have nothing left to save.
+    settle_net(&mut a, &mut b, |a, b| {
+        std::fs::read_to_string(project.join(&path)).is_ok_and(|text| text == both)
+            && !a.tabs.get(&path).unwrap().unsaved()
+            && !b.tabs.get(&path).unwrap().unsaved()
+    });
+    // Undo in the joiner's tab takes back only the joiner's line.
+    b.tabs.get_mut(&path).unwrap().live_undo = Some(true);
+    let hosts_only = format!("-- from the host\n{source}");
+    settle_net(&mut a, &mut b, |a, b| {
+        a.tabs.get(&path).unwrap().text == hosts_only
+            && b.tabs.get(&path).unwrap().text == hosts_only
     });
     settle_net(&mut a, &mut b, |a, b| scripts(a) == scripts(b));
-    assert!(
-        a.tabs
-            .get(&path)
-            .unwrap()
-            .text
-            .ends_with("-- edited by the joiner\n")
-    );
 
     // A new script from the host's editor reaches the joiner on the same
     // Instance, without a second Script.

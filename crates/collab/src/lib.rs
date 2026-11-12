@@ -42,6 +42,7 @@ pub mod hosted;
 pub mod identity;
 pub mod ids;
 pub mod journal;
+pub mod live;
 pub mod message;
 pub mod mirror;
 pub mod op;
@@ -60,6 +61,10 @@ mod convergence_tests;
 mod files_tests;
 #[cfg(test)]
 mod journal_tests;
+#[cfg(test)]
+mod live_session_tests;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod net_tests;
 #[cfg(test)]

@@ -21,6 +21,12 @@
 //! again; the host's join message says which of them it already has (the
 //! ones it wrote down just before it stopped), so they don't apply twice.
 //!
+//! Also beside them, `live/` keeps each live document's whole state (C7,
+//! [`Journal::save_doc`]), written when its typing is written back to its
+//! file and with each snapshot. Like `handled`, it outlives [`discard`], so
+//! the next run of the host carries on with the same documents
+//! ([`saved_docs`]); a clean end removes it.
+//!
 //! A member keeps a recovery file the same way: their edits the host
 //! hasn't confirmed ([`save_unsent`]), written while they're offline, so
 //! an editor that stops before the connection comes back sends them the
@@ -36,6 +42,7 @@ use axcenity_core::World;
 
 use crate::apply::{self, Doc, Graveyard};
 use crate::host::Logged;
+use crate::live::Saved;
 use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Transaction;
 use crate::role::Role;
@@ -46,6 +53,7 @@ pub const FOLDER: &str = ".axcenity/teamcreate";
 const SNAPSHOT_FILE: &str = "snapshot";
 const JOURNAL_FILE: &str = "journal";
 const HANDLED_FILE: &str = "handled";
+const LIVE_FOLDER: &str = "live";
 
 /// The newest transaction number handled from each member.
 pub type Handled = BTreeMap<MemberId, u64>;
@@ -139,8 +147,22 @@ impl Journal {
     /// The session ended cleanly: nothing to recover.
     /// `handled` stays: a member's edits from this session may reach a
     /// later one.
+    /// Keeps a live document's whole state, replacing what was kept for
+    /// its path.
+    pub fn save_doc(&self, saved: &Saved) -> io::Result<()> {
+        let folder = self.folder.join(LIVE_FOLDER);
+        fs::create_dir_all(&folder)?;
+        let mut bytes = vec![wire::FORMAT];
+        bytes.extend(postcard::to_stdvec(saved).map_err(|error| invalid(&error.to_string()))?);
+        write_whole(&folder, &live_name(&saved.path), &bytes)
+    }
+
     pub fn end(self, handled: &Handled) -> io::Result<()> {
         drop(self.file);
+        match fs::remove_dir_all(self.folder.join(LIVE_FOLDER)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
         write_whole(&self.folder, HANDLED_FILE, &handled_text(handled))?;
         remove(&self.folder.join(JOURNAL_FILE))?;
         remove(&self.folder.join(SNAPSHOT_FILE))
@@ -210,6 +232,41 @@ pub fn recover(project: &Path) -> io::Result<Option<Recovered>> {
         seq,
         handled,
     }))
+}
+
+/// The live documents an earlier run of the host kept in the project at
+/// `project` ([`Journal::save_doc`]). One that can't be read is left out.
+pub fn saved_docs(project: &Path) -> Vec<Saved> {
+    let Ok(listing) = fs::read_dir(project.join(FOLDER).join(LIVE_FOLDER)) else {
+        return Vec::new();
+    };
+    let mut saved = Vec::new();
+    for entry in listing.flatten() {
+        if entry.path().extension().is_some() {
+            continue; // a half-written `.tmp`
+        }
+        let read = fs::read(entry.path())
+            .ok()
+            .and_then(|bytes| match bytes.split_first() {
+                Some((&wire::FORMAT, rest)) => postcard::from_bytes::<Saved>(rest).ok(),
+                _ => None,
+            });
+        match read {
+            Some(doc) => saved.push(doc),
+            None => log::warn!(
+                "Collaborate: a saved live document ({}) couldn't be read",
+                entry.file_name().to_string_lossy()
+            ),
+        }
+    }
+    saved.sort_by(|a, b| a.path.cmp(&b.path));
+    saved
+}
+
+/// The file name a live document is kept under: its path's hash, as paths
+/// have slashes.
+fn live_name(path: &str) -> String {
+    crate::files::FileHash::of(path.as_bytes()).hex()
 }
 
 /// The newest transaction number the host handled from each member, as
