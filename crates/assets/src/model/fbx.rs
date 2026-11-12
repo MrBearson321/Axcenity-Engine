@@ -922,7 +922,8 @@ impl Reader<'_> {
                     }
                 }
                 (None, None) => self.note(format!(
-                    "has a texture `{name}` it doesn't know the use of, so it's left out;                      naming it like `{}_Normal` or `_Roughness` says what it's for",
+                    "has a texture `{name}` it doesn't know the use of, so it's left out; \
+                     naming it like `{}_Normal` or `_Roughness` says what it's for",
                     material.element.name
                 )),
             }

@@ -388,7 +388,8 @@ impl EditorApp {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(format!(
-                            "The host ended the session. This copy stays open, read-only.{kept}                              Leave the session to work on it alone."
+                            "The host ended the session. This copy stays open, read-only.{kept} \
+                             Leave the session to work on it alone."
                         ))
                         .color(palette.text_weak),
                     )

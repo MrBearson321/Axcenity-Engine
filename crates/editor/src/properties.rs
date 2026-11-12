@@ -1617,7 +1617,8 @@ fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
         if ui
             .small_button(icons::FOLDER_OPEN)
             .on_hover_text(
-                "Choose a sky image from this computer: a 2:1 panorama, best as an HDR                  (.exr or .hdr), or a PNG or JPEG",
+                "Choose a sky image from this computer: a 2:1 panorama, best as an HDR \
+                 (.exr or .hdr), or a PNG or JPEG",
             )
             .clicked()
         {

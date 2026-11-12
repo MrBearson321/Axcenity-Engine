@@ -806,7 +806,8 @@ impl GraphicsSettings {
         let volumetric_fog = self.volumetric_fog() && capabilities.compute_shaders;
         if self.volumetric_fog() && !volumetric_fog {
             notes.push(
-                "Volumetric fog is off: this GPU can't run compute shaders. Fog is drawn without                  sun shafts."
+                "Volumetric fog is off: this GPU can't run compute shaders. Fog is drawn without \
+                 sun shafts."
                     .to_owned(),
             );
         }

@@ -1045,7 +1045,8 @@ impl EditorApp {
         team.unsent_kept = Some((usize::MAX, None));
         if count > 0 {
             self.output.info(format!(
-                "Team Create: sent {count} change(s) this editor made in the session before it                  stopped"
+                "Team Create: sent {count} change(s) this editor made in the session before it \
+                 stopped"
             ));
         }
     }
