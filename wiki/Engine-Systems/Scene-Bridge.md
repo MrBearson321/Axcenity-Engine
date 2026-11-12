@@ -4,10 +4,10 @@ type: system
 status: current
 implementation: implemented
 crates: [scene]
-source: [crates/scene/src/lib.rs, crates/scene/src/draw_list.rs, crates/scene/src/retained.rs, crates/scene/src/mesh_cache.rs, crates/scene/src/terrain.rs, crates/scene/src/streaming.rs, crates/scene/src/pick.rs, crates/scene/src/particles.rs, crates/scene/src/preload.rs, crates/scene/src/surfaces.rs]
+source: [crates/scene/src/lib.rs, crates/scene/src/draw_list.rs, crates/scene/src/draw_list/lights.rs, crates/scene/src/draw_list/materials.rs, crates/scene/src/retained.rs, crates/scene/src/mesh_cache.rs, crates/scene/src/terrain.rs, crates/scene/src/streaming.rs, crates/scene/src/pick.rs, crates/scene/src/particles.rs, crates/scene/src/preload.rs, crates/scene/src/surfaces.rs]
 docs: [docs/rendering/pipeline.md, docs/rendering/performance.md, docs/architecture/streaming.md, crates/scene/CLAUDE.md]
-verified: 2026-11-11
-verified_commit: 19c7179d
+verified: 2026-11-12
+verified_commit: e1eea07
 tags: [system/scene, graphics]
 ---
 

@@ -4,17 +4,17 @@ type: system
 status: current
 implementation: implemented
 crates: [script]
-source: [crates/script/src/lib.rs, crates/script/src/context.rs, crates/script/src/lent.rs, crates/script/src/sandbox.rs, crates/script/src/scheduler.rs, crates/script/src/events.rs, crates/script/src/changes.rs, crates/script/src/watchdog.rs, crates/script/src/chunks.rs, crates/script/src/handler_threads.rs, crates/script/src/instance.rs, crates/script/src/types.rs, crates/script/src/remote.rs, crates/script/src/definitions.rs, crates/script/src/debugger.rs]
+source: [crates/script/src/lib.rs, crates/script/src/runtime.rs, crates/script/src/runtime/frame.rs, crates/script/src/runtime/players.rs, crates/script/src/context.rs, crates/script/src/lent.rs, crates/script/src/sandbox.rs, crates/script/src/scheduler.rs, crates/script/src/events.rs, crates/script/src/changes.rs, crates/script/src/watchdog.rs, crates/script/src/chunks.rs, crates/script/src/handler_threads.rs, crates/script/src/instance.rs, crates/script/src/types.rs, crates/script/src/remote.rs, crates/script/src/definitions.rs, crates/script/src/debugger.rs]
 docs: [docs/scripting.md, docs/scripting/execution.md, docs/scripting/sandbox.md, docs/scripting/language.md, docs/scripting/client-server.md, docs/scripting/modules.md, crates/script/CLAUDE.md]
-verified: 2026-11-11
-verified_commit: 19c7179d
+verified: 2026-11-12
+verified_commit: e1eea07
 tags: [system/scripting, lua]
 ---
 
 # Scripting
 
 > [!summary]
-> `script` runs **Luau** (`mlua` 0.12, `luau0-src` pinned `=0.22.0`) in a per-script allowlist sandbox, with a Roblox-familiar engine API. `ScriptRuntime` owns **two VMs**, a server side and a client side, even in single-player. Every script body and handler is a coroutine owned by a scheduler; change events are deferred; a watchdog stops a script that runs 3 s without pausing. The crate still hosts TweenService, SaveService, Prompts, Sequences, Players, chat and levels; Debris, Abilities, Tools, Health, Humanoids, dialogues and quests moved to the `gameplay` crate behind `script::GameSystem` (L7, [Gameplay systems](Gameplay-Systems.md)). **Implemented.** Native `vector` for Vector3 is **not chosen** ([ADR-0015](../Architecture/Architecture-Decisions/ADR-0015-Native-Vector-On-Hold.md)).
+> `script` runs **Luau** (`mlua` 0.12, `luau0-src` pinned `=0.22.0`) in a per-script allowlist sandbox, with a Roblox-familiar engine API. `ScriptRuntime` (`lib.rs`, with its methods by feature in `runtime/`) owns **two VMs**, a server side and a client side, even in single-player. Every script body and handler is a coroutine owned by a scheduler; change events are deferred; a watchdog stops a script that runs 3 s without pausing. The crate still hosts TweenService, SaveService, Prompts, Sequences, Players, chat and levels; Debris, Abilities, Tools, Health, Humanoids, dialogues and quests moved to the `gameplay` crate behind `script::GameSystem` (L7, [Gameplay systems](Gameplay-Systems.md)). **Implemented.** Native `vector` for Vector3 is **not chosen** ([ADR-0015](../Architecture/Architecture-Decisions/ADR-0015-Native-Vector-On-Hold.md)).
 
 ## Architecture
 
