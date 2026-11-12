@@ -98,7 +98,7 @@ fn rename(app: &mut EditorApp, id: InstanceId, name: &str) {
     app.history.seal();
 }
 
-fn warnings(app: &EditorApp) -> Vec<String> {
+pub(super) fn warnings(app: &EditorApp) -> Vec<String> {
     app.output
         .lines()
         .iter()
@@ -289,7 +289,7 @@ fn many_edits_from_both_editors_stay_identical() {
 
 /// A folder for one test's Collaborate files (identity, certificate,
 /// members), so each editor is its own computer.
-fn team_folder(name: &str) -> std::path::PathBuf {
+pub(super) fn team_folder(name: &str) -> std::path::PathBuf {
     // A counter, not the time: names must be valid on Windows too.
     static FOLDERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let folder = std::env::temp_dir().join(format!(
@@ -302,7 +302,11 @@ fn team_folder(name: &str) -> std::path::PathBuf {
 }
 
 /// Runs both editors' frames until `done`, or fails after 20 s.
-fn settle_net(a: &mut EditorApp, b: &mut EditorApp, done: impl Fn(&EditorApp, &EditorApp) -> bool) {
+pub(super) fn settle_net(
+    a: &mut EditorApp,
+    b: &mut EditorApp,
+    done: impl Fn(&EditorApp, &EditorApp) -> bool,
+) {
     let start = std::time::Instant::now();
     while !done(a, b) {
         assert!(
@@ -567,7 +571,9 @@ fn the_panel_offers_share_and_join_then_shows_the_session() {
 }
 
 /// `invite`, naming the loopback address (the host names its LAN one).
-fn over_loopback(invite: axcenity_collab::access::Invite) -> axcenity_collab::access::Invite {
+pub(super) fn over_loopback(
+    invite: axcenity_collab::access::Invite,
+) -> axcenity_collab::access::Invite {
     let port = invite.host.rsplit(':').next().unwrap().to_owned();
     axcenity_collab::access::Invite {
         host: format!("127.0.0.1:{port}"),

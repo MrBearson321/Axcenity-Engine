@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-teamwork"
+description = "Teamwork: a project's shared task board (tasks, assignments, bugs, goals) kept as plain files in the project, so Collaborate sessions and Git carry it. No engine, UI or network code."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

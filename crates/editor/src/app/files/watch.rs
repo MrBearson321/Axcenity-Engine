@@ -56,6 +56,11 @@ impl EditorApp {
                 self.ui_graph_file_changed(path);
             } else if project::is_stylesheet(path) {
                 self.stylesheet_file_changed(path);
+            } else if path.starts_with("team/") {
+                // Teamwork files; anything else there is the team's own.
+                if axcenity_teamwork::board::is_board_path(path) {
+                    self.board_file_changed();
+                }
             } else if project::is_asset_path(path) {
                 self.asset_file_changed(path);
             } else if self.is_object_file(path) {
