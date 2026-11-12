@@ -42,6 +42,7 @@ mod ik_control;
 mod property_clip;
 pub mod ragdoll;
 pub mod sequence;
+mod threads;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip, read_state_machine};
 pub use blend_space::{blend_space_weights, triangulate};
@@ -67,6 +68,7 @@ pub use property_clip::{
     current_numbers, model_pivot, numbers_of, resolve_target, sample_time, sample_track,
     target_path, value_from_numbers,
 };
+pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
 
 #[cfg(test)]
 mod ik_control_tests;

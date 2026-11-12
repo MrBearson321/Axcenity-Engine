@@ -4,7 +4,7 @@ type: architecture
 status: current
 verified: 2026-11-11
 verified_commit: 7e373ad1
-source: [crates/assets/src/loading.rs, crates/render/src/renderer/parallel.rs, crates/render/src/renderer/uploads.rs, crates/nav/src/shared.rs, crates/scene/src/terrain.rs, crates/terrain/src/job.rs, crates/script/src/csg.rs, crates/project/src/watch.rs, crates/project/src/packed.rs, crates/editor/src/cooking.rs, crates/player/src/preload.rs, crates/script/src/task.rs]
+source: [crates/assets/src/loading.rs, crates/anim/src/threads.rs, crates/render/src/renderer/parallel.rs, crates/render/src/renderer/uploads.rs, crates/nav/src/shared.rs, crates/scene/src/terrain.rs, crates/terrain/src/job.rs, crates/script/src/csg.rs, crates/project/src/watch.rs, crates/project/src/packed.rs, crates/editor/src/cooking.rs, crates/player/src/preload.rs, crates/script/src/task.rs]
 docs: [docs/project/assets.md, docs/architecture/navigation.md, docs/scripting/execution.md, docs/development-policy.md]
 tags: [architecture, threading, perf]
 ---
@@ -54,6 +54,7 @@ Rule of thumb: **anything that reads or writes the World runs on the frame's thr
 |---|---|---|
 | Draw planning (`plan_draws`, culling, batching) | `rayon` (the renderer's own pool, below) | Only above 4,096 items (`WORTH_SHARING` in `render/src/renderer/parallel.rs`); parts of 512; **output order equals input order** so a frame is identical on any thread count (tested) |
 | rapier's step | rapier3d `parallel` on **physics' own rayon pool, at most 12 threads** (`physics/src/threads.rs`, `AXCENITY_PHYSICS_THREADS`; PRs #86, #93) | rayon's global pool has a thread per logical CPU (32 on the Desktop) and was slower. Results don't depend on the count. Worlds sharing the pool step one at a time (rapier blocks a pool thread on its own tasks, which deadlocked tests side by side). Tiny scenes pay a little (`hello-vehicle` 0.05–0.07 → 0.19 ms) |
+| Skeletal posing (Phase 93) | the **animation pool, at most 8 threads** (`anim/src/threads.rs`, `AXCENITY_ANIM_THREADS`; 1 = the calling thread) | State machines, properties and events stay on the frame's thread; each pose that needs nothing more from the World (no Ragdoll, IKControl or foot placement) is worked out on the pool from its clips and state machine, from 8 poses up; results applied in input order, the same on any thread count (`a_crowd_is_posed_the_same_on_one_thread_and_on_eight`). The Profiler shows posing per thread |
 | Draw planning pool | the **renderer's own rayon pool, at most 12 threads** (`MAX_THREADS`, `AXCENITY_RENDER_THREADS`; 0 uses the global pool; PR #88) | Unpinned Render step 6–18% less CPU (S10k 2.60 → 2.14 ms) |
 
 ## Rules for new concurrent code
@@ -67,4 +68,4 @@ Rule of thumb: **anything that reads or writes the World runs on the frame's thr
 ## Planned
 
 - **L4, parallel read / serial write stages** in the frame: open; no 4-core S10k stage is a clear target yet; measure on 8+ cores first ([Current roadmap](../Roadmap/Current-Roadmap.md)).
-- **Phase 93, "A multithreaded frame"**, in `plans/axcenity-engine-unified.md`: not started.
+- **Phase 93, "A multithreaded frame"**, in `plans/axcenity-engine-unified.md`: posing across threads, the Profiler's per-thread posing time and the crowd benchmark scene (`axcenity-test --make-crowd`) are built; the before/after numbers on a 6-core desktop are still to measure. Merging every pool into one isn't planned: physics, drawing and posing each measured faster on a pool of their own size.

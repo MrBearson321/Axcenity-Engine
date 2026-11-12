@@ -47,8 +47,42 @@ pub struct FrameCost {
     pub audio: Duration,
     /// Animators and property animations.
     pub animation: Duration,
+    /// How long each thread spent posing skeletons, inside `animation`
+    /// (unified Phase 93).
+    pub posing: PosingThreads,
     /// The whole game frame, steps 1 to 4.
     pub total: Duration,
+}
+
+/// Posing time by thread: the calling (main) thread first, then the
+/// animation pool's threads in order (`anim 0`, `anim 1`, …; more than
+/// the slots share the last).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PosingThreads(pub [Duration; PosingThreads::SLOTS]);
+
+impl PosingThreads {
+    pub const SLOTS: usize = 1 + axcenity_anim::ANIM_MAX_THREADS;
+
+    /// From the names `Animators::thread_times` gives.
+    pub fn of(times: &axcenity_anim::ThreadTimes) -> Self {
+        let mut slots = [Duration::ZERO; Self::SLOTS];
+        for (name, time) in times {
+            let slot = name
+                .strip_prefix("anim ")
+                .and_then(|index| index.parse::<usize>().ok())
+                .map_or(0, |index| (index + 1).min(Self::SLOTS - 1));
+            slots[slot] += *time;
+        }
+        Self(slots)
+    }
+
+    /// Each slot's name, as the panel shows it.
+    fn name(slot: usize) -> String {
+        match slot {
+            0 => "Main thread".to_owned(),
+            slot => format!("Thread {slot}"),
+        }
+    }
 }
 
 impl FrameCost {
@@ -336,6 +370,13 @@ impl Profiler {
             lua_bytes: newest.load.lua_bytes,
             scripts: average(|s| s.game.scripts),
             animation: average(|s| s.game.animation),
+            posing: PosingThreads(std::array::from_fn(|slot| {
+                self.samples
+                    .iter()
+                    .map(|s| s.game.posing.0[slot])
+                    .sum::<Duration>()
+                    / count
+            })),
             physics: average(|s| s.game.physics),
             physics_steps: self
                 .samples
@@ -458,6 +499,23 @@ impl Profiler {
             row(ui, "Scripts", millis(summary.scripts));
             row(ui, "Animation", millis(summary.animation));
         });
+        // Where skeletons were posed: the main thread for a few, the
+        // animation pool's threads for a crowd (unified Phase 93).
+        let posing: Vec<(usize, Duration)> = summary
+            .posing
+            .0
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, time)| !time.is_zero())
+            .collect();
+        if !posing.is_empty() {
+            section(ui, "Posing by thread", |ui| {
+                for (slot, time) in posing {
+                    row(ui, &PosingThreads::name(slot), millis(time));
+                }
+            });
+        }
         section(ui, "Network", |ui| {
             if self.network.is_empty() {
                 row(ui, "Clients", "1 (no connections)".into());
@@ -662,6 +720,8 @@ struct Summary {
     lua_bytes: usize,
     scripts: Duration,
     animation: Duration,
+    /// Average posing time per thread.
+    posing: PosingThreads,
     physics: Duration,
     physics_steps: f64,
     bodies: usize,
@@ -1046,6 +1106,41 @@ mod tests {
             profiler.record_shader_errors(std::slice::from_ref(&error));
         }
         assert_eq!(profiler.shader_messages.len(), SHADER_MESSAGES);
+    }
+
+    #[test]
+    fn posing_time_is_listed_by_thread_only_when_there_is_some() {
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(frame(1), GameLoad::default());
+        assert!(
+            !shown_text(&mut profiler)
+                .to_lowercase()
+                .contains("posing by thread")
+        );
+
+        let times = vec![
+            ("main".to_owned(), Duration::from_micros(300)),
+            ("anim 0".to_owned(), Duration::from_millis(2)),
+            ("anim 3".to_owned(), Duration::from_millis(1)),
+        ];
+        let posing = PosingThreads::of(&times);
+        assert_eq!(posing.0[0], Duration::from_micros(300));
+        assert_eq!(posing.0[1], Duration::from_millis(2));
+        assert_eq!(posing.0[4], Duration::from_millis(1));
+        // A thread past the slots counts in the last.
+        let many = PosingThreads::of(&vec![("anim 40".to_owned(), Duration::from_millis(1))]);
+        assert_eq!(many.0[PosingThreads::SLOTS - 1], Duration::from_millis(1));
+
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(FrameCost { posing, ..frame(4) }, GameLoad::default());
+        let text = shown_text(&mut profiler);
+        assert!(text.to_lowercase().contains("posing by thread"), "{text}");
+        assert!(text.contains("Main thread"), "{text}");
+        assert!(text.contains("Thread 1"), "{text}");
+        assert!(text.contains("Thread 4"), "{text}");
+        assert!(!text.contains("Thread 2"), "{text}");
     }
 
     #[test]

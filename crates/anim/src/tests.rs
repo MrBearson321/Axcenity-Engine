@@ -1051,3 +1051,81 @@ fn a_bone_in_the_world_follows_the_pose_the_animators_made() {
     let found = crate::ragdoll::bone_in_world(&world, part, &rig, None, rig.joints[0].bone);
     assert!(found.unwrap().abs_diff_eq(rest, 1e-4));
 }
+
+/// `count` noodles side by side, each with an Animator playing the example's
+/// state machine, at Speeds that differ so their poses differ.
+fn crowd(count: usize) -> (World, Vec<InstanceId>) {
+    use axcenity_core::Parameter;
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let mut parts = Vec::new();
+    for index in 0..count {
+        let part = world.create(ClassName::MeshPart).unwrap();
+        world
+            .set_property(
+                part,
+                "MeshId",
+                Value::String("assets/models/noodle.fbx".into()),
+            )
+            .unwrap();
+        world
+            .set_property(
+                part,
+                "Position",
+                Value::Vector3(Vector3::new(index as f32 * 2.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        world.set_parent(part, Some(workspace)).unwrap();
+        let animator = world.create(ClassName::Animator).unwrap();
+        world
+            .set_property(
+                animator,
+                "StateMachine",
+                Value::String(STATE_MACHINE.into()),
+            )
+            .unwrap();
+        world.set_parent(animator, Some(part)).unwrap();
+        parts.push(part);
+    }
+    // Their parameters arrive with the first update.
+    let assets = Assets::new(example());
+    Animators::with_threads(1).update(&mut world, &assets, 0.0);
+    for (index, &part) in parts.iter().enumerate() {
+        let animator = world.find_first_child(part, "Animator").unwrap();
+        world
+            .animator_mut(animator)
+            .unwrap()
+            .parameters
+            .insert("Speed".into(), Parameter::Number(index as f64 / 4.0));
+    }
+    (world, parts)
+}
+
+#[test]
+fn a_crowd_is_posed_the_same_on_one_thread_and_on_eight() {
+    let assets = Assets::new(example());
+    let mut poses = Vec::new();
+    for threads in [1, 8] {
+        let (mut world, parts) = crowd(24);
+        let mut animators = Animators::with_threads(threads);
+        for _ in 0..30 {
+            animators.update(&mut world, &assets, 1.0 / 60.0);
+        }
+        assert_eq!(animators.take_errors(), Vec::<String>::new());
+        let times = animators.thread_times();
+        if threads == 1 {
+            assert_eq!(times.len(), 1, "{times:?}");
+            assert_eq!(times[0].0, "main");
+        } else {
+            assert!(!times.is_empty(), "{times:?}");
+        }
+        let made: Vec<_> = parts
+            .iter()
+            .map(|part| corners(&assets, &animators.poses()[part]))
+            .collect();
+        poses.push(made);
+    }
+    assert_eq!(poses[0], poses[1]);
+    // And the noodles at different speeds aren't all posed alike.
+    assert_ne!(poses[0][0], poses[0][23]);
+}
