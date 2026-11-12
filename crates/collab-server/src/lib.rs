@@ -45,6 +45,9 @@ pub struct Options {
     /// "host:port" as invites name the server; this computer's LAN address
     /// and the port when `None`.
     pub address: Option<String>,
+    /// Without `address`: name this computer by its Tailscale name when
+    /// Tailscale is connected (C3). Off with `--no-tailscale`.
+    pub tailscale: bool,
 }
 
 impl Options {
@@ -56,6 +59,7 @@ impl Options {
                 .context("there's no data folder for this user: pass --data <folder>")?,
             port: DEFAULT_PORT,
             address: None,
+            tailscale: true,
         })
     }
 }
@@ -189,6 +193,21 @@ impl Server {
         )
         .with_context(|| format!("couldn't listen on port {}", options.port))?;
         let port = session.local_address().port();
+        if options.address.is_none() && options.tailscale {
+            use axcenity_collab::tailscale::{State, advertise};
+            said.push(match advertise(&mut session) {
+                State::Running(net) => format!(
+                    "Reachable over Tailscale as {} ({}). Members on other tailnets need this \
+                     computer shared with them (Tailscale admin console: Machines › … › Share).",
+                    session.address(),
+                    net.login.as_deref().unwrap_or("signed in")
+                ),
+                other => format!(
+                    "{} Invites name this computer's address on its network.",
+                    other.describe()
+                ),
+            });
+        }
         if !session
             .access()
             .members()
@@ -197,8 +216,8 @@ impl Server {
         {
             let invite = session.invite(Role::Owner, INVITE_DAYS * DAY);
             said.push(format!(
-                "This project has no Owner yet. Open this link in your editor (Join Team \
-                 Create…) to be its Owner; it works once, for {INVITE_DAYS} days:\n{}",
+                "This project has no Owner yet. Open this link in your editor (Join \
+                 Collaborate Session…) to be its Owner; it works once, for {INVITE_DAYS} days:\n{}",
                 invite.link()
             ));
         }

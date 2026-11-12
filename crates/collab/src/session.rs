@@ -128,6 +128,12 @@ impl HostSession {
         &self.address
     }
 
+    /// Names the host by `address` ("host:port") in invites made from now
+    /// on, such as its Tailscale name once that's known (C3).
+    pub fn set_address(&mut self, address: String) {
+        self.address = address;
+    }
+
     /// Where it listens.
     pub fn local_address(&self) -> SocketAddr {
         self.listener.address()

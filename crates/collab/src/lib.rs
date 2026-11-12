@@ -49,6 +49,7 @@ pub mod presence;
 pub mod role;
 pub mod session;
 pub mod socket;
+pub mod tailscale;
 pub mod wire;
 
 #[cfg(test)]
@@ -65,6 +66,8 @@ mod net_tests;
 mod presence_tests;
 #[cfg(test)]
 mod rejoin_tests;
+#[cfg(test)]
+mod tailscale_tests;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! `axcenity-collab <project-folder> [--port <port>] [--data <folder>] [--address <host:port>]`:
+//! `axcenity-collab <project-folder> [--port <port>] [--data <folder>] [--address <host:port>] [--no-tailscale]`:
 //! Collaborate's self-hosted server (TC7). It hosts the project for
 //! editors to join with invite links, saves it every 30 seconds with
 //! changes, and takes admin commands typed into its terminal (`help`
@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use axcenity_collab_server::{Options, Server};
 
-const USAGE: &str = "usage: axcenity-collab <project-folder> [--port <port>] [--data <folder>] [--address <host:port>]\n\
+const USAGE: &str = "usage: axcenity-collab <project-folder> [--port <port>] [--data <folder>] [--address <host:port>] [--no-tailscale]\n\
                      example: cargo run -p axcenity-collab-server -- examples/hello-part";
 
 fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Options> {
@@ -21,6 +21,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Options> {
     let mut port = None;
     let mut data = None;
     let mut address = None;
+    let mut tailscale = true;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let mut value = |name: &str| {
@@ -38,6 +39,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Options> {
             }
             "--data" => data = Some(PathBuf::from(value("--data")?)),
             "--address" => address = Some(value("--address")?),
+            "--no-tailscale" => tailscale = false,
             "--help" | "-h" => bail!("{USAGE}"),
             other if other.starts_with("--") => bail!("unknown option `{other}`\n{USAGE}"),
             other if project.is_none() => project = Some(PathBuf::from(other)),
@@ -56,6 +58,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Options> {
         options.data = data;
     }
     options.address = address;
+    options.tailscale = tailscale;
     Ok(options)
 }
 

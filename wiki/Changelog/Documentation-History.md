@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | System inventory | Collaborate C3: `collab::tailscale` (status, sign-in, invite address, reachability); the system's new name | Claude |
 | 2026-11-12 | ADR-0021, ADR-0020, ADR index, roadmap | Collaborate audit (C1): ADR-0021 supersedes ADR-0020's D3 (live `yrs` scripts), TC8 (identity seam, no hosted service) and the name; Tailscale as the guided connection | Claude |
 | 2026-11-12 | Scripting, scene bridge, technical debt | Usability brief Phase 6: `ScriptRuntime` methods split into `runtime/`, the draw list into `draw_list/`; oversized-files and crate-`CLAUDE.md` debt rows | Claude |
 | 2026-11-12 | MCP server | Toolbox tools: `toolbox_search`, `toolbox_get` | Claude |

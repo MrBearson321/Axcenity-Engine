@@ -364,6 +364,21 @@ impl EditorApp {
             format!("Host: {}", team.address())
         };
         ui.label(egui::RichText::new(place).color(palette.text_weak));
+        // How others reach the host (C3): over Tailscale from anywhere, or
+        // only on this network.
+        let reach = match (&team.tailscale, hosting) {
+            (Some(note), _) => Some(format!("Tailscale: {note}.")),
+            (None, true) => {
+                Some("Tailscale isn't connected: invites work on this network only.".to_owned())
+            }
+            (None, false) if axcenity_collab::tailscale::is_tailscale_host(team.address()) => {
+                Some("Connected over Tailscale.".to_owned())
+            }
+            (None, false) => None,
+        };
+        if let Some(reach) = reach {
+            ui.add(egui::Label::new(egui::RichText::new(reach).color(palette.text_weak)).wrap());
+        }
         match &status {
             TeamStatus::Reconnecting { why, .. } => {
                 ui.add(
@@ -604,7 +619,7 @@ impl EditorApp {
         match action {
             Action::Share => {
                 self.team_panel.problem = None;
-                match self.host_network_session(None, axcenity_collab::socket::DEFAULT_PORT) {
+                match self.host_collaborate_session() {
                     Ok(invite) => self.output.info(format!(
                         "Collaborate: hosting on {}. Invite: {}",
                         invite.host,
