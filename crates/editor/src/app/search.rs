@@ -451,6 +451,9 @@ fn command_description(command: &Command) -> String {
         Command::BuildGame(_) => {
             "Package the game so it runs without the editor, for the chosen computer."
         }
+        Command::BuildProfile(_) => {
+            "Which build profile Build Game uses: cooking, compression and the Developer Console."
+        }
         Command::LoadingScreen(_) | Command::WaitForScript => {
             "What a built game shows while it loads."
         }

@@ -44,7 +44,7 @@ mod pickers;
 mod script_files;
 mod watch;
 
-pub(super) use export::ExportTarget;
+pub(super) use export::{ExportTarget, picked_profile};
 pub(super) use import::is_package;
 pub(in crate::app) use import::{asset_files, files_made_since};
 
