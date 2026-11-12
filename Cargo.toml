@@ -225,15 +225,6 @@ rusqlite = { version = "0.41", features = ["bundled"] }
 # Checks downloads against the MD5s Poly Haven publishes (`crates/toolbox`, an
 # integrity check, not security). MIT OR Apache-2.0.
 md-5 = "0.11"
-# Hot-patching the running editor's code (unified Phase 26), only behind the
-# editor's dev `hot-patch` feature; the player never has them. `subsecond`
-# swaps in changed functions, `dioxus-devtools` connects to the `dx` CLI that
-# builds the patches and applies them, and `dioxus-cli-config` says whether dx
-# started the editor. All MIT OR Apache-2.0 (their dependencies add MIT and
-# Zlib). dx 0.7.10 or later patches workspace crates, not only the editor's.
-dioxus-cli-config = "0.7"
-dioxus-devtools = "0.7"
-subsecond = "0.7"
 thiserror = "2"
 taffy = { version = "0.7", features = ["taffy_tree"] }
 # `static-dxc` links Microsoft's DXC shader compiler into Windows builds
