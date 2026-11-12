@@ -60,4 +60,4 @@ Measured GPU sizes: one 4096² texture with mips is 85 MiB as RGBA8 and 21 MiB a
 1. Who owns it, and for how long? Prefer an owner that already exists (the `Assets` cache, `TerrainCache`, the renderer's caches) to a new global.
 2. What frees it? Every cache above has an eviction rule; a new one needs one too.
 3. Is it per Instance? Multiply by 10,000 (S10k) before deciding it's small.
-4. Measure: the editor Profiler's **Memory** tab (G7) breaks memory down by kind (Lua, Instances, Models, Textures, Sky and probes, Sounds, Physics) and by Instance class; `RenderStats` shows GPU bytes by kind ([Profiling](../Performance/Profiling.md)).
+4. Measure: the editor Profiler's **Memory** tab (G7) breaks memory down by kind (Lua, Instances, Models, Textures, Sky and probes, Sounds, Physics) and by Instance class; it charts the total over the last minute, keeps each kind's peak and change since Play started, and compares the game with the project's optional memory budget (`memory_budget` in the manifest; editor-only, a warning in Output, nothing enforced); `RenderStats` shows GPU bytes by kind ([Profiling](../Performance/Profiling.md)).

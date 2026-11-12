@@ -37,6 +37,7 @@ pub mod branding;
 mod collaborate_file;
 mod compat;
 mod levels;
+pub mod memory_budget;
 mod migrate;
 mod migrate_animation;
 mod migrate_physics;
@@ -206,6 +207,10 @@ pub struct Manifest {
     /// The game's icon and banner (cohesion pass CW8.1, `branding.rs`).
     #[serde(default, skip_serializing_if = "branding::Branding::is_empty")]
     pub branding: branding::Branding,
+    /// The memory budget the Profiler warns about (competitive roadmap
+    /// item 5, `memory_budget.rs`).
+    #[serde(default, skip_serializing_if = "memory_budget::MemoryBudget::is_empty")]
+    pub memory_budget: memory_budget::MemoryBudget,
 }
 
 fn default_show_splash() -> bool {
@@ -537,6 +542,7 @@ pub(crate) fn load_project(
                 developer_console: false,
                 engine: None,
                 branding: Default::default(),
+                memory_budget: Default::default(),
             }
         }
     };
