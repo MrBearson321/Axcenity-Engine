@@ -730,6 +730,37 @@ impl Git {
         self.ok(Some(dir), args)
     }
 
+    /// Runs a local command that must succeed, with `env` for that child
+    /// only (a temporary index for conflict copies).
+    pub(crate) fn run_env(
+        &self,
+        dir: &Path,
+        args: &[&str],
+        env: &[(&str, &Path)],
+    ) -> Result<String, GitError> {
+        let mut all = Vec::new();
+        all.extend(args.iter().map(|a| a.to_string()));
+        let call = Invocation {
+            dir: Some(dir),
+            args: all,
+            env: env
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), Secret::new(value.to_string_lossy())))
+                .collect(),
+            stdin: None,
+            timeout: LOCAL_TIMEOUT,
+        };
+        let output = self
+            .runner
+            .run(&call)
+            .map_err(|error| GitError::Failed(format!("couldn't run git: {error}")))?;
+        if output.success {
+            Ok(output.stdout)
+        } else {
+            Err(GitError::Failed(failure(args, &self.scrub(&output.stderr))))
+        }
+    }
+
     /// Runs any command; its output whatever the result.
     pub(crate) fn try_run(
         &self,

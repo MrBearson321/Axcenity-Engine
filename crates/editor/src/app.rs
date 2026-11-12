@@ -63,9 +63,11 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod collab_conflicts;
 mod collab_handoff;
 mod collab_project;
 mod collab_repo;
+mod collab_repo_ui;
 mod collab_setup;
 mod inventory;
 mod sky;
@@ -1758,6 +1760,7 @@ impl EditorApp {
         self.settings_window(ctx);
         self.recovered_changes_window(ctx);
         self.collab_setup_windows(ctx);
+        self.repo_ui_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
@@ -1868,6 +1871,8 @@ mod collab_handoff_tests;
 mod collab_project_tests;
 #[cfg(test)]
 mod collab_repo_tests;
+#[cfg(test)]
+mod collab_scenario_tests;
 #[cfg(test)]
 mod collab_setup_tests;
 #[cfg(test)]

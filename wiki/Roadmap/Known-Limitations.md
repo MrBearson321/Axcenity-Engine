@@ -50,4 +50,4 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 - References may name an asset by path or by ID (PR #78); older projects still use paths.
 - Built games ship sources and cooked copies (G12 plans cooked-only games).
 - macOS is not verified on changes; mobile and web are not supported.
-- Large `world.json` files load slowly (no binary world format).
+- No binary world format (S10k's 10 MB `world.json` loads in 0.19 s since C11).

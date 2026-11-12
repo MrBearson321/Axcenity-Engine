@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 13] = [
+pub const BUILT_INS: [(&str, &str); 15] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -58,6 +58,15 @@ pub const BUILT_INS: [(&str, &str); 13] = [
         "host — host the open Collaborate project for its members, who rejoin without an \
          invite",
     ),
+    (
+        "conflicts",
+        "conflicts — list the files changed both here and in the project's repository",
+    ),
+    (
+        "resolve",
+        "resolve <mine|theirs|both> [file] — choose what to keep of a conflicting file (all \
+         of them without a file); the merge is made once every file is chosen",
+    ),
 ];
 
 /// The most commands the history keeps.
@@ -82,6 +91,9 @@ pub enum Command<'a> {
     /// The project's name or ID after `rejoin`.
     Rejoin(&'a str),
     Host,
+    Conflicts,
+    /// The choice and file after `resolve`.
+    Resolve(&'a str),
     /// Anything else.
     Lua(&'a str),
 }
@@ -114,6 +126,8 @@ pub fn parse(input: &str) -> Command<'_> {
         ("projects", true) => Command::Projects,
         ("rejoin", _) => Command::Rejoin(rest),
         ("host", true) => Command::Host,
+        ("conflicts", true) => Command::Conflicts,
+        ("resolve", false) => Command::Resolve(rest),
         _ => Command::Lua(line),
     }
 }
@@ -518,6 +532,12 @@ mod tests {
             parse("checkpoint before boss"),
             Command::Checkpoint("before boss")
         );
+        assert_eq!(parse("conflicts"), Command::Conflicts);
+        assert_eq!(
+            parse("resolve theirs world.json"),
+            Command::Resolve("theirs world.json")
+        );
+        assert_eq!(parse("resolve"), Command::Lua("resolve"));
         for lua in [
             "clear = 5",
             "select(2, 'a', 'b')",

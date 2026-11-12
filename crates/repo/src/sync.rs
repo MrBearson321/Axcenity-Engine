@@ -7,7 +7,8 @@
 //! - [`sync_once`]: one safe pass. Checkpoint what changed, fetch, bring
 //!   the remote's changes in when they merge cleanly, push (never forced),
 //!   and confirm the remote's branch is at our commit. Conflicts stop it
-//!   with nothing overwritten; no network leaves the checkpoint local.
+//!   with nothing overwritten (the repository's versions are written
+//!   beside, [`crate::conflicts`]); no network leaves the checkpoint local.
 //! - [`Schedule`]: when to run a pass (no I/O, so it's tested with a fake
 //!   clock): changes wait for the checkpoint interval and are batched;
 //!   a member leaving, a handoff, the session ending, the editor closing
@@ -20,6 +21,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::checkpoint::{self, Kind};
+use crate::conflicts;
 use crate::git::{Author, Git, GitError, MergeCheck, Pushed};
 use crate::repository::REMOTE;
 
@@ -149,7 +151,16 @@ fn pass(git: &Git, job: &Job, outcome: &mut Outcome) -> Result<State, GitError> 
         if remote_has_branch && !git.is_ancestor(dir, &theirs, "HEAD") {
             let ours = git.head(dir).unwrap_or_default();
             match git.merge_check(dir, &ours, &theirs)? {
-                MergeCheck::Conflicts(files) => return Ok(State::Conflict(files)),
+                MergeCheck::Conflicts(files) => {
+                    // Both versions in the folder to compare; nothing
+                    // overwritten (P5, `conflicts`).
+                    if let Err(error) = conflicts::keep_copies(git, dir, &job.branch, &files) {
+                        log::warn!(
+                            "Collaborate: couldn't write the repository's versions: {error}"
+                        );
+                    }
+                    return Ok(State::Conflict(files));
+                }
                 MergeCheck::Clean => {
                     let message = checkpoint::message(Kind::Merge, None, &[&job.author.name], 0);
                     git.merge(dir, &theirs, &message, &job.author)?;
@@ -245,6 +256,19 @@ impl Schedule {
 
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    /// True while a pass runs (nothing else may change the repository).
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    /// Someone resolved the conflicts: upload the merge now.
+    pub fn resolved(&mut self) {
+        if matches!(self.state, State::Conflict(_)) {
+            self.state = State::Pending;
+        }
+        self.ask(Kind::Merge, None);
     }
 
     /// The project changed on disk (a save, an import, a file arriving).

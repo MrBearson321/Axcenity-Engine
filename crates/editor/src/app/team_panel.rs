@@ -45,6 +45,9 @@ pub(crate) struct TeamPanel {
     pub(crate) chat_unread: usize,
     /// Why the last chat message didn't go.
     pub(crate) chat_problem: Option<String>,
+    /// "Let others host from my computer" is off (Settings > Collaborate,
+    /// the Project section; Collaborate 2.0 P6).
+    pub(crate) no_host_offer: bool,
     /// The name being typed for a new checkpoint (C9).
     pub(crate) checkpoint_label: String,
     /// The checkpoint the Owner pressed Restore on, asking once more.
@@ -109,7 +112,8 @@ impl TeamPanel {
             InviteLifetime::Month => "month",
         };
         let ready = if self.setup.done { " ready" } else { "" };
-        format!("{role} {lifetime}{ready}")
+        let offer = if self.no_host_offer { " nohost" } else { "" };
+        format!("{role} {lifetime}{ready}{offer}")
     }
 
     /// Reads what [`TeamPanel::to_text`] wrote; unknown words keep the
@@ -123,6 +127,7 @@ impl TeamPanel {
                 "week" => self.invite_lifetime = InviteLifetime::Week,
                 "month" => self.invite_lifetime = InviteLifetime::Month,
                 "ready" => self.setup.done = true,
+                "nohost" => self.no_host_offer = true,
                 _ => {}
             }
         }
@@ -292,6 +297,7 @@ impl EditorApp {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                self.project_section_ui(ui);
                 action = if self.team.is_some() {
                     self.team_session_ui(ui)
                 } else {
@@ -942,6 +948,20 @@ impl EditorApp {
         weak(
             ui,
             "Each link works once. Revoke unused ones from the Collaborate panel.",
+        );
+        ui.add_space(theme::space::M);
+        settings::section(ui, "Hosting");
+        let mut offer = !self.team_panel.no_host_offer;
+        if ui
+            .checkbox(&mut offer, "Let others host from my computer")
+            .changed()
+        {
+            self.set_host_offer(offer);
+        }
+        weak(
+            ui,
+            "If a session's host leaves or is lost, it can go on from this computer (it \
+             listens on port 47810). Off: this computer is never picked.",
         );
     }
 

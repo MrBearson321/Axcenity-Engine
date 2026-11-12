@@ -34,6 +34,10 @@ use super::*;
 
 /// How often the link in `collaborate.json` is read again.
 const RELOAD_LINK: Duration = Duration::from_secs(5);
+
+/// How long a successor's copy waits before trying to link again.
+const MIRROR_RETRY: Duration = Duration::from_secs(60);
+
 /// How long closing the editor waits for its last upload.
 const CLOSING_WAIT: Duration = Duration::from_secs(10);
 
@@ -51,12 +55,54 @@ pub(crate) struct ProjectRepo {
     /// The last pass's outcome, for the panel.
     pub(crate) last: Option<Outcome>,
     author: Option<Author>,
+    /// The Project section's windows (`collab_repo_ui.rs`).
+    pub(crate) ui: super::collab_repo_ui::RepoUi,
+    /// The folder last checked for a Git history of its own, whether it
+    /// has one, and when.
+    mirror_checked: Option<(PathBuf, bool, Instant)>,
+    /// Choices made so far for the files in conflict (`resolve`).
+    pub(crate) choices: Vec<(String, axcenity_repo::conflicts::Choice)>,
 }
 
 impl ProjectRepo {
     /// The sync state for the chip and panel; `None` when not linked.
     pub(crate) fn state(&self) -> Option<&State> {
         self.link.as_ref().map(|_| self.schedule.state())
+    }
+
+    /// True when `folder` names a repository in `collaborate.json` but has
+    /// no Git history of its own: a member's copy of the session's files
+    /// (dot files and `.git` never travel), now hosting.
+    fn mirror_unlinked(&mut self, folder: &Path) -> bool {
+        match &self.mirror_checked {
+            Some((checked, own, _)) if checked == folder && *own => return false,
+            Some((checked, _, at)) if checked == folder && at.elapsed() < RELOAD_LINK => {
+                return true;
+            }
+            _ => {}
+        }
+        let git = self.manager().git.clone();
+        // Its own history, not a folder inside some other repository.
+        let own = axcenity_repo::repository::folder_state(&git, folder)
+            == axcenity_repo::repository::Folder::Root;
+        self.mirror_checked = Some((folder.to_owned(), own, Instant::now()));
+        !own
+    }
+
+    /// Linking `folder` was started: don't start it again.
+    pub(crate) fn mark_mirror_checked(&mut self, folder: &Path) {
+        self.mirror_checked = Some((folder.to_owned(), true, Instant::now()));
+    }
+
+    /// Linking `folder` failed: try again in a minute, not every frame.
+    pub(crate) fn retry_mirror_later(&mut self, folder: &Path) {
+        let later = Instant::now() + MIRROR_RETRY.saturating_sub(RELOAD_LINK);
+        self.mirror_checked = Some((folder.to_owned(), false, later));
+    }
+
+    /// Reads `collaborate.json` again on the next frame.
+    pub(crate) fn force_reload(&mut self) {
+        self.read_at = None;
     }
 
     pub(crate) fn manager(&mut self) -> Arc<RepositoryManager> {
@@ -91,7 +137,7 @@ impl EditorApp {
             let link = project::load_collaborate_file(&folder)
                 .ok()
                 .and_then(|file| file.repository);
-            if link.is_some() && self.repo.link.is_none() {
+            if link.is_some() && link != self.repo.link {
                 // Newly linked (or just opened): see what's waiting.
                 self.repo.schedule.ask(Kind::Auto, None);
             }
@@ -103,6 +149,16 @@ impl EditorApp {
             self.repo_finished(outcome, now);
         }
         if self.repo.link.is_none() || !self.repo_commits_here() {
+            return;
+        }
+        if self.repo.mirror_unlinked(&folder) {
+            // A successor hosting from its copy of the session's files: it
+            // gets the project's history first (Collaborate 2.0, P7). A copy
+            // open outside a session never uploads: its person can connect
+            // it in the Repository window.
+            if self.team.as_ref().is_some_and(|t| t.hosting().is_some()) {
+                self.repo_link_mirror(&folder);
+            }
             return;
         }
         if let Some((kind, label)) = self.repo.schedule.due(now) {
@@ -131,6 +187,19 @@ impl EditorApp {
         if self.repo.link.is_some() {
             self.repo.schedule.ask(kind, label);
         }
+    }
+
+    /// A hosted session is ending or changing hands here: the session's
+    /// World goes into `world.json` and a checkpoint of `kind` is asked
+    /// for, so the repository has what everyone saw (Scenario C).
+    pub(crate) fn repo_session_ending(&mut self, kind: Kind) {
+        if self.repo.link.is_none() {
+            return;
+        }
+        if self.team.as_ref().is_some_and(|t| t.hosting().is_some()) && self.unsaved() {
+            self.save_world_for_checkpoint();
+        }
+        self.repo_checkpoint(kind, None);
     }
 
     /// The Console's `checkpoint [label]` (Sync now, until the panel has
@@ -197,7 +266,8 @@ impl EditorApp {
             ),
             State::Conflict(files) => self.output.warning(format!(
                 "Collaborate: {} changed both here and in the repository; nothing was \
-                 overwritten. Open the Collaborate panel to choose what to keep.",
+                 overwritten; the repository's version is beside each. Choose what to keep \
+                 with `resolve` in the Console (`conflicts` lists them).",
                 files.join(", ")
             )),
             State::Error(why) => self
@@ -239,7 +309,7 @@ impl EditorApp {
 
     /// The commit author: the Collaborate name, with the email from the
     /// person's own Git settings when there is one.
-    fn repo_author(&mut self, folder: &Path) -> Author {
+    pub(super) fn repo_author(&mut self, folder: &Path) -> Author {
         if let Some(author) = &self.repo.author {
             return author.clone();
         }

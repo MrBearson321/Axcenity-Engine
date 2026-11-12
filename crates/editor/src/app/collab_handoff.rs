@@ -61,7 +61,11 @@ impl EditorApp {
         let Some(team) = self.team.as_mut() else {
             return;
         };
-        if team.card_sent || team.hosting().is_some() || !team.lets_others_host {
+        if team.card_sent
+            || team.hosting().is_some()
+            || !team.lets_others_host
+            || self.team_panel.no_host_offer
+        {
             return;
         }
         let Some(data) = team.data.clone() else {
@@ -319,6 +323,16 @@ impl EditorApp {
     /// successor takes the session on. Returns false when there's nobody
     /// to hand it to (the session ends as before).
     pub(super) fn hand_off_hosting(&mut self) -> bool {
+        let has_successor = self
+            .team
+            .as_ref()
+            .and_then(|t| t.hosting())
+            .is_some_and(|h| !h.lock().host().successors().is_empty());
+        if !has_successor {
+            return false;
+        }
+        // The repository gets the session as it is now.
+        self.repo_session_ending(axcenity_repo::checkpoint::Kind::Handoff);
         let Some(team) = self.team.as_mut() else {
             return false;
         };
@@ -352,7 +366,6 @@ impl EditorApp {
         self.output.info(format!(
             "Collaborate: you left; {name} is hosting the session now"
         ));
-        self.repo_checkpoint(axcenity_repo::checkpoint::Kind::Handoff, None);
         true
     }
 }

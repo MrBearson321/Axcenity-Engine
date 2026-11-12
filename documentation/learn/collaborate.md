@@ -1,5 +1,5 @@
 ---
-description: Set up Collaborate in about five minutes, start a session, invite people from anywhere over Tailscale, and fix what usually goes wrong.
+description: Set up Collaborate in about five minutes, start a session, invite people from anywhere over Tailscale, keep the project in a Git repository when everyone leaves, and fix what usually goes wrong.
 icon: users
 samples: [hello-touched]
 ---
@@ -50,6 +50,41 @@ Over Tailscale, the other person's computer has to be able to reach yours:
 2. Open the invite link. On the start screen, choose **Join…** and paste it; in an open editor, choose **File > Join Collaborate Session…** and paste it into the **Collaborate** panel. Where Axcenity was installed with its installer (Windows and Linux), clicking an `axcenity://` link opens the editor with the link filled in. Either way, the Join window says whose session it is before anything connects: join only if you expected the invite.
 3. Your editor fetches the session's project into a folder of its own and opens it. The first time takes longest; after that only changes are fetched.
 
+## Keep the project online
+
+A session ends when everyone leaves, but the project doesn't have to go with it. Connect it to a Git repository (GitHub or any other Git host) and it waits there for whoever opens it next. This is optional: without a repository, the project lives in the host's folder as before.
+
+1. Open the **Collaborate** panel. At the top, the **Project** section shows the project's name, its Owner and who is hosting.
+2. Under **Repository**, choose **Connect a repository…**. Sign in to GitHub (the window shows a code to type at github.com/login/device), then pick an existing repository, create a new one (private unless you change it), or paste the address of any other Git repository.
+3. If the repository already has files, nothing uploads until you choose **Upload my version** or **Use the repository's version**. Your files go to Git's stash first, so neither choice loses anything.
+
+From then on Axcenity makes **checkpoints** by itself: after saves (at most every ten minutes), when someone leaves a session, when hosting passes to someone else, and when the session ends. Each one uploads straight away. The chip beside the session chip in the title bar says when the project isn't **Synced**; **Sync now** uploads at once, and **History…** lists every checkpoint with **Restore…**. In a session only the host's computer uploads. Your sign-in is kept by Git on your computer, never in the project.
+
+## When the host leaves
+
+- **Leave session** on the host passes the session to the next person who may host. Everyone stays connected and keeps working; the Output panel says who hosts now.
+- **End for everyone** ends the session for all. With a repository, the last state is uploaded first.
+- If the host's computer goes off or loses its network, members wait about 20 seconds in case it comes back. Then the next person on the list hosts from their own copy, and edits made in the meantime are kept.
+
+Who hosts next is shown in the Project section while you host. The Owner can name a **Backup host** to go first. If you'd rather your computer never hosts, turn off **Let others host from my computer** (also in **Settings > Collaborate > Hosting**). Whoever takes over must let Axcenity through their firewall on port 47810.
+
+When the new host's copy came from the session, Axcenity connects it to the project's repository the first time it hosts, so checkpoints keep uploading from there.
+
+## Pick the project up later
+
+- **Rejoin**: if you were in a session of this project, the Project section offers **Rejoin** while someone hosts it. You don't need a new invite.
+- **From the repository**: clone the repository (or download it from GitHub) and open the folder in Axcenity. It's the same project, even with nobody left in a session. If you were in its sessions before and may host, your computer kept its members list, so starting a session from it lets everyone who was in back in without an invite. Otherwise the session starts with you as its host, and you invite people as usual.
+
+## When the same file changed in two places
+
+If a file changed both on your computer and in the repository (for example two people worked on the same scene while apart), Axcenity overwrites neither. Syncing stops, and the repository's version is put beside yours with `.remote-` and a short code in its name, such as `world.remote-1a2b3c4.json`. Those copies are never uploaded.
+
+Choose **Resolve…** in the Project section. For each file, choose **Keep mine**, **Keep theirs** or **Keep both** (yours stays in place and theirs is kept, for everyone, as the copy). **Compare** shows text files side by side. **Resolve and upload** finishes once every file has a choice. Whatever you choose, both versions stay in the History. The Console's `conflicts` and `resolve` do the same.
+
+## Working offline
+
+Without a network, keep working. Checkpoints are kept on your computer, the chip says **Offline**, and Axcenity tries again by itself. When the network is back they upload; if someone uploaded in the meantime, their changes are merged in first, and anything changed on both sides becomes a choice as above.
+
 ## If it doesn't work
 
 | What you see | What to do |
@@ -60,6 +95,8 @@ Over Tailscale, the other person's computer has to be able to reach yours:
 | **this invite was already used** or **has expired** | Ask the host for a new link. |
 | Tailscale says **waiting for approval** | Your Tailscale network's admin approves new computers. Ask them, or use your own account. |
 | Joined, but you can't change anything | You joined as a viewer. The host can make you an Editor in the **Collaborate** panel. |
+| The chip says **Error** or **Offline** | Open the Collaborate panel: the Project section says why. Signed out of GitHub: **Manage…** signs you in again. |
+| **No one is hosting**, and **Rejoin** does nothing | Nobody who may host has the project open in a session. Start one from your copy, or open it from the repository. |
 | **Can't reach …** after several tries with wrong or old links | The host turns an address away for a minute after ten failed joins in a minute. Wait a minute, then use a fresh link. |
 
 When it still doesn't work, the **Output** panel on both computers says what Collaborate tried. Tailscale's own app shows whether the other computer is online.

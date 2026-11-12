@@ -265,6 +265,13 @@ fn everyone_hears_the_same_successors_backup_first_then_longest_connected() {
         "Kim off the list",
         |m| m.iter().all(|m| order(m) == [sam_id]),
     );
+    // Sam stops offering to host ("Let others host from my computer" off).
+    sam.client.as_mut().unwrap().withdraw_card();
+    until(
+        &mut [&mut paul, &mut sam, &mut kim],
+        "Sam off the list",
+        |m| m.iter().all(|m| m.client().successors().is_empty()),
+    );
 }
 
 /// Scenario A: the host leaves while others work. Sam takes over; nobody's

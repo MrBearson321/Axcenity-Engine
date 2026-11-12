@@ -13,7 +13,7 @@ use super::tests::copy_of_example;
 use super::*;
 use crate::properties::Edit;
 
-fn data_folder(name: &str) -> PathBuf {
+pub(super) fn data_folder(name: &str) -> PathBuf {
     let folder = std::env::temp_dir().join(format!(
         "axcenity-collab-handoff-{name}-{}",
         std::process::id()
@@ -22,7 +22,7 @@ fn data_folder(name: &str) -> PathBuf {
     folder
 }
 
-fn free_port() -> u16 {
+pub(super) fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -30,7 +30,11 @@ fn free_port() -> u16 {
         .port()
 }
 
-fn settle(apps: &mut [&mut EditorApp], what: &str, done: impl Fn(&[&mut EditorApp]) -> bool) {
+pub(super) fn settle(
+    apps: &mut [&mut EditorApp],
+    what: &str,
+    done: impl Fn(&[&mut EditorApp]) -> bool,
+) {
     let start = Instant::now();
     while !done(apps) {
         if start.elapsed() > Duration::from_secs(40) {
@@ -49,25 +53,25 @@ fn settle(apps: &mut [&mut EditorApp], what: &str, done: impl Fn(&[&mut EditorAp
     }
 }
 
-fn joined(app: &EditorApp) -> bool {
+pub(super) fn joined(app: &EditorApp) -> bool {
     app.team
         .as_ref()
         .and_then(|t| t.client())
         .is_some_and(|c| c.is_online() && c.is_joined() && c.pending() == 0)
 }
 
-fn hosting(app: &EditorApp) -> bool {
+pub(super) fn hosting(app: &EditorApp) -> bool {
     app.team.as_ref().is_some_and(|t| t.hosting().is_some())
 }
 
-fn successors(app: &EditorApp) -> usize {
+pub(super) fn successors(app: &EditorApp) -> usize {
     app.team
         .as_ref()
         .and_then(|t| t.client())
         .map_or(0, |c| c.successors().len())
 }
 
-fn has_part(app: &EditorApp, name: &str) -> bool {
+pub(super) fn has_part(app: &EditorApp, name: &str) -> bool {
     let world = &app.world;
     world
         .descendants(world.root())
@@ -75,7 +79,7 @@ fn has_part(app: &EditorApp, name: &str) -> bool {
         .any(|id| world.get(id).is_some_and(|i| i.name() == name))
 }
 
-fn add_part(app: &mut EditorApp, name: &str) {
+pub(super) fn add_part(app: &mut EditorApp, name: &str) {
     app.insert(Insertable::Part(PartType::Block), None);
     let part = app.selected.expect("the new part is selected");
     app.change(
@@ -87,7 +91,7 @@ fn add_part(app: &mut EditorApp, name: &str) {
     app.history.seal();
 }
 
-fn loopback(invite: &Invite) -> Invite {
+pub(super) fn loopback(invite: &Invite) -> Invite {
     let port = invite.host.rsplit(':').next().unwrap();
     Invite {
         host: format!("127.0.0.1:{port}"),
@@ -97,7 +101,7 @@ fn loopback(invite: &Invite) -> Invite {
 
 /// A member who may host offers a loopback port (set before its card is
 /// sent, on its first frame), with short timings.
-fn on_loopback(app: &mut EditorApp) {
+pub(super) fn on_loopback(app: &mut EditorApp) {
     let team = app.team.as_mut().unwrap();
     team.card_address = Some(format!("127.0.0.1:{}", free_port()));
     team.timing = Timing {
@@ -109,7 +113,9 @@ fn on_loopback(app: &mut EditorApp) {
 
 /// Paul hosts hello-part; Sam and Kim join, each offering to host on a
 /// loopback port, with short timings.
-fn session(name: &str) -> (Box<EditorApp>, Box<EditorApp>, Box<EditorApp>, Vec<PathBuf>) {
+pub(super) fn session(
+    name: &str,
+) -> (Box<EditorApp>, Box<EditorApp>, Box<EditorApp>, Vec<PathBuf>) {
     let folders: Vec<PathBuf> = ["paul", "sam", "kim"]
         .iter()
         .map(|who| data_folder(&format!("{name}-{who}")))

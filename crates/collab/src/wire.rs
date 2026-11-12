@@ -30,7 +30,21 @@ use crate::project::{HostCard, MembersList};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 9;
+pub const FORMAT: u8 = 10;
+
+/// Set in the first byte of a message whose postcard is zstd-packed (C11).
+const PACKED: u8 = 0x80;
+
+/// Messages at least this big are packed with zstd when that saves an
+/// eighth or more: S10k's join message goes from 953 KiB to 82 KiB in
+/// about 1 ms (design §9.5). Smaller ones aren't worth the time.
+pub const PACK_FROM: usize = 16 << 10;
+
+/// The biggest message a member may send the host, packed or not.
+pub const TO_HOST_MOST: usize = 32 << 20;
+
+/// The biggest message the host may send a member, packed or not.
+pub const TO_CLIENT_MOST: usize = 1 << 30;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +57,8 @@ pub enum WireError {
     Decode(#[from] postcard::Error),
     #[error("a message naming something this version doesn't have: {0}")]
     Unknown(String),
+    #[error("a packed message that doesn't unpack, or unpacks too big")]
+    Unpack,
 }
 
 pub fn encode_to_host(message: &ToHost) -> Vec<u8> {
@@ -50,7 +66,7 @@ pub fn encode_to_host(message: &ToHost) -> Vec<u8> {
 }
 
 pub fn decode_to_host(bytes: &[u8]) -> Result<ToHost, WireError> {
-    decode::<WireToHost>(bytes)?.into_message()
+    decode_most::<WireToHost>(bytes, TO_HOST_MOST)?.into_message()
 }
 
 pub fn encode_to_client(message: &ToClient) -> Vec<u8> {
@@ -58,21 +74,48 @@ pub fn encode_to_client(message: &ToClient) -> Vec<u8> {
 }
 
 pub fn decode_to_client(bytes: &[u8]) -> Result<ToClient, WireError> {
-    decode::<WireToClient>(bytes)?.into_message()
+    decode_most::<WireToClient>(bytes, TO_CLIENT_MOST)?.into_message()
 }
 
 pub(crate) fn encode<T: Serialize>(value: &T) -> Vec<u8> {
-    let mut bytes = vec![FORMAT];
     // Writing to a Vec can't fail.
-    bytes.extend(postcard::to_stdvec(value).expect("postcard writes to a Vec"));
+    let body = postcard::to_stdvec(value).expect("postcard writes to a Vec");
+    if body.len() >= PACK_FROM
+        && let Ok(packed) = zstd::bulk::compress(&body, 1)
+        && packed.len() <= body.len() - body.len() / 8
+    {
+        let mut bytes = Vec::with_capacity(packed.len() + 1);
+        bytes.push(FORMAT | PACKED);
+        bytes.extend(packed);
+        return bytes;
+    }
+    let mut bytes = Vec::with_capacity(body.len() + 1);
+    bytes.push(FORMAT);
+    bytes.extend(body);
     bytes
 }
 
-pub(crate) fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, WireError> {
+/// Reads a message, unpacking it first if it's packed, to at most `most`
+/// bytes: a packed message must say how big it unpacks, and nothing
+/// bigger is unpacked (so a few packed bytes can't fill the memory).
+pub(crate) fn decode_most<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    most: usize,
+) -> Result<T, WireError> {
     match bytes.split_first() {
         None => Err(WireError::Empty),
         Some((&FORMAT, rest)) => Ok(postcard::from_bytes(rest)?),
-        Some((&other, _)) => Err(WireError::Format(other)),
+        Some((&first, rest)) if first == FORMAT | PACKED => {
+            let size = zstd::zstd_safe::get_frame_content_size(rest)
+                .ok()
+                .flatten()
+                .filter(|&size| size <= most as u64)
+                .ok_or(WireError::Unpack)?;
+            let body =
+                zstd::bulk::decompress(rest, size as usize).map_err(|_| WireError::Unpack)?;
+            Ok(postcard::from_bytes(&body)?)
+        }
+        Some((&other, _)) => Err(WireError::Format(other & !PACKED)),
     }
 }
 
