@@ -87,6 +87,7 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             "from the editor's camera".to_owned(),
         ),
     };
+    let framed = args.str("id").is_some() || from.is_some();
     let Some((device, queue)) = gpu() else {
         return Err(ToolError::new(
             Code::Unsupported,
@@ -105,12 +106,40 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
     let png = encode(&renderer.read_pixels(), width, height)
         .map_err(|error| ToolError::internal(format!("could not encode the picture: {error}")))?;
     host.session.png = Some(png);
-    let point = |p: Vec3| format!("[{},{},{}]", n(p.x), n(p.y), n(p.z));
     Ok(format!(
-        "{width}x{height} picture {seen}: camera at {} looking at {} (Y is up)",
+        "{width}x{height} picture {seen}: camera at {} {} (Y is up)",
         point(camera.position),
-        point(camera.look_at)
+        aim(&camera, framed)
     ))
+}
+
+fn point(p: Vec3) -> String {
+    format!("[{},{},{}]", n(p.x), n(p.y), n(p.z))
+}
+
+/// Where the camera looks, in words: the point it was aimed at; for the
+/// editor's own camera (whose look-at is just a step ahead of it), where
+/// its view meets the ground (Y 0), else which way it looks.
+fn aim(camera: &axcenity_render::Camera, framed: bool) -> String {
+    if framed {
+        return format!("looking at {}", point(camera.look_at));
+    }
+    let along = (camera.look_at - camera.position).normalize_or_zero();
+    if along.y < -0.01 {
+        let ground = camera.position + along * (-camera.position.y / along.y);
+        if camera.position.y > 0.0 && ground.distance(camera.position) < 10_000.0 {
+            return format!("looking at {} on the ground", point(ground));
+        }
+    }
+    let rounded = |x: f32| (x * 100.0).round() / 100.0;
+    format!(
+        "looking along {}",
+        point(Vec3::new(
+            rounded(along.x),
+            rounded(along.y),
+            rounded(along.z)
+        ))
+    )
 }
 
 fn vec3([x, y, z]: [f64; 3]) -> Vec3 {
@@ -186,5 +215,22 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
             return value;
         }
         std::thread::yield_now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_editors_camera_says_where_its_view_meets_the_ground() {
+        // The editor's camera looks a step ahead of itself.
+        let down = camera(Vec3::new(12.0, 8.0, 16.0), Vec3::new(11.4, 7.6, 15.2));
+        assert_eq!(aim(&down, false), "looking at [0,0,0] on the ground");
+        let level = camera(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 5.0, -1.0));
+        assert_eq!(aim(&level, false), "looking along [0,0,-1]");
+        // A point the client gave is said as it is.
+        let given = camera(Vec3::new(0.0, 20.0, 30.0), Vec3::ZERO);
+        assert_eq!(aim(&given, true), "looking at [0,0,0]");
     }
 }
