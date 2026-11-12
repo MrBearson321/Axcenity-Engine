@@ -141,7 +141,8 @@ impl Host {
         out
     }
 
-    /// `HostCard`: how to reach a member's computer if it hosts.
+    /// `HostCard`: how to reach a member's computer if it hosts (an empty
+    /// address: it no longer offers).
     pub(super) fn receive_card(
         &mut self,
         member: MemberId,
@@ -155,10 +156,12 @@ impl Host {
             return Vec::new();
         }
         let address = address.trim();
-        if address.is_empty()
-            || address.len() > ADDRESS_MOST
-            || address.contains(char::is_whitespace)
-        {
+        // An empty card withdraws the offer.
+        if address.is_empty() {
+            m.card = None;
+            return self.successors_if_changed();
+        }
+        if address.len() > ADDRESS_MOST || address.contains(char::is_whitespace) {
             return Vec::new();
         }
         m.card = Some(HostCard {

@@ -462,6 +462,25 @@ impl Client {
         }
     }
 
+    /// This computer no longer offers to host (its person turned "Let
+    /// others host from my computer" off): the host takes it off the
+    /// successor list.
+    pub fn withdraw_card(&mut self) {
+        if let Some((_, cert)) = self.handover.card.take()
+            && self.is_online()
+        {
+            self.outbox.push(ToHost::HostCard {
+                address: String::new(),
+                cert,
+            });
+        }
+    }
+
+    /// True while this computer offers to host.
+    pub fn has_card(&self) -> bool {
+        self.handover.card.is_some()
+    }
+
     /// Who hosts next, best first, as the host last said.
     pub fn successors(&self) -> &[crate::project::HostCard] {
         &self.handover.successors

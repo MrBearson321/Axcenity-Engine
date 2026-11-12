@@ -67,6 +67,7 @@ mod collab_conflicts;
 mod collab_handoff;
 mod collab_project;
 mod collab_repo;
+mod collab_repo_ui;
 mod collab_setup;
 mod inventory;
 mod sky;
@@ -1762,6 +1763,7 @@ impl EditorApp {
         self.settings_window(ctx);
         self.recovered_changes_window(ctx);
         self.collab_setup_windows(ctx);
+        self.repo_ui_frame(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {

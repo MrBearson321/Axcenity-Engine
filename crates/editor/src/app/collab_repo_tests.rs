@@ -266,3 +266,142 @@ fn a_file_changed_on_both_sides_keeps_both_until_someone_chooses() {
     let _ = std::fs::remove_dir_all(&sam);
     let _ = std::fs::remove_dir_all(&check);
 }
+
+/// Draws the Collaborate panel and the windows; what was drawn, as text.
+fn draw_collaborate(app: &mut EditorApp, ctx: &egui::Context) -> String {
+    let mut drawn = String::new();
+    for _ in 0..2 {
+        let output = theme::run(ctx, Default::default(), |ui| {
+            app.team_create_pane(ui);
+            app.repo_ui_frame(ui.ctx());
+        });
+        drawn = format!("{:?}", output.shapes);
+    }
+    drawn
+}
+
+/// Waits for the Project section's background task.
+fn task_done(app: &mut EditorApp, ctx: &egui::Context) {
+    let start = Instant::now();
+    while app.repo.ui.busy_for_test() {
+        assert!(start.elapsed() < Duration::from_secs(60));
+        let _ = theme::run(ctx, Default::default(), |ui| app.repo_ui_frame(ui.ctx()));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn the_project_section_shows_the_repository_and_its_history() {
+    let (folder, _url) = linked_project("repo-panel");
+    let mut app = EditorApp::new(Some(&folder));
+    app.repo.manager = Some(manager());
+    frames_until(&mut app, &State::Synced);
+    let ctx = theme::test_context();
+    let drawn = draw_collaborate(&mut app, &ctx);
+    for words in [
+        "Project",
+        "Repository",
+        "Synced",
+        "Sync now",
+        "History…",
+        "Manage…",
+    ] {
+        assert!(drawn.contains(words), "{words} isn't drawn");
+    }
+    // History lists the checkpoints.
+    app.repo.ui.history_open = true;
+    app.load_repo_history();
+    task_done(&mut app, &ctx);
+    let entries = app.repo.ui.history.clone().expect("the history was read");
+    assert!(entries.iter().any(|e| e.title() == "First checkpoint"));
+    let drawn = draw_collaborate(&mut app, &ctx);
+    assert!(drawn.contains("First checkpoint"));
+    assert!(drawn.contains("Restore…"));
+    // Manage: not signed in to GitHub, and the link shown.
+    app.open_manage_repository();
+    task_done(&mut app, &ctx);
+    assert!(matches!(app.repo.ui.account, Some(Ok(None))));
+    let drawn = draw_collaborate(&mut app, &ctx);
+    assert!(drawn.contains("Not signed in"));
+    assert!(drawn.contains("Disconnect…"));
+    if let Some(dir) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        crate::snapshot::snapshot(
+            &std::path::Path::new(&dir).join("collaborate-project.png"),
+            egui::vec2(260.0, 640.0),
+            vec![Vec::new(); 3],
+            &mut |ui: &mut egui::Ui| app.team_create_pane(ui),
+        );
+    }
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_project_without_a_repository_offers_to_connect_one_and_the_host_offer_is_kept() {
+    let folder = copy_of_example("hello-part", "repo-panel-none");
+    let mut app = EditorApp::new(Some(&folder));
+    app.repo.manager = Some(manager());
+    app.repo_frame();
+    let ctx = theme::test_context();
+    let drawn = draw_collaborate(&mut app, &ctx);
+    assert!(drawn.contains("Connect a repository…"));
+    // "Let others host from my computer" off is kept between runs.
+    app.set_host_offer(false);
+    assert!(app.team_panel.to_text().contains("nohost"));
+    let mut panel = super::team_panel::TeamPanel::default();
+    panel.read_text(&app.team_panel.to_text());
+    assert!(panel.no_host_offer);
+    app.set_host_offer(true);
+    assert!(!app.team_panel.to_text().contains("nohost"));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_resolve_window_merges_with_each_files_choice() {
+    let (folder, url) = linked_project("repo-resolve-window");
+    let mut app = EditorApp::new(Some(&folder));
+    app.repo.manager = Some(manager());
+    frames_until(&mut app, &State::Synced);
+    let sam = std::env::temp_dir().join(format!(
+        "axcenity-editor-sam-repo-resolve-window-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&sam);
+    Git::system().clone_repository(&url, &sam, None).unwrap();
+    std::fs::write(sam.join("notes.txt"), "sam\n").unwrap();
+    sam_git(&sam, &["add", "--all"]);
+    sam_git(&sam, &["commit", "--quiet", "-m", "Sam's"]);
+    sam_git(&sam, &["push", "--quiet", "origin", "HEAD:main"]);
+    std::fs::write(folder.join("notes.txt"), "paul\n").unwrap();
+    app.run_console_command("checkpoint");
+    let start = Instant::now();
+    while !matches!(app.repo.state(), Some(State::Conflict(_))) {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{:?}",
+            app.repo.last
+        );
+        app.repo_frame();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let ctx = theme::test_context();
+    let drawn = draw_collaborate(&mut app, &ctx);
+    assert!(drawn.contains("Conflict"));
+    assert!(drawn.contains("Resolve…"));
+    app.open_conflicts_window();
+    let drawn = draw_collaborate(&mut app, &ctx);
+    assert!(drawn.contains("notes.txt"));
+    assert!(drawn.contains("0 of 1 chosen"));
+    app.repo
+        .ui
+        .choices
+        .insert("notes.txt".into(), axcenity_repo::conflicts::Choice::Mine);
+    app.resolve_chosen();
+    assert!(!app.repo.ui.conflicts_open);
+    frames_until(&mut app, &State::Synced);
+    assert_eq!(
+        std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
+        "paul\n"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+    let _ = std::fs::remove_dir_all(&sam);
+}

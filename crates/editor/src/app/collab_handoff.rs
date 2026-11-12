@@ -61,7 +61,11 @@ impl EditorApp {
         let Some(team) = self.team.as_mut() else {
             return;
         };
-        if team.card_sent || team.hosting().is_some() || !team.lets_others_host {
+        if team.card_sent
+            || team.hosting().is_some()
+            || !team.lets_others_host
+            || self.team_panel.no_host_offer
+        {
             return;
         }
         let Some(data) = team.data.clone() else {

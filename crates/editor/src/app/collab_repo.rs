@@ -51,6 +51,8 @@ pub(crate) struct ProjectRepo {
     /// The last pass's outcome, for the panel.
     pub(crate) last: Option<Outcome>,
     author: Option<Author>,
+    /// The Project section's windows (`collab_repo_ui.rs`).
+    pub(crate) ui: super::collab_repo_ui::RepoUi,
     /// Choices made so far for the files in conflict (`resolve`).
     pub(crate) choices: Vec<(String, axcenity_repo::conflicts::Choice)>,
 }
@@ -59,6 +61,11 @@ impl ProjectRepo {
     /// The sync state for the chip and panel; `None` when not linked.
     pub(crate) fn state(&self) -> Option<&State> {
         self.link.as_ref().map(|_| self.schedule.state())
+    }
+
+    /// Reads `collaborate.json` again on the next frame.
+    pub(crate) fn force_reload(&mut self) {
+        self.read_at = None;
     }
 
     pub(crate) fn manager(&mut self) -> Arc<RepositoryManager> {
@@ -93,7 +100,7 @@ impl EditorApp {
             let link = project::load_collaborate_file(&folder)
                 .ok()
                 .and_then(|file| file.repository);
-            if link.is_some() && self.repo.link.is_none() {
+            if link.is_some() && link != self.repo.link {
                 // Newly linked (or just opened): see what's waiting.
                 self.repo.schedule.ask(Kind::Auto, None);
             }
