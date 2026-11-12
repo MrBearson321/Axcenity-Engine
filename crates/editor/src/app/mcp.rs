@@ -37,6 +37,7 @@ mod asset_manage;
 mod batch;
 mod changes;
 mod check;
+mod data_edit;
 mod docs;
 mod env_set;
 mod game_run;
@@ -389,6 +390,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &toolbox_get::SPEC,
         call: toolbox_get::call,
+    },
+    Tool {
+        spec: &data_edit::SPEC,
+        call: data_edit::call,
     },
 ];
 

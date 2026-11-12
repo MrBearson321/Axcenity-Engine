@@ -272,7 +272,7 @@ Each step is a PR with tests, merged before the next starts depending on it.
 | 5 | Change cursors everywhere, folding, prompts, resource mirrors; small-model pass | 4.x | Local models on Paul's PC |
 | 6 | `docs/mcp/` user docs, client configs, diagnostics (`axcenity-editor --mcp --check`) | 3.4 | |
 | 7 | Benchmarks, confusing-tool review, schema simplification | all | Done: [benchmarks](../../mcp/benchmarks.md); no schema needed simplifying |
-| later | `view_capture` (done: standard profile), Toolbox tools (done: `toolbox_search`, `toolbox_get`, full profile), Streamable HTTP if a client needs it, `data_edit`, mesh ops | as listed | |
+| later | `view_capture` (done: standard profile), Toolbox tools (done: `toolbox_search`, `toolbox_get`, full profile), Streamable HTTP if a client needs it, `data_edit` (done: data tables, full profile), mesh ops | as listed | |
 
 Coordination: G2 (scripts inside objects, #91) changes where scripts live; `script_write` follows whatever lands. G4 (luau-lsp) can later feed `project_check` with type errors. The Toolbox thread owns `crates/toolbox`; MCP only wraps its API. M12 (egui 0.36) touches `EditorApp::update`; the live host's hook is one call there, so the order doesn't matter much, but step 3.4 should land after M12 to avoid a conflict.
 

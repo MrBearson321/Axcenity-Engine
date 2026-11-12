@@ -13,6 +13,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 | Date | Pages | Change | By |
 |---|---|---|---|
 | 2026-11-12 | MCP server | Toolbox tools: `toolbox_search`, `toolbox_get` | Claude |
+| 2026-11-12 | MCP server | `data_edit`: data tables for AI clients | Claude |
 | 2026-11-12 | MCP server | `view_capture`: pictures as MCP image content | Claude |
 | 2026-11-12 | MCP server | Step 7 measurements and the TCP_NODELAY fix for live clients | Claude |
 | 2026-11-12 | MCP server | Small-model results and lenient arguments (lists and numbers sent as text) | Claude |
