@@ -102,6 +102,10 @@ image = { version = "0.25", default-features = false, features = ["bmp", "exr", 
 # OR Apache-2.0). Editor only, through `axcenity-cook`: the player reads
 # cooked files and never links it.
 intel_tex_2 = "0.5"
+# Decodes cooked BC7/BC5 textures on the CPU in games shipped without their
+# source images (G12). Pure Rust, no unsafe; its one dependency, `paste`, is
+# already in the tree. MIT OR Apache-2.0.
+texture2ddecoder = "0.1.2"
 kira = "0.12"
 log = "0.4"
 # Decodes the logo PNG for the player's window icon, and writes the editor's

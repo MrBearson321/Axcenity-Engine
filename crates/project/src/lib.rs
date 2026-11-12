@@ -110,7 +110,7 @@ pub use package::{
     package_contents, package_contents_with_scripts, package_scripts, plan_import, read_package,
     script_tables, without_scripts, write_package,
 };
-pub use packed::{PackError, pack_game, unpack_game};
+pub use packed::{PackError, PackOptions, pack_game, pack_game_with, unpack_game};
 pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};
 pub use starter_character::load_starter_character;
 pub use terrain_files::{

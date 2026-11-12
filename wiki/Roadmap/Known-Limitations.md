@@ -48,6 +48,6 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 ## Content and platforms
 
 - References may name an asset by path or by ID (PR #78); older projects still use paths.
-- Built games ship sources and cooked copies (G12 plans cooked-only games).
+- Built games ship cooked textures without their sources (G12); what the CPU reads of such a texture (terrain layers, color grading lookups, UI images) is decoded from BC7 or BC5, so it's close to the source, not equal. Model files (FBX, glTF) still ship beside their cooked copies.
 - macOS is not verified on changes; mobile and web are not supported.
 - No binary world format (S10k's 10 MB `world.json` loads in 0.19 s since C11).

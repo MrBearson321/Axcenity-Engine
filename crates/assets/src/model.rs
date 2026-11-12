@@ -616,19 +616,26 @@ impl Image {
 
     /// 4 bytes per pixel (red, green, blue, alpha), rows from the top:
     /// sRGB-encoded for colors, plain values for the other maps. A cooked
-    /// image decodes its file the first time (mid-grey if that fails now,
-    /// so the size always matches).
+    /// image decodes its file the first time; when that file isn't there to
+    /// decode (a built game that left it out, G12), its cooked top level is
+    /// decoded instead (mid-grey if both fail, so the size always matches).
     pub fn rgba(&self) -> &[u8] {
         self.pixels.get_or_init(|| {
             let decoded = self.source.as_ref().and_then(|source| {
                 let (bytes, name) = source.bytes()?;
                 decode_image(&bytes, &name).ok()
             });
+            let size = self.width as usize * self.height as usize * 4;
             match decoded {
                 Some(image) if (image.width, image.height) == (self.width, self.height) => {
                     image.pixels.into_inner().unwrap_or_default()
                 }
-                _ => vec![128; self.width as usize * self.height as usize * 4],
+                _ => self
+                    .cooked
+                    .as_ref()
+                    .and_then(cooked::decode_top_level)
+                    .filter(|pixels| pixels.len() == size)
+                    .unwrap_or_else(|| vec![128; size]),
             }
         })
     }
