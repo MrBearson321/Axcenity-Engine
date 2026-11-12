@@ -204,6 +204,12 @@ impl Session {
         // shaders, as in the viewport.
         session.particles.set_gpu(capabilities.compute_shaders);
         session.sim.scripts.enable_debugger();
+        // Saving a script during Play keeps its state, as s&box's hotload
+        // does (Phase 89); the player never wraps scripts.
+        session
+            .sim
+            .scripts
+            .enable_hot_reload(axcenity_blocks::hot_reload::wrap);
         // `RunService:IsStudio()` is true in the editor's Play.
         session.sim.scripts.set_studio(true);
         session.sim.scripts.set_breakpoints(breakpoints);
@@ -727,8 +733,9 @@ impl Session {
 
     /// Runs a script's changed file in place (see
     /// `ScriptRuntime::reload_script`), inside the guard. Output says
-    /// "Reloaded Door.server.lua", or shows the syntax error with its line
-    /// and that the last good version still runs.
+    /// "Reloaded Door.server.lua, kept count and door" (the top-level locals
+    /// it kept, Phase 89), or shows the syntax error with its line and that
+    /// the last good version still runs.
     pub fn reload_script(
         &mut self,
         script: InstanceId,
@@ -744,7 +751,7 @@ impl Session {
                     .reload_script(&mut self.sim.world, script, path, source);
             self.forward_output(output);
             match reloaded {
-                Ok(()) => output.info(format!("Reloaded {name}")),
+                Ok(kept) => output.info(format!("Reloaded {name}{}", kept_note(&kept))),
                 Err(_) if !self.sim.world.contains(script) => output.info(format!(
                     "{name} isn't in the game any more, so it wasn't reloaded."
                 )),
@@ -775,12 +782,22 @@ impl Session {
                 return;
             }
             let mut failed = false;
+            let mut kept = Vec::new();
             for &script in &copies {
-                failed |= self
+                match self
                     .sim
                     .scripts
                     .reload_script(&mut self.sim.world, script, path, source)
-                    .is_err();
+                {
+                    Ok(names) => {
+                        for name in names {
+                            if !kept.contains(&name) {
+                                kept.push(name);
+                            }
+                        }
+                    }
+                    Err(_) => failed = true,
+                }
                 self.forward_output(output);
                 // A syntax error is the same in every copy: said once.
                 if failed {
@@ -796,7 +813,7 @@ impl Session {
                     1 => String::new(),
                     n => format!(" in {n} copies"),
                 };
-                output.info(format!("Reloaded {name}{copies}"));
+                output.info(format!("Reloaded {name}{copies}{}", kept_note(&kept)));
             }
         })
     }
@@ -1339,3 +1356,21 @@ fn play_user_id() -> f64 {
 
 #[cfg(test)]
 mod tests;
+
+/// ", kept count and door" for the top-level locals a hot reload kept
+/// (Phase 89): up to four names, then how many more.
+fn kept_note(kept: &[String]) -> String {
+    const SHOWN: usize = 4;
+    let names: Vec<&str> = kept.iter().take(SHOWN).map(String::as_str).collect();
+    let more = kept.len().saturating_sub(SHOWN);
+    match (names.as_slice(), more) {
+        ([], _) => String::new(),
+        ([one], _) => format!(", kept {one}"),
+        (names, 0) => format!(
+            ", kept {} and {}",
+            names[..names.len() - 1].join(", "),
+            names[names.len() - 1]
+        ),
+        (names, more) => format!(", kept {} and {more} more", names.join(", ")),
+    }
+}

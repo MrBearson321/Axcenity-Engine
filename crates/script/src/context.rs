@@ -239,6 +239,7 @@ impl Context {
     /// Stops `script` without touching the world: disconnects its handlers
     /// and drops its waiting coroutines, so none of its code runs again.
     pub fn stop_script(&self, script: InstanceId) {
+        crate::hot_reload::forget(&self.lua, script);
         if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
             connections.forget_script(script);
         }
@@ -291,6 +292,63 @@ impl Context {
             .set_mode(ChunkMode::Text)
             .into_function()
             .map(|_| ())
+    }
+
+    /// Hot reload (Phase 89): reads `script`'s top-level locals before it
+    /// stops, for its next run (see `hot_reload`).
+    pub fn hot_snapshot(&self, script: InstanceId) {
+        crate::hot_reload::snapshot(&self.lua, script);
+    }
+
+    /// Hot reload: the names `script`'s new run kept, now it has started.
+    pub fn hot_finish(&self, script: InstanceId) -> Vec<String> {
+        crate::hot_reload::finish(&self.lua, script)
+    }
+
+    /// Hot reload of a ModuleScript that loaded as a table on this side:
+    /// runs its new code now with its locals kept, and copies the new table
+    /// into the one scripts already hold. Returns the scripts that required
+    /// it (they run again, keeping their state) and the names it kept, or
+    /// `None` when hot reload is off or it didn't load as a table here.
+    pub fn reload_module_keeping(
+        &self,
+        world: &mut World,
+        module: InstanceId,
+        path: &str,
+        source: &str,
+    ) -> Option<(std::collections::BTreeSet<InstanceId>, Vec<String>)> {
+        if !crate::hot_reload::enabled(&self.lua) {
+            return None;
+        }
+        let old = modules::loaded_table(&self.lua, module)?;
+        crate::hot_reload::snapshot(&self.lua, module);
+        // What the module's last hot run started belongs to it.
+        self.stop_script(module);
+        let scripts = modules::replace_keeping(&self.lua, module, path, source, old);
+        let ids = sandbox::ScriptIds {
+            game: world.root(),
+            workspace: world.workspace(),
+            script: module,
+        };
+        with_world(&self.lua, world, || {
+            // `require(module)` in a coroutine of its own, as a script's
+            // first `require` runs it.
+            let thread = sandbox::environment(&self.lua, ids)
+                .and_then(|env| env.raw_get::<mlua::Function>("require"))
+                .and_then(|require| self.lua.create_thread(require));
+            match thread {
+                Ok(thread) => scheduler::resume_as(
+                    &self.lua,
+                    &thread,
+                    crate::instance::LuaInstance(module),
+                    Some(module),
+                ),
+                Err(err) => push_error(&self.lua, &err),
+            }
+        });
+        modules::forget_self(&self.lua, module);
+        let kept = crate::hot_reload::finish(&self.lua, module);
+        Some((scripts, kept))
     }
 
     /// Gives the ModuleScript `module` new code (see `modules::replace`),
@@ -367,7 +425,7 @@ impl Context {
     ) -> mlua::Result<Thread> {
         let env = sandbox::environment(&self.lua, ids)?;
         // Compiled once per source (see `chunks`), so clones start quickly.
-        let function = crate::chunks::load(&self.lua, path, source, env)?;
+        let function = crate::chunks::load_hot(&self.lua, ids.script, path, source, env)?;
         self.lua.create_thread(function)
     }
 

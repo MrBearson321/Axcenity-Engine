@@ -112,16 +112,15 @@ On Linux you may need your distribution's Vulkan driver package (for example `me
 
 ### Changing the engine while it runs
 
-A debug editor run from this source tree can pick up changes to the engine's own Rust code. Turn on **Settings > Engine > Rebuild when engine code changes**, and each saved change to `crates/` rebuilds the editor in the background; **Relaunch** then starts the new one with the same project, unsaved edits, camera, selection and Play.
+Game files reload while the game runs, in any editor: save a script during Play and it runs its new code with its state kept, and a changed model, texture, sound or clip swaps in (see [docs/editor/scripts.md](docs/editor/scripts.md)).
 
-To skip the relaunch for changes inside functions, start the editor with the [Dioxus CLI](https://crates.io/crates/dioxus-cli) (`dx`, 0.7.10 or later) and the `hot-patch` feature:
+For the engine's own Rust code, build the editor with the dev-only `engine-dev` feature:
 
 ```bash
-cargo install dioxus-cli --version 0.7.10 --locked
-dx serve --hot-patch --package axcenity-editor --features hot-patch --args "examples/hello-touched"
+cargo run -p axcenity-editor --features engine-dev -- examples/hello-touched
 ```
 
-Change the body of a function, such as a physics or character step, and save: dx builds a patch, the next frame runs it, and Play keeps going. Output says "Hot-patched the running editor". A change a patch can't carry (a struct's fields, a function's signature, a constant, a dependency in `Cargo.toml`, a shader) rebuilds and relaunches instead, and Output says why. Started with `cargo run`, or built without the feature, the editor only rebuilds and relaunches. Release builds and the player have neither.
+Turn on **Settings > Engine > Rebuild when engine code changes**, and each saved change to `crates/` rebuilds the editor in the background; **Relaunch** then starts the new one with the same project, unsaved edits, camera, selection and Play. Editors built without the feature, release builds and the player have none of this.
 
 ## Project layout
 

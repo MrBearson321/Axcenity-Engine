@@ -332,9 +332,18 @@ impl eframe::Storage for MemoryStorage {
 }
 
 #[test]
+fn only_an_engine_dev_editor_rebuilds_and_relaunches() {
+    // Phase 89: a creator's editor never watches `crates/`, so it shows no
+    // Engine settings or menu items.
+    let app = EditorApp::new(None);
+    assert_eq!(app.rebuilds.source.is_some(), cfg!(feature = "engine-dev"));
+}
+
+#[test]
 fn a_debug_editor_has_the_engine_settings_and_they_survive_a_restart() {
     let ctx = theme::test_context();
     let mut app = EditorApp::new(None);
+    app.rebuilds.source = EngineSource::find();
     assert!(app.rebuilds.source.is_some());
     app.rebuilds.on_change = true;
     app.rebuilds.relaunch_automatically = true;
