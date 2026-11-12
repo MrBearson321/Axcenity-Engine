@@ -2,7 +2,7 @@
 
 Paul's usability brief (2026-11-11, §9 and Phase 6) asks for the code to become easier for developers and AI agents to read and change: find oversized files and files with unrelated responsibilities, split independent systems into modules, cut duplication and coupling, and keep public APIs and behavior unchanged, without refactoring only to reduce line counts.
 
-This pass works **inside** the existing crates. Moving editor panel families into their own crates is G11 ([gap analysis](../engine-gap-analysis.md)), which another thread is doing (`editor-kit`, `editor-toolbox`, `editor-benchmark` are merged; Model Studio, gizmo, snapping, shortcuts and animation posing/preview are next, into `editor-tools`). Those files are left alone here.
+This pass works **inside** the existing crates. Moving editor panel families into their own crates is G11 ([gap analysis](../engine-gap-analysis.md)), which another thread is doing (`editor-kit`, `editor-toolbox`, `editor-benchmark`, `editor-tools` with the gizmo, snapping, shortcuts and posing, and `editor-model-studio` are merged; the UI Designer and `node_graph` are next). Those files are left alone here.
 
 Splits follow the repository's existing pattern ([crates.md, "Where the big files split"](../../architecture/crates.md#where-the-big-files-split)): the parent file keeps the types and entry points; each child holds one responsibility, starts with `use super::*;`, and is either another `impl` block or free functions. Code moves verbatim. The only edits are visibility (a function the parent calls becomes `pub(super)` or `pub(crate)`), the `mod`/`use` lines, and a short `//!` comment at the top of each new file saying what it holds.
 

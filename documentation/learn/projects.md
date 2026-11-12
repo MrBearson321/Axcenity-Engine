@@ -1,5 +1,5 @@
 ---
-description: Make, open, organize and safeguard projects: templates, the project folder, levels, version history and backups.
+description: Make, open, organize and safeguard projects: templates, the project folder, levels, version history, backups and Team Create.
 icon: folder
 samples: [hello-levels]
 ---
@@ -11,7 +11,7 @@ A project is a folder. Everything in it is a readable text file (except your own
 ## Create and open
 
 - **New Project** (start screen, or **File > New Project…**) asks for a template, a name and a folder. **Baseplate** gives you a locked grey floor to build on, **Empty** nothing at all, and **Starter scene** a lit scene with a few blocks. The genre templates are small finished games to learn from and build on: **First Person** (a character with a blaster), **Third Person** (a course with coins and a checkpoint), **Vehicle** (a car and timed laps), **Top Down** and **Multiplayer Arena**. Each comes with a game menu and saves.
-- **Open Project** (start screen, or **File > Open Project…**) opens any project folder. The start screen keeps up to 100 recent projects as cards; a card's **⋯** menu (or a right-click) has Open, Settings, Version History, Show in File Manager, Remove from List (the files stay) and Delete (permanent, after you confirm).
+- **Open Project** (start screen, or **File > Open Project…**) opens any project folder. The start screen shows your last four projects under **Recent**, then **All projects** (up to 100, as cards or a list, with search and sort); a card's **⋯** menu (or a right-click) has Open, Settings, Version History, Show in File Manager, Remove from List (the files stay) and Delete (permanent, after you confirm).
 - From a terminal, `axcenity-editor <folder>` opens a project directly.
 
 Opening reads the project in the background with a progress screen, so the window never freezes, and a damaged file is reported in the Console and skipped instead of stopping the whole project from opening.
@@ -45,6 +45,20 @@ A game can have several levels. `world.json` is the start level; every other lev
 - Every save also keeps a version of the project in `.axcenity/history` (the newest 40, plus any you pin). **File > Version History…** lists them with what changed in words ("Moved Part Block in Workspace"), and can restore the whole project or one file. Restoring keeps a "Before restore" version first, so it can be undone.
 - **File > Save Checkpoint…** saves with a message and pins that version, so it's kept however many saves follow.
 - **File > Back Up Project** writes a dated `.zip` of the whole project to a backup folder you choose the first time.
+
+## Team Create: editing together
+
+> **Experimental.** Team Create works on one network, but it's new and hasn't had much use across real machines yet. Keep backups of a shared project.
+
+Team Create lets several people edit one project at the same time, each in their own editor.
+
+- **Share:** open the project and choose **File > Share with Team Create…**. Your editor hosts the session, and the **Team Create** panel opens. **Create invite link** makes a link for an **Editor** (can change things) or a **Viewer** (can look, but still receives the whole project). Each link works once; revoke unused ones from the panel.
+- **Join:** paste the link into **File > Join Team Create…**, or **Join…** on the start screen with no project open. Your editor fetches the project into its own folder and opens it.
+- **Working together:** edits, undo, imports and saved files reach everyone. Others' selections are outlined in their colour with a name tag, their rows in the Explorer get a colour bar, and **Follow their camera** shows what someone is looking at. A script or other document someone else is editing is read-only for you, with a line saying who has it.
+- **Connection:** the panel shows Connected, Syncing, Reconnecting or Offline. Offline, your changes wait and are sent when the connection comes back. If the host's editor stops without ending the session, opening the project again brings the session's work back as unsaved changes.
+- **Leave session** (members) or **End session** (the host) stops it. The owner sets roles and removes members in the panel.
+
+Sessions reach other people on the same network, through a forwarded port, or over a private network such as Tailscale; there's no Axcenity sign-in or relay service. A team can also run `axcenity-collab <project folder>` on an always-on computer, so the session doesn't depend on anyone's editor being open.
 
 ## Opening older and newer projects
 

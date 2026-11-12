@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [editor, mesh_edit, anim, blocks, ui]
-source: [crates/editor/src/model_studio.rs, crates/editor/src/animation.rs, crates/editor/src/sequencer.rs, crates/editor/src/ui_designer.rs, crates/editor/src/material_editor.rs, crates/editor/src/material_graph.rs, crates/editor/src/block_editor.rs, crates/editor/src/node_graph.rs, crates/editor/src/behavior_tree.rs, crates/editor/src/dialogue_editor.rs, crates/editor/src/data_table.rs, crates/editor/src/terrain_studio.rs]
+source: [crates/editor-model-studio/src/lib.rs, crates/editor/src/animation.rs, crates/editor/src/sequencer.rs, crates/editor/src/ui_designer.rs, crates/editor/src/material_editor.rs, crates/editor/src/material_graph.rs, crates/editor/src/block_editor.rs, crates/editor/src/node_graph.rs, crates/editor/src/behavior_tree.rs, crates/editor/src/dialogue_editor.rs, crates/editor/src/data_table.rs, crates/editor/src/terrain_studio.rs]
 docs: [docs/editor/model-studio.md, docs/editor/import.md, docs/project/sequences.md, docs/ui.md, docs/editor/assets.md, docs/scripting/blocks.md, docs/scripting/graphs.md, docs/terrain.md, docs/research/usability/usability-audit.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -17,7 +17,7 @@ The editor's tabs beyond the Scene, Explorer and Properties. Each is a module (o
 
 | Tab | Module | Edits | Saves as | Engine side |
 |---|---|---|---|---|
-| Model Studio | `model_studio.rs`, `model_studio/` | Meshes: modeling ops, modifiers, UVs, paint, sculpt, retopology, bake, rig, weights, pose | `.glb` + `.meshedit.json` sidecar | `mesh_edit` ([Mesh editing and CSG](../Engine-Systems/Mesh-Editing-and-CSG.md)) |
+| Model Studio | the `editor-model-studio` crate (G11) | Meshes: modeling ops, modifiers, UVs, paint, sculpt, retopology, bake, rig, weights, pose | `.glb` + `.meshedit.json` sidecar | `mesh_edit` ([Mesh editing and CSG](../Engine-Systems/Mesh-Editing-and-CSG.md)) |
 | Animation | `animation.rs`, `animation/` | Clips (dope sheet, curves, Record), state machines (Blueprint-style), posing, IK | `*.anim.json`, `*.statemachine.json` | `anim` |
 | Sequencer | `sequencer.rs` | Cutscene sequences on a timeline (reuses Animation's dope sheet and curves) | `*.sequence.json` | `anim::sequence`, `script::sequence` |
 | UI Designer | `ui_designer.rs`, `ui_designer/` | ScreenGuis on an artboard (anchors, rulers, palette, inspector), Event Graph, Live Preview | world + `ui/*.uigraph.json` | `ui`, `blocks-runtime::ui_graph` |

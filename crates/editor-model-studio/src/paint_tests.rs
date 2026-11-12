@@ -17,7 +17,7 @@ use crate::screen::Screen;
 const RUST: [u8; 3] = [150, 70, 30];
 
 /// The points of a stroke on `screen` from `from` to `to` on the model.
-pub(crate) fn stroke(screen: &Screen, from: Vec3, to: Vec3) -> Vec<egui::Pos2> {
+pub fn stroke(screen: &Screen, from: Vec3, to: Vec3) -> Vec<egui::Pos2> {
     (0..=12)
         .filter_map(|k| screen.point(from.lerp(to, k as f32 / 12.0)))
         .collect()

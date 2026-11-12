@@ -11,7 +11,7 @@ use super::*;
 use crate::gizmo::{Drag, Handle, Modes, Pointer, Pose};
 use crate::screen::Screen;
 
-pub(crate) fn cube_doc() -> StudioDoc {
+pub fn cube_doc() -> StudioDoc {
     StudioDoc::new(
         String::new(),
         ModelDoc::primitive(&PrimitiveSettings::default()),
@@ -34,7 +34,7 @@ fn positions(doc: &StudioDoc) -> Vec<Vec3> {
         .collect()
 }
 
-pub(crate) fn screen() -> Screen {
+pub fn screen() -> Screen {
     let camera = Camera {
         position: Vec3::new(6.0, 5.0, 8.0),
         look_at: Vec3::ZERO,

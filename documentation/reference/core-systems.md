@@ -30,10 +30,11 @@ Every major system, what it covers and how finished it is. "Partly built" means 
 | Build Game | Windows, macOS and Linux builds | Stable; macOS builds aren't notarized | [Publishing your game](../learn/publishing.md) |
 | Game tests | Automated tests in Lua, run in the editor or a terminal | Stable | [Debugging and profiling](debugging.md) |
 | Editor plugins | Lua plugins that add panels and ribbon buttons to the editor | Experimental | [Engine architecture](architecture.md) |
+| Team Create | Several people editing one project at once: invites, roles, live edits, document locks, reconnecting, a self-hosted server | Experimental | [Projects](../learn/projects.md#team-create-editing-together) |
 | AI assistant (MCP) | Lets an AI assistant read and edit a project through the editor (`axcenity-editor --mcp`) | Experimental | [Debugging and profiling](debugging.md) |
 
 ## Not built
 
-These are common in other engines but Axcenity doesn't have them yet: export to web, mobile or consoles; internet matchmaking, relays or encrypted connections; HRTF (3D-positioned) audio; UI drawn on a part's surface; importing animation from glTF files; and real-time collaboration in the editor (Team Create is being built, but you can't start or join a session from the editor yet).
+These are common in other engines but Axcenity doesn't have them yet: export to web, mobile or consoles; internet matchmaking, relays or encrypted connections; HRTF (3D-positioned) audio; UI drawn on a part's surface; importing animation from glTF files; and an Axcenity-hosted service for Team Create (sessions are hosted by an editor or your own `axcenity-collab` server).
 
 The source repository's wiki keeps the full [system inventory](https://github.com/MrBearson321/axcenity-engine/blob/main/wiki/Architecture/System-Inventory.md) and [known limitations](https://github.com/MrBearson321/axcenity-engine/blob/main/wiki/Roadmap/Known-Limitations.md).

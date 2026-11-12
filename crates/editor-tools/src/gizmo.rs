@@ -35,11 +35,13 @@ use axcenity_render::glam::{Quat, Vec3};
 use axcenity_scene::{Ray, orientation_from_rotation, rotation_from_orientation};
 use eframe::egui;
 
-use crate::properties::MIN_SIZE;
 use crate::screen::Screen;
 use crate::snapping::points::{self, DragKind, DragReport, Freedom, Sites, SnapPoint};
 use crate::snapping::{self, Obb, Obstacle};
 
+/// The smallest a part can be on any axis, the same as Roblox. Zero would
+/// leave nothing to see or click. The Scale tool stops here too.
+pub const MIN_SIZE: f32 = 0.001;
 /// How long the Move arrows and how big the Rotate rings are, in points.
 const HANDLE_POINTS: f32 = 90.0;
 /// How far the Scale balls sit out from the part's faces, in points.
@@ -374,7 +376,7 @@ pub struct Shape {
 
 impl Shape {
     /// The pieces of line the handle is drawn with.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn lines(&self) -> &[[egui::Pos2; 2]] {
         &self.lines
     }
@@ -727,7 +729,7 @@ impl Pointer {
 }
 
 /// Move and Resize drags only need the ray.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl From<Ray> for Pointer {
     fn from(ray: Ray) -> Self {
         Self {
@@ -745,7 +747,7 @@ impl Drag {
     /// Starts dragging the Move or Resize `handle` of one `part` (at
     /// `start`) where `ray` points, with world axes. `None` if the ray runs
     /// alongside the handle and can't grab it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn start(handle: Handle, part: InstanceId, start: Pose, ray: Ray) -> Option<Drag> {
         assert!(!matches!(handle, Handle::Rotate(_)), "rings use `turn`");
         // Resize handles follow the part's own axes; the others the world's.
@@ -768,7 +770,7 @@ impl Drag {
 
     /// Starts dragging the Rotate `handle` of one `part` (at `start`),
     /// grabbed at `at` in `screen`, with world axes.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn turn(
         handle: Handle,
         part: InstanceId,
@@ -987,14 +989,14 @@ impl Drag {
     }
 
     /// A ring drag's forward way on screen, one point long.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn spin(&self) -> egui::Vec2 {
         self.spin
     }
 
     /// The new property values of the part the handles are on, for the
     /// mouse now at `pointer`, or `None` if it can't tell.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn update(
         &mut self,
         pointer: impl Into<Pointer>,
@@ -1291,7 +1293,7 @@ fn along_line(origin: Vec3, direction: Vec3, ray: Ray) -> Option<f32> {
 
 /// Where the ring around `axis` of the handles at `frame` is drawn in
 /// `screen`, `angle` (radians) around from its first direction.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn ring_point(screen: &Screen, frame: Pose, axis: Axis, angle: f32) -> egui::Pos2 {
     let length = screen.studs_per_point(frame.position) * HANDLE_POINTS;
     let (across, up) = axis.ring_directions();
