@@ -60,6 +60,9 @@ pub enum FindingKind {
     /// A file in `objects/` no script inside an object takes its code from
     /// (G2): left behind when its last script was deleted.
     UnusedFile,
+    /// An asset file that is byte-for-byte another one (roadmap R12). Its
+    /// `owner` is the extra copy and its `path` the copy to keep.
+    DuplicateFile,
 }
 
 impl FindingKind {
@@ -71,6 +74,7 @@ impl FindingKind {
             Self::ImportFailure => "import-failure",
             Self::BrokenDependency => "broken-dependency",
             Self::UnusedFile => "unused-file",
+            Self::DuplicateFile => "duplicate-file",
         }
     }
 
@@ -81,6 +85,7 @@ impl FindingKind {
             Self::ImportFailure => "Import failure",
             Self::BrokenDependency => "Broken dependency",
             Self::UnusedFile => "Unused file",
+            Self::DuplicateFile => "Duplicate file",
         }
     }
 }
@@ -268,6 +273,7 @@ pub fn check_assets_in_level(folder: &Path, world: &World, open: Option<&str>) -
     scan.data_tables();
     scan.unreferenced_models();
     scan.unused_object_files();
+    scan.duplicates();
     scan.findings.sort();
     scan.findings.dedup();
     Report {
@@ -286,6 +292,27 @@ struct Scan {
 }
 
 impl Scan {
+    /// Each extra copy of a file that's the same as another (R12).
+    fn duplicates(&mut self) {
+        for set in crate::duplicates::find_duplicates(&self.folder) {
+            for copy in set.copies {
+                self.findings.push(Finding {
+                    kind: FindingKind::DuplicateFile,
+                    message: format!(
+                        "The same as `{}` ({}). Merge points everything at that file and \
+                         deletes this one.",
+                        set.keep,
+                        size_text(set.bytes)
+                    ),
+                    owner: copy.clone(),
+                    path: set.keep.clone(),
+                    site: Site::File { file: copy },
+                    wants: None,
+                });
+            }
+        }
+    }
+
     /// `prefab` is the prefab file `world` was read from, with its
     /// top-level instances, or `None` for the open world.
     fn world(&mut self, world: &World, prefab: Option<(&str, &[InstanceId])>) {
@@ -1187,6 +1214,15 @@ fn causes(err: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     text
+}
+
+/// A file size for people: bytes, KB or MB.
+fn size_text(bytes: u64) -> String {
+    match bytes {
+        0..1024 => format!("{bytes} bytes"),
+        1024..1_048_576 => format!("{:.1} KB", bytes as f64 / 1024.0),
+        _ => format!("{:.1} MB", bytes as f64 / 1_048_576.0),
+    }
 }
 
 #[cfg(test)]

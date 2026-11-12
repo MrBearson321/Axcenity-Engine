@@ -123,6 +123,38 @@ pub fn compiler() -> Compiler {
     Compiler::new().set_disabled_builtins(DISABLED_BUILTINS.iter().copied())
 }
 
+/// A syntax error in a script: the line it's on (from 1) and Luau's
+/// message, such as `Expected 'end' (to close 'function' at line 1), got <eof>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyntaxError {
+    pub line: usize,
+    pub message: String,
+}
+
+/// The first syntax error in `source`, if it has one, found by compiling it
+/// as a script would be (without running anything). Cheap enough to call
+/// as someone types: it needs no interpreter.
+pub fn find_syntax_error(source: &str) -> Option<SyntaxError> {
+    match compiler().compile(source) {
+        Ok(_) => None,
+        Err(mlua::Error::SyntaxError { message, .. }) => {
+            // Luau writes `line: message`.
+            let (line, message) = message
+                .split_once(':')
+                .and_then(|(line, rest)| Some((line.trim().parse().ok()?, rest.trim())))
+                .unwrap_or((1, message.trim()));
+            Some(SyntaxError {
+                line,
+                message: message.to_owned(),
+            })
+        }
+        Err(other) => Some(SyntaxError {
+            line: 1,
+            message: other.to_string(),
+        }),
+    }
+}
+
 const SAFE_OS_FUNCTIONS: &[&str] = &["clock", "date", "difftime", "time"];
 
 /// What `getmetatable` gives for a string, as in Roblox.

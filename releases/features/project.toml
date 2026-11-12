@@ -95,3 +95,27 @@ docs = "docs/project/templates.md"
 version = "unreleased"
 evidence = "reconstructed"
 source = "commit 66f4e073 (Genre Templates), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.autorecover"
+name = "AutoRecover"
+subsystem = "project"
+description = "Unsaved work is kept every few minutes and offered back after a crash or power cut."
+status = "active"
+docs = "docs/project/autorecover.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "PR #255"
+
+[[feature]]
+id = "project.user-templates"
+name = "Your own templates"
+subsystem = "project"
+description = "Save a project as an .axtemplate file and start new projects from it."
+status = "active"
+docs = "docs/project/templates.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "PR #258"

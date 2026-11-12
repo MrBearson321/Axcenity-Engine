@@ -25,6 +25,7 @@
 mod asset_fixes;
 mod asset_refs;
 mod assets;
+mod autorecover;
 mod behavior_trees;
 mod block_undo;
 mod branding;
@@ -47,6 +48,7 @@ mod find_in_scripts;
 mod floating;
 mod game_tests;
 mod graphics_benchmark;
+pub(crate) mod import_presets;
 mod input_settings;
 mod layouts;
 mod levels;
@@ -63,6 +65,7 @@ mod plugins;
 mod prefabs;
 mod probes;
 mod project_upgrade;
+mod save_template;
 mod search;
 mod sequencer;
 mod session;
@@ -311,6 +314,9 @@ pub struct EditorApp {
     ui_warnings: Vec<String>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
+    /// Pause was pressed and Play hasn't paused since, so the pause it
+    /// makes says so in Output.
+    pause_pressed: bool,
     /// Turns keyboard events into key presses for LocalScripts during Play.
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
@@ -452,6 +458,13 @@ pub struct EditorApp {
     ribbon_tabs: RibbonTabs,
     /// View > Light Cones: show every light's reach in the viewport, not
     /// just the selected one's. Saved between runs.
+    /// AutoRecover's setting and snapshots (`app/autorecover.rs`).
+    autorecover: autorecover::AutoRecover,
+    /// Where Save as Template… writes and New Project lists the user's
+    /// templates (`app/save_template.rs`).
+    templates_folder: Option<PathBuf>,
+    /// Save as Template…, while it's open.
+    template_draft: Option<save_template::TemplateDraft>,
     light_cones: bool,
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
@@ -774,6 +787,8 @@ const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
 const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
+const OVERLAY_CONTACTS_KEY: &str = "overlay contacts";
+const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -956,6 +971,7 @@ impl EditorApp {
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
+            pause_pressed: false,
             profiler: Profiler::default(),
             last_drawn: None,
             mixer: crate::mixer::Mixer::default(),
@@ -1019,6 +1035,9 @@ impl EditorApp {
             layout_name: None,
             pending_layout: None,
             ribbon_tabs: RibbonTabs::default(),
+            autorecover: Default::default(),
+            templates_folder: None,
+            template_draft: None,
             light_cones: false,
             view_cube: true,
             ai: Default::default(),
@@ -1088,6 +1107,9 @@ impl EditorApp {
                 self.start.set_nav(start::StartNav::from_text(&text));
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
+            if let Some(text) = storage.get_string(autorecover::AUTORECOVER_KEY) {
+                self.autorecover.read(&text);
+            }
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(team_panel::TEAM_CREATE_KEY) {
@@ -1117,6 +1139,9 @@ impl EditorApp {
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             self.overlays.constraints =
                 storage.get_string(OVERLAY_CONSTRAINTS_KEY).as_deref() == Some("on");
+            self.overlays.contacts =
+                storage.get_string(OVERLAY_CONTACTS_KEY).as_deref() == Some("on");
+            self.overlays.bodies = storage.get_string(OVERLAY_BODIES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
                 self.recent_tabs = welcome::RecentTabs::from_text(&text);
             }
@@ -1213,6 +1238,7 @@ impl eframe::App for EditorApp {
         storage.set_string(start::StartNav::KEY, self.start.nav().to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
+        storage.set_string(autorecover::AUTORECOVER_KEY, self.autorecover.to_text());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
         let ai = if self.ai.allowed { "on" } else { "off" };
@@ -1250,6 +1276,11 @@ impl eframe::App for EditorApp {
             OVERLAY_CONSTRAINTS_KEY,
             flag(self.overlays.constraints).to_owned(),
         );
+        storage.set_string(
+            OVERLAY_CONTACTS_KEY,
+            flag(self.overlays.contacts).to_owned(),
+        );
+        storage.set_string(OVERLAY_BODIES_KEY, flag(self.overlays.bodies).to_owned());
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
         storage.set_string(
@@ -1384,7 +1415,8 @@ impl EditorApp {
             } else {
                 // Saved, or the changes were let go: a last upload to the
                 // project's repository, then a hosted session ends with
-                // nothing to recover.
+                // nothing to recover, and so does AutoRecover.
+                self.autorecover_done();
                 self.repo_close();
                 self.end_team_for_quit();
             }
@@ -1801,6 +1833,9 @@ impl EditorApp {
         self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.sky_prompt(ctx);
+        self.autorecover_prompt(ctx);
+        self.autorecover_frame();
+        self.save_template_dialog(ctx);
         self.import_dropped(ctx);
         self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);
@@ -1864,6 +1899,8 @@ mod asset_refs_tests;
 #[cfg(test)]
 mod attribute_tests;
 #[cfg(test)]
+mod autorecover_tests;
+#[cfg(test)]
 mod behavior_tree_tests;
 #[cfg(test)]
 mod block_undo_tests;
@@ -1897,6 +1934,8 @@ mod graphics_benchmark_tests;
 mod health_tests;
 #[cfg(test)]
 mod ik_tests;
+#[cfg(test)]
+mod import_preset_tests;
 #[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]

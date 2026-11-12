@@ -1,7 +1,9 @@
-//! Checks the open code tabs with luau-lsp (G4 stage 2; `luau_check.rs`)
-//! and gives each tab what was found, for its squiggles. A tab is checked
-//! once its code has stayed the same for [`QUIET`], and a saved tab's
-//! errors are also listed in Output, as `path:line:` links.
+//! Checks the open code tabs and gives each tab what was found, for its
+//! squiggles: the editor's own checks (`script_completion::lint`: syntax
+//! errors and names the API can't have), always, and luau-lsp's type
+//! errors and lints (G4 stage 2; `luau_check.rs`) when it's installed. A
+//! tab is checked once its code has stayed the same for [`QUIET`], and a
+//! saved tab's errors are also listed in Output, as `path:line:` links.
 
 use super::*;
 use crate::luau_check::{self, Checker, Diagnostic, Results, Severity};
@@ -17,6 +19,9 @@ pub(crate) struct LuauChecks {
     /// luau-lsp was looked for (it's looked for once).
     looked: bool,
     results: Results,
+    /// The editor's own findings for each script, for the text (by hash)
+    /// they were found in.
+    built_in: HashMap<String, (u64, Vec<Diagnostic>)>,
     /// The text (by hash) each script was last sent with.
     asked: HashMap<String, u64>,
     /// Each tab's text (by hash) and when it was first seen like that.
@@ -34,6 +39,7 @@ impl Default for LuauChecks {
             checker: None,
             looked: false,
             results: Results::default(),
+            built_in: HashMap::new(),
             asked: HashMap::new(),
             seen: HashMap::new(),
             reported: HashMap::new(),
@@ -65,36 +71,29 @@ impl EditorApp {
             checks.looked = true;
             checks.checker = luau_check::find().and_then(|program| Checker::start(program).ok());
         }
-        let Some(checker) = &checks.checker else {
-            return false;
-        };
 
         let mut waiting = false;
-        for done in checker.finished() {
-            let found = match done.result {
-                Ok(found) => found,
-                Err(reason) => {
-                    if !checks.failed {
-                        checks.failed = true;
-                        self.output.warning(format!(
-                            "Couldn't check scripts with luau-lsp ({}): {reason}",
-                            checker.program().display()
-                        ));
+        let mut answered = Vec::new();
+        if let Some(checker) = &checks.checker {
+            for done in checker.finished() {
+                let found = match done.result {
+                    Ok(found) => found,
+                    Err(reason) => {
+                        if !checks.failed {
+                            checks.failed = true;
+                            self.output.warning(format!(
+                                "Couldn't check scripts with luau-lsp ({}): {reason}",
+                                checker.program().display()
+                            ));
+                        }
+                        Vec::new()
                     }
-                    Vec::new()
-                }
-            };
-            checks.results.set(&done.path, done.hash, found.clone());
-            // Only the latest text asked about counts; an older answer is
-            // dropped.
-            if checks.asked.get(&done.path) != Some(&done.hash) {
-                continue;
-            }
-            if let Some(tab) = self.tabs.get_mut(&done.path) {
-                let saved = !tab.unsaved();
-                tab.problems = found.clone();
-                if saved {
-                    report(&mut self.output, &mut checks.reported, &done.path, &found);
+                };
+                checks.results.set(&done.path, done.hash, found);
+                // Only the latest text asked about counts; an older answer
+                // is dropped.
+                if checks.asked.get(&done.path) == Some(&done.hash) {
+                    answered.push(done.path);
                 }
             }
         }
@@ -105,16 +104,24 @@ impl EditorApp {
             }
             let hash = luau_check::text_hash(&tab.text);
             if checks.asked.get(&tab.path) == Some(&hash) {
-                if checks.results.get(&tab.path, hash).is_none() {
+                if checks.checker.is_some() && checks.results.get(&tab.path, hash).is_none() {
                     waiting = true;
+                }
+                if answered.contains(&tab.path) {
+                    show(checks, &mut self.output, tab, hash);
                 }
                 continue;
             }
             match checks.seen.get(&tab.path) {
                 Some(&(seen, since)) if seen == hash => {
                     if now - since >= QUIET {
-                        checker.check(&tab.path, &tab.text);
+                        let found = crate::script_completion::lint::check(&tab.text, &self.world);
+                        checks.built_in.insert(tab.path.clone(), (hash, found));
+                        if let Some(checker) = &checks.checker {
+                            checker.check(&tab.path, &tab.text);
+                        }
                         checks.asked.insert(tab.path.clone(), hash);
+                        show(checks, &mut self.output, tab, hash);
                     }
                 }
                 _ => {
@@ -125,6 +132,34 @@ impl EditorApp {
         }
         waiting
     }
+}
+
+/// Gives `tab` (whose text is `hash`) what was found in it: luau-lsp's
+/// findings, once they're in, and the editor's own, except on lines
+/// luau-lsp already has something to say about. A saved tab's errors go
+/// to Output too.
+fn show(
+    checks: &mut LuauChecks,
+    output: &mut Output,
+    tab: &mut crate::scripts::ScriptTab,
+    hash: u64,
+) {
+    let mut found: Vec<Diagnostic> = checks
+        .results
+        .get(&tab.path, hash)
+        .map(<[Diagnostic]>::to_vec)
+        .unwrap_or_default();
+    if let Some((checked, own)) = checks.built_in.get(&tab.path)
+        && *checked == hash
+    {
+        let lines: Vec<usize> = found.iter().map(|found| found.line).collect();
+        found.extend(own.iter().filter(|own| !lines.contains(&own.line)).cloned());
+    }
+    found.sort_by_key(|found| (found.line, found.column));
+    if !tab.unsaved() {
+        report(output, &mut checks.reported, &tab.path, &found);
+    }
+    tab.problems = found;
 }
 
 /// Lists a saved script's errors in Output, when they're not the ones
@@ -238,10 +273,35 @@ mod tests {
     }
 
     #[test]
-    fn without_luau_lsp_tabs_are_left_alone() {
+    fn without_luau_lsp_tabs_still_get_the_editors_own_checks() {
         let mut app = EditorApp::new(None);
         app.luau.enabled = true;
         app.luau.looked = true;
         assert!(!app.check_scripts(0.0));
+
+        let folder = copy_of_example("hello-touched", "built-in-checks");
+        let mut app = EditorApp::new(Some(&folder));
+        app.luau.enabled = true;
+        app.luau.looked = true;
+        let path = "scripts/pad.server.lua";
+        app.open_script(path, None);
+        app.tabs.get_mut(path).unwrap().text = "workspace.Floor:Destory()\n".to_owned();
+        let mut now = 0.0;
+        while app.tabs.get(path).unwrap().problems.is_empty() {
+            assert!(now < 5.0, "never checked");
+            app.check_scripts(now);
+            now += 0.1;
+        }
+        let problem = &app.tabs.get(path).unwrap().problems[0];
+        assert_eq!((problem.line, problem.severity), (1, Severity::Error));
+        assert!(problem.message.contains("Destory"), "{problem:?}");
+        // Unsaved, so not in Output yet.
+        assert!(
+            !app.output
+                .lines()
+                .iter()
+                .any(|line| line.text.contains("Destory"))
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

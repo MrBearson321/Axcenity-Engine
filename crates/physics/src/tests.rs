@@ -1088,3 +1088,50 @@ fn a_stack_of_ice_blocks_stands_like_plastic() {
         "as high as Plastic's: {ice:?} and {plastic:?}"
     );
 }
+
+#[test]
+fn the_debug_view_shows_contacts_centers_of_mass_and_sleep_without_changing_anything() {
+    let (mut world, floor) = world_with_floor();
+    // A 4×1×2 block (default size) dropped just above the floor.
+    let block = part(&mut world, Vector3::new(3.0, 2.0, 0.0), false);
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 0.1, 60.0);
+    // Still falling: awake, no contacts yet, its center where it is.
+    let view = physics.debug_view();
+    assert!(view.contacts.is_empty(), "{:?}", view.contacts);
+    assert_eq!(view.bodies.len(), 1, "the anchored floor isn't listed");
+    let body = view.bodies[0];
+    assert_eq!(body.part, block);
+    assert!(!body.sleeping);
+    assert!(body.mass > 0.0);
+    let at = position(&world, block);
+    assert!(
+        (body.center_of_mass.y - at.y).abs() < 1e-3,
+        "{body:?} {at:?}"
+    );
+
+    // Landed and settled: contacts on the floor's top, pushing the block
+    // up, and in time the block sleeps.
+    run(&mut physics, &mut world, 5.0, 60.0);
+    let view = physics.debug_view();
+    assert!(!view.contacts.is_empty());
+    for contact in &view.contacts {
+        let (one, two) = contact.parts;
+        assert!(
+            (one, two) == (block, floor) || (one, two) == (floor, block),
+            "{contact:?}"
+        );
+        assert!(
+            contact.point.y.abs() < 0.05,
+            "on the floor's top: {contact:?}"
+        );
+        let up = if one == block { 1.0 } else { -1.0 };
+        assert!((contact.normal.y - up).abs() < 1e-3, "{contact:?}");
+    }
+    assert!(view.contacts.iter().any(|contact| contact.impulse > 0.0));
+    assert!(view.bodies[0].sleeping, "{:?}", view.bodies[0]);
+    // Reading it changed nothing.
+    let before = position(&world, block);
+    assert_eq!(physics.debug_view(), view);
+    assert_eq!(position(&world, block), before);
+}

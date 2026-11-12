@@ -21,7 +21,7 @@ Tools for finding out why something misbehaves. For slowness see [Profiling](../
 | Breakpoints | Click a script tab's gutter, then Play | Pauses the whole game before the line; call stack, locals and upvalues; Continue (F5), Step Over (F10), Step Into (F11), Step Out (Shift+F11); watch expressions |
 | Pause on errors | Ribbon > Clients > Pause on errors (off by default) | A script error pauses Play at the failed line with its call stack and locals |
 | Live Properties | Select during Play | Values update every frame; edits change the game world (Keep to carry them back) |
-| Visual-debug overlays | Viewport > Overlays | Colliders, recent raycasts, bounds, sound emitters, navmesh, agent paths, culling |
+| Visual-debug overlays | Viewport > Overlays | Colliders, recent raycasts, bounds, sound emitters, navmesh, agent paths, constraints, culling; during Play, physics **Contacts** (points, push direction and strength) and **Bodies** (centers of mass, awake or asleep) from `Physics::debug_view` (G15) |
 | Several clients | Game group: Clients, Network (latency, jitter, loss) | Each device's world; Profiler Network section |
 | Player F9 console | Editor Play, project-folder runs, or built games with `--dev` / the project setting | Log (by level and side), Lua on either side, Stats (frame laps) |
 | Player logs | `latest.log` in the game's data folder; panic hook writes the crash message | What happened on someone else's machine |

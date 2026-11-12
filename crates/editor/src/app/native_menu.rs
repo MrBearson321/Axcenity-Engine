@@ -227,6 +227,7 @@ impl EditorApp {
             .command("Version History…", Command::VersionHistory, when(editing))
             .command("Save Checkpoint…", Command::SaveCheckpoint, when(editing))
             .command("Back Up Project", Command::BackUpProject, when(editing))
+            .command("Save as Template…", Command::SaveAsTemplate, when(editing))
             .separator()
             .command("Input…", Command::Input, when(project))
             .command("Close Project", Command::CloseProject, when(editing))

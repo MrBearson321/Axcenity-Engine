@@ -161,6 +161,19 @@ impl EditorApp {
             }
             if ui
                 .add_enabled(
+                    editing,
+                    egui::Button::new(item(ui, icons::COPY_SIMPLE, "Save as Template…")),
+                )
+                .on_hover_text(
+                    "Keep this project as a starting point that New Project offers under \
+                     Your templates.",
+                )
+                .clicked()
+            {
+                self.open_save_template();
+            }
+            if ui
+                .add_enabled(
                     self.project.is_some(),
                     egui::Button::new(item(ui, icons::GAME_CONTROLLER, "Input…")),
                 )

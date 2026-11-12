@@ -43,6 +43,8 @@ pub enum FixChoice {
     Locate,
     Clear,
     Delete,
+    /// Point everything at the kept file of a duplicate and delete the copy.
+    Merge,
 }
 
 /// The last scan, if one has been run for this open project.
@@ -279,6 +281,7 @@ impl Row<'_> {
             FindingKind::ImportFailure => (icons::WARNING_CIRCLE, palette.error),
             FindingKind::BrokenDependency => (icons::LINK, palette.warning),
             FindingKind::UnusedFile => (icons::FILE_CODE, palette.text_weak),
+            FindingKind::DuplicateFile => (icons::COPY, palette.text_weak),
         };
         let mut action = CheckAction::None;
         let mut tick = None;
@@ -409,6 +412,17 @@ impl Row<'_> {
                 let tip = "Empty the reference, so it names no file.";
                 if fix(ui, widgets::Role::Ghost, icons::ERASER, "Clear", tip) {
                     choice = Some(FixChoice::Clear);
+                }
+            }
+            if finding.kind == FindingKind::DuplicateFile {
+                let keep = finding.path.rsplit('/').next().unwrap_or(&finding.path);
+                let label = format!("Merge into {keep}");
+                let tip = format!(
+                    "Point everything that uses this file at `{}` and delete this one. Undo puts it back.",
+                    finding.path
+                );
+                if fix(ui, widgets::Role::Primary, icons::GIT_MERGE, &label, &tip) {
+                    choice = Some(FixChoice::Merge);
                 }
             }
             if finding.can_delete() {

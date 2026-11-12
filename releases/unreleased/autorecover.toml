@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "project"
+title = "Unsaved work comes back after a crash or power cut (AutoRecover)"
+details = "Every few minutes (Settings > Saving: off, 1, 2, 5 or 10 minutes; 2 by default) the editor keeps a copy of unsaved work in the project's .axcenity/autorecover folder: the world, script and stylesheet tabs and block scripts. If the editor crashes or the computer loses power, opening the project asks Recover unsaved work?; Recover opens it as unsaved changes and Discard deletes the copy. Saving removes it. UI graphs, behavior trees, dialogues, data tables, materials and terrain sculpting aren't kept yet."
+features = ["project.autorecover"]
+fixes = []
+introduces_issues = []
+prs = [255]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
