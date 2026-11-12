@@ -58,6 +58,8 @@ use painter::*;
 use palette::*;
 
 pub use graph::show_graph;
+#[cfg(test)]
+pub(crate) use graph::view_of;
 
 /// An object a block can name: its path below the Workspace, such as
 /// `Pad.Chime`, and its class.

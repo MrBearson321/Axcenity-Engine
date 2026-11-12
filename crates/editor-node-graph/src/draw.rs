@@ -18,17 +18,6 @@ pub(super) fn scale_style(ui: &mut egui::Ui, zoom: f32) {
     ui.set_style(style);
 }
 
-pub fn draw_wire(painter: &egui::Painter, start: Pos2, end: Pos2, color: Color32, width: f32) {
-    let reach = ((end.x - start.x).abs() * 0.5).max(40.0);
-    let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
-        [start, start + vec2(reach, 0.0), end - vec2(reach, 0.0), end],
-        false,
-        Color32::TRANSPARENT,
-        Stroke::new(width, color),
-    );
-    painter.add(bezier);
-}
-
 /// What `draw_node` needs about one node.
 pub(super) struct NodeDraw<'a> {
     pub(super) spec: &'a NodeSpec,
@@ -254,7 +243,6 @@ pub(super) fn draw_node(
                     wire_held,
                     events,
                     key,
-                    &colors,
                 );
             }
         }
@@ -280,7 +268,6 @@ pub(super) fn draw_node(
                     wire_held,
                     events,
                     key,
-                    &colors,
                 );
             }
         }
@@ -455,54 +442,6 @@ fn value_control(ui: &mut egui::Ui, rect: Rect, ty: PinType, value: &mut String,
     }
 }
 
-/// A pin's pointer handling: drag to wire, Alt-click or right-click to
-/// break its wires.
-#[allow(clippy::too_many_arguments)] // One pin's whole state.
-fn pin_response(
-    ui: &mut egui::Ui,
-    painter: &egui::Painter,
-    pin: PinRef,
-    output: bool,
-    at: Pos2,
-    z: f32,
-    wire_held: bool,
-    events: &mut Vec<Event>,
-    key: &str,
-    colors: &theme::Canvas,
-) {
-    let reach = (PIN + 5.0) * z;
-    let rect = Rect::from_center_size(at, Vec2::splat(reach * 2.0));
-    let response = ui
-        .interact(
-            rect,
-            egui::Id::new(("node graph pin", key, pin.clone(), output)),
-            Sense::click_and_drag(),
-        )
-        .on_hover_cursor(CursorIcon::Crosshair);
-    if response.hovered() && !wire_held {
-        painter.circle_stroke(
-            at,
-            reach,
-            Stroke::new(1.0_f32, colors.node_text.gamma_multiply(0.35)),
-        );
-    }
-    if response.drag_started_by(egui::PointerButton::Primary) {
-        events.push(Event::WireFrom(pin.clone(), output));
-    }
-    if response.clicked() && ui.input(|i| i.modifiers.alt) {
-        events.push(Event::Break(pin.clone(), output));
-    }
-    response.context_menu(|ui| {
-        if ui
-            .button(theme::with_icon(icons::LINK_BREAK, "Break links"))
-            .clicked()
-        {
-            events.push(Event::Break(pin.clone(), output));
-            ui.close();
-        }
-    });
-}
-
 /// An exec pin is Unreal's white arrow, a value pin a circle in its type's
 /// colour; each is filled when it's wired.
 fn draw_pin(
@@ -514,32 +453,29 @@ fn draw_pin(
     colors: &theme::Canvas,
 ) {
     if ty == PinType::Exec {
-        let s = |x: f32, y: f32| at + vec2(x * z, y * z);
-        let points = vec![
-            s(-5.0, -6.0),
-            s(1.0, -6.0),
-            s(6.0, 0.0),
-            s(1.0, 6.0),
-            s(-5.0, 6.0),
-        ];
-        let fill = if connected {
-            colors.wire
-        } else {
-            Color32::TRANSPARENT
-        };
-        painter.add(egui::Shape::convex_polygon(
-            points,
-            fill,
-            Stroke::new(1.5 * z.max(0.7), colors.wire),
-        ));
-    } else if connected {
-        painter.circle_filled(at, PIN * z, pin_color(ty));
+        canvas::draw_exec_pin(painter, at, z, connected, colors);
     } else {
-        painter.circle(
-            at,
-            PIN * z,
-            colors.node_body,
-            Stroke::new(1.5 * z.max(0.7), pin_color(ty)),
-        );
+        canvas::draw_value_pin(painter, at, z, pin_color(ty), connected, colors);
+    }
+}
+
+/// A pin's pointer handling (`canvas::pin_interact`), as events.
+#[allow(clippy::too_many_arguments)] // One pin's whole state.
+fn pin_response(
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    pin: PinRef,
+    output: bool,
+    at: Pos2,
+    z: f32,
+    wire_held: bool,
+    events: &mut Vec<Event>,
+    key: &str,
+) {
+    let id = egui::Id::new(("node graph pin", key, pin.clone(), output));
+    match canvas::pin_interact(ui, painter, id, at, z, wire_held) {
+        PinAction::WireFrom => events.push(Event::WireFrom(pin, output)),
+        PinAction::Break => events.push(Event::Break(pin, output)),
+        PinAction::None => {}
     }
 }

@@ -261,6 +261,8 @@ pub enum Action {
     DuplicateNodes,
     SelectAllNodes,
     ClearNodeSelection,
+    FrameNodes,
+    SearchNodes,
 
     // UI Designer.
     AddToSelection,
@@ -412,6 +414,8 @@ impl Action {
             DuplicateNodes,
             SelectAllNodes,
             ClearNodeSelection,
+            FrameNodes,
+            SearchNodes,
             AddToSelection,
             BoxSelect,
             Nudge,
@@ -554,6 +558,8 @@ impl Action {
             DuplicateNodes => keys![CMD D],
             SelectAllNodes => keys![CMD A],
             ClearNodeSelection => keys![NONE Escape],
+            FrameNodes => keys![NONE F],
+            SearchNodes => keys![NONE Space],
 
             AddToSelection | BoxSelect => &[],
             Nudge => keys![NONE ArrowLeft, NONE ArrowRight, NONE ArrowUp, NONE ArrowDown],
@@ -659,7 +665,8 @@ impl Action {
             | ClipEnd | KeySelected | DeleteKeys | CopyKeys | CutKeys | PasteKeys | FrameCurves => {
                 Context::Animation
             }
-            DeleteNodes | DuplicateNodes | SelectAllNodes | ClearNodeSelection => Context::Graphs,
+            DeleteNodes | DuplicateNodes | SelectAllNodes | ClearNodeSelection | FrameNodes
+            | SearchNodes => Context::Graphs,
             AddToSelection | BoxSelect | Nudge | NudgeTen | CopyElements | PasteElements | Bold
             | Italic | Underline => Context::UiDesigner,
             PreviousSlide | NextSlide => Context::UiPages,
@@ -740,8 +747,10 @@ impl Action {
             FrameCurves => "Fit the curves in view",
             DeleteNodes => "Delete the selected nodes",
             DuplicateNodes => "Duplicate the selected nodes",
-            SelectAllNodes => "Select every node (material and UI graphs)",
+            SelectAllNodes => "Select every node",
             ClearNodeSelection => "Clear the selection",
+            FrameNodes => "Frame the selected nodes, or all of them",
+            SearchNodes => "Search for a node to add",
             AddToSelection => "Add to the selection",
             BoxSelect => "Select with a box",
             Nudge => "Nudge 1 pixel",

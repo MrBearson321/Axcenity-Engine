@@ -225,6 +225,14 @@ impl ControllerDoc {
                     }
                     self.selected = Selected::Node(Node::State(index));
                 }
+                GraphEvent::Duplicate(index) => {
+                    if let Some(state) = self.file.states.get(index) {
+                        let mut copy = state.clone();
+                        copy.position = [state.position[0] + 30.0, state.position[1] + 30.0];
+                        self.add_copy(copy);
+                    }
+                }
+                GraphEvent::Paste(state) => self.add_copy(state),
                 GraphEvent::AddCondition(transition, parameter) => {
                     self.add_condition(transition, &parameter);
                     self.selected = Selected::Transition(transition);
@@ -234,6 +242,18 @@ impl ControllerDoc {
                 }
             }
         }
+    }
+
+    /// Adds `state` (a copy) under a free name, without its Return
+    /// setting, and selects it.
+    fn add_copy(&mut self, mut state: StateDef) {
+        state.name = self.free_state_name(&state.name);
+        state.returns = None;
+        if self.file.states.is_empty() {
+            self.file.default_state = state.name.clone();
+        }
+        self.file.states.push(state);
+        self.selected = Selected::Node(Node::State(self.file.states.len() - 1));
     }
 
     /// A new transition from `from` to state `to`, put before the ones

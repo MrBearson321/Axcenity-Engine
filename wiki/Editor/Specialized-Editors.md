@@ -46,7 +46,7 @@ Tools in Sculpt, Materials and Terrain rows; generation and erosion run as `terr
 
 ## Shared pieces
 
-- **One node-graph editor** (the `editor-node-graph` crate) serves block Graph view, UI Event Graphs, behavior trees, dialogues and material graphs. Phase 91 ("One graph canvas") plans to finish unifying canvases.
+- **One node-graph editor** (the `editor-node-graph` crate) serves block Graph view, UI Event Graphs, behavior trees, dialogues and material graphs. Since Phase 91 every graph view (those five, plus the block Graph view and the Animation state machine) draws on one canvas, `editor-node-graph`'s `canvas.rs`: pan and zoom, box select, the same keys (F frames, Space searches, Ctrl+D duplicates, Ctrl+C/X/V copy and paste as text, Delete, Escape), pins, wires, the minimap and notices. The editor's `graph_keys_tests.rs` drives the same keys through all five views.
 - **Preview canvases** (`animation::preview::Canvas`) run a small World through `scene` so previews draw what Play draws.
 
 ## Related documentation

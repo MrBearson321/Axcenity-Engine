@@ -21,7 +21,7 @@ Structural problems that make the engine harder to change. Each has a roadmap it
 | Retained draw list still has a from-scratch path | Two code paths | M4 next step: spatial chunks, then remove it | Open |
 | Hand-ordered render passes | Each new pass edits `ScenePipeline::draw` | L8 render graph | Deferred |
 | Editor design-system drift | Inconsistent UI; editor cost with big scenes | Design-system phases | Phases 1–5 done; Phase 6 optional |
-| Several graph canvases | Duplicate code (`node_graph.rs`, block scripts' Graph view, the Animation state machine) | Phase 91 / design system V24 "One graph canvas" | Planned |
+| Several graph canvases | Duplicate code (`node_graph.rs`, block scripts' Graph view, the Animation state machine) | Phase 91 / design system V24 "One graph canvas" | Done: one `canvas.rs` in `editor-node-graph` used by every view (the two editor views are only 20 lines shorter, 2,366 to 2,346, because they gained copy and paste, the shared keys and a minimap while their own canvas code went; what they repeated is now in one place) |
 | Oversized files with several jobs | Hard to find code; more merge conflicts | Usability brief Phase 6 (`docs/research/usability/refactoring.md`): verbatim splits into parent + folder | Done for Properties, Settings, Material tab, Assets panel, `ScriptRuntime`, the scene draw list and the player; `render/renderer/scene.rs` waits for L8 |
 | `editor`/`script` crate `CLAUDE.md` lines are file maps (~10k characters) | Every editor PR edits them; most merge conflicts start there | Move the file maps into `docs/` | Proposed |
 | Legacy paths, old templates | Dead weight | Phase 92 | Planned |

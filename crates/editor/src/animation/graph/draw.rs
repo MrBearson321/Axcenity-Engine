@@ -3,7 +3,7 @@
 
 use axcenity_anim::files::{Motion, TransitionDef};
 use axcenity_anim::{ANY_STATE, StateMachineFile};
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Shape, Stroke, Vec2, vec2};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Shape, Stroke, vec2};
 
 use super::{Node, ParameterKind, STATE, words};
 use crate::theme::{self, icons};
@@ -18,28 +18,6 @@ const DEFAULT_HEADER: Color32 = Color32::from_rgb(196, 118, 40);
 const STATE_HEADER: Color32 = Color32::from_rgb(64, 92, 140);
 const ANY_HEADER: Color32 = Color32::from_rgb(40, 140, 150);
 const ENTRY_HEADER: Color32 = Color32::from_rgb(58, 140, 82);
-
-/// The grid behind the graph, so panning reads as movement.
-pub(super) fn draw_grid(painter: &egui::Painter, rect: Rect, offset: Vec2, zoom: f32) {
-    let step = 40.0 * zoom;
-    let grid = Stroke::new(1.0_f32, theme::canvas(painter.ctx()).grid);
-    let mut x = rect.left() + offset.x.rem_euclid(step);
-    while x < rect.right() {
-        painter.line_segment(
-            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-            grid,
-        );
-        x += step;
-    }
-    let mut y = rect.top() + offset.y.rem_euclid(step);
-    while y < rect.bottom() {
-        painter.line_segment(
-            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-            grid,
-        );
-        y += step;
-    }
-}
 
 /// A wire from an output pin at `start` to an input pin at `end`, leaving
 /// and arriving sideways, bowed `bow` points down (up if negative).

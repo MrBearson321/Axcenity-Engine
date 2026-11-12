@@ -46,6 +46,8 @@ mod explorer;
 mod find_in_scripts;
 mod game_tests;
 mod global_assets;
+#[cfg(test)]
+mod graph_keys_tests;
 mod history;
 mod import_dialog;
 mod layout;

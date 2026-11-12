@@ -26,6 +26,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 | 2026-11-12 | ADR-0022, ADR index, system inventory, roadmap | Collaborate 2.0 design (P0): host handoff by deterministic successor, members list replicated, persistent project ID, optional Git remote (`docs/research/collaborate-persistent.md`) | Claude |
 | 2026-11-12 | Mesh editing and CSG, specialized editors, roadmap | Unified Phase 90: Sculpt mode, retopology and Bake removed from the Model Studio; creators sculpt and bake in Blender | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C9: host checkpoints (`crates/collab/src/history.rs`, `.axcenity/teamcreate/history`, contents by hash) and the Owner's restore for everyone as one transaction | Claude |
+| 2026-11-12 | Specialized editors, blocks and graphs, technical debt | Phase 91: one graph canvas (`editor-node-graph/src/canvas.rs`) under every graph view, with the same keys, menu, minimap and copy and paste | Claude |
 | 2026-11-12 | System inventory, roadmap | Collaborate C8: session chat (host keeps the last 200 lines in memory, Instance paths as links, unread count on the chip) and others' cursors in live script tabs (`crates/editor/src/app/team_chat.rs`, `crates/editor/src/scripts/others.rs`) | Claude |
 | 2026-11-12 | System inventory | Collaborate C4: the setup wizard and Start Session dialog (`app/collab_setup.rs`) | Claude |
 | 2026-11-12 | System inventory | Collaborate C3: `collab::tailscale` (status, sign-in, invite address, reachability); the system's new name | Claude |

@@ -9,11 +9,13 @@
 //! values typed in stay on the pin. Nodes not wired to an event don't run,
 //! like loose blocks.
 //!
-//! Right-click the canvas (or drop a wire on it) for the searchable node
-//! menu. Drag from a pin to wire it, Alt-click a pin to break its wires.
-//! Left-drag the background to select a box of nodes, right-drag (or the
-//! wheel) to pan, and Ctrl + wheel to zoom. Delete deletes the selected
-//! nodes and Ctrl+D duplicates them.
+//! It draws on the shared graph canvas (`node_graph::canvas`, Phase 91):
+//! right-click the canvas, press Space or drop a wire on it for the
+//! searchable node menu. Drag from a pin to wire it, Alt-click a pin to
+//! break its wires. Left-drag the background to select a box of nodes,
+//! right-drag (or the wheel) to pan, Ctrl + wheel to zoom and F to frame
+//! the selection. Delete deletes the selected nodes, Ctrl+D duplicates
+//! them, and Ctrl+C, X and V copy, cut and paste them as Lua.
 //!
 //! Where to change behavior:
 //! - `edit.rs` — what wiring, breaking and deleting does to the blocks
@@ -27,6 +29,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use axcenity_blocks::{Graph, LooseValue};
 
 use super::*;
+use crate::node_graph::canvas::{
+    self as graph_canvas, BoxSelect, Canvas, MenuChoice, PinAction, draw_exec_pin, draw_value_pin,
+    draw_wire,
+};
 
 mod edit;
 mod layout;
@@ -41,7 +47,7 @@ use nodes::*;
 // Sizes at zoom 1, in graph units (points).
 pub(super) const HEADER: f32 = 28.0;
 const ROW: f32 = 26.0;
-const PIN: f32 = 5.0;
+const PIN: f32 = graph_canvas::PIN_RADIUS;
 /// From a node's edge to the text beside a pin.
 const PIN_SPACE: f32 = 22.0;
 const MIDDLE_GAP: f32 = 24.0;
@@ -49,6 +55,8 @@ const MIN_NODE_WIDTH: f32 = 130.0;
 const NAME_GAP: f32 = 6.0;
 /// How near a pin a wire has to be let go to join it.
 const PIN_REACH: f32 = 14.0;
+const MIN_ZOOM: f32 = 0.3;
+const MAX_ZOOM: f32 = 2.0;
 
 /// Which mouth or follow-on an exec output is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -152,30 +160,41 @@ impl Pin {
 /// What the graph view remembers between frames for one script.
 #[derive(Clone, Debug)]
 struct GraphState {
-    pan: Vec2,
-    zoom: f32,
+    /// Pan, zoom, the selection box and notices; `state.pan` and
+    /// `state.zoom` reach it through `Deref`.
+    canvas: Canvas,
     show_lua: bool,
     selected: HashSet<NodeRef>,
     /// A wire being dragged out of this pin.
     wire: Option<Pin>,
-    /// Where a box selection started, on screen.
-    boxing: Option<Pos2>,
     menu: Option<Menu>,
-    /// Why the last wire didn't join, and until when to say so.
-    notice: Option<(String, f64)>,
+    /// Fit the selected nodes (or all) into view on the next frame.
+    frame_next: bool,
+}
+
+impl std::ops::Deref for GraphState {
+    type Target = Canvas;
+
+    fn deref(&self) -> &Canvas {
+        &self.canvas
+    }
+}
+
+impl std::ops::DerefMut for GraphState {
+    fn deref_mut(&mut self) -> &mut Canvas {
+        &mut self.canvas
+    }
 }
 
 impl Default for GraphState {
     fn default() -> Self {
         Self {
-            pan: vec2(20.0, 20.0),
-            zoom: 1.0,
+            canvas: Canvas::new(vec2(20.0, 20.0)),
             show_lua: false,
             selected: HashSet::new(),
             wire: None,
-            boxing: None,
             menu: None,
-            notice: None,
+            frame_next: false,
         }
     }
 }
@@ -460,6 +479,15 @@ enum Event {
     Delete(NodeRef),
 }
 
+/// Where the graph view with `key` is looking (pan and zoom), for tests.
+#[cfg(test)]
+pub(crate) fn view_of(ctx: &egui::Context, key: &str) -> (Vec2, f32) {
+    let state: GraphState = ctx
+        .data_mut(|data| data.get_temp(egui::Id::new(("graph editor", key))))
+        .unwrap_or_default();
+    (state.pan, state.zoom)
+}
+
 /// Draws the graph view of `script`. Returns true if the script changed.
 pub fn show_graph(ui: &mut egui::Ui, script: &mut BlockScript, context: BlockContext) -> bool {
     let before = script.clone();
@@ -555,26 +583,9 @@ fn show_graph_toolbar(
             state.show_lua = !state.show_lua;
         }
         ui.separator();
-        if ui
-            .button(icons::MAGNIFYING_GLASS_PLUS)
-            .on_hover_text("Zoom in")
-            .clicked()
-        {
-            state.zoom = (state.zoom * 1.2).min(2.0);
-        }
-        if ui
-            .button(format!("{:.0}%", state.zoom * 100.0))
-            .on_hover_text("Back to 100%")
-            .clicked()
-        {
-            state.zoom = 1.0;
-        }
-        if ui
-            .button(icons::MAGNIFYING_GLASS_MINUS)
-            .on_hover_text("Zoom out")
-            .clicked()
-        {
-            state.zoom = (state.zoom / 1.2).max(0.3);
+        if graph_canvas::zoom_buttons(ui, &mut state.canvas, MIN_ZOOM..=MAX_ZOOM) {
+            state.selected.clear();
+            state.frame_next = true;
         }
         if ui
             .button(theme::with_icon(icons::BROOM, "Clean up"))
@@ -582,7 +593,7 @@ fn show_graph_toolbar(
             .clicked()
         {
             script.graph.nodes.clear();
-            state.pan = GraphState::default().pan;
+            state.canvas.pan = GraphState::default().pan;
         }
     });
     add
@@ -610,53 +621,6 @@ fn show_graph_canvas(
     let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     canvas.set_clip_rect(rect);
     let painter = canvas.painter_at(rect);
-    painter.rect_filled(rect, 0, colors.background);
-
-    // The background: left-drag selects a box, right- or middle-drag pans,
-    // a right-click opens the node menu. The wheel pans; Ctrl + wheel (or
-    // pinching) zooms around the pointer.
-    let back = canvas.interact(
-        rect,
-        egui::Id::new(("graph canvas", context.key)),
-        Sense::click_and_drag(),
-    );
-    if back.dragged_by(egui::PointerButton::Secondary)
-        || back.dragged_by(egui::PointerButton::Middle)
-    {
-        state.pan += back.drag_delta();
-    }
-    let hovered = canvas.rect_contains_pointer(rect);
-    if hovered && state.menu.is_none() {
-        let (scroll, zoom, pointer) =
-            canvas.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
-        state.pan += scroll;
-        if zoom != 1.0
-            && let Some(pointer) = pointer
-        {
-            let old = state.zoom;
-            state.zoom = (old * zoom).clamp(0.3, 2.0);
-            let from_origin = pointer - rect.min - state.pan;
-            state.pan = pointer - rect.min - from_origin * (state.zoom / old);
-        }
-    }
-    let z = state.zoom;
-    let origin = rect.min + state.pan;
-    let to_screen = |at: Pos2| origin + at.to_vec2() * z;
-    let to_graph = |at: Pos2| pos2((at.x - origin.x) / z, (at.y - origin.y) / z);
-
-    // A grid, which moves with the nodes.
-    let spacing = 32.0 * z;
-    let line = colors.grid;
-    let mut x = rect.left() + state.pan.x.rem_euclid(spacing);
-    while x < rect.right() {
-        painter.vline(x, rect.y_range(), Stroke::new(1.0_f32, line));
-        x += spacing;
-    }
-    let mut y = rect.top() + state.pan.y.rem_euclid(spacing);
-    while y < rect.bottom() {
-        painter.hline(rect.x_range(), y, Stroke::new(1.0_f32, line));
-        y += spacing;
-    }
 
     let geometry = measure_all(&canvas, script, context, variables);
     let sizes: HashMap<NodeRef, Vec2> = geometry
@@ -664,6 +628,28 @@ fn show_graph_canvas(
         .map(|(node, geometry)| (node.clone(), geometry.size))
         .collect();
     let places = layout(script, &sizes);
+    let node_area = |node: &NodeRef| Some(Rect::from_min_size(*places.get(node)?, sizes[node]));
+    if std::mem::take(&mut state.frame_next) {
+        let area = sizes
+            .keys()
+            .filter(|node| state.selected.is_empty() || state.selected.contains(*node))
+            .filter_map(node_area)
+            .reduce(|a, b| a.union(b));
+        state.canvas.fit(rect, area, MIN_ZOOM, 1.0);
+    }
+
+    // The shared canvas: the background and grid, pan and zoom.
+    let frame = state.canvas.begin(
+        &mut canvas,
+        rect,
+        egui::Id::new(("graph canvas", context.key)),
+        MIN_ZOOM..=MAX_ZOOM,
+        state.menu.is_none(),
+    );
+    let (z, hovered, pointer) = (frame.zoom, frame.hovered, frame.pointer);
+    let to_screen = |at: Pos2| frame.to_screen(at);
+    let to_graph = |at: Pos2| frame.to_graph(at);
+
     let wired = wiring(script);
     let pin_at = |pin: &Pin| -> Option<Pos2> {
         geometry.iter().find_map(|(node, geometry)| {
@@ -687,12 +673,10 @@ fn show_graph_canvas(
         .collect();
 
     if script.blocks.is_empty() && script.graph.loose.is_empty() {
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
+        graph_canvas::empty_hint(
+            &canvas,
+            rect,
             "Right-click to add a node, such as \"When Game Starts\".",
-            FontId::proportional(14.0),
-            ui.visuals().weak_text_color(),
         );
     }
 
@@ -760,7 +744,6 @@ fn show_graph_canvas(
     });
 
     // The wire being dragged, from its pin to the pointer.
-    let pointer = canvas.input(|i| i.pointer.interact_pos());
     if let (Some(from), Some(pointer)) = (&state.wire, pointer)
         && let Some(start) = pin_at(from)
     {
@@ -779,23 +762,9 @@ fn show_graph_canvas(
     }
 
     // The box being dragged out.
-    if back.drag_started_by(egui::PointerButton::Primary) {
-        state.boxing = back.interact_pointer_pos();
-        if !canvas.input(|i| i.modifiers.shift) {
-            state.selected.clear();
-        }
-    }
-    if let (Some(start), Some(pointer)) = (state.boxing, pointer) {
-        let area = Rect::from_two_pos(start, pointer);
-        let accent = ui.visuals().selection.bg_fill;
-        painter.rect(
-            area,
-            2,
-            accent.gamma_multiply(0.15),
-            Stroke::new(1.0_f32, accent),
-            egui::StrokeKind::Inside,
-        );
-        if back.drag_stopped() {
+    match state.canvas.box_select(&canvas, &frame, true) {
+        BoxSelect::Started { add: false } => state.selected.clear(),
+        BoxSelect::Done(area) => {
             for (node, geometry) in &geometry {
                 if let Some(place) = places.get(node) {
                     let node_rect = Rect::from_min_size(to_screen(*place), geometry.size * z);
@@ -804,13 +773,10 @@ fn show_graph_canvas(
                     }
                 }
             }
-            state.boxing = None;
         }
+        _ => {}
     }
-    if !canvas.input(|i| i.pointer.primary_down()) {
-        state.boxing = None;
-    }
-    if back.clicked() {
+    if frame.back.clicked() {
         state.selected.clear();
         state.menu = None;
     }
@@ -893,10 +859,7 @@ fn show_graph_canvas(
                 freeze(&mut script.graph, &places);
                 match join(script, &from, &to) {
                     Ok(()) => edited = true,
-                    Err(why) => {
-                        let now = canvas.input(|i| i.time);
-                        state.notice = Some((why.to_owned(), now + 4.0));
-                    }
+                    Err(why) => state.canvas.say(canvas.ctx(), why),
                 }
             }
             None => {
@@ -909,41 +872,57 @@ fn show_graph_canvas(
         }
     }
 
-    // Keys: Delete, Ctrl+D, Escape.
-    let typing = canvas.ctx().memory(|memory| memory.focused().is_some());
-    if hovered && !typing && state.menu.is_none() {
-        let (delete, duplicate, escape) = canvas.input(|i| {
-            use crate::shortcuts::{Action, pressed};
-            (
-                pressed(i, Action::DeleteNodes),
-                pressed(i, Action::DuplicateNodes),
-                pressed(i, Action::ClearNodeSelection),
-            )
-        });
-        if delete && !state.selected.is_empty() {
+    // The keys every graph shares.
+    if hovered && state.menu.is_none() {
+        let keys = graph_canvas::keys(canvas.ctx());
+        let picked: Vec<NodeRef> = state.selected.iter().cloned().collect();
+        if (keys.copy || keys.cut)
+            && let Some(text) = copy_nodes(script, &state.selected, &places)
+        {
+            canvas.ctx().copy_text(text);
+        }
+        if (keys.delete || keys.cut) && !picked.is_empty() {
             freeze(&mut script.graph, &places);
-            let nodes: Vec<NodeRef> = state.selected.drain().collect();
-            delete_nodes(script, &nodes);
+            state.selected.clear();
+            delete_nodes(script, &picked);
             edited = true;
         }
-        if duplicate && !state.selected.is_empty() {
+        if keys.duplicate && !picked.is_empty() {
             freeze(&mut script.graph, &places);
-            let nodes: Vec<NodeRef> = state.selected.drain().collect();
-            for node in nodes {
+            state.selected.clear();
+            for node in picked {
                 if let Some(copy) = duplicate_at(script, &node, &places) {
                     state.selected.insert(copy);
                 }
             }
             edited = true;
         }
-        if escape {
+        if let Some(text) = keys.paste {
+            freeze(&mut script.graph, &places);
+            let pasted = paste_nodes(script, &text, frame.pointer_in_graph());
+            if !pasted.is_empty() {
+                state.selected = pasted.into_iter().collect();
+                edited = true;
+            }
+        }
+        if keys.select_all {
+            state.selected = sizes.keys().cloned().collect();
+        }
+        if keys.escape {
             state.selected.clear();
+        }
+        if keys.frame {
+            state.frame_next = true;
+        }
+        if keys.search {
+            let at = frame.to_screen(frame.pointer_in_graph());
+            state.menu = Some(Menu::new(at, to_graph(at), None));
         }
     }
 
     // The node menu.
-    if back.secondary_clicked()
-        && let Some(pointer) = back.interact_pointer_pos()
+    if frame.back.secondary_clicked()
+        && let Some(pointer) = frame.back.interact_pointer_pos()
     {
         state.menu = Some(Menu::new(pointer, to_graph(pointer), None));
     }
@@ -958,15 +937,15 @@ fn show_graph_canvas(
             MenuChoice::Pick(index) => {
                 freeze(&mut script.graph, &places);
                 if let Some(node) = add_node(script, &items[index].item) {
+                    let at = menu.menu.graph;
                     script
                         .graph
                         .nodes
-                        .insert(node.key(), [menu.graph.x.round(), menu.graph.y.round()]);
+                        .insert(node.key(), [at.x.round(), at.y.round()]);
                     if let Some(from) = &menu.from
                         && let Err(why) = join_new(script, from, &node)
                     {
-                        let now = canvas.input(|i| i.time);
-                        state.notice = Some((why.to_owned(), now + 4.0));
+                        state.canvas.say(canvas.ctx(), why);
                     }
                     state.selected = HashSet::from([node]);
                 }
@@ -975,28 +954,11 @@ fn show_graph_canvas(
         }
     }
 
-    // Why the last wire didn't join.
-    let now = canvas.input(|i| i.time);
-    if let Some((text, until)) = &state.notice {
-        if now < *until {
-            let at = pos2(rect.center().x, rect.bottom() - 24.0);
-            let galley = canvas.fonts_mut(|fonts| {
-                fonts.layout_no_wrap(text.clone(), FontId::proportional(13.0), Color32::WHITE)
-            });
-            let back_rect = Rect::from_center_size(at, galley.size() + vec2(20.0, 10.0));
-            painter.rect_filled(
-                back_rect,
-                6,
-                Color32::from_rgba_unmultiplied(160, 40, 40, 230),
-            );
-            painter.galley(back_rect.min + vec2(10.0, 5.0), galley, Color32::WHITE);
-            canvas
-                .ctx()
-                .request_repaint_after(std::time::Duration::from_millis(250));
-        } else {
-            state.notice = None;
-        }
-    }
+    // The minimap, once some nodes are out of view, and why the last wire
+    // didn't join.
+    let areas: Vec<Rect> = sizes.keys().filter_map(node_area).collect();
+    state.canvas.minimap(&mut canvas, &frame, &areas);
+    state.canvas.show_notice(&canvas, &frame);
 
     if edited {
         tidy(script);
@@ -1078,17 +1040,6 @@ fn duplicate_at(
             .insert(copy.key(), [place.x + 30.0, place.y + 30.0]);
     }
     Some(copy)
-}
-
-fn draw_wire(painter: &egui::Painter, start: Pos2, end: Pos2, color: Color32, width: f32) {
-    let reach = ((end.x - start.x).abs() * 0.5).max(40.0);
-    let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
-        [start, start + vec2(reach, 0.0), end - vec2(reach, 0.0), end],
-        false,
-        Color32::TRANSPARENT,
-        Stroke::new(width, color),
-    );
-    painter.add(bezier);
 }
 
 /// What `draw_node` needs about one node.
@@ -1231,7 +1182,7 @@ fn draw_node(
                 Item::ExecIn => {
                     if let NodeRef::Block(block) = which {
                         let pin = Pin::ExecIn(*block);
-                        exec_pin(&painter, pin_at, z, wired.fed.contains(block), &colors);
+                        draw_exec_pin(&painter, pin_at, z, wired.fed.contains(block), &colors);
                         pin_response(ui, drawer, &pin, pin_at, wire_held, events);
                     }
                 }
@@ -1246,7 +1197,7 @@ fn draw_node(
                     if let Some(Part::Slot(value, _)) = parts.get(*part) {
                         connected = !value.is_literal();
                     }
-                    value_pin(&painter, pin_at, z, pin_color(*kind), connected, &colors);
+                    draw_value_pin(&painter, pin_at, z, pin_color(*kind), connected, &colors);
                     pin_response(ui, drawer, &pin, pin_at, wire_held, events);
                     painter.text(
                         pos2(text_x, middle),
@@ -1301,7 +1252,7 @@ fn draw_node(
                 Item::ExecOut(out, name) => {
                     if let NodeRef::Block(block) = which {
                         let pin = Pin::ExecOut(*block, *out);
-                        exec_pin(
+                        draw_exec_pin(
                             &painter,
                             pin_at,
                             z,
@@ -1321,7 +1272,7 @@ fn draw_node(
                 Item::Output(kind) => {
                     if let NodeRef::Value(at) = which {
                         let pin = Pin::Output(at.clone());
-                        value_pin(
+                        draw_value_pin(
                             &painter,
                             pin_at,
                             z,
@@ -1339,8 +1290,7 @@ fn draw_node(
     }
 }
 
-/// A pin's pointer handling: drag to wire, Alt-click or right-click to
-/// break its wires.
+/// A pin's pointer handling (`canvas::pin_interact`), as events.
 fn pin_response(
     ui: &mut egui::Ui,
     drawer: &BlockPainter,
@@ -1352,83 +1302,11 @@ fn pin_response(
     if !drawer.interactive {
         return;
     }
-    let reach = drawer.s(PIN + 5.0);
-    let rect = Rect::from_center_size(at, Vec2::splat(reach * 2.0));
-    let response = ui
-        .interact(
-            rect,
-            egui::Id::new(("graph pin", pin.clone())).with(drawer.id),
-            Sense::click_and_drag(),
-        )
-        .on_hover_cursor(CursorIcon::Crosshair);
-    if response.hovered() && !wire_held {
-        drawer.painter.circle_stroke(
-            at,
-            reach,
-            Stroke::new(
-                1.0_f32,
-                theme::canvas(ui.ctx()).node_text.gamma_multiply(0.35),
-            ),
-        );
-    }
-    if response.drag_started_by(egui::PointerButton::Primary) {
-        events.push(Event::WireFrom(pin.clone()));
-    }
-    if response.clicked() && ui.input(|i| i.modifiers.alt) {
-        events.push(Event::BreakPin(pin.clone()));
-    }
-    response.context_menu(|ui| {
-        if ui
-            .button(theme::with_icon(icons::LINK_BREAK, "Break link"))
-            .clicked()
-        {
-            events.push(Event::BreakPin(pin.clone()));
-            ui.close();
-        }
-    });
-}
-
-/// An exec pin: Unreal's white arrow, filled when it's wired.
-fn exec_pin(painter: &egui::Painter, at: Pos2, z: f32, connected: bool, colors: &theme::Canvas) {
-    let s = |x: f32, y: f32| at + vec2(x * z, y * z);
-    let points = vec![
-        s(-5.0, -6.0),
-        s(1.0, -6.0),
-        s(6.0, 0.0),
-        s(1.0, 6.0),
-        s(-5.0, 6.0),
-    ];
-    let fill = if connected {
-        colors.wire
-    } else {
-        Color32::TRANSPARENT
-    };
-    painter.add(Shape::convex_polygon(
-        points,
-        fill,
-        Stroke::new(1.5 * z.max(0.7), colors.wire),
-    ));
-}
-
-/// A value pin: a circle in its type's colour, filled when it's wired.
-fn value_pin(
-    painter: &egui::Painter,
-    at: Pos2,
-    z: f32,
-    color: Color32,
-    connected: bool,
-    colors: &theme::Canvas,
-) {
-    let radius = PIN * z;
-    if connected {
-        painter.circle_filled(at, radius, color);
-    } else {
-        painter.circle(
-            at,
-            radius,
-            colors.node_body,
-            Stroke::new(1.5 * z.max(0.7), color),
-        );
+    let id = egui::Id::new(("graph pin", pin.clone())).with(drawer.id);
+    match graph_canvas::pin_interact(ui, &drawer.painter, id, at, drawer.s(1.0), wire_held) {
+        PinAction::WireFrom => events.push(Event::WireFrom(pin.clone())),
+        PinAction::Break => events.push(Event::BreakPin(pin.clone())),
+        PinAction::None => {}
     }
 }
 
