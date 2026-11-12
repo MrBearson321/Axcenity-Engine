@@ -81,6 +81,7 @@ impl EditorApp {
                 errors: Vec::new(),
                 stylesheets: Vec::new(),
                 widgets: Vec::new(),
+                drawings: Vec::new(),
             });
         }
         let roots = [
@@ -149,6 +150,7 @@ impl EditorApp {
             return;
         };
         entry.widgets.clear();
+        entry.drawings.clear();
         if let Some(plugin) = entry.running.take() {
             plugin.stop(&mut self.world);
         }
@@ -272,6 +274,9 @@ impl EditorApp {
         };
         let lines = plugin.take_output();
         let settings = plugin.take_settings();
+        if let Some(drawings) = plugin.take_drawings() {
+            entry.drawings = drawings;
+        }
         for line in lines {
             match line.kind {
                 axcenity_script::OutputKind::Print => self.output.info(line.text),

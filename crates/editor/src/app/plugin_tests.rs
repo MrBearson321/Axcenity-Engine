@@ -426,6 +426,46 @@ fn the_part_tools_tab_slider_and_button_work_and_restyle_through_css() {
     );
 }
 
+/// Roadmap G10: the example's Align to Grid draws where the selected parts
+/// would snap to, the Scene View gets those drawings while editing, and
+/// they go when the parts are aligned or the plugin is turned off.
+#[test]
+fn align_to_grid_draws_where_the_selection_would_snap_until_aligned() {
+    let mut app = opened("plugin-drawings");
+    let index = plugin_index(&app, "project/align-to-grid");
+    assert!(app.plugins.entries[index].drawings.is_empty());
+    let crate_part = part(&app, "Crate");
+    app.select_many(vec![crate_part]);
+    app.plugins_frame(1.0 / 60.0);
+    // A box where the Crate would go, and a line from it to there.
+    let drawings = &app.plugins.entries[index].drawings;
+    assert_eq!(drawings.len(), 2, "{drawings:?}");
+    assert!(matches!(
+        &drawings[0].shape,
+        axcenity_plugins::Shape::Box { cframe, .. } if cframe.position == Vector3::new(2.0, 2.0, -4.0)
+    ));
+    assert!(matches!(
+        drawings[1].shape,
+        axcenity_plugins::Shape::Line { .. }
+    ));
+    assert_eq!(app.history.undo_label(), None, "drawing isn't an edit");
+
+    let (_, button) = first_button(&app, "project/align-to-grid");
+    app.click_plugin_button(index, button);
+    assert!(app.plugins.entries[index].drawings.is_empty());
+
+    app.undo();
+    app.select_many(Vec::new());
+    app.plugins_frame(1.0 / 60.0);
+    assert!(app.plugins.entries[index].drawings.is_empty());
+    app.select_many(vec![crate_part]);
+    app.plugins_frame(1.0 / 60.0);
+    assert_eq!(app.plugins.entries[index].drawings.len(), 2);
+    app.plugins.set_enabled("project/align-to-grid", false);
+    app.reload_plugin(index);
+    assert!(app.plugins.entries[index].drawings.is_empty());
+}
+
 #[test]
 fn turning_a_plugin_off_takes_its_tab_and_buttons_away() {
     let mut app = opened("plugin-off");

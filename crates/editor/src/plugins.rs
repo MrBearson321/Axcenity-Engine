@@ -55,6 +55,9 @@ pub struct Entry {
     pub stylesheets: Vec<Stylesheet>,
     /// Its dock tabs.
     pub widgets: Vec<WidgetView>,
+    /// What it draws over the Scene View (`plugin:DrawLine` and the rest),
+    /// as of its last call.
+    pub drawings: Vec<axcenity_plugins::Drawing>,
 }
 
 /// How many of a plugin's errors the panel keeps.

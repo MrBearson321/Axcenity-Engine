@@ -52,6 +52,22 @@ declare extern type PluginMouse with
 	Move: PluginSignal
 end
 
+--- A shape a plugin drew in the Scene View. It stays until removed.
+declare extern type PluginDrawing with
+	--- Takes the drawing out of the Scene View.
+	function Remove(self): ()
+	--- Draws it in another colour.
+	function SetColor(self, color: Color3): ()
+end
+
+--- How a drawing looks.
+type DrawOptions = {
+	--- Its colour (left out: orange).
+	Color: Color3?,
+	--- Line width in points, 0.5 to 32 (left out: 2). For `DrawText`, the text size (left out: 14).
+	Thickness: number?,
+}
+
 --- What a dock widget starts with.
 type DockWidgetInfo = {
 	--- The tab's title (left out: the widget's id).
@@ -82,6 +98,16 @@ declare extern type Plugin with
 	function Deactivate(self): ()
 	--- Whether the plugin has the Scene View's left button.
 	function IsActivated(self): boolean
+	--- Draws a line in the Scene View, over the scene, until it's removed. At most 10000 drawings at once.
+	function DrawLine(self, from: Vector3, to: Vector3, options: DrawOptions?): PluginDrawing
+	--- Draws the edges of a box `size` across, centred on `at` (a CFrame turns it; a Vector3 keeps it lined up with the world).
+	function DrawBox(self, at: CFrame | Vector3, size: Vector3, options: DrawOptions?): PluginDrawing
+	--- Draws a sphere as three rings round `center`.
+	function DrawSphere(self, center: Vector3, radius: number, options: DrawOptions?): PluginDrawing
+	--- Draws a label at `position`, the same size however far away (up to 200 characters).
+	function DrawText(self, position: Vector3, text: string, options: DrawOptions?): PluginDrawing
+	--- Removes everything the plugin drew.
+	function ClearDrawings(self): ()
 end
 
 --- What's selected in the editor.

@@ -7,11 +7,13 @@
 //!
 //! A [`Plugin`] doesn't know about undo or the editor's panels. The host
 //! calls it (a button's click, a new selection, the mouse, a frame), then
-//! reads what it made ([`Plugin::toolbars`], [`Plugin::widgets`]) and asked
+//! reads what it made ([`Plugin::toolbars`], [`Plugin::widgets`],
+//! [`Plugin::take_drawings`]) and asked
 //! for ([`Plugin::take_requests`]), and its output.
 
 mod api;
 pub mod bundle;
+mod draw;
 pub mod files;
 mod manifest;
 
@@ -25,6 +27,7 @@ use mlua::{IntoLuaMulti, MultiValue};
 pub use bundle::{
     Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
 };
+pub use draw::{DEFAULT_COLOR, DEFAULT_THICKNESS, Drawing, MAX_DRAWINGS, Shape};
 pub use manifest::{
     ENTRY_FILE, Found, MANIFEST_FILE, Manifest, Origin, PLUGINS_FOLDER, Permission, find_plugins,
     plugin_files,
@@ -163,6 +166,7 @@ impl Plugin {
             mouse_active: false,
             modules: BTreeMap::new(),
             env: None,
+            drawings: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -205,6 +209,14 @@ impl Plugin {
         self.state()
             .map(|state| state.widgets.clone())
             .unwrap_or_default()
+    }
+
+    /// What it draws in the Scene View, when that changed since the last
+    /// call (drawings stay until the plugin removes them).
+    pub fn take_drawings(&self) -> Option<Vec<Drawing>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.drawings.changed)
+            .then(|| state.drawings.shapes.values().cloned().collect())
     }
 
     /// Whether it took the Scene View's left button (`plugin:Activate(true)`).
