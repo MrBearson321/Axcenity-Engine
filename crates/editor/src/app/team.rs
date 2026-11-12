@@ -282,6 +282,9 @@ pub(crate) struct Team {
     presence_sent: Option<std::time::Instant>,
     /// Why the connection is down, or why the host refused this editor.
     problem: Option<String>,
+    /// When hosting over Tailscale: how others reach this computer, for
+    /// the panel (C3).
+    pub(crate) tailscale: Option<String>,
     /// The host's address, as the panel names it.
     address: String,
     /// The newest invite link this editor made, to copy again.
@@ -316,6 +319,7 @@ impl Team {
             problem: None,
             address,
             invite,
+            tailscale: None,
             mirror: None,
             mirror_synced: None,
             mirrors_home: None,
@@ -472,7 +476,7 @@ impl EditorApp {
             return;
         };
         let result = match start {
-            TeamStart::Host => self.host_network_session(None, DEFAULT_PORT).map(|invite| {
+            TeamStart::Host => self.host_collaborate_session().map(|invite| {
                 let link = invite.link();
                 // On stdout too, to copy from the terminal.
                 println!("Collaborate invite (works once, for 7 days): {link}");
@@ -488,14 +492,39 @@ impl EditorApp {
         }
     }
 
+    /// Hosts a session for the open project on the usual port, from the
+    /// panel or the command line. When Tailscale is connected, invites name
+    /// this computer's Tailscale name, so they work from anywhere (C3);
+    /// otherwise its LAN address. Output says which.
+    pub(crate) fn host_collaborate_session(&mut self) -> Result<Invite, String> {
+        let invite = self.host_session_on(None, DEFAULT_PORT, true)?;
+        let reach = self.team.as_ref().and_then(|team| team.tailscale.clone());
+        match reach {
+            Some(note) => self.output.info(format!("Collaborate: {note}")),
+            None => self.output.info(
+                "Collaborate: Tailscale isn't connected, so the invite works on this network                  only",
+            ),
+        }
+        Ok(invite)
+    }
+
     /// Hosts a session for the open project on `port` (0 picks one), with
-    /// this editor joined as its owner; returns an Editor invite.
-    /// `folder` is where Collaborate's files go (the editor's data folder
-    /// when `None`).
+    /// this editor joined as its owner; returns an Editor invite naming
+    /// the LAN address (tests). `folder` is where Collaborate's files go
+    /// (the editor's data folder when `None`).
     pub(crate) fn host_network_session(
         &mut self,
         folder: Option<&Path>,
         port: u16,
+    ) -> Result<Invite, String> {
+        self.host_session_on(folder, port, false)
+    }
+
+    fn host_session_on(
+        &mut self,
+        folder: Option<&Path>,
+        port: u16,
+        tailscale: bool,
     ) -> Result<Invite, String> {
         let folder = folder
             .map(Path::to_owned)
@@ -546,6 +575,18 @@ impl EditorApp {
             None,
         )
         .map_err(|e| format!("couldn't listen on port {port}: {e}"))?;
+        let reach = if tailscale {
+            match axcenity_collab::tailscale::advertise(&mut session) {
+                axcenity_collab::tailscale::State::Running(net) => Some(format!(
+                    "reachable over Tailscale as {} ({})",
+                    session.address(),
+                    net.login.as_deref().unwrap_or("signed in")
+                )),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let invite = session.invite(
             self.team_panel.invite_role.role(),
             self.team_panel.invite_lifetime.seconds(),
@@ -566,6 +607,7 @@ impl EditorApp {
             invite.host.clone(),
             Some(invite.link()),
         );
+        team.tailscale = reach;
         team.mirror = Some(mirror);
         self.team = Some(team);
         Ok(invite)

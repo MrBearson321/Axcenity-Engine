@@ -58,7 +58,7 @@ Collaborate lets several people edit one project at the same time, each in their
 - **Connection:** the panel shows Connected, Syncing, Reconnecting or Offline. Offline, your changes wait and are sent when the connection comes back. If the host's editor stops without ending the session, opening the project again brings the session's work back as unsaved changes.
 - **Leave session** (members) or **End session** (the host) stops it. The owner sets roles and removes members in the panel.
 
-Sessions reach other people on the same network, through a forwarded port, or over a private network such as Tailscale; there's no Axcenity sign-in or relay service. A team can also run `axcenity-collab <project folder>` on an always-on computer, so the session doesn't depend on anyone's editor being open.
+Sessions reach other people on the same network, or from anywhere over **Tailscale**, a free private network app: when Tailscale is installed and connected on the host's computer, invites name that computer by its Tailscale name (such as `pauls-pc.tail1234.ts.net`) and the panel says so; otherwise invites work on the host's network only. Someone with their own Tailscale account joins once the host has shared their computer with them in Tailscale (admin console, **Machines › … › Share**). Tailscale only connects the computers: who may join and edit is still decided by your invites and roles. There's no Axcenity sign-in or relay service. A team can also run `axcenity-collab <project folder>` on an always-on computer, so the session doesn't depend on anyone's editor being open.
 
 ## Opening older and newer projects
 

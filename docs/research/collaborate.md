@@ -2,7 +2,7 @@
 
 Paul's brief "Axcenity Collaborate – Additional Architectural Decisions and Requirements" (2026-11-12) sets the direction for **Collaborate**, the feature built so far as Team Create (TC1–TC7, [team-create.md](team-create.md), [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md)). Its first priority is an audit of what exists and what can be reused. This is that audit, the decisions it leads to ([ADR-0021](../../wiki/Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md)) and the phased plan C1–C12, one phase per priority in the brief.
 
-- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3 onwards follow the plan in [§8](#8-phased-plan-c1c12).
+- **Status:** C1 (this audit) done; C2's protocol is [§9](#9-protocol-c2), its rename is PR #197. C3's cloud part is built (§5.1); its two-machine test over Tailscale waits for Paul's PC and Mac. C4 onwards follow the plan in [§8](#8-phased-plan-c1c12).
 - **Date:** 2026-11-12
 - **Engine:** `main` at `d45d70b` (PR #195, the LAN test fixes)
 - **Relies on:** ADR-0020 (one session authority, host-ordered operations), ADR-0010 (shared IDs), ADR-0016 (text project format), ADR-0008 (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed).
@@ -125,6 +125,8 @@ Through the installed Tailscale client's command-line tool, never an embedded ne
 - **Show who's who**: `tailscale whois` on a member's address shows their Tailscale login beside their Collaborate name in the roster. It is shown, never trusted for permissions.
 
 The invite names the host by its MagicDNS name (falling back to its `100.x` address) instead of the LAN address, so links work from anywhere the joiner's Tailscale can reach.
+
+**Built (C3, cloud):** `crates/collab/src/tailscale.rs`: `Cli::find` (`AXCENITY_TAILSCALE` path or `off`, the `PATH`, install locations), `state` and `parse_status` (`Missing`, `NotRunning`, `NeedsLogin` with the sign-in page, `NeedsApproval`, `Stopped`, `Starting`, `Running` with machine, MagicDNS name, addresses, tailnet and login), `Cli::start_login` (`tailscale up --json`, returns the sign-in page and leaves `up` waiting in the background), `whois`, `is_tailscale_host`, `check_reachable` (plain-words answers for a Tailscale name that doesn't resolve or a host that doesn't answer) and `advertise`, which points a `HostSession`'s invites at the Tailscale name. Everything that runs the tool goes through a `Runner` trait, so `tailscale_tests.rs` uses recorded output. The editor's Start Collaborate Session (panel and `--collab-host`) and `axcenity-collab` (unless `--address` or `--no-tailscale`) name the host by Tailscale when it's connected and say so; the panel shows "Tailscale: reachable as …", "Tailscale isn't connected: invites work on this network only", or, for a member, "Connected over Tailscale". Tests' own hosting stays on the LAN address. Still to do: recordings of real `status --json` from Windows and macOS replace the hand-written fixtures, the two-machine test, and the reachability check runs in the C4 join wizard (it blocks, so not on the UI thread).
 
 ### 5.2 What can stop five minutes
 

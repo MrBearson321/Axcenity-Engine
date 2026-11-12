@@ -41,6 +41,7 @@ impl Place {
             data: self.0.join("data"),
             port: 0,
             address: None,
+            tailscale: false,
         }
     }
 
