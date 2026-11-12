@@ -2064,6 +2064,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Part,
+        "LinearDrag",
+        "Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.",
+    ),
+    (
+        ClassName::Part,
+        "AngularDrag",
+        "Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.",
+    ),
+    (
+        ClassName::Part,
+        "RollingFriction",
+        "Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.",
+    ),
+    (
+        ClassName::Part,
         "Massless",
         "If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.",
     ),
@@ -2146,6 +2161,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "CanTouch",
         "If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.",
+    ),
+    (
+        ClassName::MeshPart,
+        "LinearDrag",
+        "Air resistance on its speed: each second its assembly loses about that share of it (1 takes away about 63%). 0 at first. Welded parts use their root part's.",
+    ),
+    (
+        ClassName::MeshPart,
+        "AngularDrag",
+        "Air resistance on its spin, like LinearDrag. 0.5 at first, so a spinning part slows by itself; 0 spins on.",
+    ),
+    (
+        ClassName::MeshPart,
+        "RollingFriction",
+        "Extra spin slowing while its assembly touches anything, so a ball rolls to a stop on the ground but spins on in the air. 0 at first. Welded parts use their root part's.",
     ),
     (
         ClassName::MeshPart,

@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-12 | Physics, roadmap | Cohesion pass CP6: physics layers (`physics::api`), drag and rolling friction, script forces; `step_cost` at 1k/5k/10k bodies | Claude |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP5: Object Viewer (`editor-tools/src/object_viewer.rs`), opened by View in Explorer and Assets | Claude |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP4: node catalogue (`blocks-runtime/src/catalogue.rs`) and one tooltip card for every visual scripting view | Claude |
 | 2026-11-12 | Editor architecture, roadmap | Cohesion pass CP3: Explorer double-click opens each Instance in its own editor or frames it in the viewport; Code ↔ Blocks and Blocks tabs for scripts inside objects (`plan_switch`) | Claude |

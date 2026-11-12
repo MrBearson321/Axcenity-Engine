@@ -1259,3 +1259,27 @@ fn a_parent_with_many_children_reads_quickly() {
         "20,000 siblings took {spent:?} to read"
     );
 }
+
+#[test]
+fn drag_is_written_only_when_changed_and_read_back() {
+    let mut world = World::new();
+    let part = world.create(ClassName::Part).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    assert!(!write_world(&world).contains("Drag"));
+    world
+        .set_property(part, "LinearDrag", Value::Number(0.25))
+        .unwrap();
+    world
+        .set_property(part, "RollingFriction", Value::Number(2.0))
+        .unwrap();
+    let text = write_world(&world);
+    assert!(text.contains("\"LinearDrag\": 0.25"), "{text}");
+    assert!(!text.contains("AngularDrag"), "{text}");
+    let reloaded = parse_world(&text).unwrap();
+    let part = reloaded
+        .get(reloaded.descendants(reloaded.workspace())[0])
+        .unwrap();
+    assert_eq!(part.property("LinearDrag"), Some(&Value::Number(0.25)));
+    assert_eq!(part.property("RollingFriction"), Some(&Value::Number(2.0)));
+    assert_eq!(part.property("AngularDrag"), Some(&Value::Number(0.5)));
+}

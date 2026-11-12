@@ -3197,7 +3197,7 @@ fn collision_properties() -> [(&'static str, Value); 3] {
 
 /// What Parts and MeshParts share about how they move (Phase 34). Parts
 /// welded together move as one assembly (Phase 35).
-fn body_properties() -> [(&'static str, Value); 4] {
+fn body_properties() -> [(&'static str, Value); 7] {
     [
         // On, the part adds no mass to an assembly it shares with other
         // parts. A part alone keeps its own mass.
@@ -3217,8 +3217,20 @@ fn body_properties() -> [(&'static str, Value); 4] {
             "AssemblyAngularVelocity",
             Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
         ),
+        // Air resistance (cohesion pass CW6.2): how quickly the assembly's
+        // speed and spin die away by themselves, each second, as a share of
+        // what they are. Read from the assembly's root part.
+        ("LinearDrag", Value::Number(0.0)),
+        ("AngularDrag", Value::Number(DEFAULT_ANGULAR_DRAG)),
+        // Extra spin slowing while the assembly touches anything, so a ball
+        // rolls to a stop on the ground but not in the air.
+        ("RollingFriction", Value::Number(0.0)),
     ]
 }
+
+/// `AngularDrag`'s default: every spinning body always slowed this much,
+/// since rapier has no rolling resistance of its own.
+pub const DEFAULT_ANGULAR_DRAG: f64 = 0.5;
 
 /// Where a light or ParticleEmitter is when it isn't inside a part, as in
 /// Unreal, where a light needs no mesh: its place and turn in the world, in

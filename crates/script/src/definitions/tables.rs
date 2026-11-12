@@ -1998,6 +1998,10 @@ const GET_AUTO_DOC: &str =
 const ROOT_PART_DOC: &str = "The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.";
 const APPLY_IMPULSE_AT_DOC: &str = "Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.";
 const APPLY_ANGULAR_DOC: &str = "Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.";
+const APPLY_FORCE_DOC: &str = "Pushes the part's assembly with `force` for `seconds` (one physics step, 1/60 s, if left out): its `AssemblyLinearVelocity` changes by force times time over its mass. To push steadily, call it every Heartbeat with that frame's time, or use a VectorForce.";
+const APPLY_TORQUE_DOC: &str = "Turns the part's assembly with `torque` for `seconds` (one physics step if left out): its `AssemblyAngularVelocity` changes by torque times time through its inertia. To turn steadily, call it every Heartbeat with that frame's time, or use a Torque.";
+const LINEAR_MOMENTUM_DOC: &str =
+    "Its assembly's mass times its `AssemblyLinearVelocity`: how hard it is to stop. Read-only.";
 const GET_MASS_DOC: &str = "Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.";
 const ASSEMBLY_MASS_DOC: &str = "The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.";
 const CENTER_OF_MASS_DOC: &str =
@@ -2562,6 +2566,24 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
     (
         ClassName::Part,
         Function {
+            name: "ApplyForce",
+            doc: APPLY_FORCE_DOC,
+            params: &[("force", "Vector3"), ("seconds", "number?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "ApplyTorque",
+            doc: APPLY_TORQUE_DOC,
+            params: &[("torque", "Vector3"), ("seconds", "number?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
             name: "GetMass",
             doc: GET_MASS_DOC,
             params: &[],
@@ -2592,6 +2614,24 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             name: "ApplyAngularImpulse",
             doc: APPLY_ANGULAR_DOC,
             params: &[("impulse", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "ApplyForce",
+            doc: APPLY_FORCE_DOC,
+            params: &[("force", "Vector3"), ("seconds", "number?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "ApplyTorque",
+            doc: APPLY_TORQUE_DOC,
+            params: &[("torque", "Vector3"), ("seconds", "number?")],
             returns: "()",
         },
     ),
@@ -3308,6 +3348,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
     (
         ClassName::Part,
         Field {
+            name: "AssemblyLinearMomentum",
+            ty: "Vector3",
+            doc: LINEAR_MOMENTUM_DOC,
+        },
+    ),
+    (
+        ClassName::Part,
+        Field {
             name: "CurrentPhysicalProperties",
             ty: "PhysicalProperties",
             doc: CURRENT_PHYSICAL_DOC,
@@ -3327,6 +3375,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "AssemblyCenterOfMass",
             ty: "Vector3",
             doc: CENTER_OF_MASS_DOC,
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Field {
+            name: "AssemblyLinearMomentum",
+            ty: "Vector3",
+            doc: LINEAR_MOMENTUM_DOC,
         },
     ),
     (
