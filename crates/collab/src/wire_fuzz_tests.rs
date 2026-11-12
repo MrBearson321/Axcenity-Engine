@@ -149,7 +149,37 @@ fn to_client_samples() -> Vec<ToClient> {
         ToClient::Missing(FileHash::of(b"x")),
         ToClient::HistoryNotice("no".into()),
         ToClient::AuditLog(Vec::new()),
+        ToClient::Members(members_sample()),
     ]
+}
+
+fn members_sample() -> crate::project::MembersList {
+    let member = |id: u32, role: Role, account: Option<&str>| crate::access::Member {
+        id: MemberId(id),
+        key: crate::identity::PublicKey([id as u8; 32]),
+        name: format!("m{id}"),
+        color: [1, 2, 3],
+        role,
+        account: account.map(str::to_owned),
+    };
+    crate::project::MembersList {
+        version: 4,
+        members: vec![
+            member(1, Role::Owner, None),
+            member(2, Role::Editor, Some("acct")),
+        ],
+        next_member: 3,
+    }
+}
+
+#[test]
+fn members_lists_read_back_as_written() {
+    let list = members_sample();
+    let bytes = wire::encode_to_client(&ToClient::Members(list.clone()));
+    match wire::decode_to_client(&bytes).expect("reads back") {
+        ToClient::Members(read) => assert_eq!(read, list),
+        other => panic!("read back as {other:?}"),
+    }
 }
 
 #[test]

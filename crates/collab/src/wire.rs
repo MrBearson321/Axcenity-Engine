@@ -16,18 +16,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::access::Member;
 use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
 use crate::audit::AuditEntry;
 use crate::files::{FileHash, Manifest, Piece};
 use crate::history::Checkpoint;
+use crate::identity::PublicKey;
 use crate::ids::IdBlock;
 use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
 use crate::presence::{Camera, ChatLine, Collaborator, Presence, TextCursor};
+use crate::project::MembersList;
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 7;
+pub const FORMAT: u8 = 8;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -721,6 +724,61 @@ enum WireToClient {
     Checkpoints(Vec<Checkpoint>),
     HistoryNotice(String),
     AuditLog(Vec<AuditEntry>),
+    Members(WireMembers),
+}
+
+/// A [`MembersList`] on the wire. Its own shape because a [`Member`]'s
+/// file form leaves out an empty account, which postcard (no field names)
+/// can't read back.
+#[derive(Serialize, Deserialize)]
+pub struct WireMembers {
+    version: u64,
+    next_member: u32,
+    members: Vec<(u32, PublicKey, String, [u8; 3], Role, Option<String>)>,
+}
+
+impl From<&MembersList> for WireMembers {
+    fn from(list: &MembersList) -> WireMembers {
+        WireMembers {
+            version: list.version,
+            next_member: list.next_member,
+            members: list
+                .members
+                .iter()
+                .map(|m| {
+                    (
+                        m.id.0,
+                        m.key,
+                        m.name.clone(),
+                        m.color,
+                        m.role,
+                        m.account.clone(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<WireMembers> for MembersList {
+    fn from(wire: WireMembers) -> MembersList {
+        MembersList {
+            version: wire.version,
+            next_member: wire.next_member,
+            members: wire
+                .members
+                .into_iter()
+                .map(|(id, key, name, color, role, account)| Member {
+                    id: MemberId(id),
+                    key,
+                    name,
+                    color,
+                    role,
+                    account,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<&ToClient> for WireToClient {
@@ -838,6 +896,7 @@ impl From<&ToClient> for WireToClient {
             ToClient::Checkpoints(list) => WireToClient::Checkpoints(list.clone()),
             ToClient::HistoryNotice(reason) => WireToClient::HistoryNotice(reason.clone()),
             ToClient::AuditLog(entries) => WireToClient::AuditLog(entries.clone()),
+            ToClient::Members(list) => WireToClient::Members(list.into()),
         }
     }
 }
@@ -957,6 +1016,7 @@ impl WireToClient {
             WireToClient::Checkpoints(list) => ToClient::Checkpoints(list),
             WireToClient::HistoryNotice(reason) => ToClient::HistoryNotice(reason),
             WireToClient::AuditLog(entries) => ToClient::AuditLog(entries),
+            WireToClient::Members(list) => ToClient::Members(list.into()),
         })
     }
 }

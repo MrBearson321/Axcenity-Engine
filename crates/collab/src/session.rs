@@ -66,6 +66,8 @@ pub struct HostSession {
     conns: HashMap<MemberId, ConnId>,
     /// Each connection's messages in the current second (rate limit).
     rates: HashMap<ConnId, (Instant, u32)>,
+    /// The members list version last sent to everyone who may host.
+    shared: u64,
 }
 
 /// The most messages a member may send in one second (TC6). An editor
@@ -120,6 +122,7 @@ impl HostSession {
             members: HashMap::new(),
             conns: HashMap::new(),
             rates: HashMap::new(),
+            shared: 0,
         })
     }
 
@@ -212,6 +215,7 @@ impl HostSession {
             self.save_access();
             let out = self.host.set_role(member, role);
             self.route(out);
+            self.share_members(None);
         }
     }
 
@@ -225,6 +229,7 @@ impl HostSession {
         }
         let out = self.host.remove_member(member);
         self.route(out);
+        self.share_members(None);
     }
 
     /// Handles what arrived since the last call. Returns how many events
@@ -473,6 +478,7 @@ impl HostSession {
         }
         self.members.insert(conn, member.id);
         self.save_access();
+        self.share_members(Some(member.id));
         log::info!(
             "Collaborate: {} ({}) joined as {:?}",
             member.name,
@@ -495,6 +501,27 @@ impl HostSession {
         for o in out {
             if let Some(&conn) = self.conns.get(&o.to) {
                 self.listener.send(conn, wire::encode_to_client(&o.message));
+            }
+        }
+    }
+
+    /// Sends the members list to everyone connected who may host when it
+    /// changed since last sent, else only to `joiner` (who hasn't had it).
+    /// A Viewer is never sent it.
+    fn share_members(&mut self, joiner: Option<MemberId>) {
+        let changed = self.access.version() != self.shared;
+        let to: Vec<MemberId> = if changed {
+            self.conns.keys().copied().collect()
+        } else {
+            joiner.into_iter().collect()
+        };
+        self.shared = self.access.version();
+        let list = self.access.members_list();
+        let bytes = wire::encode_to_client(&ToClient::Members(list));
+        for member in to {
+            let may_host = self.host.role(member).is_some_and(Role::may_host);
+            if may_host && let Some(&conn) = self.conns.get(&member) {
+                self.listener.send(conn, bytes.clone());
             }
         }
     }
