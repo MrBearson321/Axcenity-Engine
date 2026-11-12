@@ -54,10 +54,12 @@ impl RayShadowPlan {
     /// are off.
     pub(super) fn of(list: &DrawList, graphics: &EffectiveGraphics) -> Option<Self> {
         let world = list.shadows;
+        // A distance that isn't a number counts as no shadows.
+        let has_distance = world.distance > 0.0;
         if graphics.ray_traced_shadows == RayTracedShadows::Off
             || !graphics.ray_queries
             || !world.enabled
-            || !(world.distance > 0.0)
+            || !has_distance
         {
             return None;
         }
