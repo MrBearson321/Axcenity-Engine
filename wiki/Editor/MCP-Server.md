@@ -65,6 +65,7 @@ sequenceDiagram
 - Keep schemas flat (no `oneOf`/`$ref`), summaries one sentence, errors that say what to do next.
 - New tools go in `editor/src/app/mcp/` (one file each) and go through `EditorApp` paths so undo and history stay consistent.
 - `scripts/check-platform.sh` checks the player doesn't link it.
+- `view_capture` (standard): a PNG of the shown world drawn offscreen by `TextureRenderer` on a device the tool makes once (`OnceLock`), returned as MCP image content (`axcenity_mcp::Reply { text, png }`, `Job::answer_with`; the tool leaves it in `Session::png`). No adapter: `unsupported`.
 - Measurements (step 7): `docs/mcp/benchmarks.md`. Results are 10–60 tokens typically; a call takes well under 1 ms in-process; a live client's round trip is one frame (0.3 ms when the waker repaints at once) since both loopback ends set `TCP_NODELAY` (without it, ~44 ms of Nagle/delayed-ACK); a write on S10k costs 20–30 ms; `--mcp` without the window waits for the project to open (~4 s for S10k in the container).
 - Small local models drive the `lite` profile (PRs #178, #181 and the follow-up on arguments sent as text; Qwen3 8B 21/21, gpt-oss-20b 19/21, Llama 3.1 8B 6/21 on 7 tasks × 3, `docs/mcp/README.md`). What moved them was error text naming the next call, so when a model gets stuck, fix the message first. Arguments are lenient where the meaning is plain: an empty filter is no filter, and a list or number sent as JSON text is parsed.
 

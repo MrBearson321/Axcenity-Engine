@@ -24,6 +24,7 @@ pub use error::{Code, ToolError, closest};
 pub use extras::{PromptArg, PromptSpec, ResourceSpec};
 pub use safety::{Allowed, Confirms, Mode, call_key};
 pub use server::{
-    Call, Job, Outcome, Setup, Waker, rmcp_tool, serve, serve_stdio, serve_tcp, tools_list_json,
+    Call, Job, Outcome, Reply, Setup, Waker, rmcp_tool, serve, serve_stdio, serve_tcp,
+    tools_list_json,
 };
 pub use spec::{Class, Kind, Param, Profile, ToolSpec};

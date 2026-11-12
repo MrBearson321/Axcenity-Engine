@@ -244,7 +244,7 @@ impl Live {
                     &job.call.args,
                     job.call.client.as_deref(),
                 );
-                job.answer(outcome);
+                job.answer_with(outcome, client.session.png.take());
                 ran = true;
             }
             if !ran {

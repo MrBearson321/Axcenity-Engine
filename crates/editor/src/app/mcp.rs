@@ -64,6 +64,7 @@ mod solid_op;
 mod style_edit;
 mod terrain_edit;
 mod values;
+mod view_capture;
 
 #[cfg(test)]
 mod benchmarks;
@@ -137,6 +138,9 @@ pub(super) struct Session {
     pub me: u32,
     /// The mark `history changes` last answered: its default `since`.
     pub asked: u64,
+    /// The picture the last call made (`view_capture`), sent with its
+    /// answer.
+    pub png: Option<Vec<u8>>,
 }
 
 impl Session {
@@ -154,6 +158,7 @@ impl Session {
             import_folders: Vec::new(),
             me,
             asked: 0,
+            png: None,
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -303,6 +308,10 @@ pub(super) const TOOLS: &[Tool] = &[
         spec: &render_stats::SPEC,
         call: render_stats::call,
     },
+    Tool {
+        spec: &view_capture::SPEC,
+        call: view_capture::call,
+    },
 ];
 
 // Parameters shared by several tools.
@@ -343,6 +352,7 @@ pub(super) fn run(host: &mut Host, tool: &ToolSpec, args: &Args, client: Option<
         host.session.client = client.trim().chars().take(40).collect();
     }
     host.session.last_undo = None;
+    host.session.png = None;
     // Whatever changed between calls wasn't this client.
     host.changes.take(&mut host.app.world, None);
     let outcome = call(host, tool, args);
@@ -567,7 +577,7 @@ pub(crate) fn run_from_command_line(args: impl Iterator<Item = std::ffi::OsStrin
                 job.call.client.as_deref(),
             )
         };
-        job.answer(outcome);
+        job.answer_with(outcome, headless.session.png.take());
     }
     match server.join() {
         Ok(Ok(())) => true,
