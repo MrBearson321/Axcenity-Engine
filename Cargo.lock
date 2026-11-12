@@ -1121,6 +1121,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-repo"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-workspace-hack",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+]
+
+[[package]]
 name = "axcenity-save"
 version = "0.2.0-alpha.1"
 dependencies = [
