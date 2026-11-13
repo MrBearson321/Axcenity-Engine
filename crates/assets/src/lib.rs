@@ -273,6 +273,32 @@ impl Assets {
         self.lock().blueprint.clone()
     }
 
+    /// Whether loading the model at `mesh_id` will import its file rather
+    /// than read a cooked copy (see `model/cooked_model.rs`): its first
+    /// load in this version of the engine, which takes longer. False once
+    /// it's loaded, or for a MeshId that isn't a project model file.
+    pub fn model_needs_import(&self, mesh_id: &str) -> bool {
+        let resolved = self.resolve(mesh_id);
+        let mesh_id: &str = &resolved;
+        let (folder, loaded) = {
+            let shared = self.lock();
+            (shared.folder.clone(), shared.models.contains_key(mesh_id))
+        };
+        let Some(folder) = folder.filter(|_| !loaded) else {
+            return false;
+        };
+        let (file, _) = Pick::of_mesh_id(mesh_id);
+        let Some(relative) = safe_path(file) else {
+            return false;
+        };
+        if ModelFormat::of(&relative).is_none() {
+            return false;
+        }
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let objects = mesh_id.split_once('#').map_or("", |(_, objects)| objects);
+        !model::cooked_model::is_cooked(&folder, &relative, objects)
+    }
+
     /// The model at `mesh_id` (a MeshPart's `MeshId`, such as
     /// `assets/models/chair.glb`), loading it the first time and waiting
     /// for that. `None` if `mesh_id` is empty or the model can't be loaded;

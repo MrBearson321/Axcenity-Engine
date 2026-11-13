@@ -43,7 +43,7 @@ flowchart LR
 | Retained draw items per Instance (M4) | `scene/src/retained.rs` in `TerrainCache` | Rebuilt by revision and dependencies; removed with the Instance |
 | MeshPart meshes, file materials, skins (I8) | `scene/src/mesh_cache.rs` | Rebuilt when `Assets` hands back a reloaded model |
 | Terrain chunk meshes and weight textures | `TerrainCache` | Same key, new version per edit |
-| GPU meshes, textures, bind groups, surface-shader pipelines | `render` | **Freed after 600 frames undrawn** (`docs/rendering/models.md`) |
+| GPU meshes, textures, bind groups, surface-shader pipelines | `render` | **Freed after 600 frames and 10 s undrawn** (`docs/rendering/models.md`) |
 | GPU textures over budget | `render/src/renderer/texture_budget.rs` | The graphics settings' texture memory budget: the least recently drawn textures drop their largest mips (BC7 down to its 4×4 level at most) |
 | Frame targets (MSAA, SSAO, shadows, probes, temporal history, depth of field) | `FrameTargets` | **Exist only while a setting uses them** (graphics plan decision; [ADR-0013](Architecture-Decisions/ADR-0013-Look-Versus-Cost-Settings.md)) |
 

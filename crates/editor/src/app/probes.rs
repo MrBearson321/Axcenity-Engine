@@ -1,80 +1,28 @@
 //! Baking probes (Bake Probes on the ribbon): each LightProbeVolume's grid
 //! of probes and each ReflectionProbe's view from the middle of its part is
 //! drawn on the GPU, saved in `assets/probes`, and named by its `Bake`, all
-//! one undo step. A light probe bake keeps a fingerprint of the world, so a
-//! volume whose bake is out of date gets a warning in the Explorer, and the
-//! probes that stood inside a solid part or under the ground, which surfaces
-//! leave out (roadmap R18.2).
+//! one undo step. The bake itself runs a little each frame
+//! (`app/probe_bake.rs`); this file finds what to bake and where. A light
+//! probe bake keeps a fingerprint of the world, so a volume whose bake is
+//! out of date gets a warning in the Explorer, and the probes that stood
+//! inside a solid part or under the ground are listed so surfaces leave
+//! them out (roadmap R18.2, `invalid_probes`).
 
 use std::collections::HashSet;
 use std::path::Path;
 
-use axcenity_render::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE, TextureRenderer, wgpu};
-
 use super::*;
 
 /// A probe to bake: the Instance, its part's name and its `Bake` now.
-struct ToBake {
-    id: InstanceId,
-    part_name: String,
-    bake: String,
+pub(super) struct ToBake {
+    pub(super) id: InstanceId,
+    pub(super) part_name: String,
+    pub(super) bake: String,
 }
 
 impl EditorApp {
-    /// Bakes every LightProbeVolume, then every ReflectionProbe (so their
-    /// reflections show the volumes' light), inside a part in the Workspace,
-    /// as it is now, on `device`. A probe keeps its bake file if it has one
-    /// in `assets/probes`; otherwise one is named after its part. The new
-    /// `Bake` values are one undo step (the files stay).
-    pub(super) fn bake_probes(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        if self.playing() {
-            return;
-        }
-        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
-            return;
-        };
-        let volumes = self.probes_to_bake(ClassName::LightProbeVolume);
-        let probes = self.probes_to_bake(ClassName::ReflectionProbe);
-        if volumes.is_empty() && probes.is_empty() {
-            self.output.warning(
-                "There are no LightProbeVolumes or ReflectionProbes in parts to bake. \
-                 Insert one with Light Probes or Reflection Probe on the ribbon.",
-            );
-            return;
-        }
-        if self.assets.texture_progress().is_some() {
-            self.output.warning(
-                "Some textures are still loading, so the bakes are missing them. \
-                 Bake again once they've loaded.",
-            );
-        }
-        let mut used = HashSet::new();
-        let volumes = self.bake_light_probes(device, queue, &folder, volumes, &mut used);
-        let probes = self.bake_reflection_probes(device, queue, &folder, probes, &mut used);
-        self.history.seal();
-        // Baking again into the same files changes no `Bake`, so no step.
-        self.stale_light_probes = None;
-        let mut baked = Vec::new();
-        if volumes > 0 {
-            let s = if volumes == 1 { "" } else { "s" };
-            baked.push(format!("{volumes} light probe volume{s}"));
-        }
-        if probes > 0 {
-            let s = if probes == 1 { "" } else { "s" };
-            baked.push(format!("{probes} reflection probe{s}"));
-        }
-        if !baked.is_empty() {
-            let baked = baked.join(" and ");
-            self.toasts.success(format!("Baked {baked}"));
-            self.output.info(format!(
-                "Baked {baked} into {}.",
-                axcenity_assets::PROBES_FOLDER
-            ));
-        }
-    }
-
     /// Every Instance of `class` inside a Part or MeshPart in the Workspace.
-    fn probes_to_bake(&self, class: ClassName) -> Vec<ToBake> {
+    pub(super) fn probes_to_bake(&self, class: ClassName) -> Vec<ToBake> {
         self.world
             .descendants(self.world.workspace())
             .into_iter()
@@ -101,143 +49,8 @@ impl EditorApp {
             .collect()
     }
 
-    /// Bakes each light probe volume's grid. Returns how many were baked.
-    fn bake_light_probes(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        folder: &Path,
-        volumes: Vec<ToBake>,
-        used: &mut HashSet<String>,
-    ) -> usize {
-        let fingerprint = axcenity_scene::light_bake_fingerprint(&self.world);
-        let list = self.bake_scene();
-        let mut baked = 0;
-        for volume in volumes {
-            let Some(grid) = axcenity_scene::light_probe_points(&self.world, volume.id) else {
-                continue;
-            };
-            let path = bake_path(
-                folder,
-                &volume,
-                used,
-                axcenity_assets::is_light_probes_file,
-                axcenity_assets::light_probes_path,
-                "LightProbeVolume",
-            );
-            let part_name = &volume.part_name;
-            let probes = match TextureRenderer::bake_light_probes(
-                device,
-                queue,
-                &list,
-                &grid.points,
-                LIGHT_PROBE_BAKE_SIZE,
-                &self.graphics,
-            ) {
-                Ok(probes) => probes,
-                Err(err) => {
-                    self.output.error(format!(
-                        "Could not bake the light probes in {part_name}: {err:#}"
-                    ));
-                    continue;
-                }
-            };
-            let invalid = invalid_probes(&self.world, &self.assets, volume.id, &grid.points);
-            let Some(probes) = axcenity_assets::LightProbes::new(grid.counts, fingerprint, probes)
-                .and_then(|probes| probes.with_invalid(invalid))
-            else {
-                self.output.error(format!(
-                    "Could not bake the light probes in {part_name}: the light came back \
-                     as something that isn't a number."
-                ));
-                continue;
-            };
-            if let Err(err) = axcenity_assets::write_light_probes(folder, &path, &probes) {
-                self.output
-                    .error(format!("Could not save the bake `{path}`: {err}"));
-                continue;
-            }
-            self.assets.put_light_probes(&path, probes);
-            if volume.bake != path {
-                self.apply(
-                    volume.id,
-                    Edit::Property("Bake", Value::String(path.clone())),
-                );
-            }
-            used.insert(path);
-            baked += 1;
-        }
-        baked
-    }
-
-    /// Bakes each reflection probe's view. Returns how many were baked.
-    fn bake_reflection_probes(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        folder: &Path,
-        probes: Vec<ToBake>,
-        used: &mut HashSet<String>,
-    ) -> usize {
-        let list = self.bake_scene();
-        let mut baked = 0;
-        for probe in probes {
-            let center = self
-                .world
-                .get(probe.id)
-                .and_then(|probe| self.world.get(probe.parent()?))
-                .and_then(|part| part.property("Position")?.as_vector3());
-            let Some(center) = center else {
-                continue;
-            };
-            let path = bake_path(
-                folder,
-                &probe,
-                used,
-                axcenity_assets::is_probe_file,
-                axcenity_assets::probe_path,
-                "ReflectionProbe",
-            );
-            let center = axcenity_render::glam::Vec3::new(center.x, center.y, center.z);
-            let rgb = match TextureRenderer::bake_reflection_probe(
-                device,
-                queue,
-                &list,
-                center,
-                PROBE_BAKE_SIZE,
-                &self.graphics,
-            ) {
-                Ok(rgb) => rgb,
-                Err(err) => {
-                    self.output.error(format!(
-                        "Could not bake the probe in {}: {err:#}",
-                        probe.part_name
-                    ));
-                    continue;
-                }
-            };
-            if let Err(err) = axcenity_assets::write_probe(folder, &path, PROBE_BAKE_SIZE, &rgb) {
-                self.output
-                    .error(format!("Could not save the bake `{path}`: {err}"));
-                continue;
-            }
-            if let Some(image) = axcenity_assets::ProbeImage::new(PROBE_BAKE_SIZE, rgb) {
-                self.assets.put_reflection_probe(&path, image);
-            }
-            if probe.bake != path {
-                self.apply(
-                    probe.id,
-                    Edit::Property("Bake", Value::String(path.clone())),
-                );
-            }
-            used.insert(path);
-            baked += 1;
-        }
-        baked
-    }
-
     /// The world as bakes see it (each bake places its own cameras).
-    fn bake_scene(&self) -> axcenity_render::DrawList {
+    pub(super) fn bake_scene(&self) -> axcenity_render::DrawList {
         axcenity_scene::build_draw_list(
             &self.world,
             &self.assets,
@@ -294,7 +107,7 @@ impl EditorApp {
 /// `Bake` is one and no other probe here took it), or a new file named
 /// after its part (`path_of` a free name; `fallback` if the part's name
 /// can't be a file name).
-fn bake_path(
+pub(super) fn bake_path(
     folder: &Path,
     probe: &ToBake,
     used: &HashSet<String>,
@@ -316,7 +129,7 @@ fn bake_path(
 
 /// The probes of `volume` standing at `points` inside a solid: a colliding
 /// part (not the volume's own) or under a Terrain's ground (roadmap R18.2).
-fn invalid_probes(
+pub(super) fn invalid_probes(
     world: &World,
     assets: &Assets,
     volume: InstanceId,
@@ -340,6 +153,8 @@ fn invalid_probes(
 
 #[cfg(test)]
 mod tests {
+    use axcenity_render::{PROBE_BAKE_SIZE, wgpu};
+
     use super::*;
 
     /// R18.2: a wall through a volume makes the probes inside it invalid;
@@ -594,6 +409,65 @@ mod tests {
         assert!(flagged(&mut app, volume));
         app.bake_probes(&device, &queue);
         assert!(!flagged(&mut app, volume), "baked again");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The bake that froze the editor: it now runs a probe or so a frame,
+    /// counts its progress, and Cancel keeps the volumes already finished
+    /// and leaves the one part way through as it was.
+    #[test]
+    fn a_bake_runs_a_little_each_frame_and_cancel_keeps_finished_volumes() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let folder = scratch_copy("light-steps");
+        let mut app = EditorApp::new(Some(&folder));
+        app.selected = None;
+        app.insert(Insertable::LightProbeVolume, None);
+        let first = app.selected.expect("the first volume");
+        app.selected = None;
+        app.insert(Insertable::LightProbeVolume, None);
+        let second = app.selected.expect("the second volume");
+        app.history.seal();
+        let revision = app.history.revision();
+
+        app.start_probe_bake();
+        let bake = app.probe_bake.as_ref().expect("started");
+        assert_eq!(
+            (bake.light_done, bake.light_total),
+            (0, 96),
+            "two 4×3×4 grids"
+        );
+        assert!(bake.seconds_left().is_none(), "nothing timed yet");
+        // A zero budget still bakes one probe a step.
+        for done in 1..=50 {
+            app.step_probe_bake(&device, &queue, std::time::Duration::ZERO);
+            let bake = app.probe_bake.as_ref().expect("still baking");
+            assert_eq!(bake.light_done, done);
+        }
+        let bake = app.probe_bake.as_ref().unwrap();
+        assert!(bake.seconds_left().is_some_and(|seconds| seconds > 0.0));
+        assert!((bake.fraction() - 50.0 / 96.0).abs() < 1e-6);
+        assert!(bake.now().contains("2 of 2 volumes"), "{}", bake.now());
+        // The first volume's file is written; nothing is named until the end.
+        let path = axcenity_assets::light_probes_path("LightProbeBox");
+        assert!(folder.join(&path).exists());
+        assert_eq!(bake_of(&app.world, first), "");
+
+        app.probe_bake.as_mut().unwrap().cancel = true;
+        app.step_probe_bake(&device, &queue, std::time::Duration::ZERO);
+        assert!(app.probe_bake.is_none(), "stopped");
+        assert_eq!(
+            bake_of(&app.world, first),
+            path,
+            "the finished volume is kept"
+        );
+        assert_eq!(bake_of(&app.world, second), "", "the half-baked one isn't");
+        // One undo step takes the name back.
+        assert_ne!(app.history.revision(), revision);
+        app.undo();
+        assert_eq!(bake_of(&app.world, first), "");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

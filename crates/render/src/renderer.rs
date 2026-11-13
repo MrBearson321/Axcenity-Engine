@@ -45,7 +45,7 @@ use glyphon::{
 };
 pub use gpu_particles::MAX_GPU_PARTICLES;
 pub use gpu_timer::FramePass;
-pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
+pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, LightProbeBaker, PROBE_BAKE_SIZE};
 pub use ray_tracing::RayTracingStats;
 pub use surface_shaders::{ShaderError, SurfaceShader};
 
@@ -72,6 +72,7 @@ mod post;
 mod probe_bake;
 mod probes;
 mod ray_ao;
+mod ray_gi;
 mod ray_shadows;
 mod ray_tracing;
 mod realtime_gi;
@@ -566,6 +567,16 @@ impl TextureRenderer {
     /// See [`Renderer::pending_uploads`].
     pub fn pending_uploads(&self) -> usize {
         self.scene.pending_uploads()
+    }
+
+    /// Asks for every mesh (with its levels of detail) and color texture of
+    /// `list`'s items to be uploaded, seen or not, so that looking around
+    /// later doesn't wait for them: the editor does this behind its loading
+    /// screen. Does nothing unless background uploads are on
+    /// ([`set_background_uploads`](Self::set_background_uploads)); count
+    /// them with [`pending_uploads`](Self::pending_uploads).
+    pub fn preload(&mut self, list: &DrawList) {
+        self.scene.preload(list);
     }
 
     /// For the editor's culling overlay: while `camera` is set, items and

@@ -54,6 +54,17 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Appearance,
+            "Ribbon",
+            &[
+                "Center ribbon",
+                "Ribbon alignment",
+                "Toolbar position",
+                "Centered buttons",
+            ],
+            "Whether the ribbon's buttons start at the left of the window or sit in its middle.",
+        ),
+        setting(
+            Appearance,
             "Menu icons",
             &["Icon alignment", "Centered icons", "Left icons", "Menus"],
             "Whether menu icons sit at the left of their column or in its middle.",

@@ -39,8 +39,13 @@ struct RayShadows {
 @group(0) @binding(5) var<storage, read_write> destination: array<u32>;
 
 // Instance masks of what casts shadows (renderer/ray_tracing.rs): solid
-// items and cut-outs.
-const MASK_CASTERS: u32 = 3u;
+// items, and cut-outs.
+const MASK_SOLID: u32 = 1u;
+const MASK_CUT_OUT: u32 = 2u;
+// Cut-outs are traced as solid cards (their holes aren't looked up), so
+// one nearer than this to the surface isn't counted: leaves lying on the
+// ground, or a grass clump, would shade the ground in card-shaped blotches.
+const CUT_OUT_NEAR: f32 = 0.35;
 // The widest a soft edge is smoothed, in pixels each way.
 const MAX_BLUR: i32 = 12;
 // Marks a pixel the soft passes have nothing for (sky, or past the reach).
@@ -80,11 +85,12 @@ fn pack_soft(visible: f32, blocker: f32) -> u32 {
     return pack2x16float(vec2<f32>(visible, blocker));
 }
 
-// One ray from `origin` along `direction`: how far to what blocks it, or 0.
-fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+// How far along the ray from `origin` an item of `mask` blocks it, from
+// `near` on, or 0 for nothing.
+fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32) -> f32 {
     var query: ray_query;
     rayQueryInitialize(&query, scene, RayDesc(
-        RAY_FLAG_TERMINATE_ON_FIRST_HIT | RAY_FLAG_FORCE_OPAQUE, MASK_CASTERS, 0.0,
+        RAY_FLAG_TERMINATE_ON_FIRST_HIT | RAY_FLAG_FORCE_OPAQUE, mask, near,
         rays.camera.w * 2.0, origin, direction));
     rayQueryProceed(&query);
     let hit = rayQueryGetCommittedIntersection(&query);
@@ -92,6 +98,15 @@ fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
         return 0.0;
     }
     return max(hit.t, 1e-3);
+}
+
+// One ray from `origin` along `direction`: how far to what blocks it, or 0.
+fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+    let solid = first_hit(origin, direction, MASK_SOLID, 0.0);
+    if solid > 0.0 {
+        return solid;
+    }
+    return first_hit(origin, direction, MASK_CUT_OUT, CUT_OUT_NEAR);
 }
 
 @compute @workgroup_size(8, 8)
@@ -171,8 +186,12 @@ fn smoothed_along(pixel: vec2<i32>, step: vec2<i32>) -> vec2<f32> {
     let point = world_at(pixel);
     let distance = length(point.xyz - rays.camera.xyz);
     let normal = textureLoad(normal_texture, pixel, 0).xyz;
+    let world_normal = normalize((rays.view_to_world * vec4<f32>(normal, 0.0)).xyz);
     let last = vec2<i32>(rays.size.xy) - 1;
-    let tolerance = 0.02 * distance + 0.05;
+    // How far a neighbour may be off this pixel's surface (its plane, so a
+    // slope seen side-on, whose pixels lie far apart in depth, still
+    // smooths: comparing distances from the camera left it dithered).
+    let tolerance = 0.01 * distance + 0.05;
     // The widest soft edge near here: a lit pixel next to a shadow has no
     // blocker of its own but lies in that shadow's edge.
     var blocker = here.y;
@@ -191,7 +210,7 @@ fn smoothed_along(pixel: vec2<i32>, step: vec2<i32>) -> vec2<f32> {
             continue;
         }
         let there = world_at(at);
-        let apart = abs(length(there.xyz - rays.camera.xyz) - distance);
+        let apart = abs(dot(there.xyz - point.xyz, world_normal));
         let facing = dot(textureLoad(normal_texture, at, 0).xyz, normal);
         let x = f32(k) / radius;
         let weight = exp(-2.0 * x * x)

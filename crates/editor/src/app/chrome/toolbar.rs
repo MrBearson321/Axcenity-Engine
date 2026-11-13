@@ -38,9 +38,24 @@ impl EditorApp {
                 ui.set_min_height(tallest);
                 let top = ui.min_rect().top();
                 let scene = self.scene_shown(ui.ctx());
+                // Centred, the groups start half the room they leave from the
+                // left: their width is known from the last frame this tab
+                // was drawn (the first frame of a tab is drawn again).
+                let centered = self.appearance.ribbon == theme::RibbonAlign::Centered;
+                let room = ui.available_width();
+                let width_id = egui::Id::new(("ribbon width", format!("{groups:?}"), scene));
                 egui::ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
+                        if centered {
+                            match ui.data(|d| d.get_temp::<f32>(width_id)) {
+                                Some(width) => {
+                                    ui.add_space(((room - width) / 2.0).max(0.0).floor())
+                                }
+                                None => ui.ctx().request_discard("ribbon width"),
+                            }
+                        }
+                        let start = ui.cursor().left();
                         // Show Scene goes before the first greyed-out group,
                         // where it's seen however narrow the window is.
                         let mut offered = scene;
@@ -68,6 +83,14 @@ impl EditorApp {
                                 })
                                 .response
                                 .on_disabled_hover_text(SCENE_HIDDEN);
+                            }
+                        }
+                        let width = ui.min_rect().right() - start;
+                        let known = ui.data(|d| d.get_temp::<f32>(width_id));
+                        if known.is_none_or(|known| (known - width).abs() > 0.5) {
+                            ui.data_mut(|d| d.insert_temp(width_id, width));
+                            if known.is_some() {
+                                ui.ctx().request_repaint();
                             }
                         }
                     });
@@ -296,7 +319,7 @@ impl EditorApp {
                         .show(ui, |ui| {
                             ui.checkbox(
                                 &mut snap.move_on,
-                                theme::with_icon(icons::GRID_FOUR, "Move"),
+                                theme::menu_item(ui.ctx(), icons::GRID_FOUR, "Move"),
                             )
                             .on_hover_text("Move and scale in steps of this many studs.");
                             ui.add_enabled(
@@ -309,7 +332,7 @@ impl EditorApp {
                             );
                             ui.checkbox(
                                 &mut snap.surfaces,
-                                theme::with_icon(icons::MAGNET, "Surfaces"),
+                                theme::menu_item(ui.ctx(), icons::MAGNET, "Surfaces"),
                             )
                             .on_hover_text(
                                 "Moved and resized parts snap flush against, or in line with, the \
@@ -317,7 +340,7 @@ impl EditorApp {
                             );
                             ui.checkbox(
                                 &mut snap.points,
-                                theme::with_icon(icons::CROSSHAIR, "Snap Points"),
+                                theme::menu_item(ui.ctx(), icons::CROSSHAIR, "Snap Points"),
                             )
                             .on_hover_text(
                                 "Show markers on the parts around a move, and click its corners, \
@@ -325,7 +348,7 @@ impl EditorApp {
                             );
                             ui.checkbox(
                                 &mut snap.join,
-                                theme::with_icon(icons::LINK_SIMPLE, "Join Surfaces"),
+                                theme::menu_item(ui.ctx(), icons::LINK_SIMPLE, "Join Surfaces"),
                             )
                             .on_hover_text(
                                 "When you let go of a part you moved, weld it to the parts it's \
@@ -334,7 +357,7 @@ impl EditorApp {
                             ui.end_row();
                             ui.checkbox(
                                 &mut snap.rotate_on,
-                                theme::with_icon(icons::ANGLE, "Rotate"),
+                                theme::menu_item(ui.ctx(), icons::ANGLE, "Rotate"),
                             )
                             .on_hover_text("Rotate in steps of this many degrees.");
                             ui.add_enabled(
@@ -347,14 +370,18 @@ impl EditorApp {
                             );
                             ui.checkbox(
                                 &mut snap.collisions,
-                                theme::with_icon(icons::CUBE, "Collisions"),
+                                theme::menu_item(ui.ctx(), icons::CUBE, "Collisions"),
                             )
                             .on_hover_text(
                                 "Moved, resized and turned parts stop at solid parts (CanCollide) \
                              instead of going into them.",
                             );
                             open_groups = ui
-                                .button(theme::with_icon(icons::INTERSECT, "Collision Groups…"))
+                                .button(theme::menu_item(
+                                    ui.ctx(),
+                                    icons::INTERSECT,
+                                    "Collision Groups…",
+                                ))
                                 .on_hover_text(
                                     "Name collision groups and choose which of them collide: parts \
                                  in groups that don't pass through each other.",
@@ -426,7 +453,11 @@ impl EditorApp {
                         );
                         ui.separator();
                         if ui
-                            .button(theme::with_icon(icons::CAMERA_ROTATE, "Bake Probes"))
+                            .button(theme::menu_item(
+                                ui.ctx(),
+                                icons::CAMERA_ROTATE,
+                                "Bake Probes",
+                            ))
                             .on_hover_text(
                                 "Bake every LightProbeVolume and ReflectionProbe: the light around \
                              each probe is saved in assets/probes. Bake again after changing \
@@ -554,8 +585,13 @@ impl EditorApp {
                                 ui.separator();
                             }
                             for &class in classes {
-                                let label = format!("{} {}", theme::class_icon(class), class);
-                                if ui.selectable_label(active == Some(class), label).clicked() {
+                                let label = theme::menu_item(
+                                    ui.ctx(),
+                                    theme::class_icon(class),
+                                    class.to_string(),
+                                );
+                                let item = egui::Button::selectable(active == Some(class), label);
+                                if ui.add(item).clicked() {
                                     clicks.constraint = Some(Some(class));
                                 }
                             }
@@ -710,7 +746,7 @@ impl EditorApp {
                     ] {
                         let item = egui::Button::selectable(
                             active == Some(tool),
-                            theme::with_icon(tool.icon(), tool.label()),
+                            theme::menu_item(ui.ctx(), tool.icon(), tool.label()),
                         );
                         if ui.add(item).on_hover_text(tool.hint()).clicked() {
                             self.terrain.tool = Some(tool);
@@ -744,7 +780,7 @@ impl EditorApp {
                         for pane in Pane::CLOSABLE {
                             let item = egui::Button::selectable(
                                 self.layout.is_open(pane),
-                                theme::with_icon(pane.icon(), pane.label()),
+                                theme::menu_item(ui.ctx(), pane.icon(), pane.label()),
                             );
                             if ui.add(item).clicked() {
                                 self.layout.toggle(pane);
@@ -752,7 +788,8 @@ impl EditorApp {
                         }
                         ui.separator();
                         if ui
-                            .button(theme::with_icon(
+                            .button(theme::menu_item(
+                                ui.ctx(),
                                 icons::ARROW_COUNTER_CLOCKWISE,
                                 "Reset Layout",
                             ))
@@ -806,7 +843,10 @@ impl EditorApp {
                     .on_hover_text("Show the scene lit, or one of the renderer's debug views.");
                 egui::Popup::menu(&mode).show(|ui| {
                     for mode in ViewMode::all() {
-                        let item = egui::Button::selectable(self.view_mode == mode, mode.label());
+                        let item = egui::Button::selectable(
+                            self.view_mode == mode,
+                            theme::menu_entry(ui.ctx(), None, mode.label()),
+                        );
                         if ui.add(item).on_hover_text(mode.hint()).clicked() {
                             self.view_mode = mode;
                         }

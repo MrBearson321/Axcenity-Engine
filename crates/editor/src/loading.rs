@@ -58,6 +58,8 @@ struct Status {
     count: Option<(usize, usize)>,
     /// The last files finished, newest last.
     recent: Vec<String>,
+    /// Why this step takes a while, when it does, under the bar.
+    note: Option<String>,
 }
 
 /// A project being opened. Dropping it cancels the load.
@@ -167,14 +169,17 @@ impl Drop for Loading {
     }
 }
 
-/// The screen held for a frame after the project opens, while its scene is
-/// sent to the graphics card. After a load too quick to show its screen,
-/// only the background, so nothing flashes up.
+/// The screen held after the project opens, while its scene is sent to
+/// the graphics card: `uploads` is how many of the meshes and textures on
+/// their way are there, of how many, while any are. After a load too quick
+/// to show its screen (`shown` false), only the background, so nothing
+/// flashes up.
 pub fn show_finishing(
     ui: &mut egui::Ui,
     rect: Rect,
     name: &str,
     shown: bool,
+    uploads: Option<(usize, usize)>,
     mark: Option<&egui::TextureHandle>,
 ) {
     if !shown {
@@ -182,10 +187,69 @@ pub fn show_finishing(
         return;
     }
     let status = Status {
-        doing: "Preparing the scene".to_owned(),
+        doing: finishing_text(uploads),
+        count: uploads,
         ..Status::default()
     };
     paint(ui, rect, name, &status, None, mark);
+}
+
+/// What the screen says while the scene goes to the graphics card.
+fn finishing_text(uploads: Option<(usize, usize)>) -> String {
+    match uploads {
+        Some(_) => "Sending models and textures to the graphics card".to_owned(),
+        None => "Getting the editor ready".to_owned(),
+    }
+}
+
+/// How many frames in a row must come quickly for the editor to count as
+/// ready after a project opens (see [`Settling`]).
+pub const SETTLED_FRAMES: u32 = 5;
+/// A frame this quick, in seconds, counts toward [`SETTLED_FRAMES`].
+const QUICK_FRAME: f32 = 0.1;
+
+/// Whether the editor's frames have settled after a project opens. The
+/// first frames that draw a scene make pipelines, build ray tracing's
+/// acceleration structures and so on, each a stall: the loading screen
+/// stays up until [`SETTLED_FRAMES`] frames in a row each take no more
+/// than [`QUICK_FRAME`] (or twice the quickest frame yet, on a computer
+/// that never draws the scene that fast), so the editor answers the
+/// moment it's gone.
+#[derive(Debug, Default)]
+pub struct Settling {
+    /// egui's number for the last frame counted, and when it started.
+    last: Option<(u64, Instant)>,
+    quickest: Option<f32>,
+    quick: u32,
+}
+
+impl Settling {
+    /// Counts frame `number` (egui's `cumulative_frame_nr`: a frame egui
+    /// lays out twice is counted once), started at `now`, and says
+    /// whether frames have settled.
+    pub fn frame(&mut self, number: u64, now: Instant) -> bool {
+        match self.last {
+            Some((last_number, _)) if last_number == number => {}
+            Some((_, last)) => {
+                self.last = Some((number, now));
+                let seconds = now.saturating_duration_since(last).as_secs_f32();
+                let quickest = self.quickest.map_or(seconds, |q| q.min(seconds));
+                self.quickest = Some(quickest);
+                if seconds <= QUICK_FRAME.max(quickest * 2.0) {
+                    self.quick += 1;
+                } else {
+                    self.quick = 0;
+                }
+            }
+            None => self.last = Some((number, now)),
+        }
+        self.settled()
+    }
+
+    /// Whether the last [`SETTLED_FRAMES`] frames came quickly.
+    pub fn settled(&self) -> bool {
+        self.quick >= SETTLED_FRAMES
+    }
 }
 
 /// The screen's background alone, covering what's under it.
@@ -213,29 +277,16 @@ impl Job {
     fn run(&self, mut terrain: TerrainCache, camera: Camera) -> Result<Loaded, LoadError> {
         let project =
             axcenity_project::load_with_level(&self.folder, self.level.as_deref(), &mut |step| {
+                let upgrading = matches!(step, LoadStep::Upgrade { .. });
                 let (doing, count) = describe(step);
                 self.report(doing, count);
+                if upgrading {
+                    self.note(UPGRADE_NOTE);
+                }
             })?;
 
         let assets = Assets::new(&project.folder);
-        let files = asset_files(&project.world);
-        for (index, file) in files.iter().enumerate() {
-            if self.cancelled() {
-                break;
-            }
-            let kind = match file {
-                AssetFile::Model(_) => "model",
-                AssetFile::Texture(_) | AssetFile::LayerTexture(_) => "texture",
-                AssetFile::Material(_) => "material",
-            };
-            self.report(
-                format!("Loading {kind} {}", file.path()),
-                Some((index, files.len())),
-            );
-            file.load(&assets);
-            self.finished(file.path().to_owned());
-        }
-
+        self.load_assets(&assets, &asset_files(&project.world));
         let world = &project.world;
         let terrains: Vec<InstanceId> = world
             .descendants(world.workspace())
@@ -261,6 +312,50 @@ impl Job {
         })
     }
 
+    /// Reads `files` into `assets`, as many at once as the asset workers
+    /// take, saying which one it's waiting on and how many are done. A
+    /// model with no cooked copy yet (the first open in this version of the
+    /// engine) is imported from its file, which is slower: the screen says
+    /// so, so a long wait isn't a mystery.
+    fn load_assets(&self, assets: &Assets, files: &[AssetFile]) {
+        // Asked before any loads: a model being loaded is cooked as it goes.
+        let importing: Vec<bool> = files
+            .iter()
+            .map(|file| match file {
+                AssetFile::Model(mesh_id) => assets.model_needs_import(mesh_id),
+                _ => false,
+            })
+            .collect();
+        let tickets: Vec<_> = files.iter().map(|file| file.request(assets)).collect();
+        let mut reported = vec![false; files.len()];
+        let mut done = 0;
+        while done < files.len() {
+            if self.cancelled() {
+                return;
+            }
+            for (index, ticket) in tickets.iter().enumerate() {
+                if !reported[index] && ticket.is_finished() {
+                    reported[index] = true;
+                    done += 1;
+                    self.finished(files[index].path().to_owned());
+                }
+            }
+            // The first file still being read is the one named.
+            if let Some(index) = (0..files.len()).find(|&index| !reported[index]) {
+                self.report(describe_file(&files[index]), Some((done, files.len())));
+                if importing[index] {
+                    self.note(IMPORT_NOTE);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+        }
+        // Each one in once more, so a load that failed is reported the
+        // way drawing would report it (each failure once).
+        for file in files {
+            file.load(assets);
+        }
+    }
+
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
     }
@@ -271,8 +366,14 @@ impl Job {
             let mut status = lock(&self.status);
             status.doing = doing;
             status.count = count;
+            status.note = None;
         }
         self.ctx.request_repaint();
+    }
+
+    /// Says why the step just reported takes a while.
+    fn note(&self, note: &str) {
+        lock(&self.status).note = Some(note.to_owned());
     }
 
     fn finished(&self, what: String) {
@@ -295,6 +396,26 @@ fn describe(step: LoadStep) -> (String, Option<(usize, usize)>) {
         }
         LoadStep::Script { path, done, total } => (format!("Reading {path}"), Some((done, total))),
         LoadStep::Stylesheets => ("Reading stylesheets".to_owned(), None),
+    }
+}
+
+/// What the screen says under the bar while an older project upgrades.
+const UPGRADE_NOTE: &str = "This project was saved by an older Axcenity. Its files are copied \
+     to .axcenity/previous first, then upgraded: only this once.";
+
+/// What the screen says under the bar while a model with no cooked copy
+/// is imported.
+const IMPORT_NOTE: &str = "First open in this version of Axcenity: models are imported from \
+     their files and kept, so the next open is quicker.";
+
+/// What the screen says while `file` is read.
+fn describe_file(file: &AssetFile) -> String {
+    match file {
+        AssetFile::Model(path) => format!("Loading model {path}"),
+        AssetFile::Texture(path) | AssetFile::LayerTexture(path) => {
+            format!("Loading texture {path}")
+        }
+        AssetFile::Material(path) => format!("Loading material {path}"),
     }
 }
 
@@ -433,6 +554,22 @@ fn paint(
         }
     }
     y += 12.0;
+    // Why it takes a while, when it does: two lines at most, clear of the
+    // percentage.
+    if let Some(note) = &status.note {
+        y += 6.0;
+        let note = widgets::elided(
+            ui,
+            note.clone(),
+            FontId::proportional(type_scale::CAPTION),
+            palette.text_secondary,
+            width - 48.0,
+            2,
+        );
+        let height = note.size().y;
+        painter.galley(egui::pos2(left, y), note, palette.text_secondary);
+        y += height + 8.0;
+    }
 
     // The last files read, the newest brightest.
     for (age, done) in status.recent.iter().rev().enumerate() {
@@ -471,6 +608,41 @@ fn paint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_settle_once_several_in_a_row_are_quick() {
+        let start = Instant::now();
+        // Each frame's egui number and seconds since the first frame.
+        let settles = |frames: &[(u64, f32)]| {
+            let mut settling = Settling::default();
+            frames
+                .iter()
+                .map(|&(number, seconds)| {
+                    settling.frame(number, start + std::time::Duration::from_secs_f32(seconds))
+                })
+                .collect::<Vec<bool>>()
+        };
+        let quick = SETTLED_FRAMES as u64;
+        // Quick frames, then a two-second stall: the count starts again
+        // after it, and a frame laid out twice (the same number) counts
+        // once.
+        let mut frames: Vec<(u64, f32)> = (0..3).map(|n| (n, n as f32 * 0.016)).collect();
+        frames.push((3, 2.04));
+        frames.extend((1..quick).map(|n| (3 + n, 2.04 + n as f32 * 0.016)));
+        let last = frames.last().unwrap().1;
+        frames.push((3 + quick - 1, last + 0.001));
+        frames.push((3 + quick, last + 0.016));
+        let settled = settles(&frames);
+        assert!(settled[..settled.len() - 1].iter().all(|&s| !s));
+        assert!(settled[settled.len() - 1]);
+        // A computer that never draws quicker than half a second settles
+        // on frames near its quickest.
+        let mut slow: Vec<(u64, f32)> = (0..quick).map(|n| (n, n as f32 * 0.5)).collect();
+        slow.push((quick, (quick - 1) as f32 * 0.5 + 0.6));
+        let settled = settles(&slow);
+        assert!(!settled[settled.len() - 2]);
+        assert!(settled[settled.len() - 1]);
+    }
 
     #[test]
     fn the_bar_fills_only_by_what_is_counted() {
@@ -526,6 +698,7 @@ mod tests {
             recent: (1..=RECENT)
                 .map(|n| format!("assets/textures/stone_{n}.png"))
                 .collect(),
+            note: Some(IMPORT_NOTE.to_owned()),
         };
         let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default()

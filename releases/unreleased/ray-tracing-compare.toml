@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "editor"
+title = "Compare: see the view with and without ray tracing"
+details = "The Scene view's ray tracing badge has a Compare toggle that draws the view without its ray traced effects, and back, without a restart or a settings change. The Learn guide says what to look for."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

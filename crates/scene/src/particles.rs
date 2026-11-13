@@ -31,8 +31,8 @@ use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    DrawList, MAX_GPU_PARTICLES, ParticleCurves, ParticleEmitter, ParticleLook, Sprite,
-    TextureSource,
+    CURVE_ENTRIES, DrawList, MAX_GPU_PARTICLES, ParticleCurves, ParticleEmitter, ParticleLook,
+    SpawnKind, SpawnShape, Sprite, TextureSource, curve_at,
 };
 
 use crate::draw_list::image_texture;
@@ -111,6 +111,7 @@ impl GpuEmitter {
                 acceleration: Vec3::ZERO,
                 drag: 0.0,
                 air: Vec3::ZERO,
+                shape: SpawnShape::default(),
                 look: ParticleLook::default(),
             },
             pending: 0,
@@ -146,6 +147,10 @@ struct Settings {
     drag: f32,
     /// True if Drag slows particles toward the wind rather than to a stop.
     wind_affects_drag: bool,
+    /// Where in the part they're born (`Shape`, `ShapeStyle`).
+    shape: SpawnShape,
+    /// `SpeedOverLife` as the curve table both paths read, if it's set.
+    speed_curve: Option<[f32; CURVE_ENTRIES]>,
 }
 
 impl Settings {
@@ -175,8 +180,42 @@ impl Settings {
                 .property("WindAffectsDrag")
                 .and_then(Value::as_bool)
                 == Some(true),
+            shape: spawn_shape(instance),
+            speed_curve: speed_curve(instance),
         }
     }
+}
+
+/// An emitter's `Shape` and `ShapeStyle` (roadmap R17.2): a Box filled by
+/// default, as before they existed.
+fn spawn_shape(instance: &Instance) -> SpawnShape {
+    let item = |name| match instance.property(name) {
+        Some(Value::EnumItem(item)) => item.item.clone(),
+        _ => String::new(),
+    };
+    let kind = match item("Shape").as_str() {
+        "Sphere" => SpawnKind::Sphere,
+        "Cylinder" => SpawnKind::Cylinder,
+        "Disc" => SpawnKind::Disc,
+        _ => SpawnKind::Box,
+    };
+    SpawnShape {
+        kind,
+        surface: item("ShapeStyle") == "Surface",
+    }
+}
+
+/// `SpeedOverLife`'s values (its envelope isn't used) at the curve table's
+/// times, if it's set.
+fn speed_curve(instance: &Instance) -> Option<[f32; CURVE_ENTRIES]> {
+    let sequence = instance
+        .property("SpeedOverLife")
+        .and_then(Value::as_number_sequence)
+        .filter(|sequence| !sequence.is_empty())?;
+    Some(std::array::from_fn(|entry| {
+        let time = entry as f32 / (CURVE_ENTRIES - 1) as f32;
+        sequence.sample(time).map_or(1.0, |(value, _)| value)
+    }))
 }
 
 /// Every emitter's particles. See the module docs.
@@ -352,7 +391,12 @@ impl Particles {
             for particle in &mut state.particles {
                 let velocity = particle.velocity + settings.acceleration * seconds;
                 particle.velocity = air + (velocity - air) * slow;
-                particle.position += particle.velocity * seconds;
+                // SpeedOverLife scales how far they go, at the age they
+                // start the step at, as on the GPU.
+                let speed = settings.speed_curve.as_ref().map_or(1.0, |table| {
+                    curve_at(table, particle.age / particle.life.max(1e-6))
+                });
+                particle.position += particle.velocity * seconds * speed;
                 particle.age += seconds;
             }
             state.particles.retain(|p| p.age < p.life);
@@ -458,19 +502,16 @@ impl Particles {
         sprites
     }
 
-    /// Adds one particle to `state`, somewhere inside the part, heading out
-    /// along the emitter's direction within its spread.
+    /// Adds one particle to `state`, somewhere in the part's spawn shape,
+    /// heading out along the emitter's direction within its spread.
     fn birth(&mut self, state: &mut Emitter, settings: &Settings, transform: Mat4) {
         if state.particles.len() >= MAX_PER_EMITTER {
             return;
         }
-        let inside = Vec3::new(
-            self.random.next() - 0.5,
-            self.random.next() - 0.5,
-            self.random.next() - 0.5,
-        );
+        let random = [self.random.next(), self.random.next(), self.random.next()];
+        let (scale, rotation, _) = transform.to_scale_rotation_translation();
+        let inside = settings.shape.point(random, scale.abs());
         let position = transform.transform_point3(inside);
-        let (_, rotation, _) = transform.to_scale_rotation_translation();
         let forward = (rotation * settings.direction).normalize_or(Vec3::Y);
         let heading = self.within_cone(forward, settings.spread.to_radians() / 2.0);
         let life = settings.lifetime * (0.8 + 0.4 * self.random.next());
@@ -493,14 +534,16 @@ impl Particles {
     }
 }
 
-/// The emitter's size, transparency and color over life as one table, if
-/// any of `SizeOverLife`, `TransparencyOverLife` and `ColorOverLife` is
-/// set; the ones that aren't blend their start and end values.
+/// The emitter's size, transparency, color and speed over life as one
+/// table, if any of `SizeOverLife`, `TransparencyOverLife`, `ColorOverLife`
+/// and `SpeedOverLife` (`speed`) is set; the ones that aren't blend their
+/// start and end values, or keep the speed.
 fn curves_of(
     instance: &Instance,
     size: (f32, f32),
     colors: (Color3, Color3),
     transparency: (f32, f32),
+    speed: Option<[f32; CURVE_ENTRIES]>,
 ) -> Option<Arc<ParticleCurves>> {
     let numbers = |name| {
         instance
@@ -514,10 +557,10 @@ fn curves_of(
         .property("ColorOverLife")
         .and_then(Value::as_color_sequence)
         .filter(|sequence| !sequence.is_empty());
-    if sizes.is_none() && transparencies.is_none() && color_curve.is_none() {
+    if sizes.is_none() && transparencies.is_none() && color_curve.is_none() && speed.is_none() {
         return None;
     }
-    let curves = ParticleCurves::from_fn(|time| {
+    let mut curves = ParticleCurves::from_fn(|time| {
         let (size, size_envelope) = sizes
             .and_then(|sequence| sequence.sample(time))
             .unwrap_or((lerp(size, time), 0.0));
@@ -534,6 +577,9 @@ fn curves_of(
             ]);
         ([size, size_envelope, seen, seen_envelope], color)
     });
+    if let Some(speed) = speed {
+        curves.speed = speed;
+    }
     Some(Arc::new(curves))
 }
 
@@ -607,7 +653,7 @@ impl Look {
         let size = (number("Size", 1.0), number("SizeEnd", 1.0));
         let colors = (color("Color"), color("ColorEnd"));
         let transparency = (number("Transparency", 0.0), number("TransparencyEnd", 1.0));
-        let curves = curves_of(instance, size, colors, transparency);
+        let curves = curves_of(instance, size, colors, transparency, speed_curve(instance));
         Self {
             size,
             color: colors,
@@ -687,6 +733,7 @@ fn step_gpu(
     draw.acceleration = settings.acceleration;
     draw.drag = settings.drag;
     draw.air = air;
+    draw.shape = settings.shape;
 }
 
 fn rgb(color: Color3) -> [f32; 3] {
@@ -1027,6 +1074,46 @@ mod tests {
         assert!((rise - 1.0).abs() < 1e-3, "{rise}");
     }
 
+    /// R17.2: a sphere's surface stretched over the part, and a speed curve
+    /// at half: particles start on the part's ellipsoid and move half as far.
+    #[test]
+    fn particles_are_born_in_their_shape_and_move_at_their_speed_curve() {
+        use axcenity_core::{EnumItem, NumberSequence};
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let mut set = |name: &str, value: Value| {
+            world.set_property(emitter, name, value).unwrap();
+        };
+        set("SpreadAngle", Value::Number(0.0));
+        set("Speed", Value::Number(10.0));
+        let item = |enum_name: &str, item: &str| {
+            Value::EnumItem(EnumItem {
+                enum_name: enum_name.to_owned(),
+                item: item.to_owned(),
+            })
+        };
+        set("Shape", item("ParticleEmitterShape", "Sphere"));
+        set("ShapeStyle", item("ParticleEmitterShapeStyle", "Surface"));
+        set(
+            "SpeedOverLife",
+            Value::NumberSequence(NumberSequence::constant(0.5)),
+        );
+        let mut particles = Particles::new();
+        particles.emit(&world, emitter, 50);
+        let start = particles.sprites(&world, &Assets::default());
+        assert_eq!(start.len(), 50);
+        for sprite in &start {
+            // The default part is 4 × 1 × 2, centered 10 up.
+            let p = sprite.position - Vec3::new(0.0, 10.0, 0.0);
+            let on = (p / Vec3::new(2.0, 0.5, 1.0)).length();
+            assert!((on - 1.0).abs() < 1e-3, "{p} is {on} of the way out");
+        }
+        particles.update(&world, 0.1);
+        let later = particles.sprites(&world, &Assets::default());
+        let rise: f32 = later.iter().map(|s| s.position.y).sum::<f32>() / 50.0
+            - start.iter().map(|s| s.position.y).sum::<f32>() / 50.0;
+        assert!((rise - 0.5).abs() < 1e-3, "{rise}");
+    }
+
     #[test]
     fn particles_fade_and_grow_toward_their_end_values() {
         let (mut world, _, emitter) = world_with_emitter(0.0);
@@ -1329,6 +1416,16 @@ mod tests {
         world
             .set_property(emitter, "WindAffectsDrag", Value::Bool(true))
             .unwrap();
+        world
+            .set_property(
+                emitter,
+                "Shape",
+                Value::EnumItem(axcenity_core::EnumItem {
+                    enum_name: "ParticleEmitterShape".to_owned(),
+                    item: "Cylinder".to_owned(),
+                }),
+            )
+            .unwrap();
         let mut particles = Particles::new();
         particles.set_gpu(true);
         particles.update(&world, 0.1);
@@ -1352,5 +1449,10 @@ mod tests {
         assert_eq!((look.rotation_degrees, look.spin_degrees), (15.0, 90.0));
         assert_eq!((look.brightness, look.light_emission), (3.0, 1.0));
         assert!(look.texture.is_some(), "the built-in circle");
+        let cylinder = SpawnShape {
+            kind: SpawnKind::Cylinder,
+            surface: false,
+        };
+        assert_eq!(gpu.shape, cylinder);
     }
 }

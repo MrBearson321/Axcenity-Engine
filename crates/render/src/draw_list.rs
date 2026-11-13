@@ -279,7 +279,101 @@ pub struct ParticleEmitter {
     pub drag: f32,
     /// The air's speed: still, or the wind.
     pub air: Vec3,
+    /// Where in the spawn box they're born (roadmap R17.2).
+    pub shape: SpawnShape,
     pub look: ParticleLook,
+}
+
+/// The shape particles are born in, filling the spawn transform's 1×1×1
+/// cube (roadmap R17.2, `ParticleEmitter.Shape` and `ShapeStyle`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpawnShape {
+    pub kind: SpawnKind,
+    /// Only on the shape's surface, not anywhere inside it.
+    pub surface: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpawnKind {
+    /// The whole cube (the surface: its six faces, by their area).
+    #[default]
+    Box,
+    /// The ball inside the cube (its surface: the sphere).
+    Sphere,
+    /// The upright cylinder inside the cube, along its Y (its surface:
+    /// the round side).
+    Cylinder,
+    /// The flat disc across the cube's middle, facing its Y (its surface:
+    /// the rim).
+    Disc,
+}
+
+impl SpawnShape {
+    /// The number particles.wgsl's `born` reads for the kind.
+    pub fn code(self) -> u32 {
+        match self.kind {
+            SpawnKind::Box => 0,
+            SpawnKind::Sphere => 1,
+            SpawnKind::Cylinder => 2,
+            SpawnKind::Disc => 3,
+        }
+    }
+
+    /// Where a particle is born in the centered 1×1×1 cube, from three
+    /// random numbers from 0 up to 1, for a spawn transform that stretches
+    /// the cube by `scale`: the same sum as particles.wgsl's `born`.
+    pub fn point(self, random: [f32; 3], scale: Vec3) -> Vec3 {
+        let [a, b, c] = random;
+        let tau = std::f32::consts::TAU;
+        match self.kind {
+            SpawnKind::Box if self.surface => {
+                // A face, by its area, then a point on it.
+                let areas = [scale.y * scale.z, scale.x * scale.z, scale.x * scale.y];
+                let total: f32 = areas.iter().map(|area| area.abs()).sum();
+                if total.is_nan() || total <= 0.0 {
+                    return Vec3::new(a, b, c) - 0.5;
+                }
+                let mut pick = a * total;
+                let mut axis = 2;
+                for (index, area) in areas.iter().enumerate() {
+                    if pick < area.abs() {
+                        axis = index;
+                        break;
+                    }
+                    pick -= area.abs();
+                }
+                let side = if pick < areas[axis].abs() / 2.0 {
+                    -0.5
+                } else {
+                    0.5
+                };
+                let (u, v) = (b - 0.5, c - 0.5);
+                match axis {
+                    0 => Vec3::new(side, u, v),
+                    1 => Vec3::new(u, side, v),
+                    _ => Vec3::new(u, v, side),
+                }
+            }
+            SpawnKind::Box => Vec3::new(a, b, c) - 0.5,
+            SpawnKind::Sphere => {
+                let z = 1.0 - 2.0 * a;
+                let across = (1.0 - z * z).max(0.0).sqrt();
+                let around = b * tau;
+                let radius = if self.surface { 0.5 } else { 0.5 * c.cbrt() };
+                Vec3::new(across * around.cos(), z, across * around.sin()) * radius
+            }
+            SpawnKind::Cylinder | SpawnKind::Disc => {
+                let around = a * tau;
+                let radius = if self.surface { 0.5 } else { 0.5 * b.sqrt() };
+                let y = if self.kind == SpawnKind::Disc {
+                    0.0
+                } else {
+                    c - 0.5
+                };
+                Vec3::new(around.cos() * radius, y, around.sin() * radius)
+            }
+        }
+    }
 }
 
 /// How a [`ParticleEmitter`]'s particles look over their lives: each pair
@@ -323,6 +417,9 @@ pub struct ParticleCurves {
     pub shape: [[f32; 4]; CURVE_ENTRIES],
     /// sRGB color.
     pub color: [[f32; 3]; CURVE_ENTRIES],
+    /// What `Speed` is multiplied by as they move (roadmap R17.2's
+    /// `SpeedOverLife`); 1 when it isn't set.
+    pub speed: [f32; CURVE_ENTRIES],
 }
 
 impl ParticleCurves {
@@ -331,6 +428,7 @@ impl ParticleCurves {
         let mut curves = Self {
             shape: [[0.0; 4]; CURVE_ENTRIES],
             color: [[0.0; 3]; CURVE_ENTRIES],
+            speed: [1.0; CURVE_ENTRIES],
         };
         for entry in 0..CURVE_ENTRIES {
             let (shape, color) = at(entry as f32 / (CURVE_ENTRIES - 1) as f32);
@@ -364,6 +462,12 @@ impl ParticleCurves {
         )
     }
 
+    /// The speed multiplier at `time` (0 to 1), as particles.wgsl's
+    /// `simulate` works it out.
+    pub fn speed_at(&self, time: f32) -> f32 {
+        curve_at(&self.speed, time)
+    }
+
     /// A particle's two spreads, from −1 to 1, from a number that stays
     /// the same over its life (`pcg`, as particles.wgsl's).
     pub fn spreads(seed: u32) -> [f32; 2] {
@@ -371,6 +475,18 @@ impl ParticleCurves {
         let second = pcg(first);
         [first, second].map(|n| (n >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0)
     }
+}
+
+/// `table`'s value at `time` (0 to 1), blending the two nearest entries.
+pub fn curve_at(table: &[f32; CURVE_ENTRIES], time: f32) -> f32 {
+    let x = if time.is_nan() {
+        0.0
+    } else {
+        time.clamp(0.0, 1.0)
+    } * (CURVE_ENTRIES - 1) as f32;
+    let index = (x.floor() as usize).min(CURVE_ENTRIES - 1);
+    let next = (index + 1).min(CURVE_ENTRIES - 1);
+    table[index] + (table[next] - table[index]) * (x - index as f32)
 }
 
 /// The PCG hash particles.wgsl uses for its random numbers.

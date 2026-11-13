@@ -5,7 +5,8 @@
 //! off and not opened.
 
 use axcenity_render::{
-    EffectiveGraphics, RayTracedAmbientOcclusion, RayTracedShadows, RayTracingStats,
+    EffectiveGraphics, RayTracedAmbientOcclusion, RayTracedGlobalIllumination, RayTracedShadows,
+    RayTracingStats,
 };
 use eframe::egui;
 
@@ -22,6 +23,17 @@ pub(super) struct Badge {
     /// True when a restart would start ray tracing: the badge has a
     /// Restart now button.
     pub restart: bool,
+    /// Whether the badge has a Compare toggle, and if so whether the ray
+    /// traced effects are hidden by it right now.
+    pub compare: Option<bool>,
+}
+
+/// What was clicked on the badge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Click {
+    Restart,
+    /// Compare: show the view with the ray traced effects hidden, or back.
+    Compare,
 }
 
 /// The ray traced effects `effective` draws, shortly: "Shadows High".
@@ -36,17 +48,27 @@ pub(super) fn traced_effects(effective: &EffectiveGraphics) -> Vec<String> {
             effective.ray_traced_ambient_occlusion.label()
         ));
     }
+    if effective.ray_traced_global_illumination != RayTracedGlobalIllumination::Off {
+        effects.push(format!(
+            "GI {}",
+            effective.ray_traced_global_illumination.label()
+        ));
+    }
     effects
 }
 
 /// The badge for `effective` (its `ray_queries`: the GPU was opened with
 /// ray tracing), whether Hardware ray tracing is `wanted` at the next
-/// start, whether this GPU `can` ray trace, and this frame's `stats`. None
-/// while it's neither wanted nor on.
+/// start, whether this GPU `can` ray trace, what `AXCENITY_RAY_TRACING`
+/// `forced` (`adapters::ray_tracing_override`), whether Compare has the
+/// effects `hidden`, and this frame's `stats`. None while it's neither
+/// wanted nor on.
 pub(super) fn badge(
     effective: &EffectiveGraphics,
     wanted: bool,
     can: bool,
+    forced: Option<bool>,
+    hidden: bool,
     stats: &RayTracingStats,
 ) -> Option<Badge> {
     let settings = "Settings > Graphics > Ray tracing";
@@ -54,7 +76,20 @@ pub(super) fn badge(
         if !wanted {
             return None;
         }
-        return Some(if can {
+        return Some(if can && forced == Some(false) {
+            Badge {
+                text: "Ray tracing: kept off by AXCENITY_RAY_TRACING=0".to_owned(),
+                detail: "The setting is on, but the editor was started with the environment \
+                         variable AXCENITY_RAY_TRACING set to 0, which opens the GPU without \
+                         ray tracing whatever the setting. Restart now starts the editor \
+                         without it. In PowerShell, Remove-Item Env:AXCENITY_RAY_TRACING (or \
+                         a new window) stops it coming back."
+                    .to_owned(),
+                warning: true,
+                restart: true,
+                compare: None,
+            }
+        } else if can {
             Badge {
                 text: "Ray tracing: restart to turn on".to_owned(),
                 detail: "Hardware ray tracing is on in the settings, but the GPU was opened \
@@ -65,6 +100,7 @@ pub(super) fn badge(
                     .to_owned(),
                 warning: true,
                 restart: true,
+                compare: None,
             }
         } else {
             Badge {
@@ -75,7 +111,20 @@ pub(super) fn badge(
                     .to_owned(),
                 warning: true,
                 restart: false,
+                compare: None,
             }
+        });
+    }
+    if hidden {
+        return Some(Badge {
+            text: "Ray tracing: hidden to compare".to_owned(),
+            detail: "The view is drawn without its ray traced effects, as it looks with \
+                     them off: shadow maps and screen-space ambient occlusion only. Click \
+                     Compare again to bring the rays back. Nothing in the settings changed."
+                .to_owned(),
+            warning: false,
+            restart: false,
+            compare: Some(true),
         });
     }
     let reach = effective.ray_tracing_distance.round();
@@ -95,6 +144,7 @@ pub(super) fn badge(
             ),
             warning: false,
             restart: false,
+            compare: None,
         });
     }
     let seen = if stats.instances == 0 {
@@ -125,14 +175,15 @@ pub(super) fn badge(
         ),
         warning: false,
         restart: false,
+        compare: Some(false),
     })
 }
 
-/// Draws `badge` at the bottom right of `rect`. True when its Restart now
-/// was clicked.
-pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) -> bool {
+/// Draws `badge` at the bottom right of `rect`, and says what on it was
+/// clicked.
+pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) -> Option<Click> {
     let palette = crate::theme::palette(ui.ctx());
-    let mut restart = false;
+    let mut click = None;
     egui::Area::new(egui::Id::new("ray tracing badge"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::RIGHT_BOTTOM)
@@ -154,16 +205,32 @@ pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) -> bool {
                                 .sense(egui::Sense::hover()),
                         )
                         .on_hover_text(&badge.detail);
-                        if badge.restart {
-                            restart = ui
+                        if badge.restart
+                            && ui
                                 .small_button("Restart now")
                                 .on_hover_text(&badge.detail)
-                                .clicked();
+                                .clicked()
+                        {
+                            click = Some(Click::Restart);
+                        }
+                        if let Some(hidden) = badge.compare
+                            && ui
+                                .add(egui::Button::selectable(
+                                    hidden,
+                                    egui::RichText::new("Compare").small(),
+                                ))
+                                .on_hover_text(
+                                    "Shows the view without its ray traced effects while on, \
+                                     to see what they add. The settings don't change.",
+                                )
+                                .clicked()
+                        {
+                            click = Some(Click::Compare);
                         }
                     });
                 });
         });
-    restart
+    click
 }
 
 #[cfg(test)]
@@ -185,28 +252,46 @@ mod tests {
     #[test]
     fn nothing_shows_while_ray_tracing_is_neither_wanted_nor_on() {
         let off = effective(false, RayTracedShadows::Off);
-        assert_eq!(badge(&off, false, true, &RayTracingStats::default()), None);
+        assert_eq!(
+            badge(&off, false, true, None, false, &RayTracingStats::default()),
+            None
+        );
     }
 
     #[test]
     fn wanted_but_not_opened_says_why_in_the_warning_color() {
         let off = effective(false, RayTracedShadows::High);
-        let restart = badge(&off, true, true, &RayTracingStats::default()).unwrap();
+        let restart = badge(&off, true, true, None, false, &RayTracingStats::default()).unwrap();
         assert!(
             restart.warning && restart.restart && restart.text.contains("restart"),
             "{restart:?}"
         );
-        let cannot = badge(&off, true, false, &RayTracingStats::default()).unwrap();
+        let cannot = badge(&off, true, false, None, false, &RayTracingStats::default()).unwrap();
         assert!(
             cannot.warning && !cannot.restart && cannot.text.contains("not on this GPU"),
             "{cannot:?}"
+        );
+        // An environment variable keeping it off is named, with Restart now,
+        // which starts the editor without it.
+        let forced = badge(
+            &off,
+            true,
+            true,
+            Some(false),
+            false,
+            &RayTracingStats::default(),
+        )
+        .unwrap();
+        assert!(
+            forced.warning && forced.restart && forced.text.contains("AXCENITY_RAY_TRACING=0"),
+            "{forced:?}"
         );
     }
 
     #[test]
     fn on_without_effects_says_nothing_looks_different_yet() {
         let on = effective(true, RayTracedShadows::Off);
-        let shown = badge(&on, true, true, &RayTracingStats::default()).unwrap();
+        let shown = badge(&on, true, true, None, false, &RayTracingStats::default()).unwrap();
         assert_eq!(shown.text, "Ray tracing on: no effects");
         assert!(!shown.warning);
     }
@@ -220,19 +305,31 @@ mod tests {
             triangles: 120_000,
             ..RayTracingStats::default()
         };
-        let shown = badge(&on, true, true, &stats).unwrap();
+        let shown = badge(&on, true, true, None, false, &stats).unwrap();
         assert_eq!(shown.text, "Ray tracing: Shadows Medium · 812 items traced");
+        assert_eq!(
+            shown.compare,
+            Some(false),
+            "drawing rays: Compare is offered"
+        );
+        let hidden = badge(&on, true, true, None, true, &stats).unwrap();
+        assert_eq!(hidden.compare, Some(true));
+        assert!(hidden.text.contains("hidden to compare"), "{hidden:?}");
         let both = GraphicsSettings {
             ray_traced_shadows: Some(RayTracedShadows::High),
             ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Low),
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Medium),
             ..GraphicsSettings::default()
         }
         .effective(&Capabilities {
             ray_queries: true,
             ..Capabilities::default()
         });
-        assert_eq!(traced_effects(&both), ["Shadows High", "AO Low"]);
-        let empty = badge(&on, true, true, &RayTracingStats::default()).unwrap();
+        assert_eq!(
+            traced_effects(&both),
+            ["Shadows High", "AO Low", "GI Medium"]
+        );
+        let empty = badge(&on, true, true, None, false, &RayTracingStats::default()).unwrap();
         assert!(
             empty.text.ends_with("nothing in reach yet"),
             "{}",

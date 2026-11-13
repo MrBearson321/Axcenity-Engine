@@ -90,6 +90,10 @@ pub(super) const FAR_PLANE: f32 = 5000.0;
 /// A caller's mesh or texture not drawn for this many frames is taken off
 /// the GPU (about 10 seconds at 60 fps). Drawn again, it's uploaded again.
 pub(super) const KEEP_UNDRAWN_FRAMES: u64 = 600;
+/// ... and for at least this many seconds, however many frames that is: at
+/// 144 fps, 600 frames is only four seconds, and what was turned away from
+/// that long ago would be uploaded again, stalling a frame, on turning back.
+pub(super) const KEEP_UNDRAWN_SECONDS: f32 = 10.0;
 
 /// Per-frame values for the shader. Must match `Frame` in shader.wgsl.
 /// Every field is 16 bytes or a multiple, which is what uniform buffers need.
@@ -1075,6 +1079,8 @@ pub(super) struct ScenePipeline {
     /// Ray traced ambient occlusion's pass, while drawn
     /// (renderer/ray_ao.rs).
     pub(super) ray_ao: Option<Box<super::ray_ao::RayAmbientOcclusion>>,
+    /// Ray traced GI's pass, while it's drawn (renderer/ray_gi.rs).
+    pub(super) ray_gi: Option<Box<super::ray_gi::RayGlobalIllumination>>,
     /// The editor's debug view, while one is shown (renderer/debug_views.rs).
     #[cfg(feature = "debug-views")]
     pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,
@@ -1083,6 +1089,10 @@ pub(super) struct ScenePipeline {
     pub(super) mesh_bytes: GpuBytes,
     /// While streaming: the thread that uploads what comes into range.
     pub(super) uploader: Option<super::uploads::Uploader>,
+    /// When the last few seconds' frames started, oldest first, so what
+    /// was drawn lately is kept for [`KEEP_UNDRAWN_SECONDS`] however fast
+    /// frames come.
+    pub(super) frame_clock: std::collections::VecDeque<(u64, std::time::Instant)>,
 }
 
 /// What a frame drew, for [`RenderStats`].

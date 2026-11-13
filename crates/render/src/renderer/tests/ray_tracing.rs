@@ -237,6 +237,90 @@ mod sun_shadows {
     }
 
     #[test]
+    fn a_soft_shadow_on_a_slope_seen_side_on_is_smooth_not_dithered() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        // The wall turned almost edge-on to the camera: neighbouring pixels
+        // lie far apart in depth, though on one surface. (Smoothing used to
+        // leave such pixels out, so sloped faces showed the rays'
+        // per-pixel pattern as a dither.)
+        let mut list = shadowed_wall();
+        let turn = glam::Quat::from_rotation_y(80f32.to_radians());
+        list.items[0].transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(40.0, 30.0, 1.0),
+            turn,
+            Vec3::new(0.0, 0.0, -12.0),
+        );
+        list.sun.direction = turn * Vec3::new(0.3, 0.0, 1.0);
+        list.shadows.softness = 1.0;
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        let row = middle_row(&mut renderer, &list);
+        let (low, high) = (*row.iter().min().unwrap(), *row.iter().max().unwrap());
+        assert!(high - low > 30, "a shadow falls across the row: {row:?}");
+        // A smooth soft edge goes one way across it; a dithered one turns
+        // back and forth from pixel to pixel.
+        let steps: Vec<i32> = row
+            .windows(2)
+            .map(|pair| i32::from(pair[1]) - i32::from(pair[0]))
+            .filter(|step| step.abs() > 3)
+            .collect();
+        let turns = steps
+            .windows(2)
+            .filter(|pair| pair[0].signum() != pair[1].signum())
+            .count();
+        assert!(turns <= 6, "dithered: {turns} turns\n{row:?}");
+        // And the edge is smoothed into a soft one, as on a surface facing
+        // the camera (left unsmoothed it's hard, or noisy with more rays).
+        let between = row
+            .iter()
+            .filter(|&&value| value > low + 8 && value + 8 < high)
+            .count();
+        assert!(between >= 4, "an unsmoothed edge: {row:?}");
+    }
+
+    #[test]
+    fn a_cut_out_right_on_a_surface_does_not_blot_it_but_one_farther_off_shades_it() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        // Cut-outs are traced as solid cards: one farther off still shades.
+        let mut list = shadowed_wall();
+        list.items[1].material.alpha_cutoff = 0.5;
+        let far = middle_of(&mut renderer, &list);
+        list.items[1].casts_shadow = false;
+        let open = middle_of(&mut renderer, &list);
+        assert!(open[0] > far[0] + 40, "{far:?} vs {open:?}");
+
+        // A thin card standing out of the wall beside the middle (a grass
+        // blade, a leaf on the ground), seen edge-on, with the sun low
+        // across the wall: its shadow would be a card-shaped blotch.
+        let mut list = shadowed_wall();
+        list.sun.direction = Vec3::new(1.0, 0.0, 0.2);
+        list.items[1].transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(0.01, 4.0, 0.3),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.25, 0.0, -9.35),
+        );
+        list.items[1].material.alpha_cutoff = 0.5;
+        let beside = middle_of(&mut renderer, &list);
+        list.items[1].casts_shadow = false;
+        let without = middle_of(&mut renderer, &list);
+        assert!(
+            beside[0].abs_diff(without[0]) <= 4,
+            "a card on the surface blots it: {beside:?} vs {without:?}"
+        );
+        // A solid block there still shades it: only cut-outs are let off.
+        list.items[1].casts_shadow = true;
+        list.items[1].material.alpha_cutoff = 0.0;
+        let solid = middle_of(&mut renderer, &list);
+        assert!(without[0] > solid[0] + 40, "{solid:?} vs {without:?}");
+    }
+
+    #[test]
     fn past_their_reach_the_shadow_maps_take_over() {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();
@@ -505,5 +589,116 @@ mod ambient_occlusion {
             crate::RayTracingStats::default()
         );
         assert_eq!(renderer.read_pixels(), before);
+    }
+}
+
+mod global_illumination {
+    use super::super::realtime_gi::{
+        PROBES, SUN_BEHIND_WALL, SUN_ON_WALL, bake, difference, probes_held, with_volume, yard,
+    };
+    use super::*;
+    use crate::RayTracedGlobalIllumination;
+
+    fn traced(gi: RayTracedGlobalIllumination) -> crate::GraphicsSettings {
+        crate::GraphicsSettings {
+            shadow_quality: Some(crate::ShadowQuality::Medium),
+            ray_traced_global_illumination: Some(gi),
+            ..crate::GraphicsSettings::default()
+        }
+    }
+
+    #[test]
+    fn a_moving_sun_relights_the_probes_with_rays_toward_a_fresh_bake() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let lit = yard(SUN_ON_WALL);
+        let moved = yard(SUN_BEHIND_WALL);
+        let (before, after) = (bake(&device, &queue, &lit), bake(&device, &queue, &moved));
+        let change = difference(&before, &after);
+        // The world still holds the bake from before the sun moved.
+        let world = with_volume(&moved, before.clone());
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
+        // Medium traces all 8 probes each frame; a second's worth settles.
+        for _ in 0..60 {
+            renderer.render(&world).unwrap();
+        }
+        assert_eq!(
+            renderer.scene.probes_ray_traced(),
+            Some(60 * u64::from(PROBES))
+        );
+        assert_eq!(renderer.scene.probes_traced(), None, "no faces drawn");
+        let held = probes_held(&renderer);
+        let to_after = difference(&held, &after);
+        let to_before = difference(&held, &before);
+        assert!(
+            to_after < 0.2 * change && to_after < to_before,
+            "near the fresh bake ({to_after}), not the old one ({to_before}); the sun \
+             moved {change}"
+        );
+
+        // Turning it off frees it and brings the bake back.
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Off));
+        renderer.render(&world).unwrap();
+        assert_eq!(renderer.scene.probes_ray_traced(), None);
+        assert_eq!(probes_held(&renderer), before);
+        assert!(renderer.stats().pass_time(FramePass::RayTracedGi).is_none());
+    }
+
+    #[test]
+    fn the_red_wall_bounces_red_light_toward_the_probes_beside_it() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let lit = yard(SUN_ON_WALL);
+        // Starting from nothing, not a bake.
+        let world = with_volume(&lit, vec![[[0.0; 3]; 4]; PROBES as usize]);
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+        for _ in 0..40 {
+            renderer.render(&world).unwrap();
+        }
+        let held = probes_held(&renderer);
+        for probe in &held {
+            let [c0, _, _, c3] = *probe;
+            assert!(
+                c0.iter().all(|&c| c > 0.05),
+                "lit from all around: {probe:?}"
+            );
+            // Band 1's X coefficient: more light from +X (the sunlit red
+            // wall) than -X, and redder than it is green.
+            assert!(c3[0] > 0.0 && c3[0] > c3[1], "red from the wall: {probe:?}");
+        }
+    }
+
+    #[test]
+    fn without_light_probe_volumes_or_ray_queries_nothing_is_traced() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+        renderer.render(&yard(SUN_ON_WALL)).unwrap();
+        assert_eq!(renderer.scene.probes_ray_traced(), None);
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default(),
+            "no volumes: no ray traced scene either"
+        );
+        if let Some((device, queue)) = test_device() {
+            let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+            renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+            let world = with_volume(&yard(SUN_ON_WALL), vec![[[0.0; 3]; 4]; PROBES as usize]);
+            renderer.render(&world).unwrap();
+            assert_eq!(renderer.scene.probes_ray_traced(), None);
+            assert!(
+                renderer
+                    .graphics()
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("GI is off"))
+            );
+        }
     }
 }

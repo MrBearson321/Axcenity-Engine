@@ -25,9 +25,10 @@ While Hardware ray tracing is on, a small badge sits at the bottom right of the 
 | **Ray tracing: Shadows Medium, AO Medium · 812 items traced** | It's working: these effects are drawn, and that many objects are in the ray traced scene. |
 | **Ray tracing on: no effects** | The card is ready, but no ray traced effect is on. Click **Use the ray traced look**. |
 | **Ray tracing: restart to turn on** | Click **Restart now** beside it. |
+| **Ray tracing: kept off by AXCENITY_RAY_TRACING=0** | The editor was started from a window where that variable was set, which keeps ray tracing off. Click **Restart now**, or open a new terminal window to start the editor from. |
 | **Ray tracing: not on this GPU** | This card or its driver can't ray trace. Everything is drawn the usual way. |
 
-Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.
+Click **Compare** on the badge to see the view without the ray traced effects, and again to bring them back: the best way to see what they add. Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.
 
 ## Get good shadows
 
@@ -39,7 +40,7 @@ Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what 
 
 - **Ray traced ambient occlusion** darkens corners, gaps and the ground under objects. Lighting's **AmbientOcclusion** still sets how strong that is.
 - **The sky.** A sky picture (**Lighting > SkyImage**, such as the default sky) looks real but keeps its own colours. Changing ClockTime moves the sun and darkens the picture toward night, but sunsets stay the picture's. For a sky that turns orange at sunset and dark at night, click **Follow time of day** under the SkyImage row. It adds an **Atmosphere**.
-- **Light Probes** and **Reflection Probes** still give bounced light and reflections. Bake them after big changes with **Bake Probes** on the World tab.
+- **Bounced light.** Light Probes give bounced light. Bake them with **Bake Probes** on the World tab. With **Ray traced GI** (Settings > Graphics > Ray tracing) on, rays keep relighting them as things move and the sun goes down, so a red wall throws red light and a room darkens when its door closes. Start at Low: it costs more the more probes your world has. Reflection Probes still give reflections; bake them after big changes.
 
 ## What it costs
 
@@ -47,4 +48,15 @@ Each effect is timed in the **Profiler** panel's Graphics tab. **Low** effects a
 
 ## In your game
 
-Players choose the same in the game's own graphics settings. A LocalScript can set them through `UserGameSettings`: `RayTracedShadows` and `RayTracedAmbientOcclusion`. Every effect is off unless a player turns it on, because not every card can ray trace.
+Players choose the same in the game's own graphics settings. A LocalScript can set them through `UserGameSettings`: `RayTracedShadows`, `RayTracedAmbientOcclusion` and `RayTracedGlobalIllumination`. Every effect is off unless a player turns it on, because not every card can ray trace.
+
+## What to look for
+
+Ray traced shadows and ambient occlusion are about accuracy, so in a sunny open scene they look close to good shadow maps. The difference shows up close:
+
+- **Where things touch.** The ground right under a car, a porch step or a crate gets a tight, dark contact shadow instead of a gap or a blur.
+- **Soft edges that follow distance.** A post's shadow is sharp at its foot and softens toward its tip.
+- **Corners and gaps.** Under eaves, between boards and beneath furniture, ambient occlusion comes from what's really there, even just off screen.
+- **Thin things.** Fence rails, wires and poles keep their shadows, which shadow maps can lose far from the camera.
+
+Bounced light that changes with the world (Ray traced GI) makes the biggest visible difference, especially indoors and in shade.

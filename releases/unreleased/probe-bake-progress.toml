@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "editor"
+title = "Bake Probes no longer freezes the editor: it bakes in the background with progress and Cancel"
+details = "Baking light probe volumes and reflection probes used to run all at once, so a project with many probes locked the editor until it finished, with no sign of what was happening. The bake now runs a little each frame: a Baking Probes window shows what's being baked, how many probes are done and about how long is left, and Cancel keeps the volumes already finished. Bakes of 1,000 or more light probes say in Output that they can take minutes, and the scene is uploaded once for all volumes instead of once per volume."
+features = ["renderer.global-illumination"]
+fixes = []
+introduces_issues = []
+prs = [297]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

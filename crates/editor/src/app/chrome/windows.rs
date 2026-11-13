@@ -366,7 +366,7 @@ pub(super) fn overlay_menu_item(
     label: &'static str,
     hint: &'static str,
 ) {
-    let item = egui::Button::selectable(*on, theme::with_icon(icon, label));
+    let item = egui::Button::selectable(*on, theme::menu_item(ui.ctx(), icon, label));
     if ui.add(item).on_hover_text(hint).clicked() {
         *on = !*on;
     }

@@ -605,6 +605,8 @@ declare extern type UserGameSettings with
 	RayTracedShadows: EnumRayTracedShadows
 	--- Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
+	--- Hardware ray traced global illumination: Off, Low (32 light probes a frame, 64 rays each), Medium (64, 128 rays) or High (128, 256 rays). Off at every preset. On, the world's LightProbeVolumes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts; it does nothing without a LightProbeVolume. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).
+	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1290,6 +1292,28 @@ declare extern type EnumRayTracedShadowsItems with
 	High: EnumRayTracedShadows
 end
 
+--- One choice of `Enum.ParticleEmitterShape`.
+declare extern type EnumParticleEmitterShape extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleEmitterShape`.
+declare extern type EnumParticleEmitterShapeItems with
+	Box: EnumParticleEmitterShape
+	Sphere: EnumParticleEmitterShape
+	Cylinder: EnumParticleEmitterShape
+	Disc: EnumParticleEmitterShape
+end
+
+--- One choice of `Enum.ParticleEmitterShapeStyle`.
+declare extern type EnumParticleEmitterShapeStyle extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleEmitterShapeStyle`.
+declare extern type EnumParticleEmitterShapeStyleItems with
+	Volume: EnumParticleEmitterShapeStyle
+	Surface: EnumParticleEmitterShapeStyle
+end
+
 --- One choice of `Enum.RayTracedAmbientOcclusion`.
 declare extern type EnumRayTracedAmbientOcclusion extends EnumItem with
 end
@@ -1300,6 +1324,18 @@ declare extern type EnumRayTracedAmbientOcclusionItems with
 	Low: EnumRayTracedAmbientOcclusion
 	Medium: EnumRayTracedAmbientOcclusion
 	High: EnumRayTracedAmbientOcclusion
+end
+
+--- One choice of `Enum.RayTracedGlobalIllumination`.
+declare extern type EnumRayTracedGlobalIllumination extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedGlobalIllumination`.
+declare extern type EnumRayTracedGlobalIlluminationItems with
+	Off: EnumRayTracedGlobalIllumination
+	Low: EnumRayTracedGlobalIllumination
+	Medium: EnumRayTracedGlobalIllumination
+	High: EnumRayTracedGlobalIllumination
 end
 
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
@@ -1347,7 +1383,10 @@ declare extern type EnumLibrary with
 	ModelStreamingMode: EnumModelStreamingModeItems
 	StreamingState: EnumStreamingStateItems
 	RayTracedShadows: EnumRayTracedShadowsItems
+	ParticleEmitterShape: EnumParticleEmitterShapeItems
+	ParticleEmitterShapeStyle: EnumParticleEmitterShapeStyleItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
+	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -4090,6 +4129,12 @@ declare extern type ParticleEmitter extends Instance with
 	ColorOverLife: ColorSequence?
 	--- A NumberSequence from 0 (solid) to 1 (invisible) over each particle's life, in place of Transparency and TransparencyEnd. nil (the default) uses them.
 	TransparencyOverLife: NumberSequence?
+	--- A NumberSequence that multiplies Speed over each particle's life, from birth (0) to death (1): how far it moves each moment, with Acceleration and Drag still acting on its velocity. Envelopes aren't used. nil (the default) keeps Speed.
+	SpeedOverLife: NumberSequence?
+	--- Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). They still head along Direction within SpreadAngle.
+	Shape: EnumParticleEmitterShape | "Box" | "Sphere" | "Cylinder" | "Disc"
+	--- `Enum.ParticleEmitterShapeStyle.Volume` (the default) gives off particles anywhere inside the Shape; `Surface` only on it: a box's faces, the sphere, a cylinder's round side or a disc's rim.
+	ShapeStyle: EnumParticleEmitterShapeStyle | "Volume" | "Surface"
 	--- How far each particle is turned when it's born, in degrees.
 	Rotation: number
 	--- How fast particles spin, in degrees a second.

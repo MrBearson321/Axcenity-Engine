@@ -510,11 +510,18 @@ fn ray_tracing_section(
     ) {
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                egui::RichText::new(if settings.ray_tracing() {
-                    "Restart the editor to start ray tracing."
-                } else {
-                    "Restart the editor to stop ray tracing."
-                })
+                egui::RichText::new(
+                    if settings.ray_tracing()
+                        && axcenity_render::adapters::ray_tracing_override() == Some(false)
+                    {
+                        "AXCENITY_RAY_TRACING=0, set where the editor was started, keeps ray \
+                     tracing off. Restart now starts it without that."
+                    } else if settings.ray_tracing() {
+                        "Restart the editor to start ray tracing."
+                    } else {
+                        "Restart the editor to stop ray tracing."
+                    },
+                )
                 .color(palette.warning),
             );
             restart = ui
@@ -639,6 +646,40 @@ fn ray_tracing_section(
                     );
             });
             ui.end_row();
+
+            found_label(ui, "Ray traced GI");
+            let label = |gi: Option<RayTracedGlobalIllumination>| match gi {
+                Some(gi) => gi.label().to_owned(),
+                None => format!(
+                    "Preset ({})",
+                    preset.ray_traced_global_illumination().label()
+                ),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced global illumination")
+                    .selected_text(label(settings.ray_traced_global_illumination))
+                    .show_ui(ui, |ui| {
+                        for choice in
+                            std::iter::once(None).chain(RayTracedGlobalIllumination::ALL.map(Some))
+                        {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_global_illumination,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Bounced light that follows the world as it changes: the light probe \
+                         volumes' probes are lit by rays each frame instead of a bake, so a \
+                         moved wall or a lamp turned on colors the light around it. Low, \
+                         Medium and High update 32, 64 or 128 probes a frame with 64, 128 or \
+                         256 rays each. Needs light probe volumes (World tab) and Hardware \
+                         ray tracing on; it replaces Real-time GI while on.",
+                    );
+            });
+            ui.end_row();
         });
     restart
 }
@@ -691,6 +732,14 @@ pub(super) fn ray_tracing_in_use(effective: &EffectiveGraphics) -> String {
             "ambient occlusion {} ({} rays a pixel)",
             effective.ray_traced_ambient_occlusion.label(),
             effective.ray_traced_ambient_occlusion.rays()
+        ));
+    }
+    if effective.ray_traced_global_illumination != RayTracedGlobalIllumination::Off {
+        effects.push(format!(
+            "GI {} ({} probes a frame, {} rays each)",
+            effective.ray_traced_global_illumination.label(),
+            effective.ray_traced_global_illumination.probes_per_frame(),
+            effective.ray_traced_global_illumination.rays()
         ));
     }
     let reach = effective.ray_tracing_distance.round();
