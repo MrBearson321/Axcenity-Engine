@@ -29,8 +29,12 @@ struct Emitter {
     // The spin (radians a second), brightness, light emission, and 1
     // while the curves below are used instead of the start and end values.
     look: vec4<f32>,
+    // The spawn shape (0 box, 1 sphere, 2 cylinder, 3 disc), 1 for only
+    // its surface, and two unused (`SpawnShape`).
+    spawn_shape: vec4<u32>,
     // Size, its envelope, transparency and its envelope over life, and
-    // sRGB colors, at 32 even times from birth to death (`ParticleCurves`).
+    // sRGB colors with the speed multiplier in w, at 32 even times from
+    // birth to death (`ParticleCurves`).
     shape: array<vec4<f32>, 32>,
     colors: array<vec4<f32>, 32>,
 };
@@ -79,11 +83,83 @@ fn random(seed: ptr<function, u32>) -> f32 {
     return f32(*seed >> 8u) / 16777216.0;
 }
 
+// Where a particle is born in the centered 1×1×1 cube, from three random
+// numbers, for the emitter's spawn shape: `SpawnShape::point` on the CPU.
+fn spawn_point(a: f32, b: f32, c: f32) -> vec3<f32> {
+    let kind = emitter.spawn_shape.x;
+    let surface = emitter.spawn_shape.y == 1u;
+    if kind == 1u {
+        let z = 1.0 - 2.0 * a;
+        let across = sqrt(max(1.0 - z * z, 0.0));
+        let around = b * TAU;
+        let radius = select(0.5 * pow(c, 1.0 / 3.0), 0.5, surface);
+        return vec3<f32>(across * cos(around), z, across * sin(around)) * radius;
+    }
+    if kind == 2u || kind == 3u {
+        let around = a * TAU;
+        let radius = select(0.5 * sqrt(b), 0.5, surface);
+        let y = select(c - 0.5, 0.0, kind == 3u);
+        return vec3<f32>(cos(around) * radius, y, sin(around) * radius);
+    }
+    if surface {
+        // A face, by its area, then a point on it.
+        let scale = vec3<f32>(
+            length(emitter.spawn[0].xyz),
+            length(emitter.spawn[1].xyz),
+            length(emitter.spawn[2].xyz),
+        );
+        let areas = vec3<f32>(scale.y * scale.z, scale.x * scale.z, scale.x * scale.y);
+        let total = areas.x + areas.y + areas.z;
+        if total > 0.0 {
+            var pick = a * total;
+            var axis = 2u;
+            var area = areas.z;
+            if pick < areas.x {
+                axis = 0u;
+                area = areas.x;
+            } else {
+                pick = pick - areas.x;
+                if pick < areas.y {
+                    axis = 1u;
+                    area = areas.y;
+                } else {
+                    pick = pick - areas.y;
+                }
+            }
+            let side = select(0.5, -0.5, pick < area / 2.0);
+            let u = b - 0.5;
+            let v = c - 0.5;
+            if axis == 0u {
+                return vec3<f32>(side, u, v);
+            }
+            if axis == 1u {
+                return vec3<f32>(u, side, v);
+            }
+            return vec3<f32>(u, v, side);
+        }
+    }
+    return vec3<f32>(a, b, c) - vec3<f32>(0.5);
+}
+
+// The speed multiplier at `t` (0 to 1) from the curve table, 1 without it.
+fn speed_at(t: f32) -> f32 {
+    if emitter.look.w < 0.5 {
+        return 1.0;
+    }
+    let x = clamp(t, 0.0, 1.0) * 31.0;
+    let index = min(u32(floor(x)), 31u);
+    let next = min(index + 1u, 31u);
+    return mix(emitter.colors[index].w, emitter.colors[next].w, x - f32(index));
+}
+
 // A particle born now, number `index` of the emitter's births: somewhere
-// inside the part, heading out within the spread.
+// in its spawn shape, heading out within the spread.
 fn born(index: u32) -> Particle {
     var seed = pcg(index + pcg(emitter.counts.w));
-    let inside = vec3<f32>(random(&seed), random(&seed), random(&seed)) - vec3<f32>(0.5);
+    let first = random(&seed);
+    let second = random(&seed);
+    let third = random(&seed);
+    let inside = spawn_point(first, second, third);
     let position = (emitter.spawn * vec4<f32>(inside, 1.0)).xyz;
     let forward = emitter.direction.xyz;
     let z = 1.0 - random(&seed) * (1.0 - emitter.direction.w);
@@ -123,8 +199,10 @@ fn simulate(@builtin(global_invocation_id) id: vec3<u32>) {
         let velocity = particle.velocity_life.xyz + emitter.acceleration.xyz * seconds;
         let moved = air + (velocity - air) * slow;
         particle.velocity_life = vec4<f32>(moved, particle.velocity_life.w);
+        // SpeedOverLife scales how far they go, at the age they start at.
+        let speed = speed_at(particle.position_age.w / max(particle.velocity_life.w, 1e-6));
         particle.position_age = vec4<f32>(
-            particle.position_age.xyz + moved * seconds,
+            particle.position_age.xyz + moved * seconds * speed,
             particle.position_age.w + seconds,
         );
     }

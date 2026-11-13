@@ -90,6 +90,12 @@ impl EditorApp {
                 self.viewport.terrain = terrain;
                 self.cover_until = Some(ctx.cumulative_frame_nr() + FINISHING_FRAMES);
                 self.cover_shown = loading.shown();
+                self.cover_started = Some(std::time::Instant::now());
+                self.cover_uploads = 0;
+                // Behind the cover, the scene's meshes and textures go to
+                // the GPU on a thread, a few each frame, so the window
+                // keeps answering however many there are.
+                self.viewport.opening = true;
                 self.follow_pending_handoff(true);
                 self.start_pending_team();
             }
@@ -132,19 +138,38 @@ impl EditorApp {
             self.loading = None;
             ctx.request_repaint();
         }
+        // The cover drawn once the project opens is an `Area`, which egui
+        // keeps invisible the first frame it's shown, to measure it. Shown
+        // here, empty and letting clicks through, it's measured already
+        // and covers the scene from its first frame.
+        let mut rect = ctx.content_rect();
+        rect.min.y += window_frame::HEIGHT;
+        finishing_area(rect)
+            .interactable(false)
+            .show(ctx, |ui| ui.allocate_rect(rect, egui::Sense::hover()));
         self.unsaved_changes_prompt(ctx);
         self.settings_window(ctx);
         self.toasts.show(ctx);
         theme::paint_crossfade(ctx);
     }
-    /// For a frame or two after a project opens, the loading screen stays
-    /// over the window while its scene is sent to the graphics card.
+    /// After a project opens, the loading screen stays over the window for
+    /// a frame or two while its scene first draws, then as long as its
+    /// meshes and textures are on their way to the GPU (up to
+    /// [`FINISHING_LIMIT`]), counting them down.
     pub(super) fn cover_while_finishing(&mut self, ctx: &egui::Context) {
         let Some(until) = self.cover_until else {
             return;
         };
-        if ctx.cumulative_frame_nr() >= until {
+        let pending = self.viewport.pending_uploads();
+        self.cover_uploads = self.cover_uploads.max(pending);
+        let waited = self
+            .cover_started
+            .map_or(0.0, |started| started.elapsed().as_secs_f32());
+        if ctx.cumulative_frame_nr() >= until && (pending == 0 || waited >= FINISHING_LIMIT) {
             self.cover_until = None;
+            self.cover_started = None;
+            self.viewport.opening = false;
+            ctx.request_repaint();
             return;
         }
         let mut rect = ctx.content_rect();
@@ -153,15 +178,14 @@ impl EditorApp {
             .project
             .as_ref()
             .map_or("", |project| project.name.as_str());
-        let shown = self.cover_shown;
+        // A quick load showed no screen; one that waits on the GPU this
+        // long shows it now.
+        let shown = self.cover_shown || waited >= loading::GRACE;
+        let uploads = (pending > 0).then(|| (self.cover_uploads - pending, self.cover_uploads));
         let mark = self.brand.as_ref().map(|brand| brand.mark());
-        egui::Area::new(egui::Id::new("finishing load"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(rect.min)
-            .constrain(false)
-            .show(ctx, |ui| {
-                loading::show_finishing(ui, rect, name, shown, mark)
-            });
+        finishing_area(rect).interactable(true).show(ctx, |ui| {
+            loading::show_finishing(ui, rect, name, shown, uploads, mark)
+        });
         ctx.request_repaint();
     }
     pub(super) fn open_failed(&mut self, folder: &Path, err: &str) {
@@ -1483,4 +1507,13 @@ pub(super) fn play_save_folder(game: &str) -> Option<std::path::PathBuf> {
             .join(format!("axcenity-editor-saves-{}", std::process::id()))
             .join(game),
     )
+}
+
+/// Where the cover after a load is drawn, over everything but the title bar.
+fn finishing_area(rect: egui::Rect) -> egui::Area {
+    egui::Area::new(egui::Id::new("finishing load"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .constrain(false)
+        .fade_in(false)
 }

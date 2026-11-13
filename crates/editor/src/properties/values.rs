@@ -415,6 +415,9 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         "ToneMapping" => ToneMapping::ALL.iter().map(|t| t.as_str()).collect(),
         // What drives a joint (Phase 36).
         "ActuatorType" => vec!["None", "Motor", "Servo"],
+        // Where a ParticleEmitter's particles are born (roadmap R17.2).
+        "ParticleEmitterShape" => vec!["Box", "Sphere", "Cylinder", "Disc"],
+        "ParticleEmitterShapeStyle" => vec!["Volume", "Surface"],
         // A mover's axes and an align's target (Phase 37).
         "ActuatorRelativeTo" => vec!["Attachment0", "Attachment1", "World"],
         "PositionAlignmentMode" | "OrientationAlignmentMode" => {
