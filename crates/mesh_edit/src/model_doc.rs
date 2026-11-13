@@ -68,9 +68,21 @@ pub struct DocObject {
     pub paint: Vec<PaintSet>,
     /// Its weights to the model's armature (Phase 62), if it's skinned.
     pub skin: Option<Skin>,
+    /// Its sculpt mask (R15.1b): per vertex of `mesh`, from 0 (free) to 1
+    /// (masked). Empty when nothing was masked. A `.glb` can't hold it, so
+    /// it's kept in the sidecar; see [`DocObject::mask`].
+    pub mask: Vec<f32>,
 }
 
 impl DocObject {
+    /// Its mask, if something is masked and the mask still fits its mesh
+    /// (an operation that changed the vertices leaves it behind).
+    pub fn mask(&self) -> Option<&[f32]> {
+        let count = self.mesh.as_ref()?.vertex_count();
+        (self.mask.len() == count && self.mask.iter().any(|&value| value > 0.0))
+            .then_some(self.mask.as_slice())
+    }
+
     /// Its mesh with its shown modifiers on it, for `purpose`; `None` for
     /// a group.
     pub fn evaluated(&self, purpose: Purpose) -> Option<Cow<'_, EditMesh>> {
@@ -110,6 +122,7 @@ impl ModelDoc {
                 modifiers: Vec::new(),
                 paint: Vec::new(),
                 skin: None,
+                mask: Vec::new(),
             }],
             armature: None,
         }
@@ -165,6 +178,7 @@ impl ModelDoc {
                 modifiers: Vec::new(),
                 paint: Vec::new(),
                 skin,
+                mask: Vec::new(),
             });
         }
         if objects.iter().all(|object| object.mesh.is_none()) {
@@ -485,6 +499,7 @@ impl ModelDoc {
                     name,
                     modifiers,
                     paint: Vec::new(),
+                    mask: Vec::new(),
                     ..object.clone()
                 },
             );

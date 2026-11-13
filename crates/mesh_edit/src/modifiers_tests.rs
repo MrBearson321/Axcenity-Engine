@@ -171,6 +171,44 @@ fn a_sidecar_isnt_used_once_the_glb_was_changed_elsewhere() {
     );
 }
 
+/// R15.1b: a sculpt mask needs the sidecar, comes back on the same
+/// vertices, and one that no longer fits its mesh isn't kept.
+#[test]
+fn a_sculpt_mask_is_kept_in_the_sidecar() {
+    let mut doc = doc_of("Head", half_head(), Vec::new());
+    let count = doc.objects[0].mesh.as_ref().unwrap().vertex_count();
+    let mut mask = vec![0.0; count];
+    mask[0] = 1.0;
+    mask[count / 2] = 0.25;
+    mask[count - 1] = 0.5;
+    doc.objects[0].mask = mask.clone();
+    assert_eq!(doc.objects[0].mask(), Some(mask.as_slice()));
+    let glb = doc.write_glb();
+    let sidecar = doc.write_sidecar(&glb).expect("a mask needs the sidecar");
+    let json: serde_json::Value = serde_json::from_slice(&sidecar).unwrap();
+    assert_eq!(
+        json["objects"][0]["mask"].as_array().map(Vec::len),
+        Some(3),
+        "only the masked vertices are written"
+    );
+
+    let mut reopened = ModelDoc::open(&glb, &std::env::temp_dir(), ModelFormat::Gltf).unwrap();
+    assert!(reopened.objects[0].mask.is_empty(), "a .glb has no mask");
+    assert_eq!(reopened.read_sidecar(&sidecar, &glb), Ok(1));
+    assert_eq!(reopened.objects[0].mask, mask);
+    assert_eq!(
+        reopened.objects[0].mesh.as_ref().unwrap().vertex_count(),
+        count
+    );
+
+    // A mask of nothing, or one left from other vertices, isn't saved.
+    doc.objects[0].mask = vec![0.0; count];
+    assert!(doc.write_sidecar(&glb).is_none());
+    doc.objects[0].mask = vec![1.0; count + 1];
+    assert_eq!(doc.objects[0].mask(), None);
+    assert!(doc.write_sidecar(&glb).is_none());
+}
+
 #[test]
 fn every_modifier_keeps_its_settings_through_the_sidecar() {
     let stack: Vec<Modifier> = ModifierKind::defaults()

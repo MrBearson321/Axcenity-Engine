@@ -34,6 +34,7 @@ fn object(name: &str, mesh: EditMesh, material: &str) -> DocObject {
         modifiers: Vec::new(),
         paint: Vec::new(),
         skin: None,
+        mask: Vec::new(),
     }
 }
 
