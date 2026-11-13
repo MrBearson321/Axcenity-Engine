@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 21] = [
+const TOOL_PANES: [Pane; 22] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -346,6 +346,7 @@ const TOOL_PANES: [Pane; 21] = [
     Pane::Tests,
     Pane::ModelStudio,
     Pane::ObjectViewer,
+    Pane::Effect,
     Pane::Toolbox,
     Pane::Inventory,
     Pane::VersionExplorer,

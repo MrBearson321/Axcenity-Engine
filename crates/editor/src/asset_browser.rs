@@ -56,6 +56,14 @@ pub const PREFAB_SUFFIX: &str = ".prefab.json";
 /// Where imported UI images and particle textures go.
 pub const IMAGES_FOLDER: &str = "assets/images";
 pub const PARTICLES_FOLDER: &str = "assets/particles";
+/// Where effect assets go (roadmap R17.3): prefabs of ParticleEmitters and
+/// what's around them, listed under Particles as well as Prefabs.
+pub const EFFECTS_FOLDER: &str = "assets/effects";
+
+/// Whether the asset at `path` is an effect: a prefab in [`EFFECTS_FOLDER`].
+pub fn is_effect(path: &str) -> bool {
+    path.to_lowercase().ends_with(PREFAB_SUFFIX) && path.starts_with(&format!("{EFFECTS_FOLDER}/"))
+}
 /// How often the folder is walked again while the panel is shown.
 const RESCAN: Duration = Duration::from_secs(2);
 const TILE: egui::Vec2 = egui::vec2(84.0, 96.0);

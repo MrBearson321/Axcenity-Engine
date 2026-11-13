@@ -873,6 +873,66 @@ fn notice(ui: &mut egui::Ui, icon: &str, text: &str) {
     ui.add_space(4.0);
 }
 
+/// Rows for the properties of `instance` named in `names` (those it has),
+/// drawn as Properties draws them (a name that says on hover what it does,
+/// ↺ back to the default, and the same controls), in a form keyed by
+/// `salt`. A start and end pair whose curve is set is greyed out, as in
+/// Properties. Returns the edit made this frame. The Effect tab's module
+/// stack draws an emitter's modules with it (roadmap R17.3).
+pub fn property_rows(
+    ui: &mut egui::Ui,
+    instance: &Instance,
+    assets: &Assets,
+    names: &[&'static str],
+    salt: &str,
+) -> Option<Edit> {
+    let class = instance.class();
+    let defaults: HashMap<&str, Value> = class.default_properties().into_iter().collect();
+    let locked = instance.property("Locked") == Some(&Value::Bool(true));
+    let mut edit = None;
+    crate::responsive::form(ui, salt, |ui| {
+        for &name in names {
+            let Some(value) = instance.property(name).cloned() else {
+                continue;
+            };
+            match defaults
+                .get(name)
+                .filter(|default| resettable(default) && **default != value)
+            {
+                Some(default) if !locked => {
+                    if field_name_with_reset(ui, class, name, default) {
+                        edit = Some(Edit::Property(name, default.clone()));
+                    }
+                }
+                _ => described_name(ui, class, name),
+            }
+            let replaced = class == ClassName::ParticleEmitter
+                && groups::replacing_curve(name)
+                    .and_then(|curve| instance.property(curve))
+                    .is_some_and(|curve| match curve {
+                        Value::NumberSequence(sequence) => !sequence.is_empty(),
+                        Value::ColorSequence(sequence) => !sequence.is_empty(),
+                        _ => false,
+                    });
+            let enabled = (!locked || name == "Locked") && !replaced;
+            let made = ui
+                .add_enabled_ui(enabled, |ui| match value {
+                    Value::Instance(_) | Value::PhysicalProperties(_) => {
+                        ui.weak("(in Properties)");
+                        None
+                    }
+                    value => value_control(ui, name, value, assets),
+                })
+                .inner;
+            if made.is_some() {
+                edit = made;
+            }
+            ui.end_row();
+        }
+    });
+    edit
+}
+
 /// Draws the control for one property and returns the edit if the user
 /// changed it this frame.
 fn value_control(

@@ -609,6 +609,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Plugins => app.plugins_pane(ui),
                         Pane::ModelStudio => app.model_studio_pane(ui, None),
                         Pane::ObjectViewer => app.object_viewer.ui(ui, None, &app.assets),
+                        Pane::Effect => app.effect_pane(ui, None),
                         Pane::Toolbox => app.toolbox_pane(ui),
                         Pane::Inventory => app.inventory_pane(ui),
                         Pane::VersionExplorer => app

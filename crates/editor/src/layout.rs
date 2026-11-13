@@ -99,6 +99,9 @@ pub enum Pane {
     /// pass CW5, `object_viewer` in `editor-tools`). Starts closed; View on
     /// an Explorer row or an Assets model or prefab opens it.
     ObjectViewer,
+    /// The selected particle effect played alone, with its emitters'
+    /// module stacks (`effect_editor.rs`, roadmap R17.3). Starts closed.
+    Effect,
     /// The Toolbox: assets from ambientCG, Poly Haven and Openverse, and
     /// the asset library (`toolbox_panel.rs`). Starts closed; the Assets
     /// panel's Toolbox button opens it beside Assets.
@@ -129,7 +132,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 27] = [
+    pub const CLOSABLE: [Pane; 28] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -152,6 +155,7 @@ impl Pane {
         Pane::Plugins,
         Pane::ModelStudio,
         Pane::ObjectViewer,
+        Pane::Effect,
         Pane::Toolbox,
         Pane::Inventory,
         Pane::VersionExplorer,
@@ -185,6 +189,7 @@ impl Pane {
             Pane::Plugins => "Plugins",
             Pane::ModelStudio => "Model Studio",
             Pane::ObjectViewer => "Object Viewer",
+            Pane::Effect => "Effect",
             Pane::Toolbox => "Toolbox",
             Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
@@ -221,6 +226,7 @@ impl Pane {
             Pane::Plugins => icons::PUZZLE_PIECE,
             Pane::ModelStudio => icons::POLYGON,
             Pane::ObjectViewer => icons::CUBE,
+            Pane::Effect => icons::SPARKLE,
             Pane::Toolbox => icons::TOOLBOX,
             Pane::Inventory => icons::TRAY_ARROW_DOWN,
             Pane::VersionExplorer => icons::GIT_BRANCH,
@@ -347,6 +353,7 @@ impl Layout {
             | Pane::Sequencer
             | Pane::ModelStudio
             | Pane::ObjectViewer
+            | Pane::Effect
             | Pane::TeamBoard => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain
@@ -773,6 +780,7 @@ mod tests {
                     | Pane::Plugins
                     | Pane::ModelStudio
                     | Pane::ObjectViewer
+                    | Pane::Effect
                     | Pane::Toolbox
                     | Pane::Inventory
                     | Pane::VersionExplorer
