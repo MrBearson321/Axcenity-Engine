@@ -128,6 +128,40 @@ type PropertyButtonInfo = {
 	Tooltip: string?,
 }
 
+--- A plugin's importer for files the editor doesn't import itself.
+declare extern type PluginImporter with
+	--- Fires with the file's name (no folders) and its contents (a string of its bytes) when such a file is imported: with Import..., or dropped on the editor. What the plugin changes is an undo step.
+	Imported: PluginSignal
+	--- Stops importing those files.
+	function Remove(self): ()
+end
+
+--- An item a plugin added to the Assets panel's right-click menu.
+declare extern type PluginAssetAction with
+	--- Fires with the asset's path in the project (such as "assets/models/tree.glb") when it's picked.
+	Activated: PluginSignal
+	--- Takes the item out of the menu.
+	function Remove(self): ()
+end
+
+--- What an importer takes.
+type ImporterInfo = {
+	--- What the files are, for the Import... file picker.
+	Name: string,
+	--- File endings, such as { "csv", "txt" }. Endings the editor imports itself (models, images, sounds, skies, prefabs, packages) stay the editor's.
+	Extensions: { string },
+}
+
+--- An Assets panel menu item.
+type AssetActionInfo = {
+	--- The item's text.
+	Label: string,
+	--- File endings it's offered for (left out: every project asset).
+	Extensions: { string }?,
+	--- Shown when the mouse is over it.
+	Tooltip: string?,
+}
+
 --- What a dock widget starts with.
 type DockWidgetInfo = {
 	--- The tab's title (left out: the widget's id).
@@ -138,6 +172,10 @@ type DockWidgetInfo = {
 declare extern type Plugin with
 	--- Fires when the plugin loses the Scene View's left button.
 	Deactivation: PluginSignal
+	--- The plugin API's version: 1 for toolbars, dock widgets, selection, undo, settings, files and the mouse; 2 adds drawing, handles, Properties rows, importers and Assets panel items. Check it to work in older editors.
+	ApiVersion: number
+	--- Fires with the new file's path in the project after the editor imports a file itself (a model, image, sound, sky or prefab).
+	AssetImported: PluginSignal
 	--- A ribbon group named `name` (the same one when asked again).
 	function CreateToolbar(self, name: string): PluginToolbar
 	--- A dock tab: a ScreenGui outside the game for the plugin's UI (Frame, TextButton, Slider and the rest), laid out and styled by the plugin's `.css` files. Its `Enabled` shows or hides the tab; closing the tab turns it off.
@@ -172,6 +210,10 @@ declare extern type Plugin with
 	function AddPropertyRow(self, info: PropertyRowInfo): PluginPropertyRow
 	--- A button in the Properties panel, under the plugin's name, for the selected Instance.
 	function AddPropertyButton(self, info: PropertyButtonInfo): PluginPropertyRow
+	--- Imports files of other kinds: their contents go to the importer's Imported event. At most 32 importers and asset actions together.
+	function AddImporter(self, info: ImporterInfo): PluginImporter
+	--- Adds an item to the Assets panel's right-click menu for the project's assets.
+	function AddAssetAction(self, info: AssetActionInfo): PluginAssetAction
 	--- A handle at `position` the user can drag in the Scene View while editing; the Move snap applies. At most 256 at once.
 	function CreateHandle(self, position: Vector3, options: HandleOptions?): PluginHandle
 end

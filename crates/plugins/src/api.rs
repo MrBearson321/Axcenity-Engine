@@ -16,7 +16,9 @@ use mlua::{
 };
 use serde_json::Value as Json;
 
-use crate::{DockWidget, MouseState, Request, Toolbar, ToolbarButton, Waypoint, draw, files, rows};
+use crate::{
+    DockWidget, MouseState, Request, Toolbar, ToolbarButton, Waypoint, assets, draw, files, rows,
+};
 
 /// An event of the plugin API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,6 +40,11 @@ pub(crate) enum SignalKey {
     /// attribute row edited), by the row's number.
     RowActivated(u64),
     RowChanged(u64),
+    /// An importer's `Imported` and an asset action's `Activated`, by
+    /// number, and `plugin.AssetImported`.
+    Imported(u64),
+    AssetAction(u64),
+    AssetImported,
 }
 
 /// A handler connected to a plugin event.
@@ -81,6 +88,8 @@ pub(crate) struct PluginState {
     pub(crate) handles: crate::draw::Handles,
     /// Its rows in the Properties panel (`plugin:AddPropertyRow`).
     pub(crate) rows: crate::rows::Rows,
+    /// Its importers and Assets panel actions.
+    pub(crate) assets: crate::assets::AssetHooks,
 }
 
 pub(crate) fn state(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, PluginState>> {
@@ -137,6 +146,10 @@ impl UserData for LuaPlugin {
         fields.add_field_method_get("Deactivation", |_, _| {
             Ok(LuaSignal(SignalKey::Deactivation))
         });
+        fields.add_field_method_get("AssetImported", |_, _| {
+            Ok(LuaSignal(SignalKey::AssetImported))
+        });
+        fields.add_field_method_get("ApiVersion", |_, _| Ok(crate::PLUGIN_API_VERSION));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -227,6 +240,8 @@ impl UserData for LuaPlugin {
         methods.add_method("AddPropertyButton", |lua, _, info| {
             rows::button_row(lua, info)
         });
+        methods.add_method("AddImporter", |lua, _, info| assets::importer(lua, info));
+        methods.add_method("AddAssetAction", |lua, _, info| assets::action(lua, info));
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("Plugin"));
     }
 }
