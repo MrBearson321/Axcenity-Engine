@@ -26,7 +26,7 @@ A Sounds card and its drawer have a listen button (G1's last built gap; `editor-
 
 ## Dragging a card into the scene
 
-A result card's picture is a drag handle when Get would work (competitive roadmap item 3, G1's gap): `editor-toolbox` sets a `CardDrag` payload; the editor's frame (`app.rs`, beside Assets-panel drops) hands one let go over the viewport to `EditorApp::drop_toolbox_card`, which calls `ToolboxPanel::get_dropped` with `Target::Drop(Spot)`. The Get runs as usual on its thread; `installed_action` gives the drop to the texture set or sound it installed, and `app/toolbox.rs` places it through `drop_asset`, the same path as a tile. A sky or model uses the drop up (the sky asks, the model opens the Import dialog), so it never places a later Get.
+A result card's picture is a drag handle when Get would work (competitive roadmap item 3, G1's gap): `editor-toolbox` sets a `CardDrag` payload; the editor's frame (`app.rs`, beside Assets-panel drops) hands one let go over the viewport to `EditorApp::drop_toolbox_card`, which calls `ToolboxPanel::get_dropped` with `Target::Drop(Spot)`. The Get runs as usual on its thread; `installed_action` gives the drop to the texture set or sound it installed, and `app/toolbox.rs` places it through `drop_asset`, the same path as a tile. A sky or model uses the drop up (the sky asks, the model opens the Import dialog), so it never places a later Get. Let go over the Assets panel instead, `assets_pane` (`app/chrome/panes.rs`) takes the payload from a hover-only zone over the whole panel and calls `drop_toolbox_card_on_assets` with `Target::Assets`; the installed texture set or sound is then revealed in the panel rather than placed.
 
 ## Where its assets show
 

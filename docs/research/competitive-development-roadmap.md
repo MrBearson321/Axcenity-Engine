@@ -58,7 +58,7 @@ In particular (status checked on main `5143a5a`):
 
 | Existing item | Work | Status |
 |---|---|---|
-| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238. Listening to a sound result before getting it. Gaps: dragging a card into the Assets panel, Freesound |
+| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238, and onto the Assets panel. Listening to a sound result before getting it. Gaps: Freesound |
 | G2 | Scripts inside objects | **Implemented** (#91, #111, #114, #115, #117, #120; Code/Blocks switch #230) |
 | G3 | Physics interpolation | **Implemented** (#110) |
 | G4 | Script completion and diagnostics | **Implemented** (#145 via #153; go to definition #239) |
@@ -208,7 +208,7 @@ Use `luau-lsp` as a child process for diagnostics, following the existing archit
 
 **Priority:** Critical
 **Existing reference:** G1 and Toolbox integration documentation
-**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). A sound result can be listened to before Get (its source's preview, played on its own). Gaps: dragging a card into the Assets panel, and Freesound (later, with a user's own key, as decided in G1).
+**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Dragging one onto the Assets panel gets it into the project and shows it there. A sound result can be listened to before Get (its source's preview, played on its own). Gap: Freesound (later, with a user's own key, as decided in G1).
 
 Complete the centralized Toolbox architecture.
 
@@ -576,7 +576,7 @@ Do not immediately attempt a complete Lumen or SDFGI equivalent.
 ## 6.4 Visual effects editor
 
 **Priority:** Medium
-**Status:** Partial (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`). R17.1 adds curves and gradients: `NumberSequence` and `ColorSequence` values and size, color and transparency over life on both paths, edited in Properties. R17.2 adds spawn shapes (`Shape`, `ShapeStyle`) and `SpeedOverLife` on both paths, and R17.2b bursts (`Bursts`, `Duration`), `VelocityInheritance` and `ShapeInOut` headings, and R17.2c flipbooks (`FlipbookLayout`, `FlipbookMode`). R17.4 adds collisions (`Collides`, `Bounce`, `LifetimeLoss`; physics on the CPU, the depth prepass on the GPU since R17.4b) and sub-emitters (child emitters with `EmitOn`, `EmitCount`). R17.3 adds the Effect tab (a preview with play, loop and slow motion, each emitter's module stack, counts and costs) and effect assets (prefabs in `assets/effects`). There is no node-based authoring yet. Design and stages R17.1–R17.5: [vfx-editor.md](vfx-editor.md).
+**Status:** Done (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`). R17.1 adds curves and gradients: `NumberSequence` and `ColorSequence` values and size, color and transparency over life on both paths, edited in Properties. R17.2 adds spawn shapes (`Shape`, `ShapeStyle`) and `SpeedOverLife` on both paths, and R17.2b bursts (`Bursts`, `Duration`), `VelocityInheritance` and `ShapeInOut` headings, and R17.2c flipbooks (`FlipbookLayout`, `FlipbookMode`). R17.4 adds collisions (`Collides`, `Bounce`, `LifetimeLoss`; physics on the CPU, the depth prepass on the GPU since R17.4b) and sub-emitters (child emitters with `EmitOn`, `EmitCount`). R17.3 adds the Effect tab (a preview with play, loop and slow motion, each emitter's module stack, counts and costs) and effect assets (prefabs in `assets/effects`). R17.5 adds an Environment module, a Place backdrop and six Lighting-aware presets, and decides to keep the module stack instead of a node graph: sub-emitters already wire emitters together, so a graph waits for custom forces or per-particle logic. Design and stages R17.1–R17.5: [vfx-editor.md](vfx-editor.md).
 
 Develop a unified authoring experience around existing CPU and GPU particle systems.
 
@@ -1069,7 +1069,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 
 | Feature | Axcenity | Unreal | Godot | s&box | Unity | Reference | Priority | Dependencies | Decision |
 |---|---|---|---|---|---|---|---|---|---|
-| Built-in asset discovery | Partial: card drag into the scene (#238), sound previews; no drag into Assets | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
+| Built-in asset discovery | Partial: card drag into the scene (#238) and the Assets panel, sound previews; no Freesound | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
 | Licence and attribution tracking | Implemented | Fab licences | Per asset | Platform | Asset Store EULA | `toolbox` `license.rs`, `provenance.rs`, CREDITS.txt | Critical | toolbox | Keep |
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
@@ -1105,7 +1105,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
 | Global illumination | Partial: baked probes, optional real-time probes, Light Probes overlay (R18.1), invalid probes (R18.2), sky light that follows the sky (R18.3), Fill with Probes and real-time GI tiers (R18.4) | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
 | Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
-| Particle authoring (VFX editor) | Partial (curves over life, spawn shapes, bursts, flipbooks, the Effect tab and effect assets, collisions, sub-emitters; no node graph) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
+| Particle authoring (VFX editor) | Done (curves over life, spawn shapes, bursts, flipbooks, the Effect tab and effect assets, collisions, sub-emitters, environment and presets; a module stack rather than a node graph) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; Streaming overlay in the editor (R16) | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
 | In-editor modeling | Partial: sculpting and baking back (#271), retopology by hand left to Blender | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
@@ -1140,7 +1140,7 @@ The following is the recommended order for execution. **Status** is on main `514
 |---|---|---|---|---|
 | 1 | Physics interpolation | G3 | Implemented (#110) | Nothing; hand check at 120–240 fps on the PC |
 | 2 | Scripts inside objects | G2 | Implemented (#111–#120, #230) | Nothing |
-| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238, sound previews) | Drag into Assets |
+| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238 and the Assets panel, sound previews) | Freesound, later |
 | 4 | Script completion and diagnostics | G4 | Implemented (#153, #239) | Nothing |
 | 5 | Memory profiler | G7 | Implemented (#241) | Nothing |
 | 6 | Audio occlusion and roll-off | G8 | Implemented (#128) | Nothing |
@@ -1154,7 +1154,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
 | 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
-| 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1), spawn shapes and speed over life (R17.2), bursts, inherited velocity and headings (R17.2b), flipbooks (R17.2c), the Effect tab and effect assets (R17.3), collisions and sub-emitters (R17.4, R17.4b); design in [vfx-editor.md](vfx-editor.md) | R17.5 environment modules and the node-graph decision |
+| 17 | Visual effects editor | New (R17) | Implemented: curves over life (R17.1), spawn shapes and speed over life (R17.2), bursts, inherited velocity and headings (R17.2b), flipbooks (R17.2c), the Effect tab and effect assets (R17.3), collisions and sub-emitters (R17.4, R17.4b), environment and presets (R17.5; the stack kept, no node graph); design in [vfx-editor.md](vfx-editor.md) | None |
 | 18 | Global illumination improvements | New (R18) | Stages R18.1–R18.4 done; options and stages in [global-illumination.md](global-illumination.md) | PC numbers from `bench_light_probes`; probe visibility only if leaks remain; RT2 in the ray tracing thread |
 | 19 | Online services architecture | New (R19) | Designed in [online-services.md](online-services.md) | Build only when Paul says; O1 and O2 need no website |
 | 20 | Platform expansion | New (R20) | Deferred; researched in [platform-expansion.md](platform-expansion.md) | Spikes (Android, OpenXR) only when Paul lifts the deferral |

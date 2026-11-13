@@ -14,7 +14,7 @@ use axcenity_core::{ClassName, Color3, InstanceId, Value, World};
 use axcenity_editor_tools::preview::{Canvas, add_floor};
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, FramePass};
-use axcenity_scene::{Particles, part_box_edges};
+use axcenity_scene::{EffectPreset, Particles, part_box_edges};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
@@ -24,7 +24,7 @@ use crate::widgets;
 
 /// The modules of an emitter's stack (D6): a title, an icon and the
 /// properties it groups, in the order a particle lives them.
-pub const MODULES: [(&str, &str, &[&str]); 5] = [
+pub const MODULES: [(&str, &str, &[&str]); 6] = [
     (
         "Spawn",
         icons::PLUS_CIRCLE,
@@ -69,9 +69,11 @@ pub const MODULES: [(&str, &str, &[&str]); 5] = [
             "SpeedOverLife",
             "Acceleration",
             "Drag",
-            "WindAffectsDrag",
         ],
     ),
+    // The place around the effect (roadmap R17.5): the wind, and the
+    // Workspace's GlobalWind under it (`ENVIRONMENT`).
+    ("Environment", icons::WIND, &["WindAffectsDrag"]),
     (
         "Collision",
         icons::ARROW_ELBOW_RIGHT_UP,
@@ -93,6 +95,33 @@ pub const MODULES: [(&str, &str, &[&str]); 5] = [
     ),
 ];
 
+/// The module that also shows the Workspace's `GlobalWind`.
+const ENVIRONMENT: &str = "Environment";
+
+/// What's behind the effect in the preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backdrop {
+    /// A plain afternoon sky.
+    Sky,
+    /// A dark backdrop, to judge glowing particles.
+    Dark,
+    /// The place's own Lighting (its time of day, sky, weather, clouds and
+    /// effects), so the effect looks as it will there (roadmap R17.5).
+    Place,
+}
+
+impl Backdrop {
+    const ALL: [Backdrop; 3] = [Backdrop::Sky, Backdrop::Dark, Backdrop::Place];
+
+    fn label(self) -> &'static str {
+        match self {
+            Backdrop::Sky => "Sky",
+            Backdrop::Dark => "Dark",
+            Backdrop::Place => "Place's lighting",
+        }
+    }
+}
+
 /// Preview speeds, for slow motion.
 const SPEEDS: [f32; 4] = [0.1, 0.25, 0.5, 1.0];
 /// The camera's field of view, degrees.
@@ -109,6 +138,9 @@ pub enum EffectAction {
     Select(InstanceId),
     /// Save the effect at this root as an effect asset.
     Save(InstanceId),
+    /// Add a ready-made effect to this effect root, or to this part
+    /// (roadmap R17.5).
+    AddPreset(InstanceId, EffectPreset),
 }
 
 /// What the preview shows of the world: the effect's root, its Instances
@@ -138,8 +170,7 @@ pub struct EffectEditor {
     /// Seconds of the effect played since it (re)started.
     pub clock: f32,
     pub floor: bool,
-    /// Off: a dark backdrop, to judge glowing particles.
-    pub sky: bool,
+    pub backdrop: Backdrop,
     middle: Vec3,
     reach: f32,
     yaw: f32,
@@ -163,7 +194,7 @@ impl Default for EffectEditor {
             looping: true,
             clock: 0.0,
             floor: true,
-            sky: true,
+            backdrop: Backdrop::Sky,
             middle: Vec3::ZERO,
             reach: 4.0,
             yaw: 35.0,
@@ -231,6 +262,12 @@ pub fn loop_seconds(world: &World, root: InstanceId) -> f32 {
 }
 
 impl EffectEditor {
+    /// The middle of the effect shown, in the world (where a preset added
+    /// to a model stands).
+    pub fn middle(&self) -> Vec3 {
+        self.middle - Vec3::Y * 2.0
+    }
+
     /// The effect shown, as its root in the edited world.
     pub fn root(&self) -> Option<InstanceId> {
         self.copied.as_ref().map(|copied| copied.root)
@@ -280,6 +317,7 @@ impl EffectEditor {
                         let _ = self.shown.set_property(shown, name, value);
                     }
                 }
+                self.copy_environment(world);
                 self.copied = Some(Copied {
                     root,
                     ids,
@@ -350,27 +388,65 @@ impl EffectEditor {
         }
         let lighting = shown.lighting();
         let backdrop = Value::Color3(Color3::new(0.05, 0.05, 0.07));
-        let sky: [(&str, Value); 3] = if self.sky {
-            [
+        let sky: [(&str, Value); 3] = match self.backdrop {
+            Backdrop::Sky => [
                 ("ClockTime", Value::Number(14.0)),
                 ("SkyTopColor", Value::Color3(Color3::new(0.25, 0.5, 0.9))),
                 (
                     "SkyHorizonColor",
                     Value::Color3(Color3::new(0.63, 0.8, 0.95)),
                 ),
-            ]
-        } else {
-            [
+            ],
+            Backdrop::Dark | Backdrop::Place => [
                 ("ClockTime", Value::Number(0.0)),
                 ("SkyTopColor", backdrop.clone()),
                 ("SkyHorizonColor", backdrop),
-            ]
+            ],
         };
         for (name, value) in sky {
             let _ = shown.set_property(lighting, name, value);
         }
+        if self.backdrop == Backdrop::Place {
+            // The place's Weather, Clouds, Atmosphere and effects too.
+            if let Some(place) = world.get(world.lighting()) {
+                for &child in place.children() {
+                    if let Ok(copy) = shown.copy_from(world, child) {
+                        let _ = shown.set_parent(copy, Some(lighting));
+                    }
+                }
+            }
+        }
         self.shown = shown;
+        self.copy_environment(world);
         self.restart();
+    }
+
+    /// Copies the place's wind into the preview (roadmap R17.5), and with
+    /// the place's backdrop its Lighting's own values (its children are
+    /// copied with the effect).
+    fn copy_environment(&mut self, world: &World) {
+        let wind = world
+            .get(world.workspace())
+            .and_then(|workspace| workspace.property("GlobalWind"))
+            .cloned();
+        if let Some(wind) = wind {
+            let workspace = self.shown.workspace();
+            let _ = self.shown.set_property(workspace, "GlobalWind", wind);
+        }
+        if self.backdrop != Backdrop::Place {
+            return;
+        }
+        let Some(place) = world.get(world.lighting()) else {
+            return;
+        };
+        let values: Vec<(&'static str, Value)> = place
+            .properties()
+            .map(|(name, value)| (name, value.clone()))
+            .collect();
+        let lighting = self.shown.lighting();
+        for (name, value) in values {
+            let _ = self.shown.set_property(lighting, name, value);
+        }
     }
 
     /// Plays `seconds` of the effect (at the preview's speed, unless
@@ -441,7 +517,20 @@ impl EffectEditor {
                  and edit its modules.",
                 None,
             );
-            return None;
+            // A part without one can start from a preset.
+            let part = selected.filter(|&id| {
+                world
+                    .get(id)
+                    .is_some_and(|i| i.class().is_base_part() && i.class() != ClassName::Terrain)
+            });
+            let mut action = None;
+            if let Some(part) = part {
+                ui.vertical_centered(|ui| {
+                    ui.label("Start one in the selected part from a preset:");
+                    ui.horizontal_wrapped(|ui| preset_menu(ui, part, &mut action));
+                });
+            }
+            return action;
         };
         let now = Instant::now();
         let seconds = self
@@ -478,6 +567,9 @@ impl EffectEditor {
                 }
                 let mut list = axcenity_scene::build_draw_list(&self.shown, assets, self.camera());
                 self.particles.draw(&mut list, &self.shown, assets);
+                if self.backdrop == Backdrop::Place {
+                    self.particles.add_weather(&mut list);
+                }
                 self.canvas.paint(ui, rect, render_state, &list);
                 if !self.paused {
                     ui.ctx().request_repaint();
@@ -541,16 +633,33 @@ impl EffectEditor {
                 }
             });
             self.speed = speed;
-            let (mut floor, mut sky) = (self.floor, self.sky);
+            let (mut floor, mut backdrop) = (self.floor, self.backdrop);
             ui.checkbox(&mut floor, "Floor");
-            ui.checkbox(&mut sky, "Sky");
-            if (floor, sky) != (self.floor, self.sky) {
-                (self.floor, self.sky) = (floor, sky);
+            widgets::menu_button(ui, Some(icons::SUN_HORIZON), backdrop.label(), |ui| {
+                for choice in Backdrop::ALL {
+                    if ui
+                        .selectable_label(backdrop == choice, choice.label())
+                        .clicked()
+                    {
+                        backdrop = choice;
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("What's behind the effect: a sky, a dark backdrop, or the place's own lighting and weather");
+            if (floor, backdrop) != (self.floor, self.backdrop) {
+                (self.floor, self.backdrop) = (floor, backdrop);
                 // Copied again with the new floor and backdrop.
                 if let Some(copied) = &mut self.copied {
                     copied.ids.clear();
                 }
             }
+            widgets::menu_button(ui, Some(icons::PLUS), "Add", |ui| {
+                preset_menu(ui, root, action);
+            })
+            .response
+            .on_hover_text("Add a ready-made emitter, suited to the place's lighting and wind");
             if widgets::icon_button(
                 ui,
                 icons::FLOPPY_DISK,
@@ -594,6 +703,20 @@ impl EffectEditor {
     }
 }
 
+/// The presets, each a button that asks to add it to `target`.
+fn preset_menu(ui: &mut egui::Ui, target: InstanceId, action: &mut Option<EffectAction>) {
+    for preset in EffectPreset::ALL {
+        if ui
+            .button(preset.name())
+            .on_hover_text(preset.description())
+            .clicked()
+        {
+            *action = Some(EffectAction::AddPreset(target, preset));
+            ui.close();
+        }
+    }
+}
+
 /// One emitter's module stack: its name (click to select it) and a
 /// collapsible group of rows per module.
 fn stack(
@@ -625,6 +748,20 @@ fn stack(
             .show(ui, |ui| {
                 if let Some(edit) = properties::property_rows(ui, instance, assets, names, &salt) {
                     action = Some(EffectAction::Edit(emitter, edit));
+                }
+                // The wind it drifts with is the place's.
+                let workspace = world.workspace();
+                if title == ENVIRONMENT
+                    && let Some(place) = world.get(workspace)
+                    && let Some(edit) = properties::property_rows(
+                        ui,
+                        place,
+                        assets,
+                        &["GlobalWind"],
+                        &format!("{salt} wind"),
+                    )
+                {
+                    action = Some(EffectAction::Edit(workspace, edit));
                 }
             });
     }
@@ -812,6 +949,66 @@ mod tests {
             assert!(sprite.position.y > 1.49, "{:?}", sprite.position);
         }
         assert!(sprites.iter().any(|sprite| sprite.position.y < 1.6));
+    }
+
+    /// R17.5: the preview always blows in the place's wind; with the
+    /// place's backdrop it also has its Lighting (time, colors, Weather),
+    /// and a wind edit reaches it without starting the effect again.
+    #[test]
+    fn the_place_backdrop_brings_the_places_lighting_and_wind() {
+        let (mut world, part, _) = fountain();
+        let (workspace, lighting) = (world.workspace(), world.lighting());
+        let wind = Value::Vector3(Vector3::new(8.0, 0.0, 0.0));
+        world
+            .set_property(workspace, "GlobalWind", wind.clone())
+            .unwrap();
+        world
+            .set_property(lighting, "ClockTime", Value::Number(19.5))
+            .unwrap();
+        let weather = world.create(ClassName::Weather).unwrap();
+        world.set_parent(weather, Some(lighting)).unwrap();
+        let shown_value = |editor: &EffectEditor, id: InstanceId, name: &str| {
+            editor.shown.get(id).and_then(|i| i.property(name)).cloned()
+        };
+        let mut editor = EffectEditor::default();
+        editor.follow(&world, Some(part), 1);
+        let (shown_space, shown_light) = (editor.shown.workspace(), editor.shown.lighting());
+        assert_eq!(shown_value(&editor, shown_space, "GlobalWind"), Some(wind));
+        assert_eq!(
+            shown_value(&editor, shown_light, "ClockTime"),
+            Some(Value::Number(14.0)),
+            "the sky backdrop keeps its own afternoon"
+        );
+
+        editor.backdrop = Backdrop::Place;
+        editor.follow(&world, None, 2);
+        editor.follow(&world, Some(part), 3);
+        let shown_light = editor.shown.lighting();
+        assert_eq!(
+            shown_value(&editor, shown_light, "ClockTime"),
+            Some(Value::Number(19.5))
+        );
+        let children = editor.shown.get(shown_light).unwrap().children().to_vec();
+        assert!(
+            children
+                .iter()
+                .any(|&id| editor.shown.get(id).unwrap().class() == ClassName::Weather),
+            "the place's Weather is copied"
+        );
+
+        // A wind edit: values only, so the particles keep flying.
+        for _ in 0..30 {
+            editor.step(&Assets::default(), 1.0 / 30.0, 10.0);
+        }
+        let alive = editor.particle_count();
+        let gust = Value::Vector3(Vector3::new(0.0, 0.0, -12.0));
+        world
+            .set_property(workspace, "GlobalWind", gust.clone())
+            .unwrap();
+        editor.follow(&world, Some(part), 4);
+        let shown_space = editor.shown.workspace();
+        assert_eq!(shown_value(&editor, shown_space, "GlobalWind"), Some(gust));
+        assert!(editor.particle_count() >= alive / 2, "kept flying");
     }
 
     #[test]

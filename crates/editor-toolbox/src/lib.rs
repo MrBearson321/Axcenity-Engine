@@ -137,6 +137,10 @@ pub enum Target {
     /// (roadmap G1): what it brings is placed there, as a tile dropped from
     /// the Assets panel would be.
     Drop(Spot),
+    /// A card was dragged out of the Toolbox and let go over the Assets
+    /// panel (roadmap G1): what it brings is got into the project and the
+    /// panel shows it, as Get does with nothing placed.
+    Assets,
 }
 
 /// Where a Toolbox card was let go over the viewport: the point on the
@@ -152,7 +156,8 @@ pub struct Spot {
 
 /// The drag payload of a Toolbox card (its picture is the handle): the
 /// result's key in the page shown and its name. The editor hands it to
-/// [`ToolboxPanel::get_dropped`] when it's let go over the viewport.
+/// [`ToolboxPanel::get_dropped`] when it's let go over the viewport or the
+/// Assets panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CardDrag {
     pub key: String,
@@ -533,8 +538,8 @@ impl ToolboxPanel {
     }
 
     /// A card dragged out of the panel ([`CardDrag`]) was let go over the
-    /// viewport: Get it, and hand it back with `target` so the editor places
-    /// it there. False (with the reason shown in the panel) when it can't be
+    /// viewport or the Assets panel: Get it, and hand it back with `target`
+    /// so the editor places or shows it there. False (with the reason shown in the panel) when it can't be
     /// got now: another download is running or the card is gone.
     pub fn get_dropped(
         &mut self,
@@ -1063,7 +1068,7 @@ impl ToolboxPanel {
             tip.push_str(&format!("\nNot for a commercial game: {why}."));
         }
         tip.push_str(if gettable {
-            "\nClick for details, or drag it onto the scene."
+            "\nClick for details, or drag it onto the scene or the Assets panel."
         } else {
             "\nClick for details."
         });
@@ -1598,7 +1603,9 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
 /// a drop on anything else (a sky, a model through the Import dialog) is
 /// used up, so it can't place the next Get.
 fn installed_action(installed: Installed, target: &mut Option<Target>) -> ToolboxAction {
-    let drop = matches!(target, Some(Target::Drop(_)));
+    // A drag's target is used up by what it got, so the next Get isn't
+    // placed or shown where this one was let go.
+    let drop = matches!(target, Some(Target::Drop(_) | Target::Assets));
     match installed {
         Installed::TextureSet { path, name } => ToolboxAction::TextureSet {
             path,
@@ -2438,6 +2445,45 @@ mod tests {
             },
             &mut target,
         );
+        assert_eq!(target, None);
+    }
+
+    /// G1: a card let go over the Assets panel hands its texture set or
+    /// sound back for the panel to show; a sky or model uses the drop up.
+    #[test]
+    fn a_card_dropped_on_the_assets_panel_is_shown_there() {
+        let mut target = Some(Target::Assets);
+        let action = installed_action(
+            Installed::TextureSet {
+                path: "assets/textures/rock.texture.json".into(),
+                name: "Rock".into(),
+            },
+            &mut target,
+        );
+        assert_eq!(
+            action,
+            ToolboxAction::TextureSet {
+                path: "assets/textures/rock.texture.json".into(),
+                name: "Rock".into(),
+                target: Some(Target::Assets),
+            }
+        );
+        assert_eq!(target, None);
+        let mut target = Some(Target::Assets);
+        let action = installed_action(
+            Installed::Sound("assets/sounds/bird.ogg".into()),
+            &mut target,
+        );
+        assert_eq!(
+            action,
+            ToolboxAction::Sound {
+                path: "assets/sounds/bird.ogg".into(),
+                target: Some(Target::Assets),
+            }
+        );
+        assert_eq!(target, None);
+        let mut target = Some(Target::Assets);
+        installed_action(Installed::Sky("assets/sky/a_2k.hdr".into()), &mut target);
         assert_eq!(target, None);
     }
 
