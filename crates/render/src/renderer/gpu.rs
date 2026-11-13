@@ -82,6 +82,8 @@ pub(super) const VOLUMETRIC_FOG_SHADER: &str = concat!(
     include_str!("../lighting.wgsl"),
     include_str!("../volumetric_fog.wgsl")
 );
+/// Sun rays' pass (`sun_rays.wgsl`, renderer/sun_rays.rs).
+pub(super) const SUN_RAYS_SHADER: &str = include_str!("../sun_rays.wgsl");
 /// Ray traced GI's pass (`ray_gi.wgsl`, renderer/ray_gi.rs): ray queries
 /// turned on first, then the sky's colors, the fog and the shared lighting
 /// (for the frame's bindings, its sky and its light probes).

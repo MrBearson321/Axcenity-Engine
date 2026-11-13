@@ -1227,6 +1227,18 @@ pub struct LensEffects {
     /// it: 0 none, 1 the whole way it moved (a camera's shutter open the
     /// whole frame).
     pub motion_blur: Option<f32>,
+    /// Shafts of light streaming from the sun past what's in front of it.
+    pub sun_rays: Option<SunRays>,
+}
+
+/// Screen-space sun shafts (god rays): bright sky near the sun smeared
+/// toward it, so gaps between leaves or a window's frame cast beams.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SunRays {
+    /// How bright the shafts are, 0 to 1.
+    pub intensity: f32,
+    /// How far they reach from the sun, 0 to 1 (1 the whole picture).
+    pub spread: f32,
 }
 
 /// Blur by distance from the camera: sharp from `focus_distance -

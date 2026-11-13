@@ -28,7 +28,7 @@ Select **Lighting** in the Explorer:
 
 ## Post-processing and effects
 
-**Bloom**, **Exposure**, **Color Correction** (brightness, contrast, saturation, tint, colour lookup tables), **Outlines**, and lens effects (**Depth of Field**, **Vignette**, **Film Grain**, **Aberration**, **Sharpen**, **Motion Blur**) go in Lighting. A **Graphics Volume** is an invisible box that blends its own effects, fog and atmosphere in as the camera enters it, for a dark cave or an underwater look.
+**Bloom**, **Exposure**, **Color Correction** (brightness, contrast, saturation, tint, colour lookup tables), **Outlines**, and lens effects (**Depth of Field**, **Vignette**, **Film Grain**, **Aberration**, **Sharpen**, **Motion Blur**, **Sun Rays**) go in Lighting. **Sun Rays** streams beams of sunlight through gaps in leaves or a window frame while the sun is in or near the view; its **Intensity** sets how bright they are and **Spread** how far they reach. A **Graphics Volume** is an invisible box that blends its own effects, fog and atmosphere in as the camera enters it, for a dark cave or an underwater look.
 
 ## Particles
 

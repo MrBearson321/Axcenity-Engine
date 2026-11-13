@@ -405,6 +405,12 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Graphics,
+            "Sun rays",
+            &["God rays", "Light shafts", "Sun shafts"],
+            "Beams of sunlight through gaps, from a SunRaysEffect.",
+        ),
+        setting(
+            Graphics,
             "In use",
             &["Effective settings", "GPU limits"],
             "What's in use once the graphics card's limits are applied, and why.",

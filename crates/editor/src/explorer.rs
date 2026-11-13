@@ -1545,6 +1545,10 @@ pub fn insert_hint(what: Insertable) -> String {
             "Insert a MotionBlurEffect into Lighting: what moves across the view streaks along \
              its motion, as through a camera's shutter."
         }
+        Insertable::LensEffect(ClassName::SunRaysEffect) => {
+            "Insert a SunRaysEffect into Lighting: shafts of sunlight streaming past leaves, \
+             window frames and anything else in front of the sun."
+        }
         Insertable::LensEffect(_) => {
             "Insert a SharpenEffect into Lighting: crisper edges between colors, useful with a \
              render scale below 100%."

@@ -677,7 +677,8 @@ pub struct GraphicsSettings {
     pub cloud_quality: Option<CloudQuality>,
     /// The lens effects a world can ask for (`DepthOfFieldEffect`,
     /// `VignetteEffect`, `FilmGrainEffect`, `ChromaticAberrationEffect`,
-    /// `SharpenEffect`), each drawn only if its setting allows it.
+    /// `SharpenEffect`, `SunRaysEffect`), each drawn only if its setting
+    /// allows it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth_of_field: Option<DepthOfFieldQuality>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -688,6 +689,8 @@ pub struct GraphicsSettings {
     pub chromatic_aberration: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sharpen: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sun_rays: Option<bool>,
     /// How a world's `MotionBlurEffect` is drawn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub motion_blur: Option<MotionBlurQuality>,
@@ -897,6 +900,10 @@ impl GraphicsSettings {
 
     pub fn sharpen(&self) -> bool {
         self.sharpen.unwrap_or(self.quality != Quality::Low)
+    }
+
+    pub fn sun_rays(&self) -> bool {
+        self.sun_rays.unwrap_or(self.quality != Quality::Low)
     }
 
     /// How motion blur is drawn: the override, or the preset's (off at Low,
@@ -1122,6 +1129,7 @@ impl GraphicsSettings {
             film_grain: self.film_grain(),
             chromatic_aberration: self.chromatic_aberration(),
             sharpen: self.sharpen(),
+            sun_rays: self.sun_rays(),
             // Like depth of field: full-screen passes over the prepass's
             // depth and the motion it finds.
             motion_blur: self.motion_blur(),
@@ -1214,6 +1222,7 @@ pub struct EffectiveGraphics {
     pub film_grain: bool,
     pub chromatic_aberration: bool,
     pub sharpen: bool,
+    pub sun_rays: bool,
     /// Motion blur's samples (needs the prepass's depth and motion vectors).
     pub motion_blur: MotionBlurQuality,
     /// The projected decals drawn (they need the prepass's depth and
@@ -1511,16 +1520,17 @@ mod tests {
                     settings.film_grain(),
                     settings.chromatic_aberration(),
                     settings.sharpen(),
+                    settings.sun_rays(),
                 ],
             )
         });
         assert_eq!(
             presets,
             [
-                (Dof::Off, [false; 4]),
-                (Dof::Low, [true; 4]),
-                (Dof::High, [true; 4]),
-                (Dof::High, [true; 4]),
+                (Dof::Off, [false; 5]),
+                (Dof::Low, [true; 5]),
+                (Dof::High, [true; 5]),
+                (Dof::High, [true; 5]),
             ]
         );
         assert_eq!(Dof::ALL.map(Dof::samples), [0, 16, 32]);
@@ -1532,6 +1542,7 @@ mod tests {
                     settings.film_grain(),
                     settings.chromatic_aberration(),
                     settings.sharpen(),
+                    settings.sun_rays(),
                 ]
             };
             let blur = GraphicsSettings {
@@ -1542,14 +1553,15 @@ mod tests {
             assert_eq!(switches(&blur), switches(&preset));
             assert_eq!(blur.post_processing(), preset.post_processing());
             // Each switch turns only itself over.
-            for which in 0..4 {
+            for which in 0..5 {
                 let mut one = preset.clone();
                 let flipped = Some(!switches(&preset)[which]);
                 match which {
                     0 => one.vignette = flipped,
                     1 => one.film_grain = flipped,
                     2 => one.chromatic_aberration = flipped,
-                    _ => one.sharpen = flipped,
+                    3 => one.sharpen = flipped,
+                    _ => one.sun_rays = flipped,
                 }
                 let mut expected = switches(&preset);
                 expected[which] = !expected[which];
@@ -1562,6 +1574,7 @@ mod tests {
                         effective.film_grain,
                         effective.chromatic_aberration,
                         effective.sharpen,
+                        effective.sun_rays,
                     ],
                     expected
                 );
@@ -1578,6 +1591,7 @@ mod tests {
         let ultra = GraphicsSettings::preset(Quality::Ultra).effective(&tiny);
         assert_eq!(ultra.depth_of_field, Dof::High);
         assert!(ultra.vignette && ultra.film_grain && ultra.chromatic_aberration && ultra.sharpen);
+        assert!(ultra.sun_rays);
     }
 
     #[test]
@@ -1651,6 +1665,7 @@ mod tests {
             film_grain: Some(true),
             chromatic_aberration: Some(false),
             sharpen: Some(true),
+            sun_rays: Some(false),
             motion_blur: Some(MotionBlurQuality::Low),
             ray_tracing_distance: Some(600.0),
             ray_traced_shadows: Some(RayTracedShadows::Medium),
@@ -2134,6 +2149,7 @@ mod tests {
                         film_grain: post,
                         chromatic_aberration: post,
                         sharpen: post,
+                        sun_rays: post,
                         motion_blur: Some(MotionBlurQuality::Low),
                         ray_tracing_distance: None,
                         ray_traced_shadows: Some(RayTracedShadows::High),
@@ -2173,6 +2189,7 @@ mod tests {
                             settings.chromatic_aberration()
                         );
                         assert_eq!(effective.sharpen, settings.sharpen());
+                        assert_eq!(effective.sun_rays, settings.sun_rays());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())

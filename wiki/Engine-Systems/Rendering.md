@@ -55,7 +55,7 @@ flowchart TB
 | `renderer/lighting.rs` | Uniforms, light tiles, shadow views, batches, `casters_in_views` |
 | `renderer/culling.rs`, `lod.rs`, `parallel.rs` | Frustum culling, LOD with hysteresis and dithered cross-fade, rayon sharing |
 | `renderer/gpu.rs`, `uploads.rs`, `texture_budget.rs` | Uploads (CPU mips for RGBA), background uploads, budget |
-| `renderer/occlusion.rs`, `post.rs`, `temporal.rs`, `lens.rs`, `grading.rs` | Prepass and SSAO, post, TAA, depth of field, grading |
+| `renderer/occlusion.rs`, `post.rs`, `temporal.rs`, `lens.rs`, `grading.rs`, `sun_rays.rs` | Prepass and SSAO, post, TAA, depth of field, grading, screen-space sun rays (`SunRaysEffect`) |
 | `renderer/gpu_timer.rs` | Per-pass GPU time (`FramePass`) |
 | `renderer/ray_ao.rs`, `ray_ao.wgsl` | Ray traced ambient occlusion (RT3): a half-size fragment pass blended into ambient occlusion's raw target before its blur |
 | `renderer/ray_shadows.rs`, `ray_shadows.wgsl` | Ray traced sun shadows (RT1): a compute pass from the prepass into a per-pixel mask (frame binding 17) that `sun_visibility` prefers to the cascades within reach |

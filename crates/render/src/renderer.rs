@@ -78,6 +78,7 @@ mod ray_tracing;
 mod realtime_gi;
 mod skinning;
 mod sprites;
+mod sun_rays;
 mod surface_shaders;
 mod temporal;
 mod terrain;
