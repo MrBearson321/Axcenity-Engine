@@ -95,6 +95,7 @@ impl EditorApp {
             self.output.error(error);
         }
         self.asset_browser.file_changed(path);
+        self.model_studio_file_changed(path);
         // An imported, new, edited or deleted texture or model: cook it
         // (and give it an asset ID) now rather than at the next open.
         if axcenity_assets::takes_asset_id(path)

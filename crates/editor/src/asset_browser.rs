@@ -237,6 +237,8 @@ pub enum BrowserAction {
     EditMaterial(String),
     /// Open the model file at this path in the Model Studio.
     EditModel(String),
+    /// Open the `.glb` at this path in Blender (R15.4).
+    EditInBlender(String),
     /// List what uses the asset at this path (Phase 70).
     FindReferences(String),
     /// Show the model or prefab at this path in the Object Viewer (CW5.2).
@@ -697,6 +699,9 @@ pub(super) enum ItemMenu {
         path: String,
     },
     EditModel {
+        path: String,
+    },
+    EditInBlender {
         path: String,
     },
 }

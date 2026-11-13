@@ -298,6 +298,7 @@ impl AssetBrowser {
             }
             ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
             ItemMenu::EditModel { path } => return Some(BrowserAction::EditModel(path)),
+            ItemMenu::EditInBlender { path } => return Some(BrowserAction::EditInBlender(path)),
             ItemMenu::FindReferences { path } => return Some(BrowserAction::FindReferences(path)),
             ItemMenu::Plugin {
                 plugin,
@@ -1013,6 +1014,19 @@ impl AssetBrowser {
                         .clicked()
                 {
                     menu = Some(ItemMenu::EditModel { path: path.clone() });
+                    ui.close();
+                }
+                if model
+                    && path.to_ascii_lowercase().ends_with(".glb")
+                    && ui
+                        .button(format!("{} Edit in Blender", icons::ARROW_SQUARE_OUT))
+                        .on_hover_text(
+                            "Open it in Blender. Save there (Ctrl+S) to send it back; \
+                             MeshParts using it reload.",
+                        )
+                        .clicked()
+                {
+                    menu = Some(ItemMenu::EditInBlender { path: path.clone() });
                     ui.close();
                 }
                 if crate::app::import_presets::is_texture_file(&path)

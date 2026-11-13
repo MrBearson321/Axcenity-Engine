@@ -32,6 +32,7 @@ mod asset_check;
 mod asset_inventory;
 mod autocomplete;
 mod behavior_tree;
+mod blender;
 mod block_editor;
 mod build_game;
 mod build_tools;
