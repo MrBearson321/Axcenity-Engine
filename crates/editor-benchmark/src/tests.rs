@@ -117,6 +117,7 @@ fn changes_has_a_row_for_every_setting() {
         film_grain: _,
         chromatic_aberration: _,
         sharpen: _,
+        sun_rays: _,
         motion_blur: _,
         ray_tracing_distance: _,
         ray_traced_shadows: _,
@@ -124,7 +125,7 @@ fn changes_has_a_row_for_every_setting() {
         ray_traced_global_illumination: _,
         ray_tracing: _,
     } = &high;
-    let edits: [fn(&mut GraphicsSettings); 26] = [
+    let edits: [fn(&mut GraphicsSettings); 27] = [
         |s| s.quality = Quality::Low,
         |s| s.automatic = !s.automatic,
         |s| s.shadow_quality = other(s.shadow_quality(), ShadowQuality::Low, ShadowQuality::Ultra),
@@ -169,6 +170,7 @@ fn changes_has_a_row_for_every_setting() {
         |s| s.film_grain = Some(!s.film_grain()),
         |s| s.chromatic_aberration = Some(!s.chromatic_aberration()),
         |s| s.sharpen = Some(!s.sharpen()),
+        |s| s.sun_rays = Some(!s.sun_rays()),
         |s| {
             s.motion_blur = other(
                 s.motion_blur(),

@@ -1562,6 +1562,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 doc: "Whether a SharpenEffect is drawn. Off at Low, on above.",
             },
             Field {
+                name: "SunRays",
+                ty: "boolean",
+                doc: "Whether a SunRaysEffect is drawn. Off at Low, on above.",
+            },
+            Field {
                 name: "MotionBlur",
                 ty: "EnumMotionBlur",
                 doc: "How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.",

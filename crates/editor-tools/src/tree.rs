@@ -222,13 +222,14 @@ impl Insertable {
         Insertable::ColorCorrectionEffect,
     ];
     /// Ribbon ▸ Lighting ▸ Lens.
-    pub const LENS: [Insertable; 6] = [
+    pub const LENS: [Insertable; 7] = [
         Insertable::LensEffect(ClassName::DepthOfFieldEffect),
         Insertable::LensEffect(ClassName::VignetteEffect),
         Insertable::LensEffect(ClassName::FilmGrainEffect),
         Insertable::LensEffect(ClassName::ChromaticAberrationEffect),
         Insertable::LensEffect(ClassName::SharpenEffect),
         Insertable::LensEffect(ClassName::MotionBlurEffect),
+        Insertable::LensEffect(ClassName::SunRaysEffect),
     ];
     /// Whether a selected GraphicsVolume holds a new one: what changes the
     /// look there.
@@ -394,6 +395,7 @@ impl Insertable {
             Insertable::LensEffect(ClassName::ChromaticAberrationEffect) => "Aberration",
             Insertable::LensEffect(ClassName::SharpenEffect) => "Sharpen",
             Insertable::LensEffect(ClassName::MotionBlurEffect) => "Motion Blur",
+            Insertable::LensEffect(ClassName::SunRaysEffect) => "Sun Rays",
             Insertable::LensEffect(class) => class.as_str(),
             Insertable::GraphicsVolume => "Graphics Volume",
             Insertable::ExposureEffect => "Exposure",

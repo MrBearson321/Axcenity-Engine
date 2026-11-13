@@ -249,6 +249,7 @@ impl WeatherState {
                     brightness: 1.0,
                     light_emission: 0.0,
                     texture: Some(look.texture.clone()),
+                    frame: None,
                 });
             }
         }

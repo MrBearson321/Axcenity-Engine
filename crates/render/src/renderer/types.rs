@@ -900,6 +900,11 @@ pub(super) struct ScenePipeline {
     /// Whether the last draw list had projected decals the graphics
     /// settings draw, which keep the prepass's targets alive too.
     pub(super) decals: bool,
+    /// Whether the last draw list had sun rays the graphics settings draw,
+    /// which read the prepass's depth.
+    pub(super) sun_rays: bool,
+    /// Sun rays' pass, made the first time they're drawn.
+    pub(super) sun_rays_pass: Option<Box<sun_rays::SunRaysPass>>,
     /// Whether the last draw list asked for depth of field, which (while
     /// its setting allows it) keeps the prepass's targets and its own alive.
     pub(super) depth_of_field: bool,

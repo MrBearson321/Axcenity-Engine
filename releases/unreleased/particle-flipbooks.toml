@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Particles can play a flipbook: a texture cut into frames, shown one at a time"
+details = "A ParticleEmitter's new FlipbookLayout (Grid2x2, Grid4x4, Grid8x8) cuts its Texture into frames, FlipbookMode picks each particle's frame as it ages (Loop, OneShot over its life, PingPong or Random), FlipbookFramerate sets the frames a second and FlipbookStartRandom starts each particle on a frame of its own. Smoke, fire and explosion sheets animate on CPU and GPU particles alike. FlipbookLayout None (the default) shows the whole texture as before."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = [306]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

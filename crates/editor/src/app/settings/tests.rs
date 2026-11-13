@@ -138,6 +138,7 @@ fn graphics_settings_survive_a_restart() {
         film_grain: Some(true),
         chromatic_aberration: None,
         sharpen: Some(false),
+        sun_rays: Some(true),
         motion_blur: Some(MotionBlurQuality::Low),
         ray_tracing_distance: Some(300.0),
         ray_traced_shadows: Some(RayTracedShadows::Medium),

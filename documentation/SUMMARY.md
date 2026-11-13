@@ -146,6 +146,7 @@
     * [FilmGrainEffect](api/classes/FilmGrainEffect.md)
     * [ChromaticAberrationEffect](api/classes/ChromaticAberrationEffect.md)
     * [SharpenEffect](api/classes/SharpenEffect.md)
+    * [SunRaysEffect](api/classes/SunRaysEffect.md)
     * [MotionBlurEffect](api/classes/MotionBlurEffect.md)
     * [GraphicsVolume](api/classes/GraphicsVolume.md)
     * [ExposureEffect](api/classes/ExposureEffect.md)

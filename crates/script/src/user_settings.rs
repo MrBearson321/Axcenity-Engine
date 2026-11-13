@@ -438,6 +438,13 @@ impl UserData for LuaUserGameSettings {
             Ok(())
         });
 
+        fields.add_field_method_get("SunRays", |lua, _| Ok(settings(lua).sun_rays()));
+        fields.add_field_method_set("SunRays", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "SunRays", value)?;
+            change(lua, |settings, _| settings.sun_rays = chosen);
+            Ok(())
+        });
+
         fields.add_field_method_get("MotionBlur", |lua, _| {
             let name = settings(lua).motion_blur().label();
             Ok(item(EnumType::MotionBlur, name))

@@ -42,10 +42,12 @@ struct EmitterUniform {
     color_end: [f32; 4],
     look: [f32; 4],
     /// The spawn shape's code (`SpawnShape::code`), 1 for only its
-    /// surface, which way they head (`ShapeInOut::code`), and one unused.
+    /// surface, which way they head (`ShapeInOut::code`), and the flipbook
+    /// (`Flipbook`: its grid, plus its mode's code times 256, plus 65536 for
+    /// a random first frame; 0 for none).
     spawn_shape: [u32; 4],
     /// The velocity every new particle starts with besides its heading
-    /// (`ParticleEmitter::inherit`), and one unused.
+    /// (`ParticleEmitter::inherit`), and the flipbook's frames a second.
     inherit: [f32; 4],
     /// Size, transparency and color over life while `look[3]` is 1
     /// (`ParticleCurves`; colors' fourth number is the speed multiplier).
@@ -405,9 +407,19 @@ fn uniform_of(
             emitter.shape.code(),
             u32::from(emitter.shape.surface),
             emitter.in_out.code(),
-            0,
+            look.flipbook.map_or(0, |book| {
+                book.grid.clamp(1, 8) | book.mode.code() << 8 | u32::from(book.start_random) << 16
+            }),
         ],
-        inherit: finite(emitter.inherit).extend(0.0).to_array(),
+        inherit: finite(emitter.inherit)
+            .extend(look.flipbook.map_or(0.0, |book| {
+                if book.framerate.is_finite() {
+                    book.framerate.max(0.0)
+                } else {
+                    0.0
+                }
+            }))
+            .to_array(),
         shape: look
             .curves
             .as_ref()

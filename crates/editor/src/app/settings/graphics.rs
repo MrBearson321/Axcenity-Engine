@@ -327,6 +327,7 @@ pub(super) fn graphics_page(
                     &mut settings.chromatic_aberration,
                 ),
                 ("Sharpen", preset.sharpen(), &mut settings.sharpen),
+                ("Sun rays", preset.sun_rays(), &mut settings.sun_rays),
             ];
             for (name, preset_on, value) in switches {
                 found_label(ui, name);
@@ -442,6 +443,7 @@ pub(super) fn graphics_page(
         (effective.film_grain, "film grain"),
         (effective.chromatic_aberration, "chromatic aberration"),
         (effective.sharpen, "sharpening"),
+        (effective.sun_rays, "sun rays"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))

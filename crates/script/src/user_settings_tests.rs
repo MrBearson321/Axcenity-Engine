@@ -148,19 +148,26 @@ fn each_lens_effect_has_its_own_setting_for_local_scripts() {
         &mut world,
         "scripts/lens.client.lua",
         "local s = game:GetService('UserGameSettings')
-        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen)
+        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen, s.SunRays)
         s.DepthOfField = Enum.DepthOfField.High
         s.Vignette = true
         s.FilmGrain = true
         s.ChromaticAberration = false
         s.Sharpen = true
-        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen)
+        s.SunRays = true
+        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen, s.SunRays)
         s.DepthOfField = Enum.DepthOfField.Low
         print(s.DepthOfField)
         print(pcall(function() s.DepthOfField = Enum.CloudQuality.Low end))",
     );
-    assert_eq!(printed[0], "Enum.DepthOfField.Off	false	false	false	false");
-    assert_eq!(printed[1], "Enum.DepthOfField.High	true	true	false	true");
+    assert_eq!(
+        printed[0],
+        "Enum.DepthOfField.Off	false	false	false	false	false"
+    );
+    assert_eq!(
+        printed[1],
+        "Enum.DepthOfField.High	true	true	false	true	true"
+    );
     assert_eq!(printed[2], "Enum.DepthOfField.Low");
     assert!(printed[3].starts_with("false	"), "{printed:?}");
     let change = runtime.take_graphics_change().unwrap();
@@ -172,6 +179,7 @@ fn each_lens_effect_has_its_own_setting_for_local_scripts() {
             film_grain: Some(true),
             chromatic_aberration: Some(false),
             sharpen: Some(true),
+            sun_rays: Some(true),
             ..GraphicsSettings::preset(Quality::Low)
         }
     );

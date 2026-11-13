@@ -1782,6 +1782,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How much crisper the edges between colors get, from 0 (no change) to 1 (strong). 0.5 by default.",
     ),
     (
+        ClassName::SunRaysEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no SunRaysEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::SunRaysEffect,
+        "Intensity",
+        "How bright the shafts are, from 0 (none) to 1 (strong). 0.25 by default.",
+    ),
+    (
+        ClassName::SunRaysEffect,
+        "Spread",
+        "How far the shafts reach from the sun across the picture, from 0 (a glow around it) to 1 (the whole way across). 0.5 by default.",
+    ),
+    (
         ClassName::MotionBlurEffect,
         "Enabled",
         "Whether it's drawn. Off (or with no MotionBlurEffect in Lighting) it costs nothing.",
@@ -2015,6 +2030,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::ParticleEmitter,
         "Rotation",
         "How far each particle is turned when it's born, in degrees.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookLayout",
+        "Cuts the Texture into a grid of frames that each particle shows one at a time, read left to right, then top to bottom: `Enum.ParticleFlipbookLayout.Grid2x2`, `Grid4x4` or `Grid8x8` (4, 16 or 64 frames). `None` (the default) shows the whole Texture. The built-in ParticleType pictures have no frames, so it needs a Texture.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookMode",
+        "Which frame a particle shows as it ages: `Enum.ParticleFlipbookMode.Loop` (the default: in order at FlipbookFramerate, then from the first again), `OneShot` (every frame once over its life, whatever the frame rate), `PingPong` (in order, then back) or `Random` (a frame at random, again at the frame rate).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookFramerate",
+        "How many flipbook frames a second each particle moves on (default 1). OneShot ignores it.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookStartRandom",
+        "When true, each particle starts on a frame of its own instead of the first (Loop and PingPong), so a puff of smoke doesn't animate in step.",
     ),
     (
         ClassName::ParticleEmitter,
@@ -5412,6 +5447,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SharpenEffect => {
             "Inside Lighting: makes the edges between colors crisper (useful with a render scale below 100%). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Sharpen)."
+        }
+        ClassName::SunRaysEffect => {
+            "Inside Lighting: shafts of light streaming from the sun past whatever is in front of it, such as bright sky between leaves or a window, worked out on screen from what's drawn (so they show only while the sun is in or near the view). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.SunRays)."
         }
         ClassName::MotionBlurEffect => {
             "Inside Lighting: streaks what moves across the view along its motion, as a camera's shutter does: parts that move, posed characters, and everything when the camera moves. What moves with the camera stays sharp. The first enabled one in Lighting is used. The player's graphics settings choose how finely it's drawn (UserGameSettings.MotionBlur); it's off at Low."
