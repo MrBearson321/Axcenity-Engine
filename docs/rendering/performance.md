@@ -173,7 +173,7 @@ What it says:
 - **On the CPU, particles cost about 0.1 ms of CPU time per 1,000**, mostly building, sorting and uploading their sprites in `ScenePipeline::draw`. On the GPU they cost a nearly fixed 0.10 to 0.13 ms (the sort's dispatches, whatever the count up to its 4,096 slots) and almost no CPU time.
 - **The GPU wins from about 3,000 particles**, so `scene::GPU_PARTICLE_THRESHOLD` is 3,000. At 2,000 the GPU path costs more GPU time than it saves on the CPU. Weaker GPUs pay more for the fixed cost, and weaker CPUs more per particle. The CPU's cap is 4,000 per emitter, so an emitter needing more than that has to be on the GPU anyway.
 - **100,000 particles take 0.23 ms to move and sort** (131,072 slots), and 1.5 ms to draw: filling overlapping squares, not moving them, is the cost there. That's the same per pixel as the CPU path would pay.
-- `RenderStats::gpu_particles` counts the slots kept, and their buffers (88 bytes a slot) count in the buffer bytes.
+- `RenderStats::gpu_particles` counts the slots kept, and their buffers (104 bytes a slot since R17.4b; 88 before) count in the buffer bytes.
 
 ## Where the frame goes (`profile_project`)
 

@@ -36,6 +36,16 @@ fn falling_emitter(speed: f64) -> (World, InstanceId, InstanceId) {
     (world, part, emitter)
 }
 
+/// The world's draw list, to add particles to.
+fn empty_list(world: &World) -> DrawList {
+    let camera = axcenity_render::Camera {
+        position: Vec3::ZERO,
+        look_at: Vec3::NEG_Z,
+        fov_y_degrees: 70.0,
+    };
+    crate::build_draw_list(world, &Assets::default(), camera)
+}
+
 fn emit_on(item: &str) -> Value {
     Value::EnumItem(EnumItem {
         enum_name: "ParticleEmitterEmitOn".to_owned(),
@@ -245,25 +255,42 @@ fn birth_and_collision_sub_emitters_give_off_at_their_events_only() {
 }
 
 #[test]
-fn colliding_emitters_and_sub_emitters_keep_their_particles_on_the_cpu() {
+fn big_colliding_emitters_land_on_the_gpu_and_sub_emitters_stay_on_the_cpu() {
     let (mut world, _, emitter) = falling_emitter(0.0);
     world
         .set_property(emitter, "Rate", Value::Number(50_000.0))
         .unwrap();
-    world
-        .set_property(emitter, "Collides", Value::Bool(true))
-        .unwrap();
+    for (name, value) in [
+        ("Collides", Value::Bool(true)),
+        ("Bounce", Value::Number(0.25)),
+        ("LifetimeLoss", Value::Number(0.5)),
+    ] {
+        world.set_property(emitter, name, value).unwrap();
+    }
     let mut particles = Particles::new();
     particles.set_gpu(true);
     particles.update(&world, 1.0 / 60.0);
-    particles.emit(&world, emitter, 10_000);
-    assert_eq!(particles.gpu_emitters(), 0);
-    assert!(particles.count() > 0);
-
-    // The same with a sub-emitter instead of Collides.
+    // R17.4b: on the GPU, told how its particles land on the prepass.
+    assert_eq!(particles.gpu_emitters(), 1);
+    let mut list = empty_list(&world);
+    particles.draw(&mut list, &world, &Assets::default());
+    assert_eq!(
+        list.particle_emitters[0].collision,
+        Some(ParticleCollision {
+            bounce: 0.25,
+            lifetime_loss: 0.5,
+        })
+    );
+    // Without Collides, they pass through.
     world
         .set_property(emitter, "Collides", Value::Bool(false))
         .unwrap();
+    particles.update(&world, 1.0 / 60.0);
+    let mut list = empty_list(&world);
+    particles.draw(&mut list, &world, &Assets::default());
+    assert_eq!(list.particle_emitters[0].collision, None);
+
+    // A sub-emitter keeps its parent (and itself) on the CPU.
     let sub = world.create(ClassName::ParticleEmitter).unwrap();
     world.set_parent(sub, Some(emitter)).unwrap();
     world.set_property(sub, "EmitOn", emit_on("Death")).unwrap();

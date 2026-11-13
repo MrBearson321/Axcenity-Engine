@@ -220,7 +220,7 @@ How much of the part's own velocity each particle starts with, from 0 (none, the
 ParticleEmitter.Collides: boolean
 ```
 
-On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. Colliding emitters move their particles on the CPU, at most 4,000 each. Default false.
+On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. A big emitter moving its particles on the GPU lands them only on what the camera sees. Default false.
 
 #### Bounce
 
