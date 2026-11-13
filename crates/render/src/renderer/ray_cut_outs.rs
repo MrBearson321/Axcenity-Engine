@@ -402,35 +402,6 @@ fn uv_buffer(device: &wgpu::Device, triangles: u32) -> wgpu::Buffer {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn alpha_is_averaged_over_the_pixels_each_texel_covers() {
-        // A 1024-wide texture whose left half is opaque and right half clear.
-        let (width, height) = (1024, 4);
-        let mut rgba = vec![0u8; width * height * 4];
-        for y in 0..height {
-            for x in 0..width / 2 {
-                rgba[(y * width + x) * 4 + 3] = 255;
-            }
-        }
-        let alpha = shrunk_alpha(&rgba, width as u32, height as u32);
-        let size = ALPHA_SIZE as usize;
-        assert_eq!(alpha.len(), size * size);
-        assert_eq!(alpha[0], 255, "the left edge is solid");
-        assert_eq!(alpha[size - 1], 0, "the right edge is a hole");
-        assert_eq!(alpha[size / 2 - 1], 255);
-        assert_eq!(alpha[size / 2], 0);
-    }
-
-    #[test]
-    fn a_texture_without_its_pixels_counts_as_solid() {
-        assert!(shrunk_alpha(&[], 8, 8).iter().all(|&a| a == 255));
-    }
-}
-
 /// The four bindings a pass that lets rays through cut-outs' holes reads
 /// (`ray_cut_outs.wgsl`), from `first`: the slots' [`CutOutRaw`]s, the
 /// meshes' texture coordinates, the alpha array and its sampler.
@@ -491,5 +462,34 @@ impl CutOuts {
                 resource: wgpu::BindingResource::Sampler(&self.sampler),
             },
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alpha_is_averaged_over_the_pixels_each_texel_covers() {
+        // A 1024-wide texture whose left half is opaque and right half clear.
+        let (width, height) = (1024, 4);
+        let mut rgba = vec![0u8; width * height * 4];
+        for y in 0..height {
+            for x in 0..width / 2 {
+                rgba[(y * width + x) * 4 + 3] = 255;
+            }
+        }
+        let alpha = shrunk_alpha(&rgba, width as u32, height as u32);
+        let size = ALPHA_SIZE as usize;
+        assert_eq!(alpha.len(), size * size);
+        assert_eq!(alpha[0], 255, "the left edge is solid");
+        assert_eq!(alpha[size - 1], 0, "the right edge is a hole");
+        assert_eq!(alpha[size / 2 - 1], 255);
+        assert_eq!(alpha[size / 2], 0);
+    }
+
+    #[test]
+    fn a_texture_without_its_pixels_counts_as_solid() {
+        assert!(shrunk_alpha(&[], 8, 8).iter().all(|&a| a == 255));
     }
 }
