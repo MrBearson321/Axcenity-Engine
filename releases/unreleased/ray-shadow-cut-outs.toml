@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "renderer"
+title = "No more black blotches under leaves with ray traced shadows"
+details = "Ray traced shadows and ambient occlusion traced cut-out leaves and grass as solid cards, so leaves lying on the ground shaded it in black, card-shaped patches that flickered. A cut-out right on a surface is no longer counted; farther ones still cast shadows."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
