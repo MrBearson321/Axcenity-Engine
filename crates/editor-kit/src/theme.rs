@@ -771,6 +771,26 @@ pub fn menu_entry(
     icon: Option<&str>,
     text: impl Into<String>,
 ) -> egui::Atoms<'static> {
+    menu_entry_tinted(ctx, icon, None, text)
+}
+
+/// [`menu_item`] with the icon drawn in `color`, such as an Insert menu's
+/// class colours.
+pub fn menu_item_tinted(
+    ctx: &egui::Context,
+    icon: &str,
+    color: Color32,
+    text: impl Into<String>,
+) -> egui::Atoms<'static> {
+    menu_entry_tinted(ctx, Some(icon), Some(color), text)
+}
+
+fn menu_entry_tinted(
+    ctx: &egui::Context,
+    icon: Option<&str>,
+    color: Option<Color32>,
+    text: impl Into<String>,
+) -> egui::Atoms<'static> {
     use egui::{AtomExt as _, IntoAtoms as _};
     let icon = icon.unwrap_or("");
     let font = egui::FontId::proportional(size::ICON_MEDIUM);
@@ -794,7 +814,7 @@ pub fn menu_entry(
     job.append(
         icon,
         indent,
-        egui::TextFormat::simple(font, Color32::PLACEHOLDER),
+        egui::TextFormat::simple(font, color.unwrap_or(Color32::PLACEHOLDER)),
     );
     let icon = egui::WidgetText::from(job)
         .atom_size(egui::vec2(MENU_ICON_COLUMN, size::ICON_MEDIUM))

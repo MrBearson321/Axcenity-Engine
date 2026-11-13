@@ -562,8 +562,13 @@ impl EditorApp {
                                 ui.separator();
                             }
                             for &class in classes {
-                                let label = format!("{} {}", theme::class_icon(class), class);
-                                if ui.selectable_label(active == Some(class), label).clicked() {
+                                let label = theme::menu_item(
+                                    ui.ctx(),
+                                    theme::class_icon(class),
+                                    class.to_string(),
+                                );
+                                let item = egui::Button::selectable(active == Some(class), label);
+                                if ui.add(item).clicked() {
                                     clicks.constraint = Some(Some(class));
                                 }
                             }
@@ -815,7 +820,10 @@ impl EditorApp {
                     .on_hover_text("Show the scene lit, or one of the renderer's debug views.");
                 egui::Popup::menu(&mode).show(|ui| {
                     for mode in ViewMode::all() {
-                        let item = egui::Button::selectable(self.view_mode == mode, mode.label());
+                        let item = egui::Button::selectable(
+                            self.view_mode == mode,
+                            theme::menu_entry(ui.ctx(), None, mode.label()),
+                        );
                         if ui.add(item).on_hover_text(mode.hint()).clicked() {
                             self.view_mode = mode;
                         }
