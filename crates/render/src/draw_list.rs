@@ -397,7 +397,20 @@ pub struct ParticleEmitter {
     /// Added to every new particle's velocity: the emitter's own velocity
     /// times its `VelocityInheritance` (roadmap R17.2b).
     pub inherit: Vec3,
+    /// Lands its particles on what the depth prepass shows in front of
+    /// them (roadmap R17.4b), or `None` to let them pass through.
+    pub collision: Option<ParticleCollision>,
     pub look: ParticleLook,
+}
+
+/// How GPU particles land on surfaces, as `scene`'s colliding particles
+/// do on the CPU (`ParticleEmitter.Bounce`, `LifetimeLoss`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ParticleCollision {
+    /// How much of their speed into a surface they keep, back out of it.
+    pub bounce: f32,
+    /// How much of their life each landing takes.
+    pub lifetime_loss: f32,
 }
 
 /// The shape particles are born in, filling the spawn transform's 1×1×1

@@ -284,6 +284,7 @@ impl ScenePipeline {
             edges: false,
             decals: false,
             sun_rays: false,
+            particle_collisions: false,
             sun_rays_pass: None,
             depth_of_field: false,
             motion_blur: false,
@@ -525,7 +526,7 @@ impl ScenePipeline {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
         let used = targets_used(
             &self.graphics,
-            self.edges || self.decals || self.sun_rays,
+            self.edges || self.decals || self.sun_rays || self.particle_collisions,
             self.depth_of_field,
             self.motion_blur,
         );
@@ -585,13 +586,21 @@ impl ScenePipeline {
         }
         // And sun rays, which tell sky from solid by its depth.
         let sun_rays = sun_rays::wanted(list, &self.graphics);
+        // And GPU particles that land on what it shows (roadmap R17.4b).
+        let particle_collisions = self.capabilities.compute_shaders
+            && list
+                .particle_emitters
+                .iter()
+                .any(|emitter| emitter.collision.is_some());
         if self.edges != list.edges.is_some()
             || self.sun_rays != sun_rays
+            || self.particle_collisions != particle_collisions
             || self.depth_of_field != depth_of_field
             || self.motion_blur != motion_blur
         {
             self.edges = list.edges.is_some();
             self.sun_rays = sun_rays;
+            self.particle_collisions = particle_collisions;
             self.depth_of_field = depth_of_field;
             self.motion_blur = motion_blur;
             self.fit_targets();
@@ -1159,7 +1168,21 @@ impl ScenePipeline {
         } else {
             self.gpu_particles
                 .get_or_insert_with(|| Box::new(gpu_particles::GpuParticles::new(&self.device)))
-                .prepare(&self.device, &self.queue, list, &emitter_textures);
+                .prepare(
+                    (&self.device, &self.queue),
+                    list,
+                    &emitter_textures,
+                    gpu_particles::PrepassView {
+                        view_proj: glam::Mat4::from_cols_array_2d(&frame_uniform.view_proj),
+                        inv_view_proj: glam::Mat4::from_cols_array_2d(&frame_uniform.inv_view_proj),
+                        view: glam::Mat4::from_cols_array_2d(&frame_uniform.view),
+                        size: self.frame_targets.size,
+                    },
+                    self.frame_targets
+                        .occlusion
+                        .as_ref()
+                        .map(|targets| (&targets.depth_view, &targets.normal_view)),
+                );
         }
 
         // The spot and point lights' shadow maps exist only while one of

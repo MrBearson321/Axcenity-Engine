@@ -32,6 +32,7 @@ fn emitter(at: Vec3, spread_out: f32, births: u32, capacity: u32) -> ParticleEmi
         shape: SpawnShape::default(),
         in_out: crate::ShapeInOut::Outward,
         inherit: Vec3::ZERO,
+        collision: None,
         look: ParticleLook {
             color: [[1.0, 0.0, 0.0]; 2],
             transparency: [0.0; 2],
@@ -636,4 +637,68 @@ fn flipbook_modes_pick_their_frames_by_age() {
         ..book(Loop, false)
     };
     assert_eq!(still.frame(5.0, 10.0, 1), 0);
+}
+
+/// R17.4b: a colliding emitter's particles land on the wall the prepass
+/// shows in front of them and stay there, where others pass behind it,
+/// and a lifetime loss of 1 kills them there.
+#[test]
+fn colliding_gpu_particles_land_on_the_wall_in_front_of_them() {
+    let Some(mut renderer) = renderer() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // A block whose face toward the camera is at z = -10.
+    let wall = big_block_at(Vec3::new(0.0, 0.0, -12.0));
+    let start = Vec3::new(0.0, 0.0, -6.0);
+    let thrown = |collision| {
+        let mut thrown = emitter(start, 0.0, 50, 1024);
+        thrown.direction = Vec3::NEG_Z;
+        thrown.speed = 10.0;
+        thrown.look.size = [1.0; 2];
+        thrown.collision = collision;
+        thrown
+    };
+    let red = |pixel: [u8; 4]| pixel[0] > 100 && pixel[1] < 60;
+    for (collision, lands) in [
+        (
+            Some(crate::ParticleCollision {
+                bounce: 0.0,
+                lifetime_loss: 0.0,
+            }),
+            true,
+        ),
+        (None, false),
+        // Dying where they land.
+        (
+            Some(crate::ParticleCollision {
+                bounce: 0.0,
+                lifetime_loss: 1.0,
+            }),
+            false,
+        ),
+    ] {
+        let mut list = list_of(vec![wall.clone()]);
+        let mut particles = thrown(collision);
+        list.particle_emitters = vec![particles.clone()];
+        assert!(red(pixel_at(&mut renderer, &list, start)), "born");
+        // Two steps of 0.3 seconds: 3 studs short of the wall, then 2
+        // past its face.
+        for step in 2..=4 {
+            particles.step = step;
+            particles.born = 50;
+            particles.births = 0;
+            particles.seconds = 0.3;
+            list.particle_emitters = vec![particles.clone()];
+            renderer.render(&list).unwrap();
+        }
+        let face = Vec3::new(0.0, 0.0, -10.0);
+        assert_eq!(
+            red(pixel_at(&mut renderer, &list, face)),
+            lands,
+            "collision {collision:?}"
+        );
+        // A new key for the next emitter, so it starts afresh.
+        renderer.render(&list_of(Vec::new())).unwrap();
+    }
 }

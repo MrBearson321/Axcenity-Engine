@@ -10,9 +10,11 @@
 //! A ParticleEmitter inside another whose `EmitOn` is Birth, Death or
 //! Collision is a sub-emitter: it gives off `EmitCount` particles where
 //! each of its parent's particles is born, dies or lands, and nothing by
-//! its Rate. Particles nothing is read back for can't have either, so an
-//! emitter that collides, has sub-emitters or is one moves its particles
-//! on the CPU.
+//! its Rate. Nothing is read back from GPU particles, so an emitter that
+//! has sub-emitters or is one moves its particles on the CPU. A big
+//! colliding emitter can move on the GPU, landing there on what the depth
+//! prepass shows (R17.4b, `render::ParticleCollision`): only what the
+//! camera sees stops those particles.
 
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use axcenity_render::glam::Vec3;

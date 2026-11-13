@@ -32,8 +32,8 @@ use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     CURVE_ENTRIES, DrawList, Flipbook, FlipbookFrame, FlipbookMode, MAX_GPU_PARTICLES,
-    ParticleCurves, ParticleEmitter, ParticleLook, ShapeInOut, SpawnKind, SpawnShape, Sprite,
-    TextureSource, curve_at,
+    ParticleCollision, ParticleCurves, ParticleEmitter, ParticleLook, ShapeInOut, SpawnKind,
+    SpawnShape, Sprite, TextureSource, curve_at,
 };
 
 use crate::draw_list::image_texture;
@@ -134,6 +134,7 @@ impl GpuEmitter {
                 shape: SpawnShape::default(),
                 in_out: ShapeInOut::default(),
                 inherit: Vec3::ZERO,
+                collision: None,
                 look: ParticleLook::default(),
             },
             pending: 0,
@@ -451,7 +452,7 @@ impl Particles {
         }
         let subs = subs_of(world, instance);
         let mut settings = Settings::read(instance);
-        settings.cpu_only = cpu_only(world, instance, &settings, &subs);
+        settings.cpu_only = cpu_only(world, instance, &subs);
         let Some(transform) = parent_transform(world, instance) else {
             return;
         };
@@ -547,7 +548,7 @@ impl Particles {
             .map(|(id, instance)| {
                 let subs = subs_of(world, instance);
                 let mut settings = Settings::read(instance);
-                settings.cpu_only = cpu_only(world, instance, &settings, &subs);
+                settings.cpu_only = cpu_only(world, instance, &subs);
                 let mount = crate::mount_of(world, instance);
                 Live {
                     id,
@@ -1045,6 +1046,10 @@ fn step_gpu(
     draw.air = air;
     draw.shape = settings.shape;
     draw.in_out = settings.in_out;
+    draw.collision = settings.collides.then_some(ParticleCollision {
+        bounce: settings.landing.bounce,
+        lifetime_loss: settings.landing.lifetime_loss,
+    });
     draw.inherit = inherit;
 }
 
@@ -1082,10 +1087,12 @@ struct Live {
     subs: Vec<Sub>,
 }
 
-/// True if `instance`'s particles must stay on the CPU: it Collides, has
-/// sub-emitters or is one (roadmap R17.4).
-fn cpu_only(world: &World, instance: &Instance, settings: &Settings, subs: &[Sub]) -> bool {
-    settings.collides || !subs.is_empty() || is_sub(world, instance)
+/// True if `instance`'s particles must stay on the CPU, where their
+/// births, deaths and landings can set off sub-emitters: it has
+/// sub-emitters or is one (roadmap R17.4). A colliding emitter can move
+/// on the GPU, landing on the depth prepass there (R17.4b).
+fn cpu_only(world: &World, instance: &Instance, subs: &[Sub]) -> bool {
+    !subs.is_empty() || is_sub(world, instance)
 }
 
 /// How far across the box a free-standing emitter gives off particles
