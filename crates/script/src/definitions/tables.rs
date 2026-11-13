@@ -1576,6 +1576,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "EnumRayTracedAmbientOcclusion",
                 doc: "Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.",
             },
+            Field {
+                name: "RayTracedGlobalIllumination",
+                ty: "EnumRayTracedGlobalIllumination",
+                doc: "Hardware ray traced global illumination: Off, Low (32 light probes a frame, 64 rays each), Medium (64, 128 rays) or High (128, 256 rays). Off at every preset. On, the world's LightProbeVolumes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts; it does nothing without a LightProbeVolume. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).",
+            },
         ],
         operators: &[],
         methods: &[],

@@ -69,6 +69,21 @@ struct MeshBlas {
     last_used: u64,
 }
 
+/// What a ray that hits a TLAS slot's item finds, for ray traced GI
+/// (`ray_gi.wgsl`'s `gi_surfaces`, two `vec4`s a slot): its color times its
+/// texture's average, then its glow, both linear light.
+pub(super) type SurfaceRaw = [[f32; 4]; 2];
+
+/// The TLAS slots' [`SurfaceRaw`]s on the GPU, kept while ray traced GI
+/// asks for them.
+pub(super) struct Surfaces {
+    pub(super) buffer: wgpu::Buffer,
+    capacity: usize,
+    written: Vec<SurfaceRaw>,
+    /// Each base color texture's average color (linear), by its key.
+    texture_colors: FxHashMap<u64, [f32; 3]>,
+}
+
 /// One TLAS slot: what's in it, compared frame to frame.
 #[derive(Clone, Copy, PartialEq)]
 struct Slot {
@@ -85,6 +100,8 @@ pub(super) struct RayScene {
     slots: Vec<Slot>,
     /// Whether the TLAS has been built with `slots`.
     built: bool,
+    /// What rays hitting each slot find, while ray traced GI is on.
+    pub(super) surfaces: Option<Surfaces>,
     pub(super) stats: RayTracingStats,
 }
 
@@ -97,6 +114,7 @@ impl RayScene {
             capacity,
             slots: Vec::new(),
             built: false,
+            surfaces: None,
             stats: RayTracingStats::default(),
         }
     }
@@ -109,17 +127,22 @@ impl RayScene {
     /// Brings the structures up to date with this frame's `draws`, recording
     /// their builds into `encoder`: new meshes' BLASes within the budget,
     /// and the TLAS if any slot changed. `reach` is the ray tracing
-    /// distance from `camera`; `mesh` finds an uploaded mesh.
+    /// distance from `camera`; `mesh` finds an uploaded mesh. With
+    /// `surfaces`, each slot's [`SurfaceRaw`] is kept up to date too.
     pub(super) fn prepare<'a>(
         &mut self,
-        device: &wgpu::Device,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (frame, camera, reach): (u64, Vec3, f32),
+        (frame, camera, reach, surfaces): (u64, Vec3, f32, bool),
         draws: &[Draw],
         mesh: impl Fn(MeshKey) -> Option<&'a GpuMesh>,
     ) {
+        if !surfaces {
+            self.surfaces = None;
+        }
         // The items wanted, and the meshes they need.
         let mut wanted: Vec<(MeshKey, &'a GpuMesh, Mat4, u8)> = Vec::new();
+        let mut wanted_surfaces: Vec<SurfaceRaw> = Vec::new();
         for draw in draws {
             let item = draw.item;
             // The copy fading out of a level-of-detail switch, and posed
@@ -138,6 +161,10 @@ impl RayScene {
                 continue;
             }
             wanted.push((key, gpu, item.transform, mask_of(&item.material, draw)));
+            if surfaces {
+                let table = self.surfaces.get_or_insert_with(|| Surfaces::new(device));
+                wanted_surfaces.push(surface_of(&item.material, &mut table.texture_colors));
+            }
         }
 
         // New or changed meshes get a BLAS, built within the budget.
@@ -189,15 +216,31 @@ impl RayScene {
         }
 
         // The frame's slots: items whose BLAS is (or is being) built.
-        let slots: Vec<Slot> = wanted
-            .iter()
-            .filter(|(key, ..)| self.blases.get(key).is_some_and(|entry| entry.built))
-            .map(|&(mesh, _, transform, mask)| Slot {
-                mesh,
-                transform: rows_3x4(transform),
-                mask,
+        let in_slots: Vec<usize> = (0..wanted.len())
+            .filter(|&index| {
+                self.blases
+                    .get(&wanted[index].0)
+                    .is_some_and(|entry| entry.built)
             })
             .collect();
+        let slots: Vec<Slot> = in_slots
+            .iter()
+            .map(|&index| {
+                let (mesh, _, transform, mask) = wanted[index];
+                Slot {
+                    mesh,
+                    transform: rows_3x4(transform),
+                    mask,
+                }
+            })
+            .collect();
+        if let Some(table) = &mut self.surfaces {
+            let raw: Vec<SurfaceRaw> = in_slots
+                .iter()
+                .map(|&index| wanted_surfaces[index])
+                .collect();
+            table.write(device, queue, raw);
+        }
         let count = slots.len() as u32;
         if count > self.capacity {
             self.capacity = count.next_power_of_two();
@@ -296,31 +339,104 @@ impl ScenePipeline {
 }
 
 /// Makes, updates or frees `scene` (a [`ScenePipeline`]'s) for this frame's
-/// `draws`, seen from `camera`: it's freed when nothing `traces`. Returns
+/// `draws`, seen from `camera`: it's freed when nothing `traces`. With
+/// `surfaces` (ray traced GI), each slot's [`SurfaceRaw`] is kept too. Returns
 /// whether it recorded anything (for the GPU timer's Acceleration
 /// structures pass). Takes the pipeline's fields, not the pipeline, so the
 /// frame's other borrows of it can stay.
 pub(super) fn prepare_scene(
     scene: &mut Option<Box<RayScene>>,
     pipeline: (
-        &wgpu::Device,
+        (&wgpu::Device, &wgpu::Queue),
         &super::Meshes,
         &FxHashMap<u64, super::Cached<GpuMesh>>,
     ),
     encoder: &mut wgpu::CommandEncoder,
-    (traces, frame, camera, reach): (bool, u64, Vec3, f32),
+    (traces, frame, camera, reach, surfaces): (bool, u64, Vec3, f32, bool),
     draws: &[Draw],
 ) -> bool {
-    let (device, meshes, custom_meshes) = pipeline;
+    let ((device, queue), meshes, custom_meshes) = pipeline;
     if !traces {
         *scene = None;
         return false;
     }
     let scene = scene.get_or_insert_with(|| Box::new(RayScene::new(device)));
-    scene.prepare(device, encoder, (frame, camera, reach), draws, |key| {
-        gpu_mesh_in(meshes, custom_meshes, key)
-    });
+    scene.prepare(
+        (device, queue),
+        encoder,
+        (frame, camera, reach, surfaces),
+        draws,
+        |key| gpu_mesh_in(meshes, custom_meshes, key),
+    );
     scene.stats.rebuilt || scene.stats.meshes > 0
+}
+
+impl Surfaces {
+    fn new(device: &wgpu::Device) -> Self {
+        let capacity = 256;
+        Self {
+            buffer: surface_buffer(device, capacity),
+            capacity,
+            written: Vec::new(),
+            texture_colors: FxHashMap::default(),
+        }
+    }
+
+    /// Writes `raw` (one a slot) to the GPU if it changed, growing the
+    /// buffer to fit.
+    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, raw: Vec<SurfaceRaw>) {
+        if raw.len() > self.capacity {
+            self.capacity = raw.len().next_power_of_two();
+            self.buffer = surface_buffer(device, self.capacity);
+            self.written.clear();
+        }
+        if raw != self.written && !raw.is_empty() {
+            queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&raw));
+        }
+        self.written = raw;
+    }
+}
+
+fn surface_buffer(device: &wgpu::Device, slots: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("ray traced surfaces"),
+        size: (slots * size_of::<SurfaceRaw>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+/// What a ray hitting an item of `material` finds: its color (times its
+/// base color texture's average, worked out once a texture into
+/// `texture_colors`) and its glow, in linear light.
+fn surface_of(material: &Material, texture_colors: &mut FxHashMap<u64, [f32; 3]>) -> SurfaceRaw {
+    let mut color = super::lighting::linear_color(material.base_color);
+    if let Some(texture) = &material.base_color_texture {
+        let average = *texture_colors
+            .entry(texture.key())
+            .or_insert_with(|| average_color(texture.rgba()));
+        color *= Vec3::from(average);
+    }
+    let glow = super::lighting::linear_color(material.emissive);
+    [color.extend(0.0).to_array(), glow.extend(0.0).to_array()]
+}
+
+/// The average of sRGB `rgba` pixels in linear light, from at most about
+/// 4,096 of them spread over the picture. Mid grey if there are none.
+fn average_color(rgba: &[u8]) -> [f32; 3] {
+    let pixels = rgba.len() / 4;
+    if pixels == 0 {
+        return [0.5; 3];
+    }
+    let step = (pixels / 4096).max(1);
+    let mut sum = Vec3::ZERO;
+    let mut count = 0.0;
+    for pixel in rgba.chunks_exact(4).step_by(step) {
+        let srgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
+        sum += super::lighting::linear_color(srgb);
+        count += 1.0;
+    }
+    (sum / count).to_array()
 }
 
 /// Which kinds of ray see an item (the instance mask): see the `MASK_*`s.

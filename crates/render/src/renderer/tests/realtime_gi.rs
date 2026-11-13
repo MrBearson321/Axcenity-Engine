@@ -8,10 +8,10 @@ use crate::draw_list::{LightProbeGrid, LightProbeVolume};
 use crate::graphics::Capabilities;
 
 /// Reaching below the floor, so the floor is inside it.
-const VOLUME_MIDDLE: Vec3 = Vec3::new(0.0, 1.5, 0.0);
+pub(super) const VOLUME_MIDDLE: Vec3 = Vec3::new(0.0, 1.5, 0.0);
 const VOLUME_HALF: Vec3 = Vec3::new(3.0, 2.0, 3.0);
 const COUNTS: [u32; 3] = [2, 2, 2];
-const PROBES: u32 = 8;
+pub(super) const PROBES: u32 = 8;
 
 fn block(middle: Vec3, size: Vec3, base_color: [f32; 3]) -> DrawItem {
     let mut block = item(Shape::Block, middle, 1.0);
@@ -22,7 +22,7 @@ fn block(middle: Vec3, size: Vec3, base_color: [f32; 3]) -> DrawItem {
 
 /// A white floor and a red wall at +X facing the volume, under the default
 /// sky, lit by a sun from `toward` (the way to the sun).
-fn yard(toward: Vec3) -> DrawList {
+pub(super) fn yard(toward: Vec3) -> DrawList {
     let mut list = list_of(vec![
         block(
             Vec3::new(0.0, -0.25, 0.0),
@@ -45,9 +45,9 @@ fn yard(toward: Vec3) -> DrawList {
 }
 
 /// On the wall's face toward the volume.
-const SUN_ON_WALL: Vec3 = Vec3::new(-1.0, 1.0, 0.3);
+pub(super) const SUN_ON_WALL: Vec3 = Vec3::new(-1.0, 1.0, 0.3);
 /// Behind the wall, so its face toward the volume is in its own shadow.
-const SUN_BEHIND_WALL: Vec3 = Vec3::new(1.0, 1.0, 0.3);
+pub(super) const SUN_BEHIND_WALL: Vec3 = Vec3::new(1.0, 1.0, 0.3);
 
 /// Medium shadows, as the probe camera draws them at any quality, so its
 /// faces and a bake's are drawn alike.
@@ -59,7 +59,7 @@ fn settings(realtime_gi: bool) -> GraphicsSettings {
     }
 }
 
-fn probe_centers() -> Vec<Vec3> {
+pub(super) fn probe_centers() -> Vec<Vec3> {
     let mut centers = Vec::new();
     for z in 0..COUNTS[2] {
         for y in 0..COUNTS[1] {
@@ -73,7 +73,11 @@ fn probe_centers() -> Vec<Vec3> {
     centers
 }
 
-fn bake(device: &wgpu::Device, queue: &wgpu::Queue, list: &DrawList) -> Vec<[[f32; 3]; 4]> {
+pub(super) fn bake(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    list: &DrawList,
+) -> Vec<[[f32; 3]; 4]> {
     TextureRenderer::bake_light_probes(
         device,
         queue,
@@ -86,7 +90,7 @@ fn bake(device: &wgpu::Device, queue: &wgpu::Queue, list: &DrawList) -> Vec<[[f3
 }
 
 /// `list` with a volume around the probes, baked as `probes`.
-fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawList {
+pub(super) fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawList {
     let mut list = list.clone();
     list.light_probe_volumes.push(LightProbeVolume {
         center: VOLUME_MIDDLE,
@@ -108,7 +112,7 @@ fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawList {
 }
 
 /// The probes in the renderer's buffer now.
-fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
+pub(super) fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
     let scene = &renderer.scene;
     let source = scene.light_probes.buffer();
     let buffer = scene.device.create_buffer(&wgpu::BufferDescriptor {
@@ -141,7 +145,7 @@ fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
 }
 
 /// The largest difference between two sets of probes' coefficients.
-fn difference(a: &[[[f32; 3]; 4]], b: &[[[f32; 3]; 4]]) -> f32 {
+pub(super) fn difference(a: &[[[f32; 3]; 4]], b: &[[[f32; 3]; 4]]) -> f32 {
     assert_eq!(a.len(), b.len());
     a.iter()
         .flatten()

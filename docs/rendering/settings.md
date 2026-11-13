@@ -37,9 +37,10 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Ray tracing distance (50 to 5,000 studs; used only on a GPU that can ray trace, by a ray traced effect) | 150 studs | 250 | 400 | 800 |
 | Ray traced shadows (rays a pixel for soft shadows; only on a GPU that can ray trace, [ray-tracing.md](ray-tracing.md)) | Off | Off | Off | Off |
 | Ray traced ambient occlusion (2, 4 or 8 rays a pixel at half size; only on a GPU that can ray trace) | Off | Off | Off | Off |
+| Ray traced GI (32, 64 or 128 light probes a frame with 64, 128 or 256 rays; only on a GPU that can ray trace, in Real-time GI's place) | Off | Off | Off | Off |
 | Projected decals (follow the preset; no override) | none | 128 within 150 studs | 512 within 300 | 1024 within 600 |
 
-`GraphicsSettings::ray_traced()` is the editor's **Use the ray traced look**: Hardware ray tracing, ray traced shadows and AO at Medium, shadow and reflection quality at least High and TAA, keeping every other field; `without_ray_traced_effects()` clears the two effect overrides ([ray-tracing.md](ray-tracing.md)).
+`GraphicsSettings::ray_traced()` is the editor's **Use the ray traced look**: Hardware ray tracing, ray traced shadows and AO at Medium, shadow and reflection quality at least High and TAA, keeping every other field; `without_ray_traced_effects()` clears the ray traced effects' overrides (shadows, AO, GI) ([ray-tracing.md](ray-tracing.md)).
 
 High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality.Automatic`) means the quality follows the machine: `GraphicsSettings::automatic(&Capabilities)` is High, or Low on a software adapter (`DeviceType::Cpu`), with no overrides. It's what a machine starts with (`default_for`), saved as `"automatic": true`, and picked again for the machine on each start (`player::graphics::fit_machine`).
 

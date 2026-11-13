@@ -81,6 +81,17 @@ pub(super) const VOLUMETRIC_FOG_SHADER: &str = concat!(
     include_str!("../lighting.wgsl"),
     include_str!("../volumetric_fog.wgsl")
 );
+/// Ray traced GI's pass (`ray_gi.wgsl`, renderer/ray_gi.rs): ray queries
+/// turned on first, then the sky's colors, the fog and the shared lighting
+/// (for the frame's bindings, its sky and its light probes).
+pub(super) const RAY_GI_SHADER: &str = concat!(
+    "enable wgpu_ray_query;\n",
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../ray_gi.wgsl")
+);
 /// The shader that bakes the sky's environment maps: the sky's colors,
 /// then `environment.wgsl`.
 pub(super) const ENVIRONMENT_SHADER: &str = concat!(

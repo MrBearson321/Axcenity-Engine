@@ -40,7 +40,7 @@ Click **Compare** on the badge to see the view without the ray traced effects, a
 
 - **Ray traced ambient occlusion** darkens corners, gaps and the ground under objects. Lighting's **AmbientOcclusion** still sets how strong that is.
 - **The sky.** A sky picture (**Lighting > SkyImage**, such as the default sky) looks real but keeps its own colours. Changing ClockTime moves the sun and darkens the picture toward night, but sunsets stay the picture's. For a sky that turns orange at sunset and dark at night, click **Follow time of day** under the SkyImage row. It adds an **Atmosphere**.
-- **Light Probes** and **Reflection Probes** still give bounced light and reflections. Bake them after big changes with **Bake Probes** on the World tab.
+- **Bounced light.** Light Probes give bounced light. Bake them with **Bake Probes** on the World tab. With **Ray traced GI** (Settings > Graphics > Ray tracing) on, rays keep relighting them as things move and the sun goes down, so a red wall throws red light and a room darkens when its door closes. Start at Low: it costs more the more probes your world has. Reflection Probes still give reflections; bake them after big changes.
 
 ## What it costs
 
@@ -48,7 +48,7 @@ Each effect is timed in the **Profiler** panel's Graphics tab. **Low** effects a
 
 ## In your game
 
-Players choose the same in the game's own graphics settings. A LocalScript can set them through `UserGameSettings`: `RayTracedShadows` and `RayTracedAmbientOcclusion`. Every effect is off unless a player turns it on, because not every card can ray trace.
+Players choose the same in the game's own graphics settings. A LocalScript can set them through `UserGameSettings`: `RayTracedShadows`, `RayTracedAmbientOcclusion` and `RayTracedGlobalIllumination`. Every effect is off unless a player turns it on, because not every card can ray trace.
 
 ## What to look for
 
