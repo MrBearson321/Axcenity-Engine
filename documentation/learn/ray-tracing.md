@@ -28,7 +28,7 @@ While Hardware ray tracing is on, a small badge sits at the bottom right of the 
 | **Ray tracing: kept off by AXCENITY_RAY_TRACING=0** | The editor was started from a window where that variable was set, which keeps ray tracing off. Click **Restart now**, or open a new terminal window to start the editor from. |
 | **Ray tracing: not on this GPU** | This card or its driver can't ray trace. Everything is drawn the usual way. |
 
-Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.
+Click **Compare** on the badge to see the view without the ray traced effects, and again to bring them back: the best way to see what they add. Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.
 
 ## Get good shadows
 
@@ -49,3 +49,14 @@ Each effect is timed in the **Profiler** panel's Graphics tab. **Low** effects a
 ## In your game
 
 Players choose the same in the game's own graphics settings. A LocalScript can set them through `UserGameSettings`: `RayTracedShadows` and `RayTracedAmbientOcclusion`. Every effect is off unless a player turns it on, because not every card can ray trace.
+
+## What to look for
+
+Ray traced shadows and ambient occlusion are about accuracy, so in a sunny open scene they look close to good shadow maps. The difference shows up close:
+
+- **Where things touch.** The ground right under a car, a porch step or a crate gets a tight, dark contact shadow instead of a gap or a blur.
+- **Soft edges that follow distance.** A post's shadow is sharp at its foot and softens toward its tip.
+- **Corners and gaps.** Under eaves, between boards and beneath furniture, ambient occlusion comes from what's really there, even just off screen.
+- **Thin things.** Fence rails, wires and poles keep their shadows, which shadow maps can lose far from the camera.
+
+Bounced light that changes with the world (Ray traced GI) makes the biggest visible difference, especially indoors and in shade.

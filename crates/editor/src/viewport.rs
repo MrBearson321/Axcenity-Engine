@@ -743,6 +743,9 @@ pub struct Viewport {
     /// The ray tracing badge's Restart now was clicked; the app restarts
     /// the editor (`take_restart_request`).
     restart_requested: bool,
+    /// The ray tracing badge's Compare is on: the view is drawn without its
+    /// ray traced effects, to see what they add.
+    rays_hidden: bool,
     /// The LOD inspector's preview: this item (`scene::item_id`) drawn at
     /// this level whatever its size. Only what's drawn changes.
     pub lod_preview: Option<(u64, usize)>,
@@ -858,6 +861,7 @@ impl Viewport {
             overdraw: None,
             measure_overdraw: false,
             restart_requested: false,
+            rays_hidden: false,
             lod_preview: None,
             swing: None,
             grid_labels: Default::default(),
@@ -1437,8 +1441,15 @@ impl Viewport {
                 texture_id,
             }
         });
-        // Does nothing unless the settings changed.
-        target.renderer.set_graphics(graphics);
+        // Does nothing unless the settings changed. While the ray tracing
+        // badge's Compare is on, the effects are left out of what's drawn.
+        if self.rays_hidden {
+            target
+                .renderer
+                .set_graphics(&graphics.without_ray_traced_effects());
+        } else {
+            target.renderer.set_graphics(graphics);
+        }
         target.renderer.set_debug_view(view_mode.debug_view());
         target.renderer.preview_lod(self.lod_preview);
         self.frozen_culling = (overlays.culling || view_mode.holds_culling())
@@ -1661,10 +1672,14 @@ impl Viewport {
             graphics.ray_tracing(),
             axcenity_render::adapters::adapter_can_ray_trace(),
             axcenity_render::adapters::ray_tracing_override(),
+            self.rays_hidden,
             &render.stats.ray_tracing,
-        ) && ray_badge::paint(ui, rect, &badge)
-        {
-            self.restart_requested = true;
+        ) {
+            match ray_badge::paint(ui, rect, &badge) {
+                Some(ray_badge::Click::Restart) => self.restart_requested = true,
+                Some(ray_badge::Click::Compare) => self.rays_hidden = !self.rays_hidden,
+                None => {}
+            }
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(
