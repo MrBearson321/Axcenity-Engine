@@ -73,6 +73,29 @@ impl EditorApp {
         }
     }
 
+    /// A Toolbox card was dragged onto the Assets panel: the Toolbox gets
+    /// it into the project, and the panel shows it once it's in (G1).
+    pub(in crate::app) fn drop_toolbox_card_on_assets(
+        &mut self,
+        ctx: &egui::Context,
+        card: &CardDrag,
+    ) {
+        if self.playing() {
+            self.output
+                .error("Press Stop to get assets from the Toolbox.");
+            return;
+        }
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            self.output
+                .error("Open a project to get assets from the Toolbox.");
+            return;
+        };
+        if !self.toolbox.get_dropped(ctx, &folder, card, Target::Assets) {
+            self.output
+                .error(format!("Could not get {} from the Toolbox now.", card.name));
+        }
+    }
+
     pub(in crate::app) fn toolbox_action(&mut self, action: ToolboxAction) {
         // Whatever the Toolbox did may have downloaded or installed something.
         self.inventory.refresh();
@@ -91,6 +114,7 @@ impl EditorApp {
                         self.terrain_action(TerrainAction::UseTextureSet(layer, entry));
                     }
                     Some(Target::Drop(spot)) => self.drop_asset(&entry, Some(drop_target(spot))),
+                    Some(Target::Assets) => self.asset_browser.reveal(&entry.path),
                     None => {}
                 }
             }
@@ -100,13 +124,17 @@ impl EditorApp {
             }
             ToolboxAction::Sound { path, target } => {
                 self.asset_browser.refresh();
-                if let Some(Target::Drop(spot)) = target {
-                    let entry = AssetEntry {
-                        kind: AssetKind::Audio,
-                        name: display_name(&path),
-                        path,
-                    };
-                    self.drop_asset(&entry, Some(drop_target(spot)));
+                match target {
+                    Some(Target::Drop(spot)) => {
+                        let entry = AssetEntry {
+                            kind: AssetKind::Audio,
+                            name: display_name(&path),
+                            path,
+                        };
+                        self.drop_asset(&entry, Some(drop_target(spot)));
+                    }
+                    Some(Target::Assets) => self.asset_browser.reveal(&path),
+                    _ => {}
                 }
             }
             ToolboxAction::ImportModel { file, key, variant } => {
@@ -234,6 +262,16 @@ mod tests {
             path: "assets/audio/rain-1a2b.ogg".to_owned(),
             target: None,
         });
+        assert_eq!(app.world.get(part).unwrap().children().len(), children);
+
+        // Dragged onto the Assets panel: shown there, nothing placed.
+        let selected = app.selected;
+        app.toolbox_action(ToolboxAction::Sound {
+            path: "assets/audio/rain-1a2b.ogg".to_owned(),
+            target: Some(Target::Assets),
+        });
+        assert_eq!(app.asset_browser.picked(), ["assets/audio/rain-1a2b.ogg"]);
+        assert_eq!(app.selected, selected);
         assert_eq!(app.world.get(part).unwrap().children().len(), children);
         let _ = std::fs::remove_dir_all(&temp);
     }
