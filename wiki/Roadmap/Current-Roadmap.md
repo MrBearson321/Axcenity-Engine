@@ -87,7 +87,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 
 ## Competitive development roadmap (Paul's of 2026-11-12)
 
-`docs/research/competitive-development-roadmap.md` carries the G items forward and adds R12–R20 (asset management, build profiles and reports, Model Studio with sculpting and baking back, large worlds, a VFX editor, GI, online services and platforms as documents only). R17's design (D1–D7, stages R17.1–R17.5: curves as `NumberSequence`/`ColorSequence`, the effect asset as a prefab, a module stack before a node graph) is `docs/research/vfx-editor.md`. R17.1 (curves over life on both particle paths) is in a PR. Its section 11 is the living feature matrix against Unreal, Godot, s&box and Unity; section 12 is the order of work with each item's status. Update both when an item lands.
+`docs/research/competitive-development-roadmap.md` carries the G items forward and adds R12–R20 (asset management, build profiles and reports, Model Studio with sculpting and baking back, large worlds, a VFX editor, GI, online services and platforms as documents only). R17's design (D1–D7, stages R17.1–R17.5: curves as `NumberSequence`/`ColorSequence`, the effect asset as a prefab, a module stack before a node graph) is `docs/research/vfx-editor.md`. R18's options and stages (probe overlay, invalid probes, sky light kept apart, placement and real-time GI tiers, beside RT2) are `docs/research/global-illumination.md`. R17.1 (curves over life on both particle paths) landed in #284. Its section 11 is the living feature matrix against Unreal, Godot, s&box and Unity; section 12 is the order of work with each item's status. Update both when an item lands.
 
 ## Feature plan (unified plan, Phases 1–93)
 
