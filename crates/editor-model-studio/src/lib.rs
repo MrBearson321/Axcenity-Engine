@@ -169,6 +169,9 @@ pub struct StudioDoc {
     pub paint_revision: u64,
     /// The revision last saved.
     saved: u64,
+    /// True once a mask changed since the last save (R15.1b): masks are
+    /// saved but aren't undo steps, so they don't change the revision.
+    masks_changed: bool,
     /// The last operation, until anything else is done.
     pub last_op: Option<LastOp>,
     /// The object and undo step a modifier change under way goes into.
@@ -199,6 +202,7 @@ impl StudioDoc {
             revision: 1,
             paint_revision: 0,
             saved: if saved { 1 } else { 0 },
+            masks_changed: false,
             last_op: None,
             modifier_edit: None,
             reference: None,
@@ -206,11 +210,26 @@ impl StudioDoc {
     }
 
     pub fn unsaved(&self) -> bool {
-        self.revision != self.saved
+        self.revision != self.saved || self.masks_changed
     }
 
     pub fn mark_saved(&mut self) {
         self.saved = self.revision;
+        self.masks_changed = false;
+    }
+
+    /// Puts `mask` (one value per vertex) on object `index`, to be saved
+    /// with it (R15.1b). Not an undo step.
+    pub fn set_mask(&mut self, index: usize, mask: &[f32]) {
+        let Some(object) = self.model.objects.get_mut(index) else {
+            return;
+        };
+        let masked = mask.iter().any(|&value| value > 0.0);
+        let kept: &[f32] = if masked { mask } else { &[] };
+        if object.mask != kept {
+            object.mask = kept.to_vec();
+            self.masks_changed = true;
+        }
     }
 
     /// Its file's name, for the tab.
@@ -229,7 +248,26 @@ impl StudioDoc {
     }
 
     fn restore(&mut self, snapshot: Snapshot) {
-        self.model = snapshot.model;
+        // Masks aren't undo steps: each object keeps the one it has now
+        // where its vertices and faces are still the same ones (a stroke
+        // only moves them; Voxel Remesh makes new ones).
+        let now = std::mem::replace(&mut self.model, snapshot.model);
+        for (object, old) in self.model.objects.iter_mut().zip(now.objects) {
+            let same = match (&object.mesh, &old.mesh) {
+                (Some(a), Some(b)) => {
+                    a.vertex_count() == b.vertex_count()
+                        && a.half_edges().len() == b.half_edges().len()
+                        && a.half_edges()
+                            .iter()
+                            .zip(b.half_edges())
+                            .all(|(a, b)| a.vertex == b.vertex)
+                }
+                _ => false,
+            };
+            if object.name == old.name && same {
+                object.mask = old.mask;
+            }
+        }
         self.mode = snapshot.mode;
         self.active = snapshot.active;
         self.objects = snapshot.objects;

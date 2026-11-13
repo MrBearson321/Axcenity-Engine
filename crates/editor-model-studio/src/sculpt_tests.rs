@@ -312,3 +312,69 @@ fn snapshot_of_the_tab_sculpting() {
         },
     );
 }
+
+/// R15.1b: the mask is kept on the object, so it's saved (painting one
+/// leaves the model unsaved), comes back from the sidecar, outlasts the
+/// undo of a stroke, and goes with Subdivide until that's undone.
+#[test]
+fn the_mask_is_saved_with_the_model_and_kept_through_undo() {
+    let mut studio = remeshed_sphere();
+    let screen = front();
+    studio.doc.as_mut().unwrap().mark_saved();
+    studio.sculpt.brush.tool = SculptTool::Mask;
+    studio.sculpt.brush.strength = 1.0;
+    studio.sculpt.brush.radius = 60.0;
+    let across = stroke(&screen, Vec3::new(-0.1, 0.0, 1.0), Vec3::new(0.1, 0.0, 1.0));
+    assert!(studio.sculpt_stroke(&screen, &across, false));
+    let mask = studio.sculpt_of().unwrap().mask().to_vec();
+    let doc = studio.doc.as_ref().unwrap();
+    assert!(
+        doc.unsaved(),
+        "a mask is saved, so painting one is a change"
+    );
+    assert_eq!(doc.model.objects[doc.active].mask, mask);
+
+    // A Draw stroke and its undo leave the mask as it is.
+    studio.sculpt.brush.tool = SculptTool::Draw;
+    let through = stroke(
+        &screen,
+        Vec3::new(0.0, 0.05, 1.0),
+        Vec3::new(0.7, 0.05, 0.7),
+    );
+    assert!(studio.sculpt_stroke(&screen, &through, false));
+    assert!(studio.doc.as_mut().unwrap().undo());
+    assert_eq!(studio.sculpt_of().unwrap().mask(), mask);
+
+    // Saved and read back: the sculpt has the mask again.
+    let doc = studio.doc.as_mut().unwrap();
+    let glb = doc.model.write_glb();
+    let sidecar = doc
+        .model
+        .write_sidecar(&glb)
+        .expect("a mask needs the sidecar");
+    doc.mark_saved();
+    assert!(!doc.unsaved());
+    let mut model = doc.model.clone();
+    model.objects[doc.active].mask.clear();
+    assert_eq!(model.read_sidecar(&sidecar, &glb), Ok(1));
+    let mut reopened = studio_with(StudioDoc::new(String::new(), model, true));
+    reopened.doc.as_mut().unwrap().set_mode(Mode::Sculpt);
+    assert_eq!(reopened.sculpt_of().unwrap().mask(), mask);
+
+    // Subdivide makes new vertices, which the mask doesn't fit; Undo
+    // brings both back.
+    studio.sculpt_detail(false);
+    assert_eq!(studio.doc.as_ref().unwrap().undo_label(), Some("Subdivide"));
+    let doc = studio.doc.as_ref().unwrap();
+    assert!(doc.model.objects[doc.active].mask.is_empty());
+    assert!(studio.sculpt_of().unwrap().mask().iter().all(|&m| m == 0.0));
+    assert!(studio.doc.as_mut().unwrap().undo());
+    assert_eq!(studio.sculpt_of().unwrap().mask(), mask);
+
+    // Clearing it is a change too.
+    studio.doc.as_mut().unwrap().mark_saved();
+    studio.change_mask(|sculpt| sculpt.clear_mask());
+    let doc = studio.doc.as_ref().unwrap();
+    assert!(doc.unsaved());
+    assert!(doc.model.objects[doc.active].mask.is_empty());
+}
