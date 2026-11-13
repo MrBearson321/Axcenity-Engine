@@ -54,6 +54,7 @@ fn new_world_has_game_and_its_services() {
             world.teams(),
             world.sound_service(),
             world.text_chat_service(),
+            world.data_layer_service(),
         ]
     );
     assert_eq!(

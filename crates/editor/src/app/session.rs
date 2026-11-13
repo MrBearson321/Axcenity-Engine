@@ -373,6 +373,11 @@ impl EditorApp {
             damaged_terrains: project.damaged_terrains,
             saved_terrains: HashMap::new(),
         });
+        // This person's hidden and locked data layers (R16.2).
+        if let Some(project) = &self.project {
+            self.layer_view = crate::layers::LayerView::load(&project.folder);
+        }
+        self.layer_sets = Default::default();
         self.animation = AnimationStudio::default();
         self.behavior = BehaviorTreeStudio::default();
         self.dialogues = crate::dialogue_editor::DialogueStudio::default();
@@ -1317,6 +1322,7 @@ impl EditorApp {
         // Saved or let go by now: nothing to recover.
         self.autorecover_done();
         self.animation = AnimationStudio::default();
+        self.layer_view = Default::default();
         self.asset_check.clear();
         // The session was this project's (or ended for good with it).
         self.leave_team_session();

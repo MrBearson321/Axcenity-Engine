@@ -43,7 +43,7 @@ flowchart LR
 
 - A flat Model with thousands of loose parts is one unit; big maps must be nested in Models or Folders to stream. The editor's Streaming overlay names a unit of more than 1,000 Instances.
 - A texture draws white until its background upload finishes.
-- Editing always draws everything; Play streams around the camera. The Streaming overlay (R16) shows what would stream around the camera while editing: unit boxes by reach, always-there parts, radii and counts. There's still no region management or data layers (R16's other parts).
+- Editing always draws everything; Play streams around the camera. The Streaming overlay (R16) shows what would stream around the camera while editing: unit boxes by reach, always-there parts, radii and counts. Data layers (R16.2, `docs/editor/layers.md`) can hide or lock a tagged set while editing; region management (R16.3) and turning layers on and off in games (R16.4) are still to come.
 - A change to the Workspace's tree still splits the whole partition again (about 12 ms for 51,000 parts in the container); ownership and physics catch up from the moves log instead.
 
 ## Related documentation

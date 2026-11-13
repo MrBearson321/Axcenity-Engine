@@ -735,6 +735,10 @@ pub struct Viewport {
     frozen_culling: Option<axcenity_render::Camera>,
     /// The Streaming overlay's split of the world (roadmap R16).
     streaming_overlay: streaming_overlay::StreamingOverlay,
+    /// What a click goes through for the data layers: hidden or locked
+    /// ones (R16.2; hidden ones aren't drawn either, through
+    /// `Streaming::set_also_hidden`).
+    layer_unpickable: std::collections::HashSet<InstanceId>,
     /// The Overdraw view's numbers, once its legend's Measure was clicked;
     /// cleared when the view changes.
     overdraw: Option<axcenity_render::OverdrawStats>,
@@ -857,6 +861,7 @@ impl Viewport {
             last_pixels: (0, 0),
             frozen_culling: None,
             streaming_overlay: Default::default(),
+            layer_unpickable: Default::default(),
             overdraw: None,
             measure_overdraw: false,
             restart_requested: false,
@@ -1491,8 +1496,11 @@ impl Viewport {
         self.terrain.set_blends(blends.unwrap_or_default());
         // During Play the game's frame streams the world, as for particles.
         if !game_playing && self.terrain.streaming.settings().is_some() {
-            // Editing shows everything, whatever Play streamed.
+            // Editing shows everything, whatever Play streamed, but the
+            // hidden data layers.
+            let layers = self.terrain.streaming.take_also_hidden();
             self.terrain.streaming = axcenity_scene::Streaming::default();
+            self.terrain.streaming.set_also_hidden(layers);
         }
         // Meshes and textures go to the GPU on the renderer's upload thread
         // and appear a few frames later, rather than stalling the frame

@@ -31,7 +31,8 @@
 //! So are `players` (`CharacterAutoLoads`, `RespawnTime`,
 //! `LeaderboardEnabled`), `starter_player` (`StarterCharacter`) and `teams`
 //! (its Team children), in the same shape (Phase 47), and `sound_service`
-//! (its SoundGroups, with their effects, Phase 52). `server_storage`
+//! (its SoundGroups, with their effects, Phase 52), and
+//! `data_layer_service` (its DataLayers, roadmap R16). `server_storage`
 //! (Phase 64) is saved like `replicated_storage`, and only when it has
 //! something in it.
 //!
@@ -169,6 +170,9 @@ struct WorldFile {
     // Phase 67: the default chat's settings.
     #[serde(default)]
     text_chat_service: ServiceNode,
+    // Roadmap R16: the DataLayers.
+    #[serde(default)]
+    data_layer_service: ServiceNode,
 }
 
 #[derive(Default, Deserialize)]
@@ -324,6 +328,7 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
         (world.teams(), &file.teams),
         (world.sound_service(), &file.sound_service),
         (world.text_chat_service(), &file.text_chat_service),
+        (world.data_layer_service(), &file.data_layer_service),
     ];
     for (service, node) in services {
         apply_properties(&mut world, service, &node.properties, &mut references)?;
@@ -854,6 +859,7 @@ pub fn write_world(world: &World) -> String {
         ("teams", world.teams()),
         ("sound_service", world.sound_service()),
         ("text_chat_service", world.text_chat_service()),
+        ("data_layer_service", world.data_layer_service()),
     ];
     for (key, service) in services {
         let changed = world.get(service).is_some_and(|instance| {

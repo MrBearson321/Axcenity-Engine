@@ -21,7 +21,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (10 since roadmap M7, 12 since Phase 81), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password, their `user_id` (missing from older engines, read as 0) and their engine's class-defaults fingerprint (`defaults`, roadmap M7). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (10 since roadmap M7, 12 since Phase 81, 13 since roadmap R16.2 added the DataLayerService), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password, their `user_id` (missing from older engines, read as 0) and their engine's class-defaults fingerprint (`defaults`, roadmap M7). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Data layers: hide or lock a tagged set of objects while you build"
+details = "A new Layers panel (View > Panels > Layers) gathers everything tagged with a layer's name into a data layer, wherever it is in the Explorer. Hide a layer to keep it out of the viewport, or lock it so clicks go through it, without changing the world: which layers you hide is kept on your computer and Play still shows them all. Layers are DataLayer objects in the new DataLayerService, saved with the world; making, renaming and deleting one are undo steps."
+features = []
+fixes = []
+introduces_issues = []
+prs = [328]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

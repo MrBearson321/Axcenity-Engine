@@ -51,6 +51,7 @@ mod game_tests;
 mod graphics_benchmark;
 pub(crate) mod import_presets;
 mod input_settings;
+mod layers;
 mod layouts;
 mod levels;
 mod luau_checks;
@@ -351,6 +352,11 @@ pub struct EditorApp {
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
     tags: crate::tags::TagsPanel,
+    /// The Layers panel (R16.2), this person's view of the data layers
+    /// (`.axcenity/layers.json`), and what that hides and locks.
+    layers: crate::layers::LayersPanel,
+    layer_view: crate::layers::LayerView,
+    layer_sets: crate::layers::LayerSets,
     /// The Team Board: the project's tasks (`app/team_board.rs`).
     team_board: team_board::TeamBoard,
     /// Each script's uses of APIs from the other side, for the warning badges.
@@ -603,6 +609,7 @@ impl DockViewer<'_> {
             Pane::DataTable => self.app.data_table_pane(ui),
             Pane::Material => self.app.material_pane(ui, self.render_state),
             Pane::Tags => self.app.tags_pane(ui),
+            Pane::Layers => self.app.layers_pane(ui),
             Pane::Levels => self.app.levels_pane(ui),
             Pane::Sequencer => self.app.sequencer_pane(ui),
             Pane::Tests => self.app.tests_pane(ui),
@@ -1018,6 +1025,9 @@ impl EditorApp {
             cooker: None,
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
+            layers: Default::default(),
+            layer_view: Default::default(),
+            layer_sets: Default::default(),
             team_board: Default::default(),
             tabs: ScriptTabs::default(),
             luau: Default::default(),
@@ -2027,6 +2037,8 @@ mod import_preset_tests;
 mod imported_clip_tests;
 #[cfg(test)]
 mod joint_tests;
+#[cfg(test)]
+mod layers_tests;
 #[cfg(test)]
 mod live_script_tests;
 #[cfg(test)]
