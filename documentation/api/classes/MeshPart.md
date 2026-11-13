@@ -94,6 +94,14 @@ MeshPart.WindAffected: boolean
 
 If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 
+#### CollisionFidelity
+
+```luau
+MeshPart.CollisionFidelity: EnumCollisionFidelity | "Default" | "Box" | "Hull" | "PreciseConvexDecomposition"
+```
+
+What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.
+
 #### CollisionGroup
 
 ```luau

@@ -205,16 +205,22 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let environment = frame.sky_top.w;
 
     // What the surface reflects: the sun's and lamps' glints, the sky and
-    // the reflection probes, and at High what's on the screen.
+    // the reflection probes, and at High what's on the screen, and with
+    // ray tracing what rays find where the screen has nothing (LE5).
     var color = shade_surface(in.world_position, up, n, pixel, vec3<f32>(0.0), 0.0,
         WATER_ROUGHNESS, 1.0, f0, false);
     let r = reflect(-v, n);
     // A reflection that dips under the surface would find what's under it.
     if frame.reflection_probes.y != 0u && dot(r, up) > 0.0 {
         let hit = screen_reflection(in.world_position, r);
-        if hit.w > 0.0 {
+        var traced = vec4<f32>(0.0);
+        if hit.w < 0.999 {
+            traced = traced_reflection(in.world_position + up * 0.05, r);
+        }
+        if hit.w > 0.0 || traced.w > 0.0 {
             let sky = reflected(in.world_position, r, WATER_ROUGHNESS, environment);
-            color += reflectance * (hit.rgb - sky) * hit.w;
+            let found = mix(mix(sky, traced.rgb, traced.w), hit.rgb, hit.w);
+            color += reflectance * (found - sky);
         }
     }
 

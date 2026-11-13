@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Model Studio saves sculpt masks with the model"
+details = "A mask painted in Sculpt mode is kept on its object and saved in the model's sidecar, so it's there again after closing and reopening the model. Painting or clearing a mask leaves the model unsaved, undoing a stroke keeps the mask, and undoing Voxel Remesh or Subdivide brings it back."
+features = ["editor.model-studio"]
+fixes = []
+introduces_issues = []
+prs = [322]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

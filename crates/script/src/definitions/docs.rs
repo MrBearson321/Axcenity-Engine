@@ -2253,11 +2253,6 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The color the whole solid is drawn in while UsePartColor is on. Union sets it to the first part's.",
     ),
     (
-        ClassName::UnionOperation,
-        "CollisionFidelity",
-        "What it collides as: `Enum.CollisionFidelity.Box` (its box), `Hull` (the default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build.",
-    ),
-    (
         ClassName::MeshPart,
         "CastShadow",
         "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
@@ -2271,6 +2266,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "CanCollide",
         "If false, other parts pass through it. It still fires Touched.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CollisionFidelity",
+        "What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.",
     ),
     (
         ClassName::MeshPart,
@@ -2491,6 +2491,46 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Terrain,
         "DataFolder",
         "The project folder its heights and painted materials are saved in, such as \"assets/terrain/Terrain\". The editor picks it.",
+    ),
+    (
+        ClassName::Terrain,
+        "Water",
+        "Floods the terrain's hollows up to WaterLevel with water that has waves, foam and reflections.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaterLevel",
+        "The world Y of the water's surface at rest. Ground below it is under water.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaterColor",
+        "The color deep water shows.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaterClarity",
+        "How many studs of water light crosses before only about a third of what's under it still shows. Bigger is clearer.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveHeight",
+        "How high the biggest wave rises above the water's surface at rest, in studs.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveLength",
+        "How long the biggest wave is from crest to crest, in studs.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveSpeed",
+        "How fast the waves roll, as a share of how fast real waves of their length would. 0 stills them.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveDirection",
+        "Which way the waves roll, in degrees: 0 toward +X, 90 toward +Z.",
     ),
     (
         ClassName::TerrainLayer,

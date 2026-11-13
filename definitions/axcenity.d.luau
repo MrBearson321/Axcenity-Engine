@@ -1145,6 +1145,7 @@ end
 
 --- The choices of `Enum.CollisionFidelity`.
 declare extern type EnumCollisionFidelityItems with
+	Default: EnumCollisionFidelity
 	Box: EnumCollisionFidelity
 	Hull: EnumCollisionFidelity
 	PreciseConvexDecomposition: EnumCollisionFidelity
@@ -1873,6 +1874,8 @@ declare extern type MeshPart extends Instance with
 	CanCollide: boolean
 	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 	WindAffected: boolean
+	--- What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.
+	CollisionFidelity: EnumCollisionFidelity | "Default" | "Box" | "Hull" | "PreciseConvexDecomposition"
 	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
 	CollisionGroup: string
 	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
@@ -1962,8 +1965,8 @@ declare extern type UnionOperation extends Instance with
 	UsePartColor: boolean
 	--- The color the whole solid is drawn in while UsePartColor is on. Union sets it to the first part's.
 	Color: Color3
-	--- What it collides as: `Enum.CollisionFidelity.Box` (its box), `Hull` (the default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build.
-	CollisionFidelity: EnumCollisionFidelity | "Box" | "Hull" | "PreciseConvexDecomposition"
+	--- What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.
+	CollisionFidelity: EnumCollisionFidelity | "Default" | "Box" | "Hull" | "PreciseConvexDecomposition"
 	--- If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
 	CastShadow: boolean
 	--- From 0 (as solid as its model) to 1 (invisible).
@@ -4519,6 +4522,22 @@ declare extern type Terrain extends Instance with
 	CanCollide: boolean
 	--- The project folder its heights and painted materials are saved in, such as "assets/terrain/Terrain". The editor picks it.
 	DataFolder: string
+	--- Floods the terrain's hollows up to WaterLevel with water that has waves, foam and reflections.
+	Water: boolean
+	--- The world Y of the water's surface at rest. Ground below it is under water.
+	WaterLevel: number
+	--- The color deep water shows.
+	WaterColor: Color3
+	--- How many studs of water light crosses before only about a third of what's under it still shows. Bigger is clearer.
+	WaterClarity: number
+	--- How high the biggest wave rises above the water's surface at rest, in studs.
+	WaveHeight: number
+	--- How long the biggest wave is from crest to crest, in studs.
+	WaveLength: number
+	--- How fast the waves roll, as a share of how fast real waves of their length would. 0 stills them.
+	WaveSpeed: number
+	--- Which way the waves roll, in degrees: 0 toward +X, 90 toward +Z.
+	WaveDirection: number
 	[string]: any
 end
 
