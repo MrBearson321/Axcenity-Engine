@@ -28,6 +28,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Scope and priorities: CI (off on purpose), target platforms, determinism, the Vector3 caveat, dedicated hosting, and the development policy | [development-policy.md](development-policy.md) |
 | Whole-frame benchmarks, the S10k scene, `--bench`, profiler spans and Tracy | [benchmarks.md](benchmarks.md) |
 | The competitive development roadmap (Paul's of 2026-11-12): each item's status against Unreal, Godot, s&box and Unity, the feature matrix, and the order of work (G items and R12–R20) | [research/competitive-development-roadmap.md](research/competitive-development-roadmap.md) |
+| The visual effects editor (R17): decisions D1–D7 (one particle system, NumberSequence and ColorSequence curves, the effect asset as a prefab, a module stack before a node graph) and stages R17.1–R17.5 | [research/vfx-editor.md](research/vfx-editor.md) |
 | Optional hardware ray tracing: what wgpu 30's ray queries offer per backend, RX 9070 XT measurements (`benchmarks/ray-tracing-probe`), which effects pay off, denoising, acceleration structures, fallback, other engines, and phases RT0–RT5 | [research/hardware-ray-tracing.md](research/hardware-ray-tracing.md) |
 | How Axcenity compares with Unity, Unreal, Roblox Studio, Godot and s&box, the XB10k cross-engine results, and recommendations C1–C10 with their owners | [research/engine-comparison.md](research/engine-comparison.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |
