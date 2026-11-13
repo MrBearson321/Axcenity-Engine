@@ -112,7 +112,17 @@ impl RayGlobalIllumination {
                         min_binding_size: NonZeroU64::new(size_of::<RayGiUniform>() as u64),
                     },
                 ),
-                entry(2, storage(true)),
+                // Uniform, not storage: with the frame's four storage
+                // buffers and the cut-outs' two, a ninth would pass the
+                // default limit of eight a stage.
+                entry(
+                    2,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(16 * u64::from(MOST_PROBES)),
+                    },
+                ),
                 entry(3, storage(true)),
                 entry(4, storage(false)),
                 // Cut-outs' holes (LE7).
@@ -158,7 +168,7 @@ impl RayGlobalIllumination {
             batch: buffer(
                 "ray traced GI batch",
                 16 * u64::from(MOST_PROBES),
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             ),
             traced: buffer(
                 "ray traced GI probes",
