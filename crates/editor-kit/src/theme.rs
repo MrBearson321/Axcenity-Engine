@@ -772,14 +772,33 @@ pub fn menu_entry(
     text: impl Into<String>,
 ) -> egui::Atoms<'static> {
     use egui::{AtomExt as _, IntoAtoms as _};
-    let align = match menu_icons(ctx) {
-        MenuIcons::Left => egui::Align2::LEFT_CENTER,
-        MenuIcons::Centered => egui::Align2::CENTER_CENTER,
+    let icon = icon.unwrap_or("");
+    let font = egui::FontId::proportional(size::ICON_MEDIUM);
+    // egui paints a sized atom's text at the atom's left edge whatever its
+    // `atom_align` says (the atom's cell is exactly its size), so the
+    // column's left room is put in front of the glyph as leading space.
+    let indent = match menu_icons(ctx) {
+        MenuIcons::Left => 0.0,
+        MenuIcons::Centered if icon.is_empty() => 0.0,
+        MenuIcons::Centered => {
+            let width = ctx.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(icon.to_owned(), font.clone(), Color32::PLACEHOLDER)
+                    .rect
+                    .width()
+            });
+            ((MENU_ICON_COLUMN - width) / 2.0).max(0.0)
+        }
     };
-    let icon = egui::RichText::new(icon.unwrap_or("").to_owned())
-        .size(size::ICON_MEDIUM)
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        icon,
+        indent,
+        egui::TextFormat::simple(font, Color32::PLACEHOLDER),
+    );
+    let icon = egui::WidgetText::from(job)
         .atom_size(egui::vec2(MENU_ICON_COLUMN, size::ICON_MEDIUM))
-        .atom_align(align);
+        .atom_align(egui::Align2::LEFT_CENTER);
     let label: String = text.into();
     (icon, label).into_atoms()
 }
@@ -1722,6 +1741,7 @@ mod tests {
 
     #[test]
     fn menu_labels_start_at_the_same_place_with_or_without_an_icon() {
+        let mut placed = Vec::new();
         for place in MenuIcons::ALL {
             let ctx = test_context();
             let appearance = Appearance {
@@ -1764,7 +1784,21 @@ mod tests {
                 );
             }
             assert_eq!(icon_centres.len(), 2, "{place:?}");
+            placed.push((icon_centres[0], save));
         }
+        // Centered moves the icons to the middle of their column (they're
+        // narrower than it), and the labels stay where they were.
+        let [(left_icon, left_label), (centered_icon, centered_label)] = placed[..] else {
+            unreachable!()
+        };
+        assert!(
+            centered_icon > left_icon + 2.0,
+            "Centered icon at {centered_icon}, Left at {left_icon}"
+        );
+        assert!(
+            (centered_label - left_label).abs() < 0.5,
+            "labels at {left_label} and {centered_label}"
+        );
     }
 
     #[test]
