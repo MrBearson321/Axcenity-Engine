@@ -664,6 +664,9 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
         // Scales with the screen, laid out over all of it, so a UI made at
         // one size looks the same at any other.
         Insertable::ScreenGui => vec![("ScaleMode", Value::String("Scale".to_owned()))],
+        // New lights cast shadows (ray traced, with Ray traced shadows on).
+        // The classes' default stays off, so saved worlds look the same.
+        _ if what.class().is_light() => vec![("Shadows", Value::Bool(true))],
         _ => Vec::new(),
     };
     for (name, value) in properties {

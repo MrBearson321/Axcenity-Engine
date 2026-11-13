@@ -85,7 +85,9 @@ struct Frame {
     // to 1 (`weathered`).
     weather: vec4<f32>,
     // x: 1 while ray traced sun shadows are drawn, y: the scene's width in
-    // pixels, z: how far they reach in studs (`ray_traced_sun`).
+    // pixels, z: how far they reach in studs (`ray_traced_sun`), w: where
+    // the lamps' half of `ray_shadow_mask` starts, or 0 while lamps aren't
+    // traced (`ray_traced_lamp`).
     ray_shadows: vec4<f32>,
 }
 
@@ -141,7 +143,8 @@ struct Light {
     // x: a spot light's layer of `spot_shadow_map`, or a point light's place
     // in `point_shadow_map` (its six layers start at six times it), or -1
     // if it casts no shadows, y: the width of one shadow texel per stud
-    // from the light.
+    // from the light, z: 0 if it casts no shadows at all, otherwise 1 plus
+    // how far from it ray traced shadows start.
     shadow: vec4<f32>,
     // A rect light's right, as long as half its width, and w: half its
     // height.
@@ -190,8 +193,15 @@ const LIGHTS_PER_TILE: u32 = 64u;
 @group(0) @binding(16) var<storage, read> light_probes: array<vec4<f32>>;
 // Ray traced sun shadows (ray_shadows.wgsl), a u32 per scene pixel: the
 // surface's distance from the camera in the top 24 bits, how much sunlight
-// reaches it in the low 8. One blank entry while they're off.
+// reaches it in the low 8. One blank entry while they're off. Then, from
+// `frame.ray_shadows.w` while lamps are traced, a u32 per pixel for its
+// lamps: 4 bits each (0 in shadow, 15 lit), in the order its tile lists
+// the lamps that cast shadows, at most `TRACED_LAMPS`.
 @group(0) @binding(17) var<storage, read> ray_shadow_mask: array<u32>;
+
+// The most lamps a pixel has ray traced shadows for. Must match
+// `TRACED_LAMPS` in ray_shadows.wgsl.
+const TRACED_LAMPS: u32 = 8u;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -306,6 +316,23 @@ fn ray_traced_sun(world_position: vec3<f32>, pixel: vec2<f32>) -> f32 {
         return -1.0;
     }
     return f32(packed & 255u) / 255.0;
+}
+
+// How much of the lamp in `slot` (of the pixel's lamps that cast shadows,
+// in its tile's order) reaches `world_position`, ray traced: from 0 to 1,
+// or -1 where the mask has nothing for it (as `ray_traced_sun`, or a lamp
+// past the first `TRACED_LAMPS`).
+fn ray_traced_lamp(slot: u32, world_position: vec3<f32>, pixel: vec2<f32>) -> f32 {
+    let first = u32(frame.ray_shadows.w);
+    if first == 0u || slot >= TRACED_LAMPS || ray_traced_sun(world_position, pixel) < 0.0 {
+        return -1.0;
+    }
+    let at = vec2<u32>(pixel);
+    let index = first + at.y * u32(frame.ray_shadows.y) + at.x;
+    if index >= arrayLength(&ray_shadow_mask) {
+        return -1.0;
+    }
+    return f32((ray_shadow_mask[index] >> (slot * 4u)) & 15u) / 15.0;
 }
 
 // How much sunlight reaches `world_position`: 1 in the open, 0 in shadow.
@@ -993,10 +1020,17 @@ fn lamp_reach(light: Light, world_position: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(to_light, strength);
 }
 
-// The `i`th of `lamps` at `world_position`. Beyond its range or outside
-// its cone, nothing arrives (`visible` 0).
-fn lamp_arrival(lamps: TileLamps, i: u32, world_position: vec3<f32>, geometric: vec3<f32>,
-    pixel: vec2<f32>, solid: bool) -> Arrival {
+// Whether the `i`th of `lamps` casts shadows, and so takes a slot of the
+// pixel's ray traced lamps: 1 if it does.
+fn lamp_slots(lamps: TileLamps, i: u32) -> u32 {
+    return select(0u, 1u, lights[tile_lights[lamps.first + 1u + i]].shadow.z > 0.0);
+}
+
+// The `i`th of `lamps` at `world_position`, `slot` of those casting
+// shadows before it (for its ray traced shadow). Beyond its range or
+// outside its cone, nothing arrives (`visible` 0).
+fn lamp_arrival(lamps: TileLamps, i: u32, slot: u32, world_position: vec3<f32>,
+    geometric: vec3<f32>, pixel: vec2<f32>, solid: bool) -> Arrival {
     var arrival = Arrival(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0), 0.0);
     let light = lights[tile_lights[lamps.first + 1u + i]];
     let reach = lamp_reach(light, world_position);
@@ -1009,9 +1043,25 @@ fn lamp_arrival(lamps: TileLamps, i: u32, world_position: vec3<f32>, geometric: 
     let l = to_light / max(dist, 0.0001);
     // Shadow maps are drawn from the light's middle.
     let to_middle = light.position_range.xyz - world_position;
-    var visible = lamp_visibility(light, world_position, geometric, to_middle, lamps.rotation);
-    // Contact shadows for lamps that cast shadows, up to the lamp.
-    if solid && light.shadow.x >= 0.0 {
+    var visible = 1.0;
+    var traced = -1.0;
+    if light.shadow.z > 0.0 {
+        traced = ray_traced_lamp(slot, world_position, pixel);
+    }
+    if traced >= 0.0 {
+        // Ray traced (LE1), fading into its map toward the reach.
+        let away = distance(frame.camera_position.xyz, world_position);
+        let blend = smoothstep(frame.ray_shadows.z * 0.85, frame.ray_shadows.z, away);
+        visible = traced;
+        if blend > 0.0 {
+            visible = mix(traced,
+                lamp_visibility(light, world_position, geometric, to_middle, lamps.rotation), blend);
+        }
+    } else {
+        visible = lamp_visibility(light, world_position, geometric, to_middle, lamps.rotation);
+    }
+    // Contact shadows for lamps that cast shadows by maps, up to the lamp.
+    if solid && light.shadow.x >= 0.0 && traced < 0.0 {
         visible *= contact_visibility(world_position, geometric, l, min(frame.contact.y, dist),
             pixel);
     }
@@ -1046,8 +1096,10 @@ fn shade_surface(
     // Point and spot lights: only the ones listed for this pixel's tile.
     var lit = vec3<f32>(0.0);
     let lamps = tile_lamps(pixel);
+    var slot = 0u;
     for (var i = 0u; i < lamps.count; i++) {
-        let lamp = lamp_arrival(lamps, i, world_position, geometric, pixel, solid);
+        let lamp = lamp_arrival(lamps, i, slot, world_position, geometric, pixel, solid);
+        slot += lamp_slots(lamps, i);
         if lamp.visible > 0.0 {
             lit += shade(n, v, lamp.l, base_color, metalness, roughness, f0) * lamp.radiance
                 * lamp.visible;
