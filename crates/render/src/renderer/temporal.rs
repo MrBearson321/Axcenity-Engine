@@ -61,6 +61,9 @@ pub(super) const MAX_MOTION_BLUR: f32 = 1.0 / 36.0;
 pub(super) struct TemporalUniform {
     view_proj: [[f32; 4]; 4],
     previous_view_proj: [[f32; 4]; 4],
+    /// Last frame's clock and wind (`Frame::clock`), which swayed plants
+    /// were bent by then.
+    previous_clock: [f32; 4],
     inv_view_proj: [[f32; 4]; 4],
     /// 1 when last frame's history can be used, this frame's share of the
     /// blend, the near plane and the far plane.
@@ -168,6 +171,8 @@ pub(super) struct History {
     frame: u64,
     /// Last frame's view, without the jitter.
     view_proj: Option<Mat4>,
+    /// Last frame's clock and wind, as `Frame::clock` has them.
+    clock: Option<[f32; 4]>,
     /// Each item's transform and joints last frame, by its ID.
     models: HashMap<u64, Mat4>,
     joints: HashMap<u64, Vec<JointRaw>>,
@@ -750,29 +755,42 @@ pub(super) struct Moved {
 
 impl History {
     /// What moved among `draws` since last frame: each solid item (drawn in
-    /// the prepass) with an ID whose transform changed, or that's posed.
-    /// `joints` and `skins` are this frame's (see `DrawPlan`).
+    /// the prepass) with an ID whose transform changed, or that's posed,
+    /// and each one the wind sways (a plant's leaves move though it stands
+    /// still; one without an ID or new this frame is taken to have stood
+    /// where it is). `joints` and `skins` are this frame's (see
+    /// `DrawPlan`), and `clock` is this frame's `Frame::clock`.
     pub(super) fn moved(
         &self,
         draws: &[Draw<'_>],
         joints: &[JointRaw],
         skins: &HashMap<*const Skin, [u32; 2]>,
+        clock: [f32; 4],
     ) -> Moved {
         let mut previous_joints = joints.to_vec();
         let mut instances = Vec::new();
+        // Plants move only while there's wind, now or last frame, and the
+        // clock moved on.
+        let windy = |clock: [f32; 4]| clock[1] != 0.0 || clock[3] != 0.0;
+        let swaying = self
+            .clock
+            .is_some_and(|before| before != clock && (windy(before) || windy(clock)));
         for draw in draws {
             let item = draw.item;
-            if item.id == 0 || !in_prepass(item) {
+            if !in_prepass(item) {
                 continue;
             }
-            let Some(previous) = self.models.get(&item.id) else {
-                continue;
+            let sways = swaying && item.sway.is_some_and(|sway| sway.strength > 0.0);
+            let previous = match self.models.get(&item.id).filter(|_| item.id != 0) {
+                Some(previous) => previous,
+                None if sways => &item.transform,
+                None => continue,
             };
             let skin = item
                 .skin
                 .as_deref()
                 .and_then(|skin| skins.get(&std::ptr::from_ref(skin)).copied());
-            if *previous == item.transform && skin.is_none() {
+            if *previous == item.transform && skin.is_none() && !sways {
                 continue;
             }
             let Some(raw) = instance_raw(item) else {
@@ -807,8 +825,9 @@ impl History {
     /// Keeps this frame's camera (`view_proj`, without the jitter) and
     /// `list`'s items for the next, and moves on to the other targets.
     /// `taa` says whether TAA's history now holds this frame.
-    pub(super) fn finish(&mut self, list: &DrawList, view_proj: Mat4, taa: bool) {
+    pub(super) fn finish(&mut self, list: &DrawList, view_proj: Mat4, clock: [f32; 4], taa: bool) {
         self.view_proj = Some(view_proj);
+        self.clock = Some(clock);
         self.models.clear();
         self.joints.clear();
         for item in list.items.iter().filter(|item| item.id != 0) {
@@ -843,6 +862,7 @@ impl TemporalPasses {
         (view_proj, drawn, jitter): (Mat4, Mat4, Vec2),
         (size, upscaled_to): ((u32, u32), Option<(u32, u32)>),
         (share, quality): (f32, MotionBlurQuality),
+        clock: [f32; 4],
         moved: &Moved,
     ) {
         let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
@@ -852,6 +872,7 @@ impl TemporalPasses {
         let uniform = TemporalUniform {
             view_proj: view_proj.to_cols_array_2d(),
             previous_view_proj: history.view_proj.unwrap_or(view_proj).to_cols_array_2d(),
+            previous_clock: history.clock.unwrap_or(clock),
             inv_view_proj: drawn.inverse().to_cols_array_2d(),
             settings: [
                 f32::from(u8::from(history.valid)),

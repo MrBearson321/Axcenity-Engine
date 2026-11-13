@@ -147,7 +147,13 @@ const SWAY_WIND: f32 = 20.0;
 // The fraction of `sway.w` is its flutter: how many studs each corner
 // shivers, in waves that differ from one leaf to the next.
 fn swayed(world: vec3<f32>, sway: vec4<f32>) -> vec3<f32> {
-    let wind = frame.clock.yw;
+    return swayed_at(world, sway, frame.clock);
+}
+
+// `swayed` at the time and in the wind of `clock` (as `Frame::clock`), so
+// the motion pass can bend a plant as it was last frame too.
+fn swayed_at(world: vec3<f32>, sway: vec4<f32>, clock: vec4<f32>) -> vec3<f32> {
+    let wind = clock.yw;
     let speed = length(wind);
     if sway.z <= 0.0 || speed < 1e-3 {
         return world;
@@ -155,7 +161,7 @@ fn swayed(world: vec3<f32>, sway: vec4<f32>) -> vec3<f32> {
     let up = clamp((world.y - sway.x) * sway.y, 0.0, 1.0);
     // Stiff at the foot, giving more toward the top.
     let bend = up * up;
-    let time = frame.clock.x;
+    let time = clock.x;
     let lean = SWAY_LEAN * sway.z / sway.y * (1.0 - exp(-speed / SWAY_WIND));
     let gust = cloud_noise2((world.xz - wind * time) * 0.03);
     let flutter = sin(time * (1.7 + speed * 0.05) + dot(world.xz, vec2<f32>(0.21, 0.17)));
@@ -790,6 +796,8 @@ fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0)
 struct MotionView {
     view_proj: mat4x4<f32>,
     previous_view_proj: mat4x4<f32>,
+    // Last frame's time and wind (as `Frame::clock`), for swayed plants.
+    previous_clock: vec4<f32>,
 }
 
 @group(3) @binding(0) var<uniform> motion_view: MotionView;
@@ -852,7 +860,8 @@ fn vs_motion(@builtin(vertex_index) index: u32, @location(0) position: vec3<f32>
     let posed = pose_corner(index, instance.skin, position, vec3<f32>(0.0), vec3<f32>(0.0));
     let world = vec4<f32>(swayed((model * vec4<f32>(posed.position, 1.0)).xyz, instance.sway), 1.0);
     let was = previous_corner(index, instance.skin, position);
-    let world_before = vec4<f32>(swayed((previous * vec4<f32>(was, 1.0)).xyz, instance.sway), 1.0);
+    let world_before = vec4<f32>(swayed_at((previous * vec4<f32>(was, 1.0)).xyz, instance.sway,
+        motion_view.previous_clock), 1.0);
     var out: MotionOut;
     out.clip_position = frame.view_proj * world;
     out.now = motion_view.view_proj * world;

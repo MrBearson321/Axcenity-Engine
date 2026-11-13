@@ -19,7 +19,7 @@ Each replaces one part of the world's look while the camera is there. What the v
 | Effect | Replaces |
 |---|---|
 | `ExposureEffect` (`Enabled`, `Exposure` 1) | Lighting's `Exposure`. |
-| `FogEffect` (`Enabled`, `Color` light grey, `Start` 0, `End` 200) | The world's fog, with distance fog. |
+| `FogEffect` (`Enabled`, `Color` light grey, `Start` 0, `End` 200, `Density` 0, `Glare` 0) | The world's fog, with distance fog. With a `Density` above 0 it's dust or mist in the volume's box instead, seen from anywhere and added to the world's fog, not replacing it ([fog.md](fog.md), Dust in a box). |
 | `BloomEffect` (`Enabled`, `Intensity` 0.35, `Threshold` 1) | Lighting's bloom. It blooms even where Lighting's `BloomEnabled` is off; `Intensity` 0 turns bloom off there. |
 | `Atmosphere` | The sky's air, the sun's color through it, and its height fog ([sky.md](sky.md), [fog.md](fog.md)). `ClockTime` still comes from Lighting. A `FogEffect` beside it wins for the fog. |
 | `ColorCorrectionEffect` | Lighting's color grading. Several in one volume add up as they do in Lighting ([post.md](post.md)). |

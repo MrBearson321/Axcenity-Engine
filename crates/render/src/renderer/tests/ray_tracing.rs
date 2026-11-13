@@ -397,6 +397,64 @@ mod sun_shadows {
         renderer.render(&shadowed_wall()).unwrap();
         assert!(renderer.scene.ray_shadows.is_none());
     }
+
+    /// A texture `size` pixels square whose alpha is `alpha` everywhere.
+    struct AlphaTexture {
+        key: u64,
+        rgba: Vec<u8>,
+    }
+
+    impl AlphaTexture {
+        fn new(key: u64, alpha: u8) -> Self {
+            Self {
+                key,
+                rgba: [255, 255, 255, alpha].repeat(16),
+            }
+        }
+    }
+
+    impl crate::TextureSource for AlphaTexture {
+        fn key(&self) -> u64 {
+            self.key
+        }
+        fn size(&self) -> (u32, u32) {
+            (4, 4)
+        }
+        fn rgba(&self) -> &[u8] {
+            &self.rgba
+        }
+    }
+
+    #[test]
+    fn rays_pass_through_a_cut_outs_holes() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        // The wall's blocker made a cut-out, wholly cut out (a leaf card's
+        // empty corner) or not at all.
+        let blocker_with = |alpha: u8, key: u64| {
+            let mut list = shadowed_wall();
+            let material = &mut list.items[1].material;
+            material.alpha_cutoff = 0.5;
+            material.base_color_texture = Some(std::sync::Arc::new(AlphaTexture::new(key, alpha)));
+            list
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        let solid = middle_of(&mut renderer, &blocker_with(255, 1));
+        let holes = middle_of(&mut renderer, &blocker_with(0, 2));
+        let mut open = shadowed_wall();
+        open.items.truncate(1);
+        let lit = middle_of(&mut renderer, &open);
+        assert!(
+            solid[0] + 40 < lit[0],
+            "where it isn't cut out it shades: {solid:?} vs {lit:?}"
+        );
+        assert!(
+            holes[0].abs_diff(lit[0]) <= 6,
+            "rays pass where it's cut out: {holes:?} vs {lit:?}"
+        );
+    }
 }
 
 /// Ray traced ambient occlusion (RT3, renderer/ray_ao.rs).

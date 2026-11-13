@@ -43,6 +43,9 @@ pub(super) struct SunRaysUniform {
     /// The sun's light (its color times its intensity), and the screen's
     /// aspect (width over height).
     pub(super) light: [f32; 4],
+    /// x: a number that changes each frame under TAA (0 without), which
+    /// turns each pixel's noise so TAA averages it.
+    pub(super) noise: [f32; 4],
 }
 
 /// Whether `list` has sun rays the graphics settings draw (wherever the
@@ -62,6 +65,7 @@ pub(super) fn uniform(
     list: &DrawList,
     graphics: &EffectiveGraphics,
     aspect: f32,
+    turn: f32,
 ) -> Option<SunRaysUniform> {
     if !wanted(list, graphics) {
         return None;
@@ -84,6 +88,7 @@ pub(super) fn uniform(
     Some(SunRaysUniform {
         rays: [strength, reach, u, v],
         light: [light[0], light[1], light[2], aspect],
+        noise: [turn, 0.0, 0.0, 0.0],
     })
 }
 

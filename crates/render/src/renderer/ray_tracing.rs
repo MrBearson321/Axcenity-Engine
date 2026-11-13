@@ -22,6 +22,7 @@
 use glam::{Mat4, Vec3};
 use rustc_hash::FxHashMap;
 
+use super::ray_cut_outs::{CutOutRaw, CutOuts, has_holes};
 use super::scene::gpu_mesh_in;
 use super::{Draw, GpuMesh, MeshKey, ScenePipeline};
 use crate::draw_list::Material;
@@ -85,17 +86,22 @@ pub(super) struct Surfaces {
     texture_colors: FxHashMap<u64, [f32; 3]>,
 }
 
+/// A mesh's BLAS: the mesh, and whether it's built for a cut-out (without
+/// the opaque flag, so rays can pass through its holes). A mesh drawn both
+/// ways has one of each.
+type BlasKey = (MeshKey, bool);
+
 /// One TLAS slot: what's in it, compared frame to frame.
 #[derive(Clone, Copy, PartialEq)]
 struct Slot {
-    mesh: MeshKey,
+    mesh: BlasKey,
     transform: [f32; 12],
     mask: u8,
 }
 
 /// The ray traced scene: BLASes by mesh and the TLAS.
 pub(super) struct RayScene {
-    blases: FxHashMap<MeshKey, MeshBlas>,
+    blases: FxHashMap<BlasKey, MeshBlas>,
     tlas: wgpu::Tlas,
     capacity: u32,
     slots: Vec<Slot>,
@@ -103,6 +109,8 @@ pub(super) struct RayScene {
     built: bool,
     /// What rays hitting each slot find, while ray traced GI is on.
     pub(super) surfaces: Option<Surfaces>,
+    /// Where each slot's holes are, for rays that pass through them.
+    pub(super) cut_outs: CutOuts,
     pub(super) stats: RayTracingStats,
 }
 
@@ -116,6 +124,7 @@ impl RayScene {
             slots: Vec::new(),
             built: false,
             surfaces: None,
+            cut_outs: CutOuts::new(device),
             stats: RayTracingStats::default(),
         }
     }
@@ -142,7 +151,8 @@ impl RayScene {
             self.surfaces = None;
         }
         // The items wanted, and the meshes they need.
-        let mut wanted: Vec<(MeshKey, &'a GpuMesh, Mat4, u8)> = Vec::new();
+        let mut wanted: Vec<(BlasKey, &'a GpuMesh, Mat4, u8)> = Vec::new();
+        let mut wanted_items = Vec::new();
         let mut wanted_surfaces: Vec<SurfaceRaw> = Vec::new();
         for draw in draws {
             let item = draw.item;
@@ -161,7 +171,14 @@ impl RayScene {
             if !within {
                 continue;
             }
-            wanted.push((key, gpu, item.transform, mask_of(&item.material, draw)));
+            let cut_out = has_holes(&item.material);
+            wanted.push((
+                (key, cut_out),
+                gpu,
+                item.transform,
+                mask_of(&item.material, draw),
+            ));
+            wanted_items.push(item);
             if surfaces {
                 let table = self.surfaces.get_or_insert_with(|| Surfaces::new(device));
                 wanted_surfaces.push(surface_of(&item.material, &mut table.texture_colors));
@@ -170,7 +187,7 @@ impl RayScene {
 
         // New or changed meshes get a BLAS, built within the budget.
         let mut budget = BLAS_TRIANGLES_PER_FRAME;
-        let mut to_build: Vec<(MeshKey, &'a GpuMesh)> = Vec::new();
+        let mut to_build: Vec<(BlasKey, &'a GpuMesh)> = Vec::new();
         let mut waiting = 0;
         for &(key, gpu, _, _) in &wanted {
             let blas = self.blases.entry(key);
@@ -181,7 +198,7 @@ impl RayScene {
                     entry.into_mut()
                 }
                 blas => {
-                    let size = size_of_mesh(gpu);
+                    let size = size_of_mesh(gpu, key.1);
                     let fresh = MeshBlas {
                         blas: create_blas(device, &size),
                         size,
@@ -210,9 +227,13 @@ impl RayScene {
             budget = budget.saturating_sub(triangles);
             to_build.push((key, gpu));
         }
-        for (key, _) in &to_build {
+        for (key, gpu) in &to_build {
             if let Some(entry) = self.blases.get_mut(key) {
                 entry.built = true;
+            }
+            // A cut-out mesh's texture coordinates, for its holes.
+            if key.1 {
+                self.cut_outs.add_mesh(device, encoder, key.0, gpu);
             }
         }
 
@@ -235,6 +256,19 @@ impl RayScene {
                 }
             })
             .collect();
+        let cut_outs: Vec<CutOutRaw> = in_slots
+            .iter()
+            .map(|&index| {
+                let ((mesh, cut_out), gpu, _, _) = wanted[index];
+                if cut_out {
+                    self.cut_outs
+                        .slot((device, queue), wanted_items[index], mesh, gpu.version)
+                } else {
+                    CutOutRaw::default()
+                }
+            })
+            .collect();
+        self.cut_outs.write(device, queue, cut_outs);
         if let Some(table) = &mut self.surfaces {
             let raw: Vec<SurfaceRaw> = in_slots
                 .iter()
@@ -467,14 +501,21 @@ fn rows_3x4(transform: Mat4) -> [f32; 12] {
     rows[..12].try_into().unwrap()
 }
 
-fn size_of_mesh(gpu: &GpuMesh) -> wgpu::BlasTriangleGeometrySizeDescriptor {
+/// A BLAS's size for `gpu`: opaque, unless it's for a `cut_out`, whose
+/// triangles rays that don't force opacity see as candidates to test
+/// against the texture's holes.
+fn size_of_mesh(gpu: &GpuMesh, cut_out: bool) -> wgpu::BlasTriangleGeometrySizeDescriptor {
     wgpu::BlasTriangleGeometrySizeDescriptor {
         // `Vertex::position` comes first in each corner.
         vertex_format: wgpu::VertexFormat::Float32x3,
         vertex_count: gpu.vertex_count,
         index_format: Some(gpu.index_format),
         index_count: Some(gpu.index_count),
-        flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
+        flags: if cut_out {
+            wgpu::AccelerationStructureGeometryFlags::empty()
+        } else {
+            wgpu::AccelerationStructureGeometryFlags::OPAQUE
+        },
     }
 }
 
@@ -503,13 +544,15 @@ fn create_tlas(device: &wgpu::Device, capacity: u32) -> wgpu::Tlas {
     })
 }
 
-/// Usage a mesh's buffers need to be built into a BLAS on `device`.
+/// Usage a mesh's buffers need to be built into a BLAS on `device`, and
+/// read (as storage) for a cut-out's texture coordinates
+/// (`ray_cut_outs.rs`).
 pub(super) fn blas_input(device: &wgpu::Device) -> wgpu::BufferUsages {
     if device
         .features()
         .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
     {
-        wgpu::BufferUsages::BLAS_INPUT
+        wgpu::BufferUsages::BLAS_INPUT | wgpu::BufferUsages::STORAGE
     } else {
         wgpu::BufferUsages::empty()
     }
