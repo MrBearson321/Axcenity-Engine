@@ -2379,6 +2379,17 @@ impl ClassName {
                 // the project, such as "assets/terrain/Terrain". The editor
                 // picks one.
                 ("DataFolder", Value::String(String::new())),
+                // Water (LE4): with `Water` on, the hollows below
+                // `WaterLevel` (world Y) are flooded, with waves, foam and
+                // reflections (`docs/terrain.md`).
+                ("Water", Value::Bool(false)),
+                ("WaterLevel", Value::Number(0.0)),
+                ("WaterColor", Value::Color3(Color3::new(0.02, 0.16, 0.22))),
+                ("WaterClarity", Value::Number(4.0)),
+                ("WaveHeight", Value::Number(0.25)),
+                ("WaveLength", Value::Number(12.0)),
+                ("WaveSpeed", Value::Number(1.0)),
+                ("WaveDirection", Value::Number(0.0)),
             ],
             ClassName::TerrainLayer => vec![
                 // The material: a tint, the texture maps (files relative to

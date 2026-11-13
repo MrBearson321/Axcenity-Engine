@@ -24,6 +24,8 @@ A material file with a `water` block is a water material (`docs/rendering/models
 
 A Part with a water material's `MaterialVariant` draws as water: the top of its box, on `render::water_surface()`, a 64×64 grid (`WATER_GRID`) the part's transform stretches, so the corners can move. Make the part's top the water's surface. Its `Transparency` fades the water out over what's behind it. Water casts no shadow, isn't in the prepass and isn't picked differently (it's still the part's box). A MeshPart can use a water material too, but its own mesh is drawn, so its waves show only where it has corners.
 
+A Terrain floods its hollows with the same water from its own `Water` properties (`docs/terrain.md`, LE4): one item per flooded chunk, on the same grid.
+
 ## Drawing
 
 `render::Material::water` (`render::Water`) marks an item. Its values ride in the material uniform's surface parameters (`renderer/water.rs`, `water_params`), so water materials differ in their binding keys and never in pipelines. `plan_draws` puts water with the see-through items, first among them (nearest last), so it's drawn after solid items and the sky and before glass and sprites.
