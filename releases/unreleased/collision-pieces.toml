@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "physics"
+title = "Models can carry their own collision shapes, and MeshParts can choose what they collide as"
+details = "An object in a model named like another with _COL on the end (Rock_COL, Rock_COL2 and so on) is now one convex piece of that object's collision: it isn't drawn and doesn't change the model's size, the same idea as Unreal's UCX_ and Godot's -colonly objects, so they can be made in Blender. MeshParts gain CollisionFidelity: Default (the model's pieces when it has any, otherwise its hull, which is what every MeshPart did before), Box, Hull or PreciseConvexDecomposition, so a doorway or an arch can be walked through. The Collisions overlay draws the pieces."
+features = ["physics.rigid-bodies", "assets.model-import"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
