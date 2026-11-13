@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Effect tab: preview and edit particle effects, and save them as effect assets"
+details = "The new Effect tab (Window menu or Ctrl+K) plays the selected particle effect alone, with play, pause, restart, loop, slow motion, a floor and a sky or dark backdrop. Below the preview, each emitter's properties are grouped as a module stack (Spawn, Birth, Over life, Render), and every edit there is an undo step. It shows how many particles run on the CPU and GPU and what they cost. Save as Effect saves the effect as a prefab in assets/effects, so it places, overrides, applies and reverts like any prefab, and the Assets panel lists effects under Particles."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
