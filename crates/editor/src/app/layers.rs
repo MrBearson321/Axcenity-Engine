@@ -11,8 +11,9 @@ impl EditorApp {
     pub(in crate::app) fn layers_pane(&mut self, ui: &mut egui::Ui) {
         let editable = !self.playing();
         let rows = layers::rows(&self.world, &self.layer_view);
+        let regions = layers::regions(&self.world, &self.layer_view);
         let selected = if editable { self.selection.len() } else { 0 };
-        if let Some(action) = self.layers.show(ui, &rows, selected, editable) {
+        if let Some(action) = self.layers.show(ui, &rows, &regions, selected, editable) {
             self.layer_action(action);
             ui.ctx().request_repaint();
         }
@@ -42,6 +43,13 @@ impl EditorApp {
             LayerAction::RemoveSelection(name) => self.tag_selection(&name, false),
             LayerAction::Rename(id, new) => self.rename_layer(id, &new),
             LayerAction::Delete(id) => self.delete_layer(id),
+            LayerAction::ToggleUnloaded(name) => {
+                let mut view = self.layer_view.clone();
+                if !view.unloaded.remove(&name) {
+                    view.unloaded.insert(name);
+                }
+                self.set_layer_view(view);
+            }
         }
     }
 

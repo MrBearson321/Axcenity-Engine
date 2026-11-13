@@ -25,6 +25,15 @@ Which layers you hide and lock is **your view**, not an edit (decision D2): it's
 - `EditorApp::update_layer_sets` turns the view into Instances (`LayerSets`) when the tree, a hidden or locked layer's tagged Instances or the view change, before the Explorer and the viewport draw.
 - Terrains in a hidden layer are still drawn, but a click goes through them.
 
+## Regions
+
+Roadmap R16.3b, decision D3. A **region** is a Folder or Model at the top of the Workspace: the Layers panel lists them under **Regions**, with an icon (a cube for a Model), the name (click to select it), how many parts are inside, and **Unload in Editor** (the eject button).
+
+- An unloaded region isn't drawn, a click goes through it and its Explorer rows are dimmed, as for a hidden layer: its Instances join `LayerSets::hidden`. It stays in the world and is saved unchanged, so unloading isn't an edit: no undo step, nothing to save.
+- Which regions are unloaded is your view, by name, beside the hidden and locked layers in `.axcenity/layers.json` (`LayerView::unloaded`). Two top-level Folders or Models with the same name unload together; renaming one loads it again.
+- Play shows every region, as it shows every layer.
+- A world with nothing but loose parts at the top of the Workspace has no regions: the panel says to put them in Folders or Models.
+
 ## Tests
 
-`app/layers_tests.rs` (a new layer holding the selection, rename, delete, add and remove as undo steps, a name already taken, saving and reopening; a hidden layer kept out of the world, the undo history and unsaved changes, kept in `.axcenity/layers.json`, hidden from the viewport and dimmed in the Explorer, locked ones still drawn, a removed tag showing at once, Play showing every layer) and `viewport/tests.rs` (`a_click_goes_through_hidden_and_locked_layers`).
+`app/layers_tests.rs` (a new layer holding the selection, rename, delete, add and remove as undo steps, a name already taken, saving and reopening; a hidden layer kept out of the world, the undo history and unsaved changes, kept in `.axcenity/layers.json`, hidden from the viewport and dimmed in the Explorer, locked ones still drawn, a removed tag showing at once, Play showing every layer; `an_unloaded_region_is_set_aside_but_saved_unchanged`), `layers.rs` (`an_unloaded_region_is_hidden_with_everything_inside`) and `viewport/tests.rs` (`a_click_goes_through_hidden_and_locked_layers`; a click going through what's streamed out while editing, in `streaming_while_editing_hides_what_is_far_but_never_the_selection`).
