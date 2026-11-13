@@ -41,6 +41,7 @@
 //! overlay are `view.rs`.
 
 pub mod bake;
+mod lods;
 mod modal;
 mod modifiers;
 pub mod paint;
@@ -176,6 +177,15 @@ pub struct StudioDoc {
     /// The high-poly object Make Low Poly copies and Bake bakes from
     /// (Phase 61). Not an undo step.
     pub reference: Option<usize>,
+    /// The level of detail the view draws objects at (R15.3's Preview
+    /// LOD): 0 is the full objects.
+    pub lod_preview: usize,
+    /// The shares of the triangles Generate LODs keeps in `_LOD1` and
+    /// `_LOD2`.
+    pub lod_ratios: [f32; 2],
+    /// The active object's levels, for the revision and object they were
+    /// counted for ([`StudioDoc::lod_rows`]).
+    lod_rows: Option<((u64, usize), Vec<lods::LodRow>)>,
 }
 
 impl StudioDoc {
@@ -202,6 +212,9 @@ impl StudioDoc {
             last_op: None,
             modifier_edit: None,
             reference: None,
+            lod_preview: 0,
+            lod_ratios: lods::default_ratios(),
+            lod_rows: None,
         }
     }
 
@@ -1310,6 +1323,7 @@ impl ModelStudio {
             self.stack_errors = (doc.revision, doc.active, errors);
         }
         modifiers::panel(ui, doc, &self.stack_errors.2, editable, &mut self.notices);
+        lods::panel(ui, doc, editable, &mut self.notices);
     }
 
     /// The 3D view and what the mouse and keys do in it.
