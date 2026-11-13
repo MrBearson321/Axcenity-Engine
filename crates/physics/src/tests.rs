@@ -1027,6 +1027,86 @@ fn a_hull_is_built_once_for_a_model_and_size() {
     ));
 }
 
+/// The corners of the box from `min` to `max`.
+fn box_corners(min: [f32; 3], max: [f32; 3]) -> Vec<[f32; 3]> {
+    (0..8)
+        .map(|i| {
+            let pick = |axis: usize| {
+                if i & (1 << axis) == 0 {
+                    min[axis]
+                } else {
+                    max[axis]
+                }
+            };
+            [pick(0), pick(1), pick(2)]
+        })
+        .collect()
+}
+
+/// A model filling its box, whose collision pieces (R15.2) make a doorway:
+/// two posts and a lintel, open in the middle from the floor up.
+fn doorway() -> std::sync::Arc<axcenity_assets::Model> {
+    let corners = box_corners([0.0; 3], [1.0; 3]);
+    let primitive = axcenity_assets::Primitive::new(
+        corners,
+        vec![[0.0, 1.0, 0.0]; 8],
+        Vec::new(),
+        vec![
+            0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4,
+            6, 1, 3, 5, 3, 7, 5,
+        ],
+        axcenity_assets::ModelMaterial::default(),
+    );
+    let mut model = axcenity_assets::Model::from_primitives(vec![primitive]).unwrap();
+    model.collision = vec![
+        box_corners([-0.5, -0.5, -0.5], [-0.3, 0.5, 0.5]),
+        box_corners([0.3, -0.5, -0.5], [0.5, 0.5, 0.5]),
+        box_corners([-0.5, 0.3, -0.5], [0.5, 0.5, 0.5]),
+    ];
+    std::sync::Arc::new(model)
+}
+
+#[test]
+fn a_meshpart_with_collision_pieces_collides_as_them_by_default() {
+    use crate::shapes::{Fidelity, Form, collider, wireframe};
+    use rapier3d::glamx::Vec3;
+    let size = Vec3::splat(10.0);
+    let inside =
+        |form: &Form, point: Vec3| collider(form, size).shape().contains_local_point(point);
+    let doorway_form = Form::Mesh(Some(doorway()), Fidelity::Default);
+    // The doorway is open; the posts and lintel are solid.
+    assert!(!inside(&doorway_form, Vec3::new(0.0, -2.0, 0.0)));
+    assert!(inside(&doorway_form, Vec3::new(-4.0, 0.0, 0.0)));
+    assert!(inside(&doorway_form, Vec3::new(4.0, -4.0, 0.0)));
+    assert!(inside(&doorway_form, Vec3::new(0.0, 4.0, 0.0)));
+    assert_eq!(
+        collider(&doorway_form, size)
+            .shape()
+            .as_compound()
+            .map(|pieces| pieces.shapes().len()),
+        Some(3)
+    );
+    // Asked for its hull, it fills the doorway as before.
+    let hull = Form::Mesh(Some(doorway()), Fidelity::Hull);
+    assert!(inside(&hull, Vec3::new(0.0, -2.0, 0.0)));
+    // Without pieces, Default is its hull.
+    let plain = Form::Mesh(Some(tetrahedron()), Fidelity::Default);
+    assert!(
+        collider(&plain, size)
+            .shape()
+            .as_convex_polyhedron()
+            .is_some()
+    );
+    // The Collisions overlay draws the pieces.
+    assert_ne!(
+        wireframe(&doorway_form, size).len(),
+        wireframe(&hull, size).len()
+    );
+
+    assert_eq!(Fidelity::named("Default"), Fidelity::Default);
+    assert_eq!(Fidelity::named("Hull"), Fidelity::Hull);
+}
+
 /// A 2x2x2 block on a stack of five 1x1x1 blocks stays up for 10 s, built
 /// six slightly different ways (`CONTACT_RECYCLE_DISTANCE`).
 #[test]

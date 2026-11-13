@@ -65,6 +65,7 @@ use axcenity_editor_kit::{responsive, widgets};
 pub mod agent;
 mod drawer;
 pub mod install;
+mod listen;
 mod packs;
 #[cfg(test)]
 mod search_tests;
@@ -197,6 +198,11 @@ pub enum ToolboxAction {
     /// Install a shared `.axcenity-plugin` into the project's plugins (or
     /// the user's Plugins folder when no project is open).
     ImportPlugin(PathBuf),
+    /// Play a sound result's preview, the file's `bytes`, on its own (the
+    /// listen button); `name` is for errors. Stops any it played before.
+    PlaySound { name: String, bytes: Vec<u8> },
+    /// Stop the preview [`ToolboxAction::PlaySound`] started.
+    StopSound,
 }
 
 #[derive(Clone)]
@@ -415,6 +421,8 @@ struct Card {
     blocked: Option<&'static str>,
     /// What Get would fetch ("Gets 2K JPG."), or `None` with no download.
     plan: Option<String>,
+    /// A sound's preview to listen to (empty for other kinds or none).
+    listen: String,
 }
 
 /// The Toolbox tab.
@@ -469,6 +477,10 @@ pub struct ToolboxPanel {
     reveal: Option<AssetRecord>,
     /// The view menu's Downloaded / Imported Assets… was picked.
     open_inventory: bool,
+    /// The sound result being listened to (`listen.rs`).
+    listen: Option<listen::Listen>,
+    /// Play and stop actions for the editor, handed back after drawing.
+    sound_out: Vec<ToolboxAction>,
 }
 
 impl Default for ToolboxPanel {
@@ -511,6 +523,8 @@ impl ToolboxPanel {
             queue: VecDeque::new(),
             reveal: None,
             open_inventory: false,
+            listen: None,
+            sound_out: Vec::new(),
         }
     }
 
@@ -580,6 +594,7 @@ impl ToolboxPanel {
         }
         let mut actions = Vec::new();
         self.poll(&ctx, &mut actions);
+        self.poll_listen();
         if can_edit {
             self.advance_queue(&ctx, project);
         }
@@ -739,6 +754,7 @@ impl ToolboxPanel {
         if search_view {
             ui.label(egui::RichText::new(credit).weak().small());
         }
+        actions.append(&mut self.sound_out);
         actions
     }
 
@@ -775,6 +791,10 @@ impl ToolboxPanel {
         let Some(first) = sources.first() else {
             return;
         };
+        if kind != Kind::Sound {
+            self.stop_listening();
+            self.listen = None;
+        }
         self.kind = kind;
         self.sources = if sources.len() > 1 {
             Sources::All
@@ -948,6 +968,11 @@ impl ToolboxPanel {
                     name: listing.name.clone(),
                     detail,
                     blocked: license::commercial_block(&record.license),
+                    listen: if record.kind == Kind::Sound {
+                        record.preview_url.clone()
+                    } else {
+                        String::new()
+                    },
                     plan: self
                         .package(listing)
                         .map(|choice| choice.describe())
@@ -1071,19 +1096,25 @@ impl ToolboxPanel {
             None => egui::RichText::new(&card.detail).weak().small(),
         };
         ui.add(egui::Label::new(detail).truncate());
-        let button = ui.add_enabled(gettable, egui::Button::new("Get"));
-        let button = match &card.plan {
-            Some(plan) if can_get => button.on_hover_text(plan),
-            Some(_) => {
-                button.on_disabled_hover_text("Open a project (and stop Play) to get assets.")
+        let sound = self.kind == Kind::Sound;
+        ui.horizontal(|ui| {
+            let button = ui.add_enabled(gettable, egui::Button::new("Get"));
+            let button = match &card.plan {
+                Some(plan) if can_get => button.on_hover_text(plan),
+                Some(_) => {
+                    button.on_disabled_hover_text("Open a project (and stop Play) to get assets.")
+                }
+                None => button.on_disabled_hover_text(format!("{} has no download.", card.name)),
+            };
+            if button.clicked()
+                && let Some(project) = project
+            {
+                self.start_download(ui.ctx(), project, &card.key);
             }
-            None => button.on_disabled_hover_text(format!("{} has no download.", card.name)),
-        };
-        if button.clicked()
-            && let Some(project) = project
-        {
-            self.start_download(ui.ctx(), project, &card.key);
-        }
+            if sound && listen::button(ui, &self.listen, &card.key, &card.name, &card.listen) {
+                self.listen_clicked(ui.ctx(), &card.key, &card.name, &card.listen);
+            }
+        });
     }
 
     /// The listing with this key, in the page shown.

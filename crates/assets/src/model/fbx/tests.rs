@@ -691,3 +691,25 @@ fn fbx_texture_placements_flip_v_into_the_engines_coordinates() {
         ([1.0, 1.0], [0.0, 0.0])
     );
 }
+
+#[test]
+fn an_fbx_col_object_is_a_collision_piece_not_drawn() {
+    let folder = temp_folder("pieces");
+    // The Lamp cube, 10 to the side of the Bench, becomes the Bench's piece.
+    let text = two_cubes_fbx().replacen(
+        "\"Model::Lamp\", \"Mesh\"",
+        "\"Model::Bench_COL\", \"Mesh\"",
+        1,
+    );
+    let model = load_fbx(&text, &folder).unwrap();
+    assert_eq!(model.primitives.len(), 1, "the piece isn't drawn");
+    assert_size(&model, [2.0, 2.0, 2.0]);
+    assert_eq!(model.collision.len(), 1);
+    // Its 8 corners, fitted with the Bench: 5 of the Bench's sizes to the side.
+    assert_eq!(model.collision[0].len(), 8);
+    assert!(
+        model.collision[0].iter().all(|p| p[0] < -4.0),
+        "{:?}",
+        model.collision[0]
+    );
+}
