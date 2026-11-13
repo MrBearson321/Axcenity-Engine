@@ -41,6 +41,7 @@
 //! overlay are `view.rs`.
 
 pub mod bake;
+mod collision;
 mod lods;
 mod modal;
 mod modifiers;
@@ -53,6 +54,7 @@ pub mod uv_editor;
 mod view;
 
 pub use bake::BakeState;
+pub use collision::{COLLISION_HEADER, CollisionShape};
 pub use modal::{Modal, ModalKind};
 pub use paint::PaintState;
 pub use proportional::{Falloff, Pivot, Proportional};
@@ -195,6 +197,10 @@ pub struct StudioDoc {
     /// The active object's levels, for the revision and object they were
     /// counted for ([`StudioDoc::lod_rows`]).
     lod_rows: Option<((u64, usize), Vec<lods::LodRow>)>,
+    /// Whether the view outlines collision pieces (R15.2b).
+    pub show_collision: bool,
+    /// How many pieces Generate Convex Pieces may make.
+    pub collision_pieces: u32,
 }
 
 impl StudioDoc {
@@ -225,6 +231,8 @@ impl StudioDoc {
             lod_preview: 0,
             lod_ratios: lods::default_ratios(),
             lod_rows: None,
+            show_collision: true,
+            collision_pieces: collision::DEFAULT_PIECES,
         }
     }
 
@@ -1435,6 +1443,10 @@ impl ModelStudio {
                 if doc.model.is_lod_copy(index) {
                     response =
                         response.on_hover_text("A far-away copy: games draw it, this view doesn't");
+                } else if doc.model.is_collision_piece(index) {
+                    response = response.on_hover_text(
+                        "A collision piece: games collide with it and don't draw it",
+                    );
                 }
                 if response.clicked() && object.mesh.is_some() {
                     clicked = Some((index, ui.input(|i| i.modifiers.shift)));
@@ -1469,6 +1481,7 @@ impl ModelStudio {
         }
         modifiers::panel(ui, doc, &self.stack_errors.2, editable, &mut self.notices);
         lods::panel(ui, doc, editable, &mut self.notices);
+        collision::panel(ui, doc, editable, &mut self.notices);
     }
 
     /// The 3D view and what the mouse and keys do in it.
@@ -1912,6 +1925,8 @@ fn hash(bytes: &[u8]) -> u64 {
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code, unused_imports))]
 pub mod bake_tests;
+#[cfg(test)]
+mod collision_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code, unused_imports))]
 pub mod modifiers_tests;

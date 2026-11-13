@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Make a model's collision in the Model Studio"
+details = "The Model Studio's new Collision fold gives the active object a box, a hull or up to 64 convex pieces that follow its hollows, so a doorway or the space under a table stays open. They're saved in the .glb as _COL objects, and a MeshPart with CollisionFidelity Default collides as them. Remove takes them out. Show Collision outlines them in green, and Edit mode edits them like any object."
+features = ["editor.model-studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

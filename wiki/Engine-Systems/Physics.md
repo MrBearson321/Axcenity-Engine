@@ -78,7 +78,7 @@ rapier keeps its defaults (4 iterations, a stabilization pass): fewer made stack
 ## Limitations
 
 - Setting `Position` stops a part (Roblox keeps its speed) (decided in Phase 6).
-- A MeshPart whose model has no `_COL` pieces collides as its convex hull by default: hollows are filled unless it's set to `PreciseConvexDecomposition` (decomposed when first needed, slow for big models) or the model gets pieces (R15.2).
+- A MeshPart whose model has no `_COL` pieces collides as its convex hull by default: hollows are filled unless it's set to `PreciseConvexDecomposition` (decomposed when first needed, slow for big models) or the model gets pieces (R15.2; the Model Studio's Collision fold makes them as a box, a hull or convex pieces, R15.2b).
 - Ragdolls can push a joint past its limit for a few frames on a hard landing.
 - Lag compensation (Phase 81) not built.
 - One friction coefficient (no separate static friction); acceleration isn't a property (CP6).

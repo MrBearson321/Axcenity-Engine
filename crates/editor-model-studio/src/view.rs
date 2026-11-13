@@ -49,6 +49,8 @@ use crate::theme;
 const MESH_ID: &str = "studio/model.glb";
 /// Seams are red, as in Blender.
 const SEAM: egui::Color32 = egui::Color32::from_rgb(230, 40, 40);
+/// Collision pieces' outline (R15.2b).
+const COLLISION: egui::Color32 = egui::Color32::from_rgb(64, 217, 102);
 /// The checker's squares across the texture.
 const CHECKER_CELLS: u32 = 8;
 /// How close (in points) the mouse must be to pick a vertex, or an edge.
@@ -909,6 +911,19 @@ fn paint_overlay(
             continue;
         };
         let editing = doc.mode == Mode::Edit && index == doc.active;
+        if !editing && doc.model.is_collision_piece(index) {
+            // Pieces aren't drawn: outlined in green, with Show Collision.
+            let picked = doc.mode == Mode::Object && doc.objects.contains(&index);
+            if doc.show_collision || picked {
+                let color = if picked { accent } else { COLLISION };
+                let stroke = egui::Stroke::new(1.0_f32, color);
+                for edge in mesh.edges() {
+                    let (a, b) = mesh.ends(edge);
+                    line(mesh.position(a), mesh.position(b), stroke);
+                }
+            }
+            continue;
+        }
         if normals {
             let length = mesh_size(mesh) * 0.2;
             for face in 0..mesh.face_count() as u32 {
