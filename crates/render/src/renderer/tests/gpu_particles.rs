@@ -100,6 +100,7 @@ fn gpu_particles_look_like_the_same_sprites_drawn_from_the_cpu() {
         brightness: 1.5,
         light_emission: 0.4,
         texture: None,
+        curves: None,
     };
     let mut on_gpu = list_of(vec![big_block()]);
     on_gpu.items[0].transform = Mat4::from_scale_rotation_translation(
@@ -142,6 +143,63 @@ fn gpu_particles_look_like_the_same_sprites_drawn_from_the_cpu() {
     };
     let (x, y) = (SIZE / 2 + 3, SIZE / 2 + 2);
     assert_ne!(pixel(&block, x, y), pixel(&gpu, x, y));
+}
+
+/// R17.1: with curves, GPU particles draw the curves' size, transparency
+/// and color in place of the start and end pairs, as the CPU's sprites
+/// sampled from the same table would.
+#[test]
+fn gpu_particles_draw_their_curves_in_place_of_the_start_and_end_values() {
+    let Some(mut renderer) = renderer() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let at = Vec3::new(0.5, -0.3, -6.0);
+    // The pairs say small and blue; the curves say big and orange, the
+    // same all life long, so each particle's age doesn't matter.
+    let curves = crate::ParticleCurves::from_fn(|_| ([2.5, 0.0, 0.6, 0.0], [0.9, 0.5, 0.2]));
+    let (size, transparency, color) = curves.sample(0.3, [0.7, -0.2]);
+    assert_eq!((size, transparency), (2.5, 0.6));
+    let mut gpu = emitter(at, 0.0, 3, 1024);
+    gpu.look = ParticleLook {
+        size: [0.2; 2],
+        color: [[0.0, 0.0, 1.0]; 2],
+        transparency: [0.0; 2],
+        curves: Some(std::sync::Arc::new(curves)),
+        ..ParticleLook::default()
+    };
+    let mut on_gpu = list_of(vec![big_block()]);
+    on_gpu.items[0].transform = Mat4::from_scale_rotation_translation(
+        Vec3::new(20.0, 20.0, 1.0),
+        glam::Quat::IDENTITY,
+        Vec3::new(0.0, 0.0, -12.0),
+    );
+    let mut on_cpu = on_gpu.clone();
+    on_gpu.particle_emitters = vec![gpu];
+    on_cpu.sprites = vec![
+        crate::Sprite {
+            position: at,
+            size,
+            rotation_degrees: 0.0,
+            color,
+            opacity: 1.0 - transparency,
+            brightness: 1.0,
+            light_emission: 0.0,
+            texture: None,
+        };
+        3
+    ];
+    renderer.render(&on_cpu).unwrap();
+    let cpu = renderer.read_pixels();
+    renderer.render(&on_gpu).unwrap();
+    let gpu = renderer.read_pixels();
+    let most = cpu
+        .iter()
+        .zip(&gpu)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(most <= 2, "differ by up to {most}");
 }
 
 #[test]

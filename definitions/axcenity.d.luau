@@ -148,6 +148,36 @@ declare extern type Random with
 	function Clone(self): Random
 end
 
+--- A number that changes over time from 0 to 1, such as a particle's size over its life: keypoints in time order, with straight lines between them.
+declare extern type NumberSequence with
+	--- Its keypoints, the first at time 0 and the last at 1.
+	Keypoints: { NumberSequenceKeypoint }
+end
+
+--- One point of a NumberSequence.
+declare extern type NumberSequenceKeypoint with
+	--- When, from 0 to 1.
+	Time: number
+	--- The number then.
+	Value: number
+	--- Give or take: each particle picks once where in this range it is.
+	Envelope: number
+end
+
+--- A color that changes over time from 0 to 1, such as a particle's color over its life.
+declare extern type ColorSequence with
+	--- Its keypoints, the first at time 0 and the last at 1.
+	Keypoints: { ColorSequenceKeypoint }
+end
+
+--- One point of a ColorSequence.
+declare extern type ColorSequenceKeypoint with
+	--- When, from 0 to 1.
+	Time: number
+	--- The color then.
+	Value: Color3
+end
+
 --- How a part weighs, grips and bounces. Where two parts touch, each coefficient is the average of theirs, weighted by their weights.
 declare extern type PhysicalProperties with
 	--- Mass per cubic stud, from 0.0001 to 100. Plastic is 1, Metal 7.85.
@@ -4024,6 +4054,12 @@ declare extern type ParticleEmitter extends Instance with
 	Transparency: number
 	--- From 0 (solid) to 1 (invisible) when a particle dies.
 	TransparencyEnd: number
+	--- A NumberSequence of studs across over each particle's life, from birth (0) to death (1), in place of Size and SizeEnd. nil (the default) uses them.
+	SizeOverLife: NumberSequence?
+	--- A ColorSequence over each particle's life, in place of Color and ColorEnd. nil (the default) uses them.
+	ColorOverLife: ColorSequence?
+	--- A NumberSequence from 0 (solid) to 1 (invisible) over each particle's life, in place of Transparency and TransparencyEnd. nil (the default) uses them.
+	TransparencyOverLife: NumberSequence?
 	--- How far each particle is turned when it's born, in degrees.
 	Rotation: number
 	--- How fast particles spin, in degrees a second.
@@ -5472,6 +5508,42 @@ end
 
 --- Creates Vector2 values.
 declare Vector2: Vector2Library
+
+--- Creates NumberSequences, such as a ParticleEmitter's `SizeOverLife`.
+declare extern type NumberSequenceLibrary with
+	--- The same number throughout (`NumberSequence.new(2)`), a start and an end (`NumberSequence.new(1, 0)`), or a list of 2 to 20 NumberSequenceKeypoints in time order from 0 to 1.
+	new: (valueOrKeypoints: number | { NumberSequenceKeypoint }, endValue: number?) -> NumberSequence
+end
+
+--- Creates NumberSequences, such as a ParticleEmitter's `SizeOverLife`.
+declare NumberSequence: NumberSequenceLibrary
+
+--- Creates the points of a NumberSequence.
+declare extern type NumberSequenceKeypointLibrary with
+	--- A point at `time` (0 to 1) with `value`, give or take `envelope` (0 when left out).
+	new: (time: number, value: number, envelope: number?) -> NumberSequenceKeypoint
+end
+
+--- Creates the points of a NumberSequence.
+declare NumberSequenceKeypoint: NumberSequenceKeypointLibrary
+
+--- Creates ColorSequences, such as a ParticleEmitter's `ColorOverLife`.
+declare extern type ColorSequenceLibrary with
+	--- The same color throughout, a start and an end color, or a list of 2 to 20 ColorSequenceKeypoints in time order from 0 to 1.
+	new: (colorOrKeypoints: Color3 | { ColorSequenceKeypoint }, endColor: Color3?) -> ColorSequence
+end
+
+--- Creates ColorSequences, such as a ParticleEmitter's `ColorOverLife`.
+declare ColorSequence: ColorSequenceLibrary
+
+--- Creates the points of a ColorSequence.
+declare extern type ColorSequenceKeypointLibrary with
+	--- A point at `time` (0 to 1) with `color`.
+	new: (time: number, color: Color3) -> ColorSequenceKeypoint
+end
+
+--- Creates the points of a ColorSequence.
+declare ColorSequenceKeypoint: ColorSequenceKeypointLibrary
 
 --- Creates PhysicalProperties for `CustomPhysicalProperties`.
 declare extern type PhysicalPropertiesLibrary with

@@ -299,6 +299,82 @@ pub struct ParticleLook {
     pub light_emission: f32,
     /// As [`Sprite::texture`].
     pub texture: Option<Arc<dyn TextureSource>>,
+    /// Size, transparency and color over life (roadmap R17.1), in place of
+    /// the pairs above; `None` blends the pairs.
+    pub curves: Option<Arc<ParticleCurves>>,
+}
+
+/// How many evenly spaced times over a particle's life [`ParticleCurves`]
+/// holds, from birth to death.
+pub const CURVE_ENTRIES: usize = 32;
+
+/// A particle's size, transparency and color over its life, sampled at
+/// [`CURVE_ENTRIES`] times from birth (0) to death (1), with straight
+/// lines between: the table particles.wgsl reads, and the CPU's particles
+/// too ([`sample`](Self::sample)), so the two look alike.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParticleCurves {
+    /// Size (studs), its envelope, transparency and its envelope. A
+    /// particle's value is the entry's plus its envelope times a spread
+    /// from −1 to 1 picked once for it.
+    pub shape: [[f32; 4]; CURVE_ENTRIES],
+    /// sRGB color.
+    pub color: [[f32; 3]; CURVE_ENTRIES],
+}
+
+impl ParticleCurves {
+    /// The table of `at(time)`'s shape and color at each entry's time.
+    pub fn from_fn(at: impl Fn(f32) -> ([f32; 4], [f32; 3])) -> Self {
+        let mut curves = Self {
+            shape: [[0.0; 4]; CURVE_ENTRIES],
+            color: [[0.0; 3]; CURVE_ENTRIES],
+        };
+        for entry in 0..CURVE_ENTRIES {
+            let (shape, color) = at(entry as f32 / (CURVE_ENTRIES - 1) as f32);
+            curves.shape[entry] = shape;
+            curves.color[entry] = color;
+        }
+        curves
+    }
+
+    /// The size, transparency and sRGB color at `time` (0 to 1) for a
+    /// particle whose two spreads (from −1 to 1) are `spread`, as
+    /// particles.wgsl's `write` works them out.
+    pub fn sample(&self, time: f32, spread: [f32; 2]) -> (f32, f32, [f32; 3]) {
+        let x = if time.is_nan() {
+            0.0
+        } else {
+            time.clamp(0.0, 1.0)
+        } * (CURVE_ENTRIES - 1) as f32;
+        let index = (x.floor() as usize).min(CURVE_ENTRIES - 1);
+        let next = (index + 1).min(CURVE_ENTRIES - 1);
+        let along = x - index as f32;
+        let mix = |a: f32, b: f32| a + (b - a) * along;
+        let (a, b) = (self.shape[index], self.shape[next]);
+        let shape = [0, 1, 2, 3].map(|i| mix(a[i], b[i]));
+        let (a, b) = (self.color[index], self.color[next]);
+        let color = [0, 1, 2].map(|i| mix(a[i], b[i]));
+        (
+            (shape[0] + shape[1] * spread[0]).max(0.0),
+            (shape[2] + shape[3] * spread[1]).clamp(0.0, 1.0),
+            color,
+        )
+    }
+
+    /// A particle's two spreads, from −1 to 1, from a number that stays
+    /// the same over its life (`pcg`, as particles.wgsl's).
+    pub fn spreads(seed: u32) -> [f32; 2] {
+        let first = pcg(seed);
+        let second = pcg(first);
+        [first, second].map(|n| (n >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0)
+    }
+}
+
+/// The PCG hash particles.wgsl uses for its random numbers.
+fn pcg(v: u32) -> u32 {
+    let state = v.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+    let word = ((state >> ((state >> 28) + 4)) ^ state).wrapping_mul(277_803_737);
+    (word >> 22) ^ word
 }
 
 impl Default for ParticleLook {
@@ -312,6 +388,7 @@ impl Default for ParticleLook {
             brightness: 1.0,
             light_emission: 0.0,
             texture: None,
+            curves: None,
         }
     }
 }

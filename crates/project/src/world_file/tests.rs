@@ -1283,3 +1283,43 @@ fn drag_is_written_only_when_changed_and_read_back() {
     assert_eq!(part.property("RollingFriction"), Some(&Value::Number(2.0)));
     assert_eq!(part.property("AngularDrag"), Some(&Value::Number(0.5)));
 }
+
+/// R17.1: an emitter's OverLife sequences are rows of keypoints in the
+/// file, unset ones aren't written, and a sequence that doesn't run from 0
+/// to 1 in order is reported.
+#[test]
+fn particle_sequences_are_written_as_keypoint_rows_and_read_back() {
+    let world = parse_world(
+        r#"{ "format_version": 1, "workspace": { "children": [
+            { "class": "ParticleEmitter", "name": "Smoke", "properties": {
+                "SizeOverLife": [[0, 1, 0], [0.5, 4, 0.5], [1, 0, 0]],
+                "ColorOverLife": [[0, 1, 0, 0], [1, 0, 0, 1]] } } ] } }"#,
+    )
+    .unwrap();
+    let smoke = world.find_first_child(world.workspace(), "Smoke").unwrap();
+    let smoke = world.get(smoke).unwrap();
+    let sizes = smoke
+        .property("SizeOverLife")
+        .and_then(Value::as_number_sequence)
+        .unwrap();
+    assert_eq!(sizes.sample(0.25), Some((2.5, 0.25)));
+    let text = write_world(&world);
+    assert!(
+        text.contains("\"SizeOverLife\": [[0, 1, 0], [0.5, 4, 0.5], [1, 0, 0]]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\"ColorOverLife\": [[0, 1, 0, 0], [1, 0, 0, 1]]"),
+        "{text}"
+    );
+    assert!(!text.contains("TransparencyOverLife"), "{text}");
+    assert_eq!(write_world(&parse_world(&text).unwrap()), text);
+    let message = parse_err(
+        r#"{ "format_version": 1, "workspace": { "children": [
+            { "class": "ParticleEmitter", "properties": { "SizeOverLife": [[0, 1, 0], [0.5, 2, 0]] } } ] } }"#,
+    );
+    assert!(
+        message.contains("start at time 0 and end at time 1"),
+        "{message}"
+    );
+}

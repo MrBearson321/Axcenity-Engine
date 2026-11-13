@@ -1963,6 +1963,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ParticleEmitter,
+        "SizeOverLife",
+        "A NumberSequence of studs across over each particle's life, from birth (0) to death (1), in place of Size and SizeEnd. nil (the default) uses them.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "ColorOverLife",
+        "A ColorSequence over each particle's life, in place of Color and ColorEnd. nil (the default) uses them.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "TransparencyOverLife",
+        "A NumberSequence from 0 (solid) to 1 (invisible) over each particle's life, in place of Transparency and TransparencyEnd. nil (the default) uses them.",
+    ),
+    (
+        ClassName::ParticleEmitter,
         "Rotation",
         "How far each particle is turned when it's born, in degrees.",
     ),

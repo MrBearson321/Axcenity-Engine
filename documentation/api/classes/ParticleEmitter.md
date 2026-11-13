@@ -150,6 +150,30 @@ ParticleEmitter.TransparencyEnd: number
 
 From 0 (solid) to 1 (invisible) when a particle dies.
 
+#### SizeOverLife
+
+```luau
+ParticleEmitter.SizeOverLife: NumberSequence?
+```
+
+A NumberSequence of studs across over each particle's life, from birth (0) to death (1), in place of Size and SizeEnd. nil (the default) uses them.
+
+#### ColorOverLife
+
+```luau
+ParticleEmitter.ColorOverLife: ColorSequence?
+```
+
+A ColorSequence over each particle's life, in place of Color and ColorEnd. nil (the default) uses them.
+
+#### TransparencyOverLife
+
+```luau
+ParticleEmitter.TransparencyOverLife: NumberSequence?
+```
+
+A NumberSequence from 0 (solid) to 1 (invisible) over each particle's life, in place of Transparency and TransparencyEnd. nil (the default) uses them.
+
 #### Rotation
 
 ```luau
