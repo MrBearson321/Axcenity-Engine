@@ -177,6 +177,14 @@ impl EditMesh {
         self.faces.len()
     }
 
+    /// How many triangles its faces make when drawn: each face's corners
+    /// less two.
+    pub fn triangle_count(&self) -> usize {
+        (0..self.faces.len() as u32)
+            .map(|face| self.face_half_edges(face).len().saturating_sub(2))
+            .sum()
+    }
+
     pub fn positions(&self) -> &[Vec3] {
         &self.positions
     }

@@ -41,6 +41,9 @@ use crate::rig::{Armature, Skin, vertex_skinning};
 /// the renderer's own simplified copies do.
 pub const LOD_RATIOS: [f32; 2] = [0.5, 0.25];
 
+/// The smallest share of triangles a copy can keep.
+pub const MIN_LOD_RATIO: f32 = 0.01;
+
 /// Corner normals this close to the face's own (as a cosine) count as
 /// flat shading.
 const FLAT: f32 = 0.9999;
@@ -251,24 +254,33 @@ impl ModelDoc {
     /// slot each primitive draws (a slot past the object's last is drawn
     /// plain), so the view can show painted materials on it again.
     pub fn to_model_slots(&self, channel: usize) -> Option<(Model, Vec<(usize, usize)>)> {
-        self.model_of(channel, None)
+        self.model_of(channel, None, 0)
+    }
+
+    /// [`to_model_slots`](Self::to_model_slots) with each object drawn by
+    /// its copy at level of detail `level` (R15.3's Preview LOD, see
+    /// [`drawn_at`](Self::drawn_at)); the slots name the copies.
+    pub fn to_model_at_level(&self, level: usize) -> Option<(Model, Vec<(usize, usize)>)> {
+        self.model_of(0, None, level)
     }
 
     /// [`to_model`](Self::to_model) without object `skip` (which the
     /// Studio draws itself while it's sculpted). `None` if nothing's left.
     pub fn to_model_except(&self, skip: usize) -> Option<Model> {
-        self.model_of(0, Some(skip)).map(|(model, _)| model)
+        self.model_of(0, Some(skip), 0).map(|(model, _)| model)
     }
 
     fn model_of(
         &self,
         channel: usize,
         skip: Option<usize>,
+        level: usize,
     ) -> Option<(Model, Vec<(usize, usize)>)> {
         let mut slots = Vec::new();
         let primitives = (0..self.objects.len())
             .filter(|&index| !self.is_lod_copy(index) && Some(index) != skip)
             .filter_map(|index| {
+                let index = self.drawn_at(index, level);
                 let object = &self.objects[index];
                 let mut mesh = object.evaluated(Purpose::Viewport)?;
                 if channel == 1 {
@@ -426,25 +438,34 @@ impl ModelDoc {
     /// inside it), at its depth, in place of copies already there. Returns
     /// the object's index after; `None` for a group or a copy.
     pub fn generate_lods(&mut self, index: usize) -> Option<usize> {
+        self.generate_lods_with(index, &LOD_RATIOS)
+    }
+
+    /// [`generate_lods`](Self::generate_lods) with a copy per ratio in
+    /// `ratios` (R15.3): the share of the triangles each keeps, one or two
+    /// of them (the renderer reads `_LOD1` and `_LOD2`), each kept between
+    /// 1% and all. `None` also for no ratios.
+    pub fn generate_lods_with(&mut self, index: usize, ratios: &[f32]) -> Option<usize> {
         let object = self.objects.get(index)?;
-        if object.mesh.is_none() || lod_level(&object.name) > 0 {
+        if object.mesh.is_none() || lod_level(&object.name) > 0 || ratios.is_empty() {
             return None;
         }
+        let ratios: Vec<f32> = ratios
+            .iter()
+            .take(LOD_RATIOS.len())
+            .map(|ratio| {
+                if ratio.is_finite() {
+                    ratio.clamp(MIN_LOD_RATIO, 1.0)
+                } else {
+                    1.0
+                }
+            })
+            .collect();
         let object = object.clone();
-        let names: Vec<String> = (1..=LOD_RATIOS.len())
+        let index = self.remove_lods(index)?;
+        let names: Vec<String> = (1..=ratios.len())
             .map(|level| format!("{}_LOD{level}", object.name))
             .collect();
-        let mut index = index;
-        let mut at = 0;
-        self.objects.retain(|other| {
-            let old =
-                other.depth == object.depth && other.mesh.is_some() && names.contains(&other.name);
-            if old && at < index {
-                index -= 1;
-            }
-            at += 1;
-            !old
-        });
         let mut after = index + 1;
         while self
             .objects
@@ -453,7 +474,7 @@ impl ModelDoc {
         {
             after += 1;
         }
-        for (k, (name, ratio)) in names.into_iter().zip(LOD_RATIOS).enumerate() {
+        for (k, (name, ratio)) in names.into_iter().zip(ratios).enumerate() {
             let mut modifiers = object.modifiers.clone();
             modifiers.push(Modifier::new(ModifierKind::Decimate { ratio }));
             self.objects.insert(
@@ -469,6 +490,81 @@ impl ModelDoc {
             );
         }
         Some(index)
+    }
+
+    /// The `_LOD1` and `_LOD2` copies of object `index`, in level order:
+    /// the objects with a mesh at its depth named like it with the level on
+    /// the end. Empty for a group or a copy.
+    pub fn lod_copies(&self, index: usize) -> Vec<usize> {
+        let Some(object) = self.objects.get(index) else {
+            return Vec::new();
+        };
+        if object.mesh.is_none() || lod_level(&object.name) > 0 {
+            return Vec::new();
+        }
+        let mut copies: Vec<(u8, usize)> = (0..self.objects.len())
+            .filter_map(|k| {
+                let other = &self.objects[k];
+                let name = other.name.trim_end();
+                let level = lod_level(name);
+                (level > 0
+                    && other.mesh.is_some()
+                    && other.depth == object.depth
+                    && name[..name.len() - "_lod1".len()] == object.name)
+                    .then_some((level, k))
+            })
+            .collect();
+        copies.sort();
+        copies.dedup_by_key(|(level, _)| *level);
+        copies.into_iter().map(|(_, k)| k).collect()
+    }
+
+    /// The share of the triangles copy `index` keeps: its last modifier's,
+    /// a Decimate's ratio, as Generate LODs makes it. `None` for a copy
+    /// made another way (in Blender, say).
+    pub fn lod_ratio(&self, index: usize) -> Option<f32> {
+        match self.objects.get(index)?.modifiers.last()?.kind {
+            ModifierKind::Decimate { ratio } => Some(ratio),
+            _ => None,
+        }
+    }
+
+    /// How many triangles object `index` draws, with its modifiers on as
+    /// the game gets them (0 for a group).
+    pub fn triangles(&self, index: usize) -> usize {
+        self.objects
+            .get(index)
+            .and_then(|object| object.evaluated(Purpose::Export))
+            .map_or(0, |mesh| mesh.triangle_count())
+    }
+
+    /// Remove LODs (R15.3): takes object `index`'s copies out (see
+    /// [`lod_copies`](Self::lod_copies)), leaving the object. Returns its
+    /// index after; `None` for a group or a copy.
+    pub fn remove_lods(&mut self, index: usize) -> Option<usize> {
+        let object = self.objects.get(index)?;
+        if object.mesh.is_none() || lod_level(&object.name) > 0 {
+            return None;
+        }
+        let copies = self.lod_copies(index);
+        let mut at = 0;
+        self.objects.retain(|_| {
+            at += 1;
+            !copies.contains(&(at - 1))
+        });
+        Some(index - copies.iter().filter(|&&copy| copy < index).count())
+    }
+
+    /// Which object draws object `index` when `level` (0, 1 or 2) is
+    /// previewed: its copy at that level, or its simplest copy when it has
+    /// fewer, as the renderer goes no further than its last; itself at
+    /// level 0 or without copies.
+    pub fn drawn_at(&self, index: usize, level: usize) -> usize {
+        let copies = self.lod_copies(index);
+        match level.min(copies.len()) {
+            0 => index,
+            level => copies[level - 1],
+        }
     }
 }
 

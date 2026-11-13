@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Model Studio: a Levels of detail fold to see, tune, preview and remove LODs"
+details = "Under Modifiers, the new Levels of detail fold lists the active object and its LOD copies with each one's triangle count and share. You can set how much LOD 1 and LOD 2 keep before Generate LODs (or Regenerate, which replaces the copies), take the copies out with Remove LODs, and preview the whole model as LOD 0, 1 or 2 in the view, as the game draws it far away. Each change is one undo step."
+features = ["editor.model-studio"]
+fixes = []
+introduces_issues = []
+prs = [320]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

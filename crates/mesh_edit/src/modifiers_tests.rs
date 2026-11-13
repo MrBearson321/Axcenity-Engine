@@ -6,8 +6,9 @@ use axcenity_assets::{ModelFormat, load_model};
 use glam::Vec3;
 
 use crate::{
-    Axis, DeleteKind, EditMesh, MeshOp, ModelDoc, Modifier, ModifierKind, PrimitiveSettings,
-    PrimitiveShape, Purpose, SelectMode, Selection, apply, check_manifold, clip, evaluate,
+    Axis, DeleteKind, EditMesh, MIN_LOD_RATIO, MeshOp, ModelDoc, Modifier, ModifierKind,
+    PrimitiveSettings, PrimitiveShape, Purpose, SelectMode, Selection, apply, check_manifold, clip,
+    evaluate,
 };
 
 fn cube() -> EditMesh {
@@ -405,6 +406,49 @@ fn generated_lods_are_the_levels_the_renderer_draws() {
         counts[1..],
         "the file's own copies, not simplified ones"
     );
+}
+
+/// R15.3: each level's copy, ratio and count; Regenerate with other
+/// ratios; Remove LODs; and Preview LOD drawing the copies.
+#[test]
+fn lods_are_counted_regenerated_with_their_ratios_previewed_and_removed() {
+    let mut settings = PrimitiveSettings::of(PrimitiveShape::UvSphere);
+    settings.segments = 32;
+    settings.rings = 16;
+    let mut doc = doc_of("Rock", settings.build(), Vec::new());
+    assert!(doc.lod_copies(0).is_empty());
+    assert_eq!(doc.drawn_at(0, 2), 0, "no copies: itself at every level");
+    let full = doc.triangles(0);
+    assert_eq!(full, triangles(&doc.objects[0].mesh.clone().unwrap()));
+
+    // One copy at a third, then a tiny ratio kept at the smallest.
+    assert_eq!(doc.generate_lods_with(0, &[0.3]), Some(0));
+    assert_eq!(doc.lod_copies(0), [1]);
+    assert_eq!(doc.lod_ratio(1), Some(0.3));
+    assert_eq!(doc.drawn_at(0, 2), 1, "past its last copy, the last");
+    assert_eq!(doc.generate_lods_with(0, &[0.6, 0.0001]), Some(0));
+    assert_eq!(doc.lod_copies(0), [1, 2]);
+    assert_eq!(doc.lod_ratio(2), Some(MIN_LOD_RATIO));
+    let (one, two) = (doc.triangles(1), doc.triangles(2));
+    assert!(full > one && one > two && two > 0, "{full} {one} {two}");
+    let share = one as f32 / full as f32;
+    assert!((share - 0.6).abs() < 0.1, "{share}");
+
+    // Preview LOD 2 draws the second copy in place of the object.
+    let (drawn, slots) = doc.to_model_at_level(2).unwrap();
+    assert_eq!(drawn.primitives[0].indices.len() / 3, two);
+    assert_eq!(slots, [(2, 0)]);
+    let (drawn, _) = doc.to_model_at_level(0).unwrap();
+    assert_eq!(drawn.primitives[0].indices.len() / 3, full);
+
+    // A group and a copy have none; Remove LODs leaves the object.
+    assert!(doc.lod_copies(1).is_empty());
+    assert_eq!(doc.remove_lods(1), None);
+    assert_eq!(doc.generate_lods_with(0, &[]), None);
+    assert_eq!(doc.remove_lods(0), Some(0));
+    let names: Vec<&str> = doc.objects.iter().map(|o| o.name.as_str()).collect();
+    assert_eq!(names, ["Rock"]);
+    assert_eq!(doc.triangles(0), full);
 }
 
 /// Phase 90: a sidecar with fields this Axcenity doesn't read (a sculpt

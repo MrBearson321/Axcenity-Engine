@@ -97,7 +97,7 @@ pub use generate::{Settings, generate, generate_for};
 pub use glb::{GlbMaterial, write_glb};
 pub use half_edge::{EditMesh, Face, HalfEdge, Polygon};
 pub use low_poly::{decimate_to, relax};
-pub use model_doc::{DocObject, LOD_RATIOS, ModelDoc, from_model};
+pub use model_doc::{DocObject, LOD_RATIOS, MIN_LOD_RATIO, ModelDoc, from_model};
 pub use modifiers::{
     Axis, Evaluated, MAX_COPIES, MAX_LEVELS, Modifier, ModifierKind, Purpose, clip, evaluate,
 };
