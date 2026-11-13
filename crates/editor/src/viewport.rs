@@ -453,6 +453,10 @@ pub struct OverlayToggles {
     /// With Workspace streaming on, what streams around the camera, while
     /// editing too (roadmap R16).
     pub streaming: bool,
+    /// With Workspace streaming on, leave out what's out of range of the
+    /// camera while editing as in Play, so a big world edits as light as it
+    /// plays (roadmap R16.3). Not an overlay: `any` leaves it out.
+    pub stream_editing: bool,
     /// Every light probe volume's probes, filled with their baked light,
     /// and whether each volume's bake is there and up to date (roadmap R18.1).
     pub light_probes: bool,
@@ -1495,12 +1499,15 @@ impl Viewport {
         let poses = poses.unwrap_or(&still);
         self.terrain.set_blends(blends.unwrap_or_default());
         // During Play the game's frame streams the world, as for particles.
-        if !game_playing && self.terrain.streaming.settings().is_some() {
-            // Editing shows everything, whatever Play streamed, but the
-            // hidden data layers.
-            let layers = self.terrain.streaming.take_also_hidden();
-            self.terrain.streaming = axcenity_scene::Streaming::default();
-            self.terrain.streaming.set_also_hidden(layers);
+        if !game_playing {
+            stream_editing(
+                &mut self.terrain.streaming,
+                world,
+                overlays.stream_editing,
+                camera.position,
+                f64::from(seconds),
+                selection,
+            );
         }
         // Meshes and textures go to the GPU on the renderer's upload thread
         // and appear a few frames later, rather than stalling the frame
@@ -2001,6 +2008,31 @@ fn speed_label(speed: f32) -> String {
         format!("Fly speed: {speed:.1} studs/s")
     } else {
         format!("Fly speed: {speed:.0} studs/s")
+    }
+}
+
+/// What's streamed while editing, once a frame outside Play. With Stream
+/// While Editing on (roadmap R16.3), what Play would leave out around the
+/// camera isn't drawn, but what's selected always is, so nothing being
+/// edited vanishes. Off, editing shows everything, whatever Play streamed,
+/// but the hidden data layers (R16.2).
+fn stream_editing(
+    streaming: &mut axcenity_scene::Streaming,
+    world: &World,
+    on: bool,
+    focus: Vec3,
+    seconds: f64,
+    selection: &[InstanceId],
+) {
+    if on {
+        streaming.step(world, focus, seconds);
+        streaming.show_anyway(world, selection.iter().copied());
+    } else if streaming.settings().is_some() {
+        // Editing shows everything, whatever Play streamed, but the hidden
+        // data layers.
+        let layers = streaming.take_also_hidden();
+        *streaming = axcenity_scene::Streaming::default();
+        streaming.set_also_hidden(layers);
     }
 }
 

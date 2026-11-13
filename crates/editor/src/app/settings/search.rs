@@ -250,6 +250,17 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Viewport,
+            "Stream while editing",
+            &[
+                "Streaming",
+                "Large worlds",
+                "Editor performance",
+                "World partition",
+            ],
+            "With Workspace streaming on, leave out what's out of range of the camera while editing, as in Play. What's selected always shows.",
+        ),
+        setting(
+            Viewport,
             "Show light probes",
             &[
                 "Global illumination",

@@ -508,6 +508,13 @@ impl EditorApp {
         found(ui, &row, "Show streaming");
         let row = ui
             .checkbox(
+                &mut self.overlays.stream_editing,
+                theme::with_icon(icons::BROADCAST, "Stream while editing"),
+            )
+            .on_hover_text("With Workspace streaming on, leave out what's out of range of the camera while editing, as in Play. What's selected always shows.");
+        found(ui, &row, "Stream while editing");
+        let row = ui
+            .checkbox(
                 &mut self.overlays.light_probes,
                 theme::with_icon(icons::LIGHTBULB, "Show light probes"),
             )
