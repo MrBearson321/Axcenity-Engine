@@ -300,7 +300,8 @@ mod tests {
     fn a_probe_traced_every_frame_keeps_most_of_its_light_and_a_rare_one_little() {
         let every_frame = keep(64, 64);
         assert!((0.9..=0.92).contains(&every_frame), "{every_frame}");
-        let rare = keep(32, 32 * 60);
+        // Traced once every 4 seconds: long settled by its next update.
+        let rare = keep(32, 32 * 240);
         assert!(rare < 0.01, "{rare}");
         assert!(keep(32, 100) > keep(32, 1000));
     }

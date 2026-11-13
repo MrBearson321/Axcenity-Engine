@@ -19,8 +19,9 @@
 // Threads a probe's rays are shared between, one workgroup a probe.
 const GI_THREADS: u32 = 64u;
 // Instance masks (renderer/ray_tracing.rs): solid items, cut-outs and items
-// that don't cast shadows. See-through ones let light through.
-const GI_MASK_SURFACES: u32 = 11u;
+// that don't cast shadows, solid (8) or cut-out (16). See-through ones let
+// light through.
+const GI_MASK_SURFACES: u32 = 27u;
 // Solid items and cut-outs: what casts shadows.
 const GI_MASK_CASTERS: u32 = 3u;
 // The most lamps one hit is lit by: the first so many of the frame's.
