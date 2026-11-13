@@ -24,9 +24,13 @@
 //! stroke's undo step keeps.
 
 mod brush;
+mod filter;
 
 pub use crate::remesh::{MAX_VOXELS, subdivide, voxel_remesh};
 pub use brush::{SculptBrush, SculptDab, SculptTool};
+pub use filter::MeshFilter;
+
+use std::collections::HashMap;
 
 use glam::Vec3;
 
@@ -96,6 +100,8 @@ pub struct Sculpt {
     /// The Grab brush's hold, from the stroke's first dab, for each
     /// mirrored copy.
     grabbed: Option<Vec<Held>>,
+    /// How far Layer has raised each vertex this stroke (looked up only).
+    layer: HashMap<u32, f32>,
 }
 
 /// What one copy of a Grab dab holds: vertices and their weights, and the
@@ -436,6 +442,26 @@ impl Sculpt {
         changed.sort_unstable();
         changed.dedup();
         self.bvh.refit(changed, &self.positions, &self.triangles);
+    }
+
+    /// After a change to most of the sculpt (a mesh filter): every normal,
+    /// the whole hierarchy and every chunk, without `after_move`'s lists.
+    fn after_move_all(&mut self, moved: &[u32]) {
+        for &v in moved {
+            if !self.moved[v as usize] {
+                self.moved[v as usize] = true;
+                self.moved_list.push(v);
+            }
+        }
+        for v in 0..self.positions.len() as u32 {
+            self.normals[v as usize] = self.vertex_normal(v);
+        }
+        self.dirty.fill(true);
+        self.bvh.refit(
+            0..self.triangles.len() as u32,
+            &self.positions,
+            &self.triangles,
+        );
     }
 
     /// The shown vertices within `radius` of `center`, and how far out

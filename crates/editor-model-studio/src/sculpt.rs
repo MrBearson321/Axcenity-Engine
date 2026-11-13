@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use axcenity_mesh_edit::paint::BrushFalloff;
-use axcenity_mesh_edit::sculpt::{Sculpt, SculptBrush, SculptDab, SculptTool};
+use axcenity_mesh_edit::sculpt::{MeshFilter, Sculpt, SculptBrush, SculptDab, SculptTool};
 use axcenity_mesh_edit::{subdivide, voxel_remesh};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{DrawItem, Material, MeshSource, Shape};
@@ -47,6 +47,9 @@ pub struct SculptState {
     pub brush: SculptBrush,
     /// Voxel Remesh's voxel size, in studs.
     pub voxel_size: f32,
+    /// The Mesh Filter picked, and how much it does (R15.1).
+    pub filter: MeshFilter,
+    pub filter_amount: f32,
     cache: Option<SculptCache>,
     stroke: Option<Stroke>,
     /// The pen's pressure while it's down, if the platform reports it.
@@ -60,6 +63,8 @@ impl Default for SculptState {
         Self {
             brush: SculptBrush::default(),
             voxel_size: 0.05,
+            filter: MeshFilter::Smooth,
+            filter_amount: 0.5,
             cache: None,
             stroke: None,
             pressure: None,
@@ -527,6 +532,38 @@ impl ModelStudio {
         });
     }
 
+    /// Runs `filter` over the active object's whole mesh by `amount` (masks
+    /// hold it back), as one undo step ("Mesh Filter: Smooth"). R15.1.
+    pub fn mesh_filter(&mut self, filter: MeshFilter, amount: f32) -> bool {
+        let Some(doc) = &mut self.doc else {
+            return false;
+        };
+        let before = doc.snapshot();
+        let Some(cache) = sculpt_of(&mut self.sculpt.cache, doc) else {
+            return false;
+        };
+        if !cache.sculpt.filter(filter, amount) {
+            self.sculpt.status = Some(format!("{}: nothing moved", filter.label()));
+            return false;
+        }
+        let Some(mesh) = doc
+            .model
+            .objects
+            .get_mut(cache.object)
+            .and_then(|object| object.mesh.as_mut())
+        else {
+            return false;
+        };
+        if !cache.sculpt.write_back(mesh) {
+            return false;
+        }
+        doc.record(&format!("Mesh Filter: {}", filter.label()), before);
+        // The sculpt is the mesh as it is now.
+        cache.revision = doc.revision;
+        self.sculpt.status = None;
+        true
+    }
+
     /// A mask action (not an undo step): `change` on the sculpt.
     pub fn change_mask(&mut self, change: impl FnOnce(&mut Sculpt)) {
         let Some(doc) = &mut self.doc else {
@@ -598,6 +635,37 @@ impl ModelStudio {
                 self.change_mask(action);
             }
             ui.add_space(8.0);
+            widgets::section_label(ui, "Mesh Filter");
+            responsive::form(ui, "studio sculpt filter", |ui| {
+                ui.label("Filter");
+                egui::ComboBox::from_id_salt("studio sculpt filter kind")
+                    .selected_text(self.sculpt.filter.label())
+                    .show_ui(ui, |ui| {
+                        for filter in MeshFilter::ALL {
+                            ui.selectable_value(&mut self.sculpt.filter, filter, filter.label())
+                                .on_hover_text(filter.tip());
+                        }
+                    });
+                ui.end_row();
+                ui.label("Amount");
+                ui.add(egui::Slider::new(
+                    &mut self.sculpt.filter_amount,
+                    -1.0..=1.0,
+                ));
+                ui.end_row();
+            });
+            if ui
+                .button(theme::with_icon(icons::SPARKLE, "Apply Filter"))
+                .on_hover_text(format!(
+                    "{} over the whole object; the mask holds it back",
+                    self.sculpt.filter.tip()
+                ))
+                .clicked()
+            {
+                let (filter, amount) = (self.sculpt.filter, self.sculpt.filter_amount);
+                self.mesh_filter(filter, amount);
+            }
+            ui.add_space(8.0);
             widgets::section_label(ui, "Detail");
             responsive::form(ui, "studio sculpt detail", |ui| {
                 ui.label("Voxel size");
@@ -645,6 +713,7 @@ fn brush_ui(ui: &mut egui::Ui, brush: &mut SculptBrush) {
         for tool in SculptTool::ALL {
             if ui
                 .selectable_label(brush.tool == tool, tool.label())
+                .on_hover_text(tool.tip())
                 .clicked()
             {
                 brush.tool = tool;

@@ -2,7 +2,7 @@
 //! voxel-remeshed sphere with X symmetry, strokes as undo steps, masks,
 //! only touched chunks sent again, and a snapshot of the tab sculpting.
 
-use axcenity_mesh_edit::sculpt::SculptTool;
+use axcenity_mesh_edit::sculpt::{MeshFilter, SculptTool};
 use axcenity_mesh_edit::{ModelDoc, PrimitiveSettings, PrimitiveShape, check_manifold};
 use axcenity_render::Camera;
 use axcenity_render::glam::Vec3;
@@ -377,4 +377,37 @@ fn the_mask_is_saved_with_the_model_and_kept_through_undo() {
     let doc = studio.doc.as_ref().unwrap();
     assert!(doc.unsaved());
     assert!(doc.model.objects[doc.active].mask.is_empty());
+}
+
+/// R15.1: a Mesh Filter is one undo step over the whole object, and the
+/// Sculpt panel lists the new brushes and the filter.
+#[test]
+fn a_mesh_filter_is_one_undo_step() {
+    let mut studio = remeshed_sphere();
+    let radius = |studio: &ModelStudio| {
+        let mesh = studio.doc.as_ref().unwrap().mesh().unwrap();
+        mesh.positions().iter().map(|p| p.length()).sum::<f32>() / mesh.vertex_count() as f32
+    };
+    let before = radius(&studio);
+    assert!(studio.mesh_filter(MeshFilter::Inflate, 1.0));
+    assert!(radius(&studio) > before + 0.01);
+    let doc = studio.doc.as_ref().unwrap();
+    assert_eq!(doc.undo_label(), Some("Mesh Filter: Inflate"));
+    check_manifold(doc.mesh().unwrap(), true).unwrap();
+    assert!(studio.doc.as_mut().unwrap().undo());
+    assert!((radius(&studio) - before).abs() < 1e-5);
+    // Nothing to move: no step.
+    assert!(!studio.mesh_filter(MeshFilter::Smooth, 0.0));
+    assert_eq!(
+        studio.doc.as_ref().unwrap().undo_label(),
+        Some("Voxel Remesh")
+    );
+    // The new brushes stroke as the others do.
+    studio.sculpt.brush.tool = SculptTool::Layer;
+    let screen = front();
+    assert!(studio.sculpt_stroke(
+        &screen,
+        &stroke(&screen, Vec3::new(-0.1, 0.0, 1.0), Vec3::new(0.1, 0.0, 1.0)),
+        false
+    ));
 }
