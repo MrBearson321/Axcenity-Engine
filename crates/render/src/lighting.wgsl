@@ -103,6 +103,12 @@ struct Volume {
     // xyz: how many probes stand along the box's own axes, each in the
     // middle of its cell, w: its first probe in `light_probes`.
     grid: vec4<u32>,
+    // xyz: how much of its probes' sky light to add, per channel (the sky
+    // drawn now over the one it was baked with, minus one), w: 1 to add it
+    // (roadmap R18.3).
+    sky: vec4<f32>,
+    // x: where its first probe's sky light is in `light_probes`.
+    sky_first: vec4<u32>,
 }
 
 // The most reflection probes drawn at once. Must match `MAX_PROBES` in
@@ -710,14 +716,26 @@ fn surrounding_diffuse(position: vec3<f32>, n: vec3<f32>, environment: f32) -> v
             let far = vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u);
             let at = select(low, high, far);
             let shares = select(1.0 - t, t, far);
-            let probe = 4u * (volume.grid.w + at.x + volume.grid.x * (at.y + volume.grid.y * at.z));
+            let index = at.x + volume.grid.x * (at.y + volume.grid.y * at.z);
+            let probe = 4u * (volume.grid.w + index);
             let first = light_probes[probe];
+            let second = light_probes[probe + 1u];
             let share = shares.x * shares.y * shares.z * (1.0 - first.w);
             valid += share;
             c0 += share * first.rgb;
-            c1 += share * light_probes[probe + 1u].rgb;
+            c1 += share * second.rgb;
             c2 += share * light_probes[probe + 2u].rgb;
             c3 += share * light_probes[probe + 3u].rgb;
+            // The sky's share follows the sky drawn now, unless real-time
+            // or ray traced GI traced the probe again (its second w is 1).
+            if volume.sky.w > 0.5 && second.w < 0.5 {
+                let sky = 4u * (volume.sky_first.x + index);
+                let scaled = share * volume.sky.xyz;
+                c0 += scaled * light_probes[sky].rgb;
+                c1 += scaled * light_probes[sky + 1u].rgb;
+                c2 += scaled * light_probes[sky + 2u].rgb;
+                c3 += scaled * light_probes[sky + 3u].rgb;
+            }
         }
         // All eight inside solids: what's around the volume lights it.
         if valid <= 0.0001 {

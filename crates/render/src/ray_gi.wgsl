@@ -187,8 +187,11 @@ fn cs_trace_probes(
             let band = select(2.0 / 3.0, 1.0, k == 0u);
             let fresh = gi_sums[0][k] * scale * band;
             let old = light_probes[place + k];
-            // w keeps the first coefficient's invalid flag (R18.2).
-            gi_traced[4u * group.x + k] = vec4<f32>(mix(fresh, old.rgb, keep), old.w);
+            // w keeps the first coefficient's invalid flag (R18.2), and the
+            // second's marks it traced, so its sky light isn't added again
+            // (R18.3).
+            let flag = select(old.w, 1.0, k == 1u);
+            gi_traced[4u * group.x + k] = vec4<f32>(mix(fresh, old.rgb, keep), flag);
         }
     }
 }

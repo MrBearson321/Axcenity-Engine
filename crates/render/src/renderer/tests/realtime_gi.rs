@@ -102,6 +102,7 @@ pub(super) fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawLi
             counts: COUNTS,
             probes: Arc::new(probes),
             invalid: Arc::default(),
+            sky: None,
         },
     });
     list.camera = Camera {

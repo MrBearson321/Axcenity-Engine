@@ -276,6 +276,18 @@ impl Environment {
         rebind
     }
 
+    /// The sky's average light as drawn (the first of its harmonics): its
+    /// image's while the maps show one, dimmed by `picture_light` as the
+    /// frame dims it, otherwise the gradient of `colors`. Light probes
+    /// that keep their sky light apart scale it by this over the one they
+    /// were baked with (roadmap R18.3).
+    pub(super) fn sky_band0(&self, colors: [Vec3; 3], picture_light: f32) -> Vec3 {
+        match &self.image {
+            Some(image) => image.harmonics[0] * picture_light,
+            None => harmonics(32, 16, |_, _, dir| gradient_sky(dir, colors))[0],
+        }
+    }
+
     /// The frame uniform's `environment` and `sky_light` (see lighting.wgsl).
     pub(super) fn uniform(&self) -> ([f32; 4], [[f32; 4]; 9]) {
         let Some(maps) = &self.maps else {
