@@ -364,6 +364,8 @@ impl LightState {
 fn camera_settings(settings: &GraphicsSettings) -> GraphicsSettings {
     GraphicsSettings {
         shadow_quality: Some(settings.shadow_quality().min(crate::ShadowQuality::Medium)),
+        // A probe's faces are blurred into its light: rays would be wasted.
+        ray_traced_shadows: Some(crate::RayTracedShadows::Off),
         ..settings.clone()
     }
 }

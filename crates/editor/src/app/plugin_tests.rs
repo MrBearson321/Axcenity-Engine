@@ -593,6 +593,96 @@ fn plugin_properties_rows_set_attributes_and_buttons_call_the_plugin() {
     assert_eq!(app.history.undo_label(), Some("Snap to Grid"));
 }
 
+/// Roadmap G10: a plugin's importer takes the files of its kind (one undo
+/// step), it hears of the editor's own imports, and its Assets panel item
+/// gets the asset's path.
+#[test]
+fn a_plugin_imports_its_kind_of_file_and_hears_of_other_imports() {
+    let folder = copy_of_example("hello-plugins", "plugin-importer");
+    let layout = folder.join("plugins").join("layout");
+    std::fs::create_dir_all(&layout).unwrap();
+    std::fs::write(
+        layout.join("plugin.json"),
+        r#"{ "name": "Layout", "version": "1.0.0" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        layout.join("init.lua"),
+        "local csv = plugin:AddImporter({ Name = 'Level layout', Extensions = { 'csv' } })\n\
+         csv.Imported:Connect(function(name, contents)\n\
+         \tfor x, y, z in contents:gmatch('(%-?%d+),(%-?%d+),(%-?%d+)') do\n\
+         \t\tlocal part = Instance.new('Part')\n\
+         \t\tpart.Name = 'Block'\n\
+         \t\tpart.Position = Vector3.new(tonumber(x), tonumber(y), tonumber(z))\n\
+         \t\tpart.Parent = workspace\n\
+         \tend\n\
+         \tChangeHistoryService:SetWaypoint('Import ' .. name)\n\
+         end)\n\
+         plugin.AssetImported:Connect(function(path) print('imported', path) end)\n\
+         local action = plugin:AddAssetAction({ Label = 'Show path', Extensions = { 'png' } })\n\
+         action.Activated:Connect(function(path) print('action', path) end)\n",
+    )
+    .unwrap();
+    let mut app = EditorApp::new(None);
+    app.open(&folder);
+    let index = plugin_index(&app, "project/layout");
+    let importers = app.plugins.importers();
+    assert_eq!(importers.len(), 1);
+    assert_eq!(importers[0].extensions, ["csv"]);
+
+    let csv = folder.join("..").join("plugin-importer-level.csv");
+    std::fs::write(&csv, "0,1,0\n4,1,0\n").unwrap();
+    let blocks = |app: &EditorApp| {
+        app.world
+            .get(app.world.workspace())
+            .unwrap()
+            .children()
+            .iter()
+            .filter(|&&id| app.world.get(id).unwrap().name() == "Block")
+            .count()
+    };
+    app.import_files(vec![csv.clone()], axcenity_assets::PROJECT_TEXTURES_FOLDER);
+    assert_eq!(blocks(&app), 2);
+    assert_eq!(
+        app.history.undo_label(),
+        Some("Import plugin-importer-level.csv")
+    );
+    assert!(
+        console(&app)
+            .iter()
+            .any(|line| line.contains("with the plugin \"Layout\"")),
+        "{:?}",
+        console(&app)
+    );
+    app.undo();
+    assert_eq!(blocks(&app), 0);
+
+    // The editor imports images itself, and tells the plugin.
+    let image = folder.join("..").join("plugin-importer-bark.png");
+    std::fs::write(&image, b"not checked until drawn").unwrap();
+    app.import_files(
+        vec![image.clone()],
+        axcenity_assets::PROJECT_TEXTURES_FOLDER,
+    );
+    let copy = "assets/textures/plugin-importer-bark.png";
+    assert!(folder.join(copy).is_file());
+    assert!(
+        console(&app).contains(&format!("imported\t{copy}")),
+        "{:?}",
+        console(&app)
+    );
+
+    // Its Assets panel item is offered for PNGs, and gets the path.
+    let actions = app.plugins.asset_actions();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].0, index);
+    assert!(actions[0].1.offered_for(copy) && !actions[0].1.offered_for("assets/models/a.glb"));
+    app.plugin_asset_action(index, actions[0].1.id, copy);
+    assert!(console(&app).contains(&format!("action\t{copy}")));
+    let _ = std::fs::remove_file(&csv);
+    let _ = std::fs::remove_file(&image);
+}
+
 #[test]
 fn turning_a_plugin_off_takes_its_tab_and_buttons_away() {
     let mut app = opened("plugin-off");

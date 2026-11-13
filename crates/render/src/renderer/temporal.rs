@@ -14,6 +14,13 @@
 //! its own, which is then copied over the scene's HDR texture, so what comes
 //! after (depth of field, bloom, the composite pass) reads the scene as
 //! before. Every target here exists only while it's used.
+//!
+//! Below 100% render scale, TAA upscales too (roadmap G9 stage 2,
+//! `fs_taau`): its history is at the output's size, each output pixel
+//! gathers the scene's jittered samples near it, and more jitter places
+//! cover the bigger pixels. The result is copied into a target at the
+//! output's size that bloom and the composite pass read in the scene's
+//! place, so motion blur and depth of field run before it, on the scene.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,8 +44,12 @@ use super::{DEPTH_FORMAT, FAR_PLANE, HDR_FORMAT, MeshKey, NEAR_PLANE};
 pub(super) const MOTION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
 /// This frame's share of TAA's blend: the rest is the frames before.
 pub(super) const TAA_SHARE: f32 = 0.1;
-/// How many places the jitter steps through before it repeats.
+/// How many places the jitter steps through before it repeats, at full
+/// size. Upscaling TAA steps through more ([`jitter_phases`]).
 pub(super) const JITTER_PHASES: u64 = 8;
+/// The most jitter places upscaling TAA steps through (at 50% render
+/// scale it uses 32).
+const MAX_JITTER_PHASES: u64 = 64;
 /// The longest half of a motion blur streak, as a share of the scene's
 /// height (30 pixels each way at 1080).
 pub(super) const MAX_MOTION_BLUR: f32 = 1.0 / 36.0;
@@ -59,6 +70,10 @@ pub(super) struct TemporalUniform {
     /// pixels, samples per pixel and tile size in pixels.
     blur: [f32; 4],
     noise: [f32; 4],
+    /// Upscaling TAA: the output's width and height, and 1 over each.
+    output: [f32; 4],
+    /// This frame's jitter in the scene's pixels, and 1 while TAA upscales.
+    jitter: [f32; 4],
 }
 
 /// A moved item as the motion pass reads it. Must match `MotionIn` in
@@ -88,6 +103,8 @@ pub(super) struct TemporalPasses {
     camera_motion: wgpu::RenderPipeline,
     moving: wgpu::RenderPipeline,
     taa: wgpu::RenderPipeline,
+    /// TAA that upscales: drawn at the output's size.
+    taau: wgpu::RenderPipeline,
     tile_max: wgpu::RenderPipeline,
     motion_blur: wgpu::RenderPipeline,
     /// This frame's moved items, and how many fit.
@@ -116,10 +133,14 @@ pub(super) struct TemporalTargets {
 }
 
 struct TaaTargets {
-    /// Each frame draws into one and reads the other.
+    /// Each frame draws into one and reads the other: at the scene's size,
+    /// or while TAA upscales at the output's.
     history: [wgpu::Texture; 2],
     views: [wgpu::TextureView; 2],
     groups: [wgpu::BindGroup; 2],
+    /// While TAA upscales: the output-sized target each frame's result is
+    /// copied into, which bloom and the composite pass read.
+    upscaled: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// A clone of [`super::TargetsAlive::taa`].
     _alive: Arc<()>,
 }
@@ -156,6 +177,9 @@ pub(super) struct History {
 pub(super) struct SceneViews<'a> {
     pub(super) hdr: &'a wgpu::TextureView,
     pub(super) depth: &'a wgpu::TextureView,
+    /// What TAA reads: the scene, or while TAA upscales with depth of field
+    /// on, depth of field's blurred copy of it (drawn before TAA then).
+    pub(super) taa_source: &'a wgpu::TextureView,
 }
 
 impl TemporalPasses {
@@ -297,6 +321,7 @@ impl TemporalPasses {
             MOTION_FORMAT,
         );
         let taa = fullscreen("TAA", &taa_layout, "fs_taa", HDR_FORMAT);
+        let taau = fullscreen("TAA upscale", &taa_layout, "fs_taau", HDR_FORMAT);
         let tile_max = fullscreen(
             "motion blur tiles",
             &tile_layout,
@@ -322,6 +347,7 @@ impl TemporalPasses {
             camera_motion,
             moving,
             taa,
+            taau,
             tile_max,
             motion_blur,
             instances,
@@ -470,6 +496,17 @@ pub(super) fn wants_motion_blur(lens: &LensEffects) -> bool {
         .is_some_and(|share| share.is_finite() && share > 0.0)
 }
 
+/// How many jitter places TAA steps through for a scene `scale` times the
+/// output's size: [`JITTER_PHASES`] at full size, more as each output pixel
+/// gets fewer of the scene's (as FSR 2 does: 8 × the area ratio).
+pub(super) fn jitter_phases(scale: f32) -> u64 {
+    if !(scale.is_finite() && scale > 0.0 && scale < 1.0) {
+        return JITTER_PHASES;
+    }
+    let phases = (JITTER_PHASES as f32 / (scale * scale)).ceil() as u64;
+    phases.clamp(JITTER_PHASES, MAX_JITTER_PHASES)
+}
+
 /// Motion blur's tile size for a scene `height` pixels tall: as long as its
 /// longest half-streak, so the tiles around a pixel hold every streak that
 /// reaches it.
@@ -479,12 +516,13 @@ fn blur_tile(height: u32) -> u32 {
 
 impl TemporalTargets {
     /// Makes the targets `used` needs for a `width` × `height` scene,
-    /// reading `scene`'s HDR color and the prepass's depth. Each set holds a
-    /// clone of its counter in `alive`.
+    /// reading `scene`'s HDR color and the prepass's depth, with TAA's
+    /// history at the size of `upscaled_to` while TAA upscales to it. Each
+    /// set holds a clone of its counter in `alive`.
     pub(super) fn new(
         device: &wgpu::Device,
         passes: &TemporalPasses,
-        (width, height): (u32, u32),
+        ((width, height), upscaled_to): ((u32, u32), Option<(u32, u32)>),
         scene: SceneViews<'_>,
         used: TemporalUse,
         alive: &super::TargetsAlive,
@@ -506,7 +544,8 @@ impl TemporalTargets {
                 format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             })
         };
@@ -514,9 +553,16 @@ impl TemporalTargets {
         let size = (width, height);
         let motion_textures = [0, 1].map(|_| texture("motion vectors", size, MOTION_FORMAT));
         let motion = [view(&motion_textures[0]), view(&motion_textures[1])];
+        let upscaled_to = upscaled_to.filter(|_| used.taa);
+        let history_size = upscaled_to.unwrap_or(size);
         let history = used
             .taa
-            .then(|| [0, 1].map(|_| texture("TAA history", size, HDR_FORMAT)));
+            .then(|| [0, 1].map(|_| texture("TAA history", history_size, HDR_FORMAT)));
+        let upscaled = upscaled_to.map(|output| {
+            let texture = texture("upscaled scene (HDR)", output, HDR_FORMAT);
+            let view = view(&texture);
+            (texture, view)
+        });
         let blur = used.motion_blur.then(|| {
             let tile = blur_tile(height);
             let tiles = (width.div_ceil(tile), height.div_ceil(tile));
@@ -562,7 +608,7 @@ impl TemporalTargets {
                     &passes.taa_layout,
                     &[
                         (1, scene.depth),
-                        (2, scene.hdr),
+                        (2, scene.taa_source),
                         (3, &views[1 - parity]),
                         (4, &motion[parity]),
                         (5, &motion[1 - parity]),
@@ -573,6 +619,7 @@ impl TemporalTargets {
                 history,
                 views,
                 groups,
+                upscaled,
                 _alive: alive.taa.clone(),
             }
         });
@@ -620,6 +667,18 @@ impl TemporalTargets {
         self.taa.is_some()
     }
 
+    /// Whether TAA upscales: its history is at the output's size.
+    pub(super) fn upscales(&self) -> bool {
+        self.taa.as_ref().is_some_and(|taa| taa.upscaled.is_some())
+    }
+
+    /// While TAA upscales, the output-sized picture it makes, which bloom
+    /// and the composite pass read in the scene's place.
+    pub(super) fn upscaled_view(&self) -> Option<&wgpu::TextureView> {
+        let (_, view) = self.taa.as_ref()?.upscaled.as_ref()?;
+        Some(view)
+    }
+
     /// The motion target the last frame drew (before `history` moved on).
     #[cfg(test)]
     pub(super) fn last_motion(&self, history: &History) -> &wgpu::Texture {
@@ -642,18 +701,23 @@ impl History {
         *self = Self::default();
     }
 
-    /// Where TAA moves this frame's scene, in its pixels: one of
-    /// [`JITTER_PHASES`] places of a Halton sequence, each within half a
+    /// Where TAA moves this frame's scene, in its pixels: one of `phases`
+    /// places of a Halton sequence ([`jitter_phases`]), each within half a
     /// pixel of the middle.
-    pub(super) fn jitter(&self) -> Vec2 {
-        let index = self.frame % JITTER_PHASES + 1;
+    pub(super) fn jitter(&self, phases: u64) -> Vec2 {
+        let index = self.frame % phases.max(1) + 1;
         Vec2::new(halton(index, 2), halton(index, 3)) - 0.5
     }
 
     /// The camera's view as drawn this frame: `view_proj` moved by the
-    /// jitter, for a scene of `size` pixels.
-    pub(super) fn jittered(&self, view_proj: Mat4, (width, height): (u32, u32)) -> Mat4 {
-        let jitter = self.jitter();
+    /// jitter (of `phases` places), for a scene of `size` pixels.
+    pub(super) fn jittered(
+        &self,
+        view_proj: Mat4,
+        (width, height): (u32, u32),
+        phases: u64,
+    ) -> Mat4 {
+        let jitter = self.jitter(phases);
         let offset = Vec3::new(
             2.0 * jitter.x / width.max(1) as f32,
             -2.0 * jitter.y / height.max(1) as f32,
@@ -767,20 +831,23 @@ fn in_prepass(item: &DrawItem) -> bool {
 
 impl TemporalPasses {
     /// Writes this frame's uniform and moved items: the camera's view
-    /// `view_proj` (without the jitter) and as drawn (`drawn`), in a scene
-    /// of `size`, with motion blur's `share` of a frame's motion (0 for
-    /// none) at `quality`.
+    /// `view_proj` (without the jitter) and as drawn (`drawn`, moved by
+    /// `jitter` pixels), in a scene of `size` (upscaled by TAA to
+    /// `upscaled_to`, if it is), with motion blur's `share` of a frame's
+    /// motion (0 for none) at `quality`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         history: &History,
-        (view_proj, drawn): (Mat4, Mat4),
-        size: (u32, u32),
+        (view_proj, drawn, jitter): (Mat4, Mat4, Vec2),
+        (size, upscaled_to): ((u32, u32), Option<(u32, u32)>),
         (share, quality): (f32, MotionBlurQuality),
         moved: &Moved,
     ) {
         let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
+        let output = upscaled_to.unwrap_or(size);
+        let (output_width, output_height) = (output.0.max(1) as f32, output.1.max(1) as f32);
         let longest = height * MAX_MOTION_BLUR;
         let uniform = TemporalUniform {
             view_proj: view_proj.to_cols_array_2d(),
@@ -800,6 +867,18 @@ impl TemporalPasses {
                 blur_tile(size.1) as f32,
             ],
             noise: [(history.frame % 64) as f32, 0.0, 0.0, 0.0],
+            output: [
+                output_width,
+                output_height,
+                1.0 / output_width,
+                1.0 / output_height,
+            ],
+            jitter: [
+                jitter.x,
+                jitter.y,
+                f32::from(u8::from(upscaled_to.is_some())),
+                0.0,
+            ],
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&uniform));
         if moved.instances.len() > self.instance_capacity {
@@ -899,31 +978,46 @@ impl TemporalPasses {
         draws
     }
 
-    /// TAA's and motion blur's passes, each over the scene's HDR texture
-    /// `hdr` (copied back into it): TAA if `targets` has its history, motion
-    /// blur if `targets` has its target.
-    pub(super) fn draw_post(
+    /// TAA's pass. At full size it's copied over the scene's HDR texture
+    /// `hdr`; while it upscales, into its output-sized target instead.
+    pub(super) fn draw_taa(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         (targets, history): (&TemporalTargets, &History),
         hdr: &wgpu::Texture,
     ) {
         let parity = history.parity;
-        if let Some(taa) = &targets.taa {
-            fullscreen_pass(
-                encoder,
-                "TAA",
-                &taa.views[parity],
-                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                &self.taa,
-                &[&taa.groups[parity]],
-            );
-            encoder.copy_texture_to_texture(
-                taa.history[parity].as_image_copy(),
-                hdr.as_image_copy(),
-                hdr.size(),
-            );
-        }
+        let Some(taa) = &targets.taa else {
+            return;
+        };
+        let (pipeline, into, label) = match &taa.upscaled {
+            Some((texture, _)) => (&self.taau, texture, "TAA upscale"),
+            None => (&self.taa, hdr, "TAA"),
+        };
+        fullscreen_pass(
+            encoder,
+            label,
+            &taa.views[parity],
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            pipeline,
+            &[&taa.groups[parity]],
+        );
+        encoder.copy_texture_to_texture(
+            taa.history[parity].as_image_copy(),
+            into.as_image_copy(),
+            into.size(),
+        );
+    }
+
+    /// Motion blur's passes, copied over the scene's HDR texture `hdr`, if
+    /// `targets` has its target.
+    pub(super) fn draw_motion_blur(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        (targets, history): (&TemporalTargets, &History),
+        hdr: &wgpu::Texture,
+    ) {
+        let parity = history.parity;
         if let Some(blur) = &targets.blur {
             fullscreen_pass(
                 encoder,
@@ -959,7 +1053,7 @@ mod tests {
         let mut history = History::default();
         let mut places = Vec::new();
         for _ in 0..JITTER_PHASES {
-            let jitter = history.jitter();
+            let jitter = history.jitter(JITTER_PHASES);
             assert!(jitter.abs().max_element() < 0.5, "{jitter}");
             places.push(jitter);
             history.frame += 1;
@@ -972,7 +1066,7 @@ mod tests {
                     .all(|other| other.distance(*place) > 0.01)
             );
         }
-        assert_eq!(history.jitter(), places[0]);
+        assert_eq!(history.jitter(JITTER_PHASES), places[0]);
         // On average they're about the middle of the pixel.
         let mean = places.iter().copied().sum::<Vec2>() / places.len() as f32;
         assert!(mean.abs().max_element() < 0.1, "{mean}");
@@ -997,11 +1091,33 @@ mod tests {
                 (1.0 - ndc.y) * 0.5 * height as f32,
             )
         };
-        let moved = pixel(history.jittered(view_proj, (width, height))) - pixel(view_proj);
+        let moved =
+            pixel(history.jittered(view_proj, (width, height), JITTER_PHASES)) - pixel(view_proj);
+        let jitter = history.jitter(JITTER_PHASES);
+        assert!(moved.distance(jitter) < 1e-3, "{moved} vs {jitter}");
+    }
+
+    #[test]
+    fn upscaling_steps_through_more_jitter_places_as_pixels_grow() {
+        assert_eq!(jitter_phases(1.0), JITTER_PHASES);
+        assert_eq!(jitter_phases(1.5), JITTER_PHASES);
+        assert_eq!(jitter_phases(0.5), 32);
+        assert_eq!(jitter_phases(0.75), 15);
+        assert_eq!(jitter_phases(0.1), MAX_JITTER_PHASES);
+        assert_eq!(jitter_phases(f32::NAN), JITTER_PHASES);
+        // The places of a longer run still sit within half a pixel, and
+        // cover the pixel evenly.
+        let mut history = History::default();
+        let mut quadrants = [0; 4];
+        for _ in 0..32 {
+            let jitter = history.jitter(32);
+            assert!(jitter.abs().max_element() < 0.5, "{jitter}");
+            quadrants[usize::from(jitter.x > 0.0) + 2 * usize::from(jitter.y > 0.0)] += 1;
+            history.frame += 1;
+        }
         assert!(
-            moved.distance(history.jitter()) < 1e-3,
-            "{moved} vs {}",
-            history.jitter()
+            quadrants.iter().all(|&n| (6..=10).contains(&n)),
+            "{quadrants:?}"
         );
     }
 }

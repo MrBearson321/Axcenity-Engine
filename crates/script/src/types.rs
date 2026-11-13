@@ -544,10 +544,12 @@ pub enum EnumType {
     NormalId,
     ModelStreamingMode,
     StreamingState,
+    RayTracedShadows,
+    RayTracedAmbientOcclusion,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 42] = [
+    pub const ALL: [EnumType; 44] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -590,6 +592,8 @@ impl EnumType {
         EnumType::NormalId,
         EnumType::ModelStreamingMode,
         EnumType::StreamingState,
+        EnumType::RayTracedShadows,
+        EnumType::RayTracedAmbientOcclusion,
     ];
 
     pub fn name(self) -> &'static str {
@@ -612,6 +616,8 @@ impl EnumType {
             EnumType::CloudQuality => "CloudQuality",
             EnumType::DepthOfField => "DepthOfField",
             EnumType::MotionBlur => "MotionBlur",
+            EnumType::RayTracedShadows => "RayTracedShadows",
+            EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::AssetFetchStatus => "AssetFetchStatus",
@@ -660,6 +666,10 @@ impl EnumType {
             EnumType::CloudQuality => user_settings::cloud_quality_names(),
             EnumType::DepthOfField => user_settings::depth_of_field_quality_names(),
             EnumType::MotionBlur => user_settings::motion_blur_quality_names(),
+            EnumType::RayTracedShadows => user_settings::ray_traced_shadows_names(),
+            EnumType::RayTracedAmbientOcclusion => {
+                user_settings::ray_traced_ambient_occlusion_names()
+            }
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             // How a file went, for `ContentProvider:PreloadAsync`'s callback.
@@ -814,6 +824,8 @@ impl LuaEnumItem {
             | EnumType::CloudQuality
             | EnumType::DepthOfField
             | EnumType::MotionBlur
+            | EnumType::RayTracedShadows
+            | EnumType::RayTracedAmbientOcclusion
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::AssetFetchStatus

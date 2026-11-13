@@ -634,6 +634,10 @@ impl EditorApp {
             return;
         }
         let name = file.to_string_lossy().replace('\\', "/");
+        // Kinds the editor doesn't import itself may be a plugin's (G10).
+        if asset_browser::kind_of(&name).is_none() && self.import_with_plugin(file) {
+            return;
+        }
         let result = match asset_browser::kind_of(&name) {
             Some(AssetKind::Model) => {
                 self.import_model(file);
@@ -684,6 +688,7 @@ impl EditorApp {
             Ok(path) => {
                 self.toasts.success(format!("Imported `{path}`"));
                 self.output.info(format!("Imported `{path}`."));
+                self.plugins_asset_imported(&path);
             }
             Err(err) => {
                 self.toasts
