@@ -49,6 +49,7 @@ impl ViewMode {
                 DebugView::Overdraw => "Overdraw",
                 DebugView::LodLevels => "LOD Levels",
                 DebugView::RayHits => "Ray Hits",
+                DebugView::PathTraced => "Path Traced",
             },
             ViewMode::CullingBounds => "Culling Bounds",
         }
@@ -82,6 +83,12 @@ impl ViewMode {
                     "What the camera's rays hit with hardware ray tracing: each item its own \
                      color, dimmer farther away, within the ray tracing distance only. Needs a \
                      GPU that can ray trace."
+                }
+                DebugView::PathTraced => {
+                    "A reference picture made by path tracing: rays bounce through the scene, one \
+                     more each frame, and the picture clears up while the camera and scene stay \
+                     still. Matte surfaces only; see-through items, water and fog are left out. \
+                     Needs a GPU that can ray trace."
                 }
             },
             ViewMode::CullingBounds => {

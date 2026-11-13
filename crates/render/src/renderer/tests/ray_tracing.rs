@@ -165,6 +165,151 @@ mod ray_hits {
     }
 }
 
+/// The editor's Path Traced view (LE6, renderer/path_tracer.rs).
+#[cfg(feature = "debug-views")]
+mod path_traced {
+    use super::*;
+    use crate::DebugView;
+
+    fn red(pixels: &[u8], x: usize, y: usize) -> u8 {
+        pixels[(y * 64 + x) * 4]
+    }
+
+    /// Renders `list` path traced `frames` times and gives the last picture.
+    fn traced(renderer: &mut TextureRenderer, list: &DrawList, frames: u32) -> Vec<u8> {
+        for _ in 0..frames {
+            renderer.render(list).unwrap();
+        }
+        renderer.read_pixels()
+    }
+
+    #[test]
+    fn the_view_shades_by_each_surfaces_own_normals() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_debug_view(Some(DebugView::PathTraced));
+        // A big ball lit from the right: its right side faces the sun, its
+        // left side away (rays would see it evenly lit without normals).
+        let ball = DrawItem {
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::splat(4.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(0.0, 0.0, -6.0),
+            ),
+            ..item(Shape::Sphere, Vec3::ZERO, 1.0)
+        };
+        let mut list = list_of(vec![ball]);
+        list.sun.direction = Vec3::X;
+        let pixels = traced(&mut renderer, &list, 4);
+        let (left, right) = (red(&pixels, 22, 32), red(&pixels, 42, 32));
+        assert!(right > left + 60, "left {left}, right {right}");
+        assert_eq!(renderer.stats().ray_tracing.path_traced_paths, 4);
+    }
+
+    #[test]
+    fn shadows_fall_only_from_items_that_cast_them_and_paths_add_up_until_something_changes() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        let mut list = shadowed_wall();
+        let lit = traced(&mut renderer, &list, 1);
+
+        renderer.set_debug_view(Some(DebugView::PathTraced));
+        let shaded = traced(&mut renderer, &list, 3);
+        assert_eq!(renderer.stats().ray_tracing.path_traced_paths, 3);
+        // The wall's middle is in the block's shadow; its left edge isn't.
+        let (shadow, sunny) = (red(&shaded, 32, 32), red(&shaded, 6, 32));
+        assert!(sunny > shadow + 40, "shadow {shadow}, sunny {sunny}");
+
+        // A block that casts no shadow: the middle is lit, and the paths so
+        // far (of the old scene) are let go.
+        list.items[1].casts_shadow = false;
+        let unshaded = traced(&mut renderer, &list, 1);
+        assert!(
+            red(&unshaded, 32, 32) > shadow + 40,
+            "{} vs {shadow}",
+            red(&unshaded, 32, 32)
+        );
+        let stats = renderer.stats().ray_tracing;
+        assert_eq!(stats.path_traced_paths, 1, "{stats:?}");
+
+        // The camera moves: the sums start again too.
+        traced(&mut renderer, &list, 2);
+        assert_eq!(renderer.stats().ray_tracing.path_traced_paths, 3);
+        list.camera.position = Vec3::new(0.5, 0.0, 0.0);
+        traced(&mut renderer, &list, 1);
+        assert_eq!(renderer.stats().ray_tracing.path_traced_paths, 1);
+
+        // Back to the lit view: everything is freed, and the frame is as it
+        // was.
+        renderer.set_debug_view(None);
+        list.camera.position = Vec3::ZERO;
+        list.items[1].casts_shadow = true;
+        assert_eq!(traced(&mut renderer, &list, 1), lit);
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default()
+        );
+    }
+
+    #[test]
+    fn a_lamp_alone_lights_the_dark() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_debug_view(Some(DebugView::PathTraced));
+        // A floor and a wall, no sun or sky: only a lamp near the floor.
+        let block = |size: Vec3, position: Vec3| DrawItem {
+            transform: Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, position),
+            ..big_block()
+        };
+        let wall = block(Vec3::new(30.0, 30.0, 1.0), Vec3::new(0.0, 0.0, -10.0));
+        let mut list = list_of(vec![wall]);
+        list.sun.color = [0.0; 3];
+        let dark = traced(&mut renderer, &list, 2);
+        assert!(red(&dark, 32, 32) < 8, "{}", red(&dark, 32, 32));
+        list.lights.push(crate::Light {
+            position: Vec3::new(0.0, 0.0, -6.0),
+            color: [1.0; 3],
+            brightness: 40.0,
+            range: 30.0,
+            cone: None,
+            rect: None,
+            point_shadows: None,
+        });
+        let lamp_lit = traced(&mut renderer, &list, 2);
+        assert!(
+            red(&lamp_lit, 32, 32) > 60,
+            "the lamp left the wall at {}",
+            red(&lamp_lit, 32, 32)
+        );
+    }
+
+    #[test]
+    fn without_ray_queries_the_view_is_plain() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.set_debug_view(Some(DebugView::PathTraced));
+        renderer.render(&list_of(vec![big_block()])).unwrap();
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default()
+        );
+        let pixels = renderer.read_pixels();
+        assert!(
+            pixels.chunks(4).all(|p| p[..3] == pixels[..3]),
+            "one plain color"
+        );
+    }
+}
+
 /// Ray traced sun shadows (RT1, renderer/ray_shadows.rs).
 mod sun_shadows {
     use super::*;

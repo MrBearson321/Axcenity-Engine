@@ -30,6 +30,8 @@ While Hardware ray tracing is on, a small badge sits at the bottom right of the 
 
 Click **Compare** on the badge to see the view without the ray traced effects, and again to bring them back: the best way to see what they add. Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.
 
+**Viewport > View Mode > Path Traced** shows a reference picture: light followed ray by ray as it bounces around the scene, the way offline renderers work. It starts grainy and clears up the longer the camera stays still (the legend counts the paths so far); moving the camera or anything in the scene starts it again. Use it to see how your lighting should look and compare the normal view against it. It treats every surface as matte and leaves out glass, water and fog.
+
 ## Get good shadows
 
 - Shadows come from the **sun**, so set **Lighting > ClockTime** to a time when it's up. Low morning or evening sun gives long shadows.

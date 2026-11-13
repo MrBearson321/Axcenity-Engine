@@ -60,6 +60,7 @@ flowchart TB
 | `renderer/gpu_timer.rs` | Per-pass GPU time (`FramePass`) |
 | `renderer/ray_ao.rs`, `ray_ao.wgsl` | Ray traced ambient occlusion (RT3): a half-size fragment pass blended into ambient occlusion's raw target before its blur |
 | `renderer/ray_shadows.rs`, `ray_shadows.wgsl` | Ray traced sun shadows (RT1): a compute pass from the prepass into a per-pixel mask (frame binding 17) that `sun_visibility` prefers to the cascades within reach |
+| `renderer/path_tracer.rs`, `path_tracer.wgsl` | The editor's Path Traced view: a reference picture, paths bounced through the ray traced scene and averaged while nothing changes |
 | `renderer/ray_tracing.rs`, `ray_hits.wgsl` | Hardware ray tracing: BLAS per mesh, TLAS of nearby items, Ray Hits view ([ADR-0025](../Architecture/Architecture-Decisions/ADR-0025-Optional-Ray-Tracing-Through-Ray-Queries.md)) |
 | `*.wgsl` (24 files) | `shader.wgsl` (items), `lighting.wgsl`, `sky.wgsl`, `terrain.wgsl`, `water.wgsl`, `post.wgsl`, … |
 | `crates/render-types/src/graphics.rs` | `GraphicsSettings`, `Capabilities`, `EffectiveGraphics`, `Camera` (no GPU code) |

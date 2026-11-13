@@ -46,6 +46,8 @@ pub use graphics::{
 pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, layers_of};
 #[cfg(feature = "debug-views")]
 pub use renderer::DebugView;
+#[cfg(feature = "debug-views")]
+pub use renderer::PATH_TRACED_MOST_PATHS;
 pub use renderer::{
     BakedProbe, CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES,
     LightProbeBaker, MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RayTracingStats, RenderStats, Renderer,

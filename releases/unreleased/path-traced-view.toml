@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Path Traced view mode"
+details = "Viewport > View Mode > Path Traced shows a reference picture of the scene made by path tracing: rays bounce through the hardware ray traced scene, one more path a pixel each frame, picking up the sun, every lamp (each with its own shadow ray), glowing surfaces and the sky. The picture clears up while the camera and scene stay still and starts again when anything changes; its legend counts the paths so far. Surfaces are treated as matte, and glass, water and fog are left out. Needs a GPU that can ray trace."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

@@ -159,6 +159,39 @@ pub(super) fn thousands(value: u64) -> String {
     out
 }
 
+/// The Path Traced view's legend: how many paths each pixel has averaged
+/// so far, or why nothing is traced.
+pub fn path_traced_lines(stats: &RenderStats) -> Vec<(Option<Color32>, String)> {
+    let rays = stats.ray_tracing;
+    if rays.path_traced_paths == 0 {
+        return vec![(
+            None,
+            "Nothing traced: Hardware ray tracing is off or this GPU can't ray trace \
+             (Settings > Graphics says which)."
+                .to_owned(),
+        )];
+    }
+    let most = axcenity_render::PATH_TRACED_MOST_PATHS;
+    let paths = if rays.path_traced_paths >= most {
+        format!("{} paths a pixel: done", thousands(u64::from(most)))
+    } else {
+        format!(
+            "{} paths a pixel so far",
+            thousands(u64::from(rays.path_traced_paths))
+        )
+    };
+    vec![
+        (None, paths),
+        (None, format!("{} items traced", rays.instances)),
+        (
+            None,
+            "Keep the camera still for a clean picture: moving it, or anything in the \
+             scene, starts again."
+                .to_owned(),
+        ),
+    ]
+}
+
 /// Draws the legend for `view_mode` at the top left of `rect`, if it
 /// has one. True when Measure was clicked (Overdraw only).
 pub fn paint(
@@ -172,6 +205,7 @@ pub fn paint(
         ViewMode::Debug(DebugView::LodLevels) => ("LOD Levels", lod_lines(stats)),
         ViewMode::Debug(DebugView::Overdraw) => ("Overdraw", overdraw_lines(overdraw)),
         ViewMode::Debug(DebugView::RayHits) => ("Ray Hits", ray_hits_lines(stats)),
+        ViewMode::Debug(DebugView::PathTraced) => ("Path Traced", path_traced_lines(stats)),
         _ => return false,
     };
     let mut measure = false;
@@ -258,6 +292,7 @@ mod tests {
                 triangles: 1_234_567,
                 meshes_waiting: 2,
                 rebuilt: false,
+                path_traced_paths: 0,
             },
             ..RenderStats::default()
         };
