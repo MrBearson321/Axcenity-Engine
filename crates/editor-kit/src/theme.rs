@@ -357,6 +357,29 @@ impl MenuIcons {
     }
 }
 
+/// Where the ribbon's buttons sit across the window (Settings > Appearance >
+/// Ribbon): from the left edge, or in the middle under the centred tabs.
+/// When they don't fit, they start at the left and scroll either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RibbonAlign {
+    /// From the left edge, as in Visual Studio.
+    Left,
+    /// In the middle of the window, under the tabs.
+    #[default]
+    Centered,
+}
+
+impl RibbonAlign {
+    pub const ALL: [RibbonAlign; 2] = [RibbonAlign::Left, RibbonAlign::Centered];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RibbonAlign::Left => "Left",
+            RibbonAlign::Centered => "Centered",
+        }
+    }
+}
+
 /// Everything about the editor's look that people can change in Settings.
 /// Saved between runs as JSON; fields missing from an older save keep
 /// their defaults.
@@ -384,6 +407,8 @@ pub struct Appearance {
     pub steady_hz: u32,
     /// Where icons sit in menus.
     pub menu_icons: MenuIcons,
+    /// Where the ribbon's buttons sit across the window.
+    pub ribbon: RibbonAlign,
 }
 
 impl Default for Appearance {
@@ -399,6 +424,7 @@ impl Default for Appearance {
             hold_refresh: false,
             steady_hz: 60,
             menu_icons: MenuIcons::Left,
+            ribbon: RibbonAlign::Centered,
         }
     }
 }
@@ -1834,6 +1860,7 @@ mod tests {
             hold_refresh: true,
             steady_hz: 30,
             menu_icons: MenuIcons::Centered,
+            ribbon: RibbonAlign::Left,
         };
         assert_eq!(Appearance::from_text(&appearance.to_text()), appearance);
         assert_eq!(Appearance::from_text("not json"), Appearance::default());

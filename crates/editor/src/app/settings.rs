@@ -8,7 +8,7 @@ use super::*;
 
 use crate::shortcuts;
 use crate::theme::{
-    Accent, Appearance, Density, MenuIcons, Palette, ThemeChoice, space, type_scale,
+    Accent, Appearance, Density, MenuIcons, Palette, RibbonAlign, ThemeChoice, space, type_scale,
 };
 use crate::widgets;
 use axcenity_render::{
