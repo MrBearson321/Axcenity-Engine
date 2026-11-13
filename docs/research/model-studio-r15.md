@@ -12,7 +12,7 @@ Roadmap item R15, section 6.6 of [competitive-development-roadmap.md](competitiv
 | Sculpting tools | Ten brushes (Draw, Clay Strips, Smooth, Grab, Inflate, Crease, Flatten, Pinch, Snake Hook, Mask), symmetry, pressure, masks, Voxel Remesh and Subdivide, about 1 ms a dab at 500k triangles | **Open**: R15.1 |
 | Rigging workflows | Rig mode, the Humanoid template, Add Bone, Automatic Weights (bone heat), Pose test, saving to `.glb`; retargeting is G16 | Met |
 | Weight painting | Weights mode with its brushes, normalising and mirror | Met |
-| Collision generation and editing | None in Model Studio. MeshParts always collide as their convex hull (`physics/src/shapes.rs`, `Fidelity`); only UnionOperations have `CollisionFidelity` | **Open**: R15.2 |
+| Collision generation and editing | None in Model Studio. MeshParts always collide as their convex hull (`physics/src/shapes.rs`, `Fidelity`); only UnionOperations have `CollisionFidelity` | **Built**: R15.2a (#319: `_COL` pieces, MeshPart `CollisionFidelity`) and R15.2b (the Collision fold: Box, Hull, Convex Pieces, Remove, Show Collision) |
 | Model LOD management | Generate LODs writes `_LOD1` and `_LOD2` copies (a half and a quarter) that `assets` reads; the view never draws them and their triangle counts aren't shown | **Open**: R15.3 |
 | Baking workflows | The Bake fold: a reference sculpt, Make Low Poly, and normal, ambient occlusion, curvature and color maps baked onto the low poly | Met |
 | Material previews | The view is the engine's renderer drawing the model as a MeshPart (`view.rs`), so the file's materials show as the scene shows them; the Material tab and Object Viewer preview materials on their own | Met |

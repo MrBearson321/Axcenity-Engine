@@ -29,7 +29,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 
 ## Physics
 
-- MeshParts collide as convex hulls (hollows filled) unless already convex and small, their model has `_COL` collision pieces, or they're set to `PreciseConvexDecomposition` (R15.2).
+- MeshParts collide as convex hulls (hollows filled) unless already convex and small, their model has `_COL` collision pieces, or they're set to `PreciseConvexDecomposition` (R15.2). The Model Studio's Convex Pieces (R15.2b) runs on the UI thread and can take a few seconds on a big model.
 - Setting `Position` stops a part (Roblox keeps its speed).
 - Ragdolls can exceed joint limits briefly on hard landings.
 

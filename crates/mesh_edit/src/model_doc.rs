@@ -30,6 +30,10 @@ use axcenity_assets::{
 use glam::{Vec2, Vec3};
 use serde_json::{Value, json};
 
+mod collision;
+
+pub use collision::{PIECE_COLOR, PieceMesh, box_piece};
+
 use crate::glb::{File, Vertices};
 use crate::half_edge::{EditMesh, Polygon, newell};
 use crate::modifiers::{Modifier, ModifierKind, Purpose, evaluate};
@@ -292,7 +296,9 @@ impl ModelDoc {
     ) -> Option<(Model, Vec<(usize, usize)>)> {
         let mut slots = Vec::new();
         let primitives = (0..self.objects.len())
-            .filter(|&index| !self.is_lod_copy(index) && Some(index) != skip)
+            .filter(|&index| {
+                !self.is_lod_copy(index) && !self.is_collision_piece(index) && Some(index) != skip
+            })
             .filter_map(|index| {
                 let index = self.drawn_at(index, level);
                 let object = &self.objects[index];

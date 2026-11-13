@@ -847,6 +847,7 @@ dependencies = [
  "axcenity-editor-kit",
  "axcenity-editor-tools",
  "axcenity-mesh-edit",
+ "axcenity-physics",
  "axcenity-render",
  "axcenity-scene",
  "axcenity-workspace-hack",
