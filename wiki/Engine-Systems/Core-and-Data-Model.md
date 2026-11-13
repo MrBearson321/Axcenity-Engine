@@ -44,7 +44,7 @@ flowchart TB
 | `crates/core/src/sequence.rs` | `NumberSequence`, `ColorSequence` (2–20 keypoints from time 0 to 1), not attributes |
 | `crates/core/src/index.rs` | Class and tag index; `World::check_index` cross-checks it in debug game tests |
 | `crates/core/src/prefab.rs`, `prefab/` | Placed prefab copies (`PrefabLink`), overrides, `sync` |
-| `crates/core/src/streaming.rs` | `Partition`, `Unit`: what loads together (Phase 80) |
+| `crates/core/src/streaming.rs` | `Partition`, `Unit`: what loads together (Phase 80); `Settings::reach`, `Partition::summary` for the editor's Streaming overlay (R16) |
 | `crates/core/src/input.rs`, `sound.rs`, `ability.rs`, `dialogue.rs`, `tool.rs`, `csg.rs`, `spline.rs`, `terrain.rs`, `strings.rs`, `ui_settings.rs` | Plain data shared by several crates, kept here to avoid cycles |
 | `crates/core/src/bench.rs` | `Laps`, `StageSamples`, `BenchRun`: shared benchmark plumbing |
 

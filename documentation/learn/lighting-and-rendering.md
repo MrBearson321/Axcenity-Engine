@@ -13,7 +13,7 @@ How a world looks is set by the **Lighting** service and the objects in it, plus
 Select **Lighting** in the Explorer:
 
 - **ClockTime** (0 to 24 hours) and **GeographicLatitude** place the sun and moon.
-- Shadows have a softness setting, and the sky can be a colour gradient or an image (an HDR `.exr` or `.hdr` panorama looks best).
+- Shadows have a softness setting, and the sky can be a colour gradient or an image (an HDR `.exr` or `.hdr` panorama looks best). A sky image keeps its own colours as ClockTime changes (it only darkens toward night); **Follow time of day** under the SkyImage row switches to a sky that changes with the sun.
 - **Atmosphere** (World tab, Lights & Sky) replaces the gradient with a physically based sky that changes colour with the sun, with Density, Offset, Glare and Haze.
 - **Clouds**, **Weather** (rain or snow, with wetness and snow cover) and **Fog** add to it. Lighting's Fog section sets a simple distance fog; volumetric fog with sun shafts is a graphics setting.
 
@@ -37,6 +37,10 @@ A **ParticleEmitter** in a part gives off particles (fire, smoke, sparks). The *
 ## Graphics quality
 
 **Settings > Graphics** sets this computer's preset (**Low**, **Medium**, **High** or **Ultra**) and overrides for shadows, shadow distance, post-processing, render scale, texture quality and anti-aliasing (FXAA, MSAA or TAA). The panel says what is in use and why anything was lowered. Below 100% render scale the scene is drawn smaller and then upscaled with an edge-aware filter and sharpened (in the style of AMD FSR 1), which looks noticeably crisper than a plain stretch; there's nothing to switch on. **Debug > Graphics Benchmark…** measures this computer and recommends the editor's settings. In a built game players choose the same from the game's settings. These settings never change your project.
+
+## Ray tracing
+
+On a graphics card that can ray trace, **Settings > Graphics > Ray tracing > Use the ray traced look** turns on ray traced shadows and ambient occlusion in one click (restart the editor the first time). A badge at the bottom right of the Scene view says whether it's working. See [Ray tracing: the best look, simply](ray-tracing.md).
 
 ## Seeing how it's drawn
 

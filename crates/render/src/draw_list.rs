@@ -1062,8 +1062,10 @@ pub struct Sky {
     /// Air that scatters the sun's and moon's light, drawn and lit in
     /// place of the colors above (but not of an image).
     pub atmosphere: Option<Atmosphere>,
-    /// How much of their light the colors above give: 1 by day, less at
-    /// night. Not applied to an image or an atmosphere.
+    /// How much of their light the colors above or an image give: 1 by
+    /// day, less at night, so a sky picture darkens as the sun sets too
+    /// (its colors stay the picture's). Not applied to an atmosphere, which
+    /// works out its own.
     pub daylight: f32,
     /// How bright the stars are, from 0 (by day) to 1. Drawn over the
     /// colors or an atmosphere, never over an image.
