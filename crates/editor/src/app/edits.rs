@@ -167,7 +167,7 @@ impl EditorApp {
                 self.flatten_terrain_along(id);
                 return;
             }
-            Edit::OpenInModelStudio => {
+            Edit::OpenInModelStudio | Edit::OpenInBlender => {
                 let mesh_id = self
                     .world
                     .get(id)
@@ -175,7 +175,11 @@ impl EditorApp {
                     .and_then(Value::as_str)
                     .map(str::to_owned);
                 if let Some(mesh_id) = mesh_id {
-                    self.open_in_model_studio(&mesh_id);
+                    if matches!(edit, Edit::OpenInBlender) {
+                        self.edit_in_blender(&mesh_id);
+                    } else {
+                        self.open_in_model_studio(&mesh_id);
+                    }
                 }
                 return;
             }
@@ -1488,6 +1492,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::BakeSpline
         | Edit::FlattenTerrainAlong
         | Edit::OpenInModelStudio
+        | Edit::OpenInBlender
         | Edit::PreviewSound(_)
         | Edit::Keep(..)
         | Edit::Attribute(..)

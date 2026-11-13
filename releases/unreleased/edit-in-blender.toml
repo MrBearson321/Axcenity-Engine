@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Edit in Blender: open a model in Blender and save it straight back into the project"
+details = "Edit in Blender, on a .glb model in the Assets panel, a MeshPart's Properties and the Model Studio toolbar, opens the model in Blender with a small script. Saving in Blender (Ctrl+S) writes the .glb back: MeshParts using it reload, and an open Model Studio document of it offers to load it again or keep your edits. Settings > External tools sets which Blender to use; left empty, the editor finds it on PATH or in the usual install folder. Nothing is installed into Blender."
+features = ["editor.model-studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
