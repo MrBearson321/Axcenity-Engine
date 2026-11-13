@@ -58,7 +58,7 @@ In particular (status checked on main `5143a5a`):
 
 | Existing item | Work | Status |
 |---|---|---|
-| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238, and onto the Assets panel. Gaps: sound preview playback, Freesound |
+| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238, and onto the Assets panel. Listening to a sound result before getting it. Gaps: Freesound |
 | G2 | Scripts inside objects | **Implemented** (#91, #111, #114, #115, #117, #120; Code/Blocks switch #230) |
 | G3 | Physics interpolation | **Implemented** (#110) |
 | G4 | Script completion and diagnostics | **Implemented** (#145 via #153; go to definition #239) |
@@ -208,7 +208,7 @@ Use `luau-lsp` as a child process for diagnostics, following the existing archit
 
 **Priority:** Critical
 **Existing reference:** G1 and Toolbox integration documentation
-**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Dragging one onto the Assets panel gets it into the project and shows it there. Gaps: sound preview playback, and Freesound (later, with a user's own key, as decided in G1).
+**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Dragging one onto the Assets panel gets it into the project and shows it there. A sound result can be listened to before Get (its source's preview, played on its own). Gap: Freesound (later, with a user's own key, as decided in G1).
 
 Complete the centralized Toolbox architecture.
 
@@ -1069,7 +1069,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 
 | Feature | Axcenity | Unreal | Godot | s&box | Unity | Reference | Priority | Dependencies | Decision |
 |---|---|---|---|---|---|---|---|---|---|
-| Built-in asset discovery | Partial: card drag into the scene (#238) and the Assets panel; no sound preview | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
+| Built-in asset discovery | Partial: card drag into the scene (#238) and the Assets panel, sound previews; no Freesound | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
 | Licence and attribution tracking | Implemented | Fab licences | Per asset | Platform | Asset Store EULA | `toolbox` `license.rs`, `provenance.rs`, CREDITS.txt | Critical | toolbox | Keep |
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
@@ -1140,7 +1140,7 @@ The following is the recommended order for execution. **Status** is on main `514
 |---|---|---|---|---|
 | 1 | Physics interpolation | G3 | Implemented (#110) | Nothing; hand check at 120–240 fps on the PC |
 | 2 | Scripts inside objects | G2 | Implemented (#111–#120, #230) | Nothing |
-| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238 and the Assets panel) | Sound preview |
+| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238 and the Assets panel, sound previews) | Freesound, later |
 | 4 | Script completion and diagnostics | G4 | Implemented (#153, #239) | Nothing |
 | 5 | Memory profiler | G7 | Implemented (#241) | Nothing |
 | 6 | Audio occlusion and roll-off | G8 | Implemented (#128) | Nothing |
