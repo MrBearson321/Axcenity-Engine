@@ -687,6 +687,13 @@ pub struct Viewport {
     looking: bool,
     /// Made on the first frame, once eframe has set up the GPU.
     target: Option<Target>,
+    /// The renderer being made on a thread while a project opens (see
+    /// [`Self::make_renderer_in_background`]), taken on the first frame.
+    making: Option<std::sync::mpsc::Receiver<TextureRenderer>>,
+    /// While a project opens behind the loading screen, its meshes and
+    /// textures go to the GPU on the renderer's upload thread, so no frame
+    /// waits for all of them (see `app/session.rs`).
+    pub opening: bool,
     /// When the flying speed last changed (egui's clock, in seconds), to
     /// show and fade the speed pop-up.
     speed_changed_at: Option<f64>,
@@ -791,12 +798,44 @@ impl Viewport {
             .map_or(0, |target| target.renderer.culling_bounds().len())
     }
 
+    /// Starts making the viewport's renderer on a thread, if it isn't made
+    /// yet: setting up its pipelines takes a second or more on some cards,
+    /// which would otherwise freeze the first frame that draws the scene.
+    /// Called while a project loads, so it's ready when the project opens.
+    pub fn make_renderer_in_background(&mut self, render_state: &RenderState) {
+        if self.target.is_some() || self.making.is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let device = render_state.device.clone();
+        let queue = render_state.queue.clone();
+        // The size is a stand-in: the first frame resizes it to the panel.
+        let spawned = std::thread::Builder::new()
+            .name("viewport renderer".to_owned())
+            .spawn(move || {
+                let _ = sender.send(TextureRenderer::new(&device, &queue, 640, 360));
+            });
+        if spawned.is_ok() {
+            self.making = Some(receiver);
+        }
+    }
+
+    /// How many meshes and textures are still on their way to the GPU
+    /// (only while [`Self::opening`] sends them on a thread).
+    pub fn pending_uploads(&self) -> usize {
+        self.target
+            .as_ref()
+            .map_or(0, |target| target.renderer.pending_uploads())
+    }
+
     pub fn new() -> Self {
         Self {
             camera: start_camera(),
             keys: MoveKeys::default(),
             looking: false,
             target: None,
+            making: None,
+            opening: false,
             speed_changed_at: None,
             drag: None,
             spline_drag: None,
@@ -1379,9 +1418,15 @@ impl Viewport {
             widget_values.extend(released.value);
         }
         let text_box = clicked_ui(axcenity_ui::UiLayout::hit_text_box).flatten();
+        let making = self.making.take();
         let target = self.target.get_or_insert_with(|| {
-            let renderer =
-                TextureRenderer::new(&render_state.device, &render_state.queue, width, height);
+            // Made on a thread while the project loaded, if it was: waits
+            // for the rest of it (the thread failing makes one here).
+            let renderer = making
+                .and_then(|receiver| receiver.recv().ok())
+                .unwrap_or_else(|| {
+                    TextureRenderer::new(&render_state.device, &render_state.queue, width, height)
+                });
             let texture_id = render_state.renderer.write().register_native_texture(
                 &render_state.device,
                 renderer.view(),
@@ -1438,7 +1483,7 @@ impl Viewport {
         }
         target
             .renderer
-            .set_background_uploads(self.terrain.streaming.settings().is_some());
+            .set_background_uploads(self.terrain.streaming.settings().is_some() || self.opening);
         let render_started = Instant::now();
         // Blueprint textures are for building by: the game never shows them.
         assets.set_blueprint(

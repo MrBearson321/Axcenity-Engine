@@ -67,6 +67,29 @@ pub(crate) fn read(project: &Path, relative: &str, pick: &str) -> Option<Model> 
     decode(&mut input, project, relative)
 }
 
+/// Whether the project model `relative` with objects `pick` has a current
+/// cooked copy, reading only the start of it: when it hasn't, loading it
+/// imports the model file (slow for a big one) and cooks it.
+pub(crate) fn is_cooked(project: &Path, relative: &str, pick: &str) -> bool {
+    use std::io::Read;
+    let mut start = vec![0u8; CACHE.header_len() + 8];
+    let read = fs::File::open(path(project, relative, pick))
+        .and_then(|mut file| file.read_exact(&mut start));
+    if read.is_err() {
+        return false;
+    }
+    let build_at = CACHE.header_len();
+    let made_by = u64::from_le_bytes(
+        start[build_at..build_at + 8]
+            .try_into()
+            .expect("eight bytes were read"),
+    );
+    CACHE
+        .stamp(&start)
+        .is_some_and(|stamp| cooked::is_current(project, relative, stamp))
+        && made_by == build()
+}
+
 /// Keeps `model`, loaded from the project model `relative` (`bytes`) with
 /// objects `pick`, if it can be loaded again from what's kept, and deletes
 /// the model's cooked files made from older versions of it. Failing (a
