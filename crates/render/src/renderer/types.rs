@@ -763,13 +763,14 @@ pub(super) struct FxaaTarget {
 /// size, which the composite pass (or FXAA) draws into, and the output-sized
 /// one it's upscaled into before it's sharpened into the output.
 pub(super) struct UpscaleTarget {
-    /// Drawn into: [`FXAA_FORMAT`], encoding to sRGB.
+    /// Drawn into: [`FXAA_FORMAT`], encoding to sRGB. At the scene's size,
+    /// or at the output's when TAA upscaled already.
     pub(super) view: wgpu::TextureView,
     /// `view`'s texture read as plain [`UPSCALE_FORMAT`].
     pub(super) source_group: wgpu::BindGroup,
-    /// The upscaled picture, at the output's size.
-    pub(super) upscaled: wgpu::TextureView,
-    pub(super) upscaled_group: wgpu::BindGroup,
+    /// The upscaled picture, at the output's size, and its bind group:
+    /// `None` when TAA upscaled already, and only the sharpen runs.
+    pub(super) upscaled: Option<(wgpu::TextureView, wgpu::BindGroup)>,
     /// A clone of [`TargetsAlive::upscale`].
     pub(super) _alive: Arc<()>,
 }
