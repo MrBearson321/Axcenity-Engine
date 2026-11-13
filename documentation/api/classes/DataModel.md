@@ -100,7 +100,7 @@ The default chat (Phase 67): a chat window at the bottom left that `/` opens, st
 DataModel.DataLayerService: DataLayerService
 ```
 
-The service that holds the project's DataLayers (roadmap R16). Every level shares them.
+The service that holds the project's DataLayers (roadmap R16). Every level shares them. In a game, a switched-off layer's Instances are set aside inside the layer: not simulated, drawn or sent to players. SetLayerActive (Scripts only) switches a layer, IsLayerActive reads it and LayerChanged reports it on every device. A loaded level's own members of a switched-off layer are set aside too, and save slots keep each layer's state.
 
 #### Debris
 

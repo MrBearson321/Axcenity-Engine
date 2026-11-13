@@ -66,6 +66,7 @@ mod csg;
 #[path = "csg_off.rs"]
 mod csg;
 mod data;
+mod data_layers;
 mod debugger;
 mod decals;
 mod definitions;

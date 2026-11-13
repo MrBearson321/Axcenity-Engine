@@ -1566,7 +1566,7 @@ declare extern type DataModel extends Instance with
 	SoundService: SoundService
 	--- The default chat (Phase 67): a chat window at the bottom left that `/` opens, styled with `TextChatService` rules (`TextChatService::key` styles the names). SendMessage sends from a LocalScript; on the server, OnIncomingMessage sees every message and returns its text, changed or not, or nil to drop it; DisplaySystemMessage shows a message from the game. MessageReceived fires on each device as a message arrives. ChatEnabled off hides the window.
 	TextChatService: TextChatService
-	--- The service that holds the project's DataLayers (roadmap R16). Every level shares them.
+	--- The service that holds the project's DataLayers (roadmap R16). Every level shares them. In a game, a switched-off layer's Instances are set aside inside the layer: not simulated, drawn or sent to players. SetLayerActive (Scripts only) switches a layer, IsLayerActive reads it and LayerChanged reports it on every device. A loaded level's own members of a switched-off layer are set aside too, and save slots keep each layer's state.
 	DataLayerService: DataLayerService
 	--- Destroys Instances later (same as `game:GetService("Debris")`).
 	Debris: Debris
@@ -5641,9 +5641,15 @@ declare extern type ObjectValue extends Instance with
 	[string]: any
 end
 
---- The service that holds the project's DataLayers (roadmap R16). Every level shares them.
+--- The service that holds the project's DataLayers (roadmap R16). Every level shares them. In a game, a switched-off layer's Instances are set aside inside the layer: not simulated, drawn or sent to players. SetLayerActive (Scripts only) switches a layer, IsLayerActive reads it and LayerChanged reports it on every device. A loaded level's own members of a switched-off layer are set aside too, and save slots keep each layer's state.
 declare extern type DataLayerService extends Instance with
+	--- Fires with the layer's name and whether it's now on, after SetLayerActive switched it (or a save slot loaded with it the other way). On both sides: a player's device hears it once the change and the parts arrive.
+	LayerChanged: Signal
 	[string]: any
+	--- Scripts only (roadmap R16.4): switches the layer `name` on or off. Off, each topmost Instance tagged with it moves inside the layer, out of the game; on, each goes back under its old parent at its old place (one whose parent was destroyed meanwhile goes with it). An Instance in two layers stays out while either is off. Errors if there's no such layer.
+	function SetLayerActive(self, name: string, active: boolean): ()
+	--- True if the layer `name` is on (its Active). Works on both sides. Errors if there's no such layer.
+	function IsLayerActive(self, name: string): boolean
 end
 
 --- A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag.
@@ -5652,6 +5658,8 @@ declare extern type DataLayer extends Instance with
 	Color: Color3
 	--- If false, a game starts with the layer's Instances set aside, until a script makes it active (roadmap R16.4). The editor shows every layer whatever this is; hiding one there is the Layers panel's eye.
 	ActiveOnStart: boolean
+	--- Whether the layer is on in the running game (roadmap R16.4): a game starts it at ActiveOnStart. Read-only: DataLayerService:SetLayerActive switches it, and every device sees the change.
+	Active: boolean
 	[string]: any
 end
 

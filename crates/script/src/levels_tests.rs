@@ -260,3 +260,55 @@ fn a_loaded_levels_scripts_inside_objects_start_with_their_files_code() {
     runtime.fire_changes(&mut world);
     assert_eq!(printed(&mut runtime), ["flicker\tWorkspace.Torch"]);
 }
+
+/// Roadmap R16.4: a level brings its own members of a switched-off layer
+/// in set aside, and what the old level set aside goes with it.
+#[test]
+fn a_switched_off_layer_sets_aside_what_a_level_brings_in() {
+    let mut world = level(&["Grass", "Moon"]);
+    let service = world.data_layer_service();
+    let night = add(&mut world, ClassName::DataLayer, service, "Night");
+    let workspace = world.workspace();
+    let old_moon = world.find_first_child(workspace, "Moon").unwrap();
+    world.add_tag(old_moon, "Night").unwrap();
+    let mut castle = level(&["Tower", "Moon"]);
+    let castle_workspace = castle.workspace();
+    let moon = castle.find_first_child(castle_workspace, "Moon").unwrap();
+    castle.add_tag(moon, "Night").unwrap();
+    let worlds = BTreeMap::from([
+        ("Meadow".to_owned(), world.clone()),
+        ("Castle".to_owned(), castle),
+    ]);
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_levels("Meadow", "Meadow", worlds);
+    runtime
+        .run_command(
+            &mut world,
+            "local layers = game:GetService('DataLayerService')\n\
+             layers.LayerChanged:Connect(function(name, active) print('changed', name, active) end)\n\
+             layers:SetLayerActive('Night', false)\n\
+             print(layers:IsLayerActive('Night'))\n\
+             print(pcall(function() workspace.Parent.DataLayerService.Night.Active = true end))\n\
+             game:GetService('LevelService'):LoadLevel('Castle')",
+        )
+        .unwrap();
+    runtime.fire_changes(&mut world);
+    let out = printed(&mut runtime);
+    assert_eq!(out[0], "false");
+    assert!(
+        out[1].starts_with("false\t") && out[1].contains("read-only"),
+        "{out:?}"
+    );
+    assert_eq!(out[2], "changed\tNight\tfalse");
+    assert!(!world.contains(old_moon), "the Meadow's Moon went with it");
+    assert_eq!(names(&world, workspace), ["Tower"]);
+    assert_eq!(names(&world, night), ["Moon"]);
+
+    runtime
+        .run_command(
+            &mut world,
+            "game:GetService('DataLayerService'):SetLayerActive('Night', true)",
+        )
+        .unwrap();
+    assert_eq!(names(&world, workspace), ["Tower", "Moon"]);
+}

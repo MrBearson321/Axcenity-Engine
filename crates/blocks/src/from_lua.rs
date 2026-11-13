@@ -23,7 +23,7 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 13] = [
+const SERVICES: [&str; 14] = [
     "UserInputService",
     "RunService",
     "Debris",
@@ -37,6 +37,7 @@ const SERVICES: [&str; 13] = [
     "UserGameSettings",
     "DataService",
     "ConsoleService",
+    "DataLayerService",
 ];
 
 /// Why some Lua couldn't become blocks.
@@ -222,6 +223,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             Expression::DataRow { .. } => {
                 services.insert("DataService".to_owned());
             }
+            Expression::LayerActive { .. } => {
+                services.insert("DataLayerService".to_owned());
+            }
             _ => {}
         }
         for child in expression.children() {
@@ -258,6 +262,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             BlockKind::SendChatMessage { .. } | BlockKind::ShowSystemMessage { .. } => {
                 services.insert("TextChatService".to_owned());
+            }
+            BlockKind::WhenLayerChanged { .. } | BlockKind::SetLayerActive { .. } => {
+                services.insert("DataLayerService".to_owned());
             }
             BlockKind::WhenCommandRun { .. } => {
                 services.insert("ConsoleService".to_owned());
@@ -655,6 +662,10 @@ impl<'a> Converter<'a> {
                     return None;
                 }
                 Some(Block::new(BlockKind::WhenStateChanged { animator, body }))
+            }
+            "LayerChanged" if self.is_service(object, "DataLayerService") => {
+                let (data_layer, body) = self.one_name_branch(handler)?;
+                Some(Block::new(BlockKind::WhenLayerChanged { data_layer, body }))
             }
             "AnimationEvent" => {
                 let animator = self.target(object)?;
@@ -1287,6 +1298,9 @@ impl<'a> Converter<'a> {
         if let Some(chat) = self.chat_call(call, scope) {
             return Some(chat);
         }
+        if let Some(layer) = self.layer_call(call, scope) {
+            return Some(layer);
+        }
         match &call.kind {
             ExprKind::Call(function, args) => {
                 if self.is_field(function, "task", "wait")
@@ -1605,6 +1619,26 @@ impl<'a> Converter<'a> {
             },
             ("Disconnect", []) => BlockKind::LeaveGame,
             _ => return None,
+        })
+    }
+
+    /// `DataLayerService:SetLayerActive("name", active)` (roadmap R16.4).
+    fn layer_call(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        let ExprKind::Method(object, method, args) = &call.kind else {
+            return None;
+        };
+        if method != "SetLayerActive" || !self.is_service(object, "DataLayerService") {
+            return None;
+        }
+        let [name, active] = args.as_slice() else {
+            return None;
+        };
+        let ExprKind::Str(data_layer) = &name.kind else {
+            return None;
+        };
+        Some(BlockKind::SetLayerActive {
+            data_layer: data_layer.clone(),
+            active: self.expression(active, scope),
         })
     }
 
@@ -2531,6 +2565,15 @@ impl<'a> Converter<'a> {
                     return Some(Expression::DataRow {
                         table,
                         key: boxed(key),
+                    });
+                }
+                if method == "IsLayerActive"
+                    && self.is_service(object, "DataLayerService")
+                    && let [arg] = args.as_slice()
+                    && let ExprKind::Str(data_layer) = &arg.kind
+                {
+                    return Some(Expression::LayerActive {
+                        data_layer: data_layer.clone(),
                     });
                 }
                 if method == "IsKeyDown"

@@ -30,3 +30,11 @@ DataLayer.ActiveOnStart: boolean
 
 If false, a game starts with the layer's Instances set aside, until a script makes it active (roadmap R16.4). The editor shows every layer whatever this is; hiding one there is the Layers panel's eye.
 
+#### Active
+
+```luau
+DataLayer.Active: boolean
+```
+
+Whether the layer is on in the running game (roadmap R16.4): a game starts it at ActiveOnStart. Read-only: DataLayerService:SetLayerActive switches it, and every device sees the change.
+

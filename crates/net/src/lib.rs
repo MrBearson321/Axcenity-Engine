@@ -68,6 +68,8 @@ mod ability_tests;
 #[cfg(test)]
 mod character_tests;
 #[cfg(test)]
+mod data_layer_tests;
+#[cfg(test)]
 mod lag_tests;
 #[cfg(test)]
 mod multiplayer_tests;

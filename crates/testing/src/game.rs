@@ -72,6 +72,8 @@ impl TestGame {
             #[cfg(debug_assertions)]
             frames_since_index_check: 0,
         };
+        // Switched-off data layers start set aside (R16.4).
+        axcenity_core::data_layers::start(&mut game.sim.world);
         if let Err(err) =
             axcenity_project::load_starter_character(setup.folder, &mut game.sim.world)
         {

@@ -22,6 +22,10 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
         let number = recorded.number;
         match recorded.change {
             Change::Property { instance, name } => {
+                // A data layer switched on or off (R16.4).
+                if name == "Active" {
+                    crate::data_layers::fire_layer_changed(lua, instance, number);
+                }
                 let owner = Owner::Instance(instance);
                 // Most changes have nobody listening on their Instance
                 // (physics moves thousands of parts a frame), so those are

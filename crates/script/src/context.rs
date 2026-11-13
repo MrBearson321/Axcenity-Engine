@@ -159,6 +159,10 @@ impl Context {
                 .expect("creating Sequence methods only fails when out of memory"),
         );
         methods.extend(
+            crate::data_layers::methods(&lua)
+                .expect("creating the DataLayerService methods only fails when out of memory"),
+        );
+        methods.extend(
             crate::spline::methods(&lua)
                 .expect("creating Spline methods only fails when out of memory"),
         );

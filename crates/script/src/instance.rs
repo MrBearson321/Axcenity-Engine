@@ -393,6 +393,9 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
         "UserId" | "DisplayName" if class == Some(ClassName::Player) => Err(mlua::Error::runtime(
             format!("Player.{key} is read-only: it's who joined, as they joined"),
         )),
+        "Active" if class == Some(ClassName::DataLayer) => {
+            Err(mlua::Error::runtime(crate::data_layers::ACTIVE_READ_ONLY))
+        }
         "Occupant" if class.is_some_and(ClassName::is_seat) => {
             Err(mlua::Error::runtime(crate::seat::OCCUPANT_READ_ONLY))
         }

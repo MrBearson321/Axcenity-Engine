@@ -639,6 +639,14 @@ pub(super) fn palette_parts(
             block(BlockKind::ShowSystemMessage {
                 text: text("Round over"),
             }),
+            block(BlockKind::WhenLayerChanged {
+                data_layer: "Night".to_owned(),
+                body: Vec::new(),
+            }),
+            block(BlockKind::SetLayerActive {
+                data_layer: "Night".to_owned(),
+                active: Expression::Boolean { value: true },
+            }),
             block(BlockKind::KickPlayer {
                 player: Expression::Variable {
                     name: "player".to_owned(),
@@ -670,6 +678,9 @@ pub(super) fn palette_parts(
             R(Expression::DataRow {
                 table: storage_name(NameKind::DataTable),
                 key: Box::new(text("sword")),
+            }),
+            R(Expression::LayerActive {
+                data_layer: "Night".to_owned(),
             }),
         ],
         // Grey blocks only come from code, so there are none of those.

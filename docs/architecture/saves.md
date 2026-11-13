@@ -33,6 +33,8 @@ A `Checkpoint` Instance has one property, `Position`: where a restored character
 
 Each saved Instance also keeps its attributes and tags (`attributes`, `tags`), and restoring gives it exactly those, removing others. A property that points at an Instance (`ObjectValue.Value`) is saved in `references` as the number of the entry it points at (or `null` for none) and points at whatever that entry became once everything is restored; one that points outside the saved Instances isn't saved and keeps its live value. All three fields are optional, so older slots load unchanged and `SAVE_VERSION` stays 2. A slot from before SoundService was kept has no `SoundService` entry in `services`, and loading it leaves the live SoundGroups as they are. Values add `{"CFrame": [x, y, z, qx, qy, qz, qw]}` and `{"EnumItem": "KeyCode.E"}`.
 
+Data layers (roadmap R16.4): `layers` keeps whether each `DataLayer` was on, by name. `restore` switches them first (`core::data_layers::set_active`), so what a switched-off layer holds is parked before the Workspace is matched, and a part saved while parked isn't made a second time; a layer the game no longer has is skipped. Checkpoints keep it too, being world state. The field is optional and left out without layers, so `SAVE_VERSION` stays 2 ([../editor/layers.md](../editor/layers.md#in-a-game)).
+
 Not world state, never saved, made or destroyed: scripts, Players, AnimationTracks and ScreenGuis (with everything in them). A Terrain's landscape isn't saved, only its properties. A recreated Instance doesn't get back a script that was inside it.
 
 ## Files

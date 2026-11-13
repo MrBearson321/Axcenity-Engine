@@ -91,6 +91,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::WhenAgentSenses { .. } => ("When Agent Senses Player", &["Agent", "Sense"]),
         BlockKind::WhenSplineReached { .. } => ("When Spline End Reached", &["Follower", "End"]),
         BlockKind::WhenSeatOccupied { .. } => ("When Someone Sits", &["Seat"]),
+        BlockKind::WhenLayerChanged { .. } => ("When Layer Changes", &["Layer"]),
         BlockKind::WhenPropertyChanged { .. } => ("When Property Changes", &["Property", "Object"]),
         BlockKind::WhenAttributeChanged { .. } => {
             ("When Attribute Changes", &["Attribute", "Object"])
@@ -200,6 +201,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::RequestStreamAround { .. } => ("Load Around Player", &["Player", "Position"]),
         BlockKind::SendChatMessage { .. } => ("Send Chat Message", &["Text"]),
         BlockKind::ShowSystemMessage { .. } => ("Show System Message", &["Text"]),
+        BlockKind::SetLayerActive { .. } => ("Set Layer Active", &["Layer", "Active"]),
         BlockKind::WhenConnectionFails { .. } => ("When Connection Fails", &[]),
         BlockKind::SetGraphicsQuality { .. } => ("Set Graphics Quality", &["Quality"]),
         BlockKind::SetGraphicsOption { .. } => ("Set Graphics Option", &["Setting", "Choice"]),
@@ -307,6 +309,7 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::TouchingPart => ("Touching Part", &[]),
         Expression::PartUnderMouse => ("Part Under Mouse", &[]),
         Expression::KeyDown { .. } => ("Is Key Down", &["Key"]),
+        Expression::LayerActive { .. } => ("Is Layer Active", &["Layer"]),
         Expression::IsA { .. } => ("Is A", &["Object", "Class"]),
         Expression::IsStreamedIn { .. } => ("Is Streamed In", &["Object"]),
         Expression::AnimatorBool { .. } => ("Get Bool", &["Parameter", "Animator"]),

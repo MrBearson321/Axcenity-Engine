@@ -68,6 +68,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
         | BlockKind::WhenSeatOccupied { .. }
+        | BlockKind::WhenLayerChanged { .. }
         | BlockKind::WhenPropertyChanged { .. }
         | BlockKind::WhenAttributeChanged { .. }
         | BlockKind::WhenPromptTriggered { .. }
@@ -160,6 +161,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::RequestStreamAround { .. } => 86,
         BlockKind::SendChatMessage { .. } => 80,
         BlockKind::ShowSystemMessage { .. } => 81,
+        BlockKind::SetLayerActive { .. } => 105,
         BlockKind::PlaceOnSpline { .. } => 82,
         BlockKind::Patrol { .. } => 83,
         BlockKind::SpawnDecal { .. } => 84,
@@ -184,7 +186,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::WaitForEvent { .. } => 104,
     })
 }
-const STATEMENT_COUNT: usize = 105;
+const STATEMENT_COUNT: usize = 106;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -352,6 +354,13 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 },
             },
             "TextChatService:DisplaySystemMessage(\"Round over\")",
+        ),
+        (
+            BlockKind::SetLayerActive {
+                data_layer: "Night".to_owned(),
+                active: Expression::Boolean { value: true },
+            },
+            "DataLayerService:SetLayerActive(\"Night\", true)",
         ),
         (
             BlockKind::PushWithForce {
@@ -1156,6 +1165,13 @@ fn translation_covers_every_event_block() {
                 body: quiet(97),
             },
         ),
+        block(
+            102,
+            BlockKind::WhenLayerChanged {
+                data_layer: "Night".to_owned(),
+                body: quiet(103),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -1193,11 +1209,14 @@ fn translation_covers_every_event_block() {
         "    if which == \"End\" then",
         "workspace.Door:GetPropertyChangedSignal(\"Transparency\"):Connect(function()",
         "workspace.Player1:GetAttributeChangedSignal(\"Health\"):Connect(function()",
+        "local DataLayerService = game:GetService(\"DataLayerService\")",
+        "DataLayerService.LayerChanged:Connect(function(layerName)",
+        "    if layerName == \"Night\" then",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 23, "{source}");
+    assert_eq!(source.matches("do return end").count(), 24, "{source}");
 }
 
 #[test]
@@ -2129,6 +2148,13 @@ fn every_block_script() -> BlockScript {
                 body: body(),
             },
         ),
+        block(
+            24,
+            BlockKind::WhenLayerChanged {
+                data_layer: "Night".to_owned(),
+                body: body(),
+            },
+        ),
     ];
     // New IDs all the way down, as the statements are copies.
     script(stacks.iter().map(Block::duplicate).collect())
@@ -2217,6 +2243,9 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
         },
         Expression::KeyDown {
             key: "W".to_owned(),
+        },
+        Expression::LayerActive {
+            data_layer: "Night".to_owned(),
         },
         Expression::Color3 {
             r: 0.0,

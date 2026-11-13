@@ -225,6 +225,8 @@ impl Session {
                 loading.screen_gui
             ));
         }
+        // Switched-off data layers start set aside (R16.4).
+        axcenity_core::data_layers::start(&mut session.sim.world);
         // The character each player spawns as (Phase 47), before scripts
         // look for it.
         if let Some(folder) = session.sim.assets.folder()

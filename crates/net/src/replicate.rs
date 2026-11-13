@@ -358,6 +358,11 @@ fn replicated(world: &World) -> (Vec<InstanceId>, Vec<InstanceId>) {
                 continue;
             }
             inside.push(child);
+            // A data layer goes to players, what a switched-off one has
+            // set aside doesn't (roadmap R16.4).
+            if service == world.data_layer_service() {
+                continue;
+            }
             // Each device makes what SplineMeshes and SplineScatters make
             // itself (Phase 74).
             inside.extend(

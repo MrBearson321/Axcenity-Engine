@@ -430,7 +430,9 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::RequestStreamAround { .. }
         | BlockKind::WhenStreamedIn { .. }
         | BlockKind::SendChatMessage { .. }
-        | BlockKind::ShowSystemMessage { .. } => Category::More,
+        | BlockKind::ShowSystemMessage { .. }
+        | BlockKind::WhenLayerChanged { .. }
+        | BlockKind::SetLayerActive { .. } => Category::More,
         BlockKind::Code { .. }
         | BlockKind::TopCode { .. }
         | BlockKind::Comment { .. }
@@ -457,7 +459,9 @@ fn reporter_category(expression: &Expression) -> Category {
         Expression::AnimatorBool { .. }
         | Expression::AnimatorNumber { .. }
         | Expression::AnimatorLayerWeight { .. } => Category::Animation,
-        Expression::DataRow { .. } | Expression::DataValue { .. } => Category::More,
+        Expression::DataRow { .. }
+        | Expression::DataValue { .. }
+        | Expression::LayerActive { .. } => Category::More,
         Expression::Code { .. }
         | Expression::Call { .. }
         | Expression::MethodCall { .. }
@@ -1574,6 +1578,17 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("show system message"),
             Slot(text, SlotKind::Text),
         ])],
+        BlockKind::WhenLayerChanged { data_layer, .. } => vec![Row(vec![
+            label("when layer"),
+            Part::Text(data_layer),
+            label("changes"),
+        ])],
+        BlockKind::SetLayerActive { data_layer, active } => vec![Row(vec![
+            label("set layer"),
+            Part::Text(data_layer),
+            label("active"),
+            Slot(active, SlotKind::Truth),
+        ])],
         BlockKind::RequestStreamAround { player, position } => vec![Row(vec![
             label("load around"),
             Slot(position, SlotKind::Any),
@@ -1797,6 +1812,9 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
         Expression::TouchingPart => vec![label("touching part")],
         Expression::PartUnderMouse => vec![label("part under mouse")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
+        Expression::LayerActive { data_layer } => {
+            vec![label("layer"), Part::Text(data_layer), label("is active")]
+        }
         Expression::IsStreamedIn { value } => {
             vec![Slot(value, SlotKind::Any), label("is streamed in")]
         }

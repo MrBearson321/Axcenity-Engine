@@ -175,6 +175,49 @@ fn loading_into_the_running_game_keeps_the_instances_scripts_hold() {
 }
 
 #[test]
+fn a_slot_keeps_each_data_layers_state() {
+    use axcenity_core::data_layers;
+    let folder = folder("layers");
+    let Level {
+        mut world, coin, ..
+    } = level();
+    let service = world.data_layer_service();
+    let layer = world.create(ClassName::DataLayer).unwrap();
+    world.set_name(layer, "Treasure").unwrap();
+    world.set_parent(layer, Some(service)).unwrap();
+    world.add_tag(coin, "Treasure").unwrap();
+    let workspace = world.workspace();
+    let mut saves = Saves::new(Some(folder));
+
+    // Saved with the layer off: the coin isn't in the Workspace, and
+    // loading over a game with it on sets it aside again rather than
+    // making a second coin.
+    data_layers::set_active(&mut world, "Treasure", false).unwrap();
+    saves.save(&world, 1).unwrap();
+    data_layers::set_active(&mut world, "Treasure", true).unwrap();
+    saves.load(&mut world, 1).unwrap();
+    assert!(!data_layers::is_active(&world, layer));
+    assert!(world.find_first_child(workspace, "Coin").is_none());
+    data_layers::set_active(&mut world, "Treasure", true).unwrap();
+    let coins = world
+        .get(workspace)
+        .unwrap()
+        .children()
+        .iter()
+        .filter(|&&id| world.get(id).unwrap().name() == "Coin")
+        .count();
+    assert_eq!(coins, 1);
+    assert!(world.contains(coin), "the same coin came back");
+
+    // Saved with it on: loading puts the coin back.
+    saves.save(&world, 2).unwrap();
+    data_layers::set_active(&mut world, "Treasure", false).unwrap();
+    saves.load(&mut world, 2).unwrap();
+    assert!(data_layers::is_active(&world, layer));
+    assert_eq!(world.get(coin).unwrap().parent(), Some(workspace));
+}
+
+#[test]
 fn restoring_a_checkpoint_puts_the_character_there_with_the_state_captured_for_it() {
     let Level {
         mut world,

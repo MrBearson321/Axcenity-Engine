@@ -1102,6 +1102,9 @@ impl ClassName {
                 ("Color", Value::Color3(Color3::new(0.35, 0.6, 1.0))),
                 // Off, a game starts with the layer set aside (R16.4).
                 ("ActiveOnStart", Value::Bool(true)),
+                // Read-only for scripts: whether the layer is on in a
+                // running game (`DataLayerService:SetLayerActive`).
+                ("Active", Value::Bool(true)),
             ],
             ClassName::Team => vec![
                 ("TeamColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
@@ -2966,7 +2969,6 @@ impl ClassName {
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
             | ClassName::Team
-            | ClassName::DataLayerService
             | ClassName::DataLayer
             | ClassName::SoundService
             | ClassName::SoundGroup
@@ -3060,6 +3062,8 @@ impl ClassName {
             // With the message: `Text`, and `Player` (nil for a system
             // message), on each device once it arrives (Phase 67).
             ClassName::TextChatService => &["MessageReceived"],
+            // A data layer was switched on or off (R16.4), on every device.
+            ClassName::DataLayerService => &["LayerChanged"],
             // Each with the character Model: `CharacterAdded` once it's in
             // the Workspace, `CharacterRemoving` as it goes.
             ClassName::Player => &["CharacterAdded", "CharacterRemoving"],

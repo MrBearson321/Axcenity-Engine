@@ -201,7 +201,12 @@ fn replace_workspace(world: &mut World, level: &World, kept: &[InstanceId]) {
 fn load(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<()> {
     let level = levels.world(name)?;
     let kept = characters(world);
+    // What the old level's switched-off layers set aside goes with it, and
+    // the new level's members of those layers are set aside (R16.4).
+    let workspace = world.workspace();
+    axcenity_core::data_layers::drop_parked_from(world, workspace);
     replace_workspace(world, level, &kept);
+    axcenity_core::data_layers::park_inactive(world);
     // Their Models went with the rest of the Workspace.
     levels.added.clear();
     levels.current = name.to_owned();
@@ -233,6 +238,7 @@ pub(crate) fn add(levels: &mut Levels, world: &mut World, name: &str) -> mlua::R
         .set_parent(model, Some(workspace))
         .expect("both exist");
     levels.added.push((name.to_owned(), model));
+    axcenity_core::data_layers::park_inactive(world);
     Ok(model)
 }
 
@@ -244,6 +250,9 @@ pub(crate) fn remove(levels: &mut Levels, world: &mut World, name: &str) -> mlua
         )));
     };
     let (_, model) = levels.added.remove(index);
+    if world.contains(model) {
+        axcenity_core::data_layers::drop_parked_from(world, model);
+    }
     // A script may have destroyed it already.
     let _ = world.destroy(model);
     Ok(())

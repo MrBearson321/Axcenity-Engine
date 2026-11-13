@@ -338,6 +338,12 @@ pub enum BlockKind {
         seat: String,
         body: Vec<Block>,
     },
+    /// When the data layer `layer` is switched on or off
+    /// (`DataLayerService.LayerChanged`, roadmap R16.4), on both sides.
+    WhenLayerChanged {
+        data_layer: String,
+        body: Vec<Block>,
+    },
     /// When one property of an object changes
     /// (`GetPropertyChangedSignal`), whoever changed it.
     WhenPropertyChanged {
@@ -641,6 +647,12 @@ pub enum BlockKind {
     /// `TextChatService:DisplaySystemMessage` (Phase 67).
     ShowSystemMessage {
         text: Expression,
+    },
+    /// Switches the data layer `layer` on or off:
+    /// `DataLayerService:SetLayerActive` (Scripts only, roadmap R16.4).
+    SetLayerActive {
+        data_layer: String,
+        active: Expression,
     },
 
     // Camera: `workspace.CurrentCamera` (LocalScripts only).
@@ -1105,6 +1117,7 @@ impl BlockKind {
                 | BlockKind::WhenAgentSenses { .. }
                 | BlockKind::WhenSplineReached { .. }
                 | BlockKind::WhenSeatOccupied { .. }
+                | BlockKind::WhenLayerChanged { .. }
                 | BlockKind::WhenPropertyChanged { .. }
                 | BlockKind::WhenAttributeChanged { .. }
                 | BlockKind::WhenPromptTriggered { .. }
@@ -1157,6 +1170,7 @@ impl BlockKind {
             | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::WhenSplineReached { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
+            | BlockKind::WhenLayerChanged { body, .. }
             | BlockKind::WhenPropertyChanged { body, .. }
             | BlockKind::WhenAttributeChanged { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
@@ -1263,6 +1277,7 @@ impl BlockKind {
             | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::WhenSplineReached { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
+            | BlockKind::WhenLayerChanged { body, .. }
             | BlockKind::WhenPropertyChanged { body, .. }
             | BlockKind::WhenAttributeChanged { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
@@ -1326,6 +1341,7 @@ impl BlockKind {
             | BlockKind::SetNetworkOwner { owner: e, .. }
             | BlockKind::SendChatMessage { text: e }
             | BlockKind::ShowSystemMessage { text: e }
+            | BlockKind::SetLayerActive { active: e, .. }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::PlaceOnSpline { distance: e, .. }
@@ -1518,6 +1534,7 @@ impl BlockKind {
             | BlockKind::SetNetworkOwner { owner: e, .. }
             | BlockKind::SendChatMessage { text: e }
             | BlockKind::ShowSystemMessage { text: e }
+            | BlockKind::SetLayerActive { active: e, .. }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::PlaceOnSpline { distance: e, .. }
@@ -1687,6 +1704,11 @@ pub enum Expression {
     KeyDown {
         key: String,
     },
+    /// Whether a data layer is on: `DataLayerService:IsLayerActive`
+    /// (roadmap R16.4).
+    LayerActive {
+        data_layer: String,
+    },
     /// An Animator's Bool parameter (`animator:GetBool`).
     AnimatorBool {
         animator: String,
@@ -1843,6 +1865,7 @@ impl Expression {
             | Expression::Logic { .. }
             | Expression::Not { .. }
             | Expression::KeyDown { .. }
+            | Expression::LayerActive { .. }
             | Expression::AnimatorBool { .. }
             | Expression::IsA { .. }
             | Expression::IsStreamedIn { .. }
