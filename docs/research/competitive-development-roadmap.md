@@ -692,7 +692,7 @@ This phase represents a potential long-term business opportunity.
 
 The engine must remain fully usable without these services.
 
-**Status:** Research and design only (R19), per the development policy. Collaboration (7.2) is built (section 2.1); accounts have a design (C12).
+**Status:** Research and design only (R19), per the development policy. Collaboration (7.2) is built (section 2.1); accounts have a design (C12). The architecture for all of section 7 (principles, each service, the one `online` client crate, threats, and an order O1–O9 where O1 game update manifests and O2 a server container need no website): [online-services.md](online-services.md).
 
 ## 7.1 Account management
 
@@ -1156,7 +1156,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
 | 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1); design in [vfx-editor.md](vfx-editor.md) | R17.2 spawn shapes and bursts, then the effect editor and asset |
 | 18 | Global illumination improvements | New (R18) | Partial; options and stages in [global-illumination.md](global-illumination.md) | R18.1 probe overlay, then invalid probes and sky light apart |
-| 19 | Online services architecture | New (R19) | Missing | Design document only |
+| 19 | Online services architecture | New (R19) | Designed in [online-services.md](online-services.md) | Build only when Paul says; O1 and O2 need no website |
 | 20 | Platform expansion | New (R20) | Deferred; researched in [platform-expansion.md](platform-expansion.md) | Spikes (Android, OpenXR) only when Paul lifts the deferral |
 
 Also done: G14 (Run without a player, #245) and G15 (physics debug views, #253). Still open: G13 (LAN scale test) when Paul's machines are free.
