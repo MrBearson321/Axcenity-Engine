@@ -549,7 +549,7 @@ Require representative benchmark evidence demonstrating a meaningful bottleneck 
 ## 6.3 Global illumination improvements
 
 **Priority:** Medium
-**Status:** Partial (R18). Baked light probe volumes with stale-bake warnings, baked reflection probes, and optional real-time probe GI (off by default). R18.1 adds the Light Probes overlay, R18.2 marks probes baked inside solids invalid, so walls stop leaking, and R18.3 keeps the sky's share of baked light apart, so volumes follow a sky that dims or changes color. Options and stages R18.1–R18.4 (probe overlay, invalid probes, sky light kept apart, placement and tiers): [global-illumination.md](global-illumination.md).
+**Status:** Partial (R18). Baked light probe volumes with stale-bake warnings, baked reflection probes, and optional real-time probe GI (off by default). R18.1 adds the Light Probes overlay, R18.2 marks probes baked inside solids invalid, so walls stop leaking, and R18.3 keeps the sky's share of baked light apart, so volumes follow a sky that dims or changes color. R18.4 adds Fill with Probes (a volume sized to the selection, spaced to a 512-probe budget) and real-time GI tiers by preset, with `bench_light_probes` for the costs. Options and stages R18.1–R18.4 (probe overlay, invalid probes, sky light kept apart, placement and tiers): [global-illumination.md](global-illumination.md).
 
 **Ray-traced GI:** RT2 in [hardware-ray-tracing.md](hardware-ray-tracing.md) (ray-traced probe GI, DDGI-style) writes into the same light probe volumes and replaces `realtime_gi.rs`'s raster cube faces when ray tracing is on. It is R18's additional real-time GI technique on RT-capable GPUs. The rest of R18 (probe placement, diagnostics, quality settings, the non-RT path) applies to every GPU. G9 stage 2 is independent, because RT denoisers run before TAA.
 
@@ -1103,7 +1103,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | GPU-driven drawing | Deferred | Nanite | — | — | GPU Resident Drawer | L5, gap analysis P4 | Medium | M12 | Defer until a benchmark needs it |
 | Occlusion culling | Deferred (measured ≤ 1.9 ms) | HZB | Occluders | PVS | Umbra | `docs/rendering/performance.md` | Low | — | Defer |
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
-| Global illumination | Partial: baked probes, optional real-time probes, Light Probes overlay (R18.1), invalid probes (R18.2), sky light that follows the sky (R18.3) | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
+| Global illumination | Partial: baked probes, optional real-time probes, Light Probes overlay (R18.1), invalid probes (R18.2), sky light that follows the sky (R18.3), Fill with Probes and real-time GI tiers (R18.4) | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
 | Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
 | Particle authoring (VFX editor) | Partial (curves over life, spawn shapes, bursts, flipbooks; no effect editor) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; Streaming overlay in the editor (R16) | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
@@ -1155,7 +1155,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
 | 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1), spawn shapes and speed over life (R17.2), bursts, inherited velocity and headings (R17.2b), flipbooks (R17.2c); design in [vfx-editor.md](vfx-editor.md) | R17.3 effect editor and asset |
-| 18 | Global illumination improvements | New (R18) | Partial; options and stages in [global-illumination.md](global-illumination.md) | R18.4 placement and real-time GI tiers |
+| 18 | Global illumination improvements | New (R18) | Stages R18.1–R18.4 done; options and stages in [global-illumination.md](global-illumination.md) | PC numbers from `bench_light_probes`; probe visibility only if leaks remain; RT2 in the ray tracing thread |
 | 19 | Online services architecture | New (R19) | Designed in [online-services.md](online-services.md) | Build only when Paul says; O1 and O2 need no website |
 | 20 | Platform expansion | New (R20) | Deferred; researched in [platform-expansion.md](platform-expansion.md) | Spikes (Android, OpenXR) only when Paul lifts the deferral |
 

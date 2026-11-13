@@ -13,10 +13,11 @@ use std::num::NonZeroU64;
 use super::light_probes::LightProbes;
 use super::probe_bake::ProbeCamera;
 use super::*;
+use crate::RealtimeGiTier;
 
-/// How many probes are traced each frame. Must match `SLOTS` in
+/// The most probes traced in a frame, at any tier. Must match `SLOTS` in
 /// light_probe_sum.wgsl.
-pub(super) const PROBES_PER_FRAME: u32 = 2;
+const SLOTS: u32 = RealtimeGiTier::MAX_PROBES_PER_FRAME;
 
 /// Scenes with more items than this keep their bake until the light
 /// changes, instead of tracing every probe from the first frame, and then
@@ -32,6 +33,9 @@ const HEAVY_FACE_EVERY: u32 = 4;
 
 /// The probes' faces and the pass that sums them.
 pub(super) struct RealtimeGi {
+    /// How many probes it traces a frame, and its faces' size (roadmap
+    /// R18.4): the settings' when it was made.
+    pub(super) tier: RealtimeGiTier,
     camera: ProbeCamera,
     /// Six layers (faces) for each probe traced in a frame.
     faces: wgpu::Texture,
@@ -62,11 +66,12 @@ impl RealtimeGi {
         list: &DrawList,
         settings: &GraphicsSettings,
     ) -> Self {
+        let tier = settings.realtime_gi_tier();
         let mut camera = ProbeCamera::new(
             device,
             queue,
             list,
-            LIGHT_PROBE_BAKE_SIZE,
+            tier.face_size,
             &camera_settings(settings),
         );
         camera.light_only();
@@ -75,7 +80,7 @@ impl RealtimeGi {
             size: wgpu::Extent3d {
                 width: camera.size,
                 height: camera.size,
-                depth_or_array_layers: 6 * PROBES_PER_FRAME,
+                depth_or_array_layers: 6 * tier.probes_per_frame,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -90,7 +95,7 @@ impl RealtimeGi {
         });
         let targets = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("real-time GI targets"),
-            size: u64::from(16 * PROBES_PER_FRAME),
+            size: u64::from(16 * SLOTS),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -116,7 +121,7 @@ impl RealtimeGi {
                     wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(u64::from(16 * PROBES_PER_FRAME)),
+                        min_binding_size: NonZeroU64::new(u64::from(16 * SLOTS)),
                     },
                 ),
                 entry(
@@ -149,6 +154,7 @@ impl RealtimeGi {
             cache: None,
         });
         Self {
+            tier,
             camera,
             faces,
             faces_view,
@@ -214,14 +220,14 @@ impl RealtimeGi {
             }
             self.face = 0;
             self.next = (index + 1) % total;
-            let mut targets = [[0u32; 4]; PROBES_PER_FRAME as usize];
+            let mut targets = [[0u32; 4]; SLOTS as usize];
             targets[0][0] = index;
             self.sum_probes(targets, 1, probes);
             return Ok(());
         }
         self.camera.show(list);
-        let mut targets = [[0u32; 4]; PROBES_PER_FRAME as usize];
-        let count = PROBES_PER_FRAME.min(total);
+        let mut targets = [[0u32; 4]; SLOTS as usize];
+        let count = self.tier.probes_per_frame.min(total);
         for slot in 0..count {
             let index = self.next % total;
             self.next = (index + 1) % total;
@@ -269,7 +275,7 @@ impl RealtimeGi {
     /// which the frame drawn next uses.
     fn sum_probes(
         &mut self,
-        targets: [[u32; 4]; PROBES_PER_FRAME as usize],
+        targets: [[u32; 4]; SLOTS as usize],
         count: u32,
         probes: &LightProbes,
     ) {
@@ -315,7 +321,7 @@ impl RealtimeGi {
     pub(super) fn bytes(&self) -> u64 {
         let size = u64::from(self.camera.size);
         // Four 16-bit floats a texel.
-        size * size * 8 * u64::from(6 * PROBES_PER_FRAME)
+        size * size * 8 * u64::from(6 * self.tier.probes_per_frame)
             + self.camera.renderer.stats().target_bytes
     }
 }

@@ -512,6 +512,9 @@ fn command_description(command: &Command) -> String {
         Command::Snap(_) => "Turn one of the Snapping group's switches on or off.",
         Command::CollisionGroups => "Which groups of parts collide with which.",
         Command::BakeProbes => "Work out the light probes' lighting again.",
+        Command::FillProbes => {
+            "Put a light probe volume around the selected parts or model, spaced to fit 512 probes."
+        }
         Command::Weld => "Join the selected parts so they move as one.",
         Command::Constraint(Some(_)) => "Pick two surfaces to join with this constraint.",
         Command::Constraint(None) => "Stop picking surfaces for a constraint.",

@@ -266,7 +266,14 @@ pub(super) fn graphics_page(
                     for choice in [None, Some(true), Some(false)] {
                         ui.selectable_value(&mut settings.realtime_gi, choice, label(choice));
                     }
-                });
+                })
+                .response
+                .on_hover_text(
+                    "Light probe volumes traced again while the world's light changes, \
+                     instead of keeping their bakes. Off at every preset. On, the preset sets \
+                     how much it traces: Low one probe a frame at 8² a face, Medium two at \
+                     8², High two at 16² (a bake's size) and Ultra four at 16².",
+                );
             ui.end_row();
 
             found_label(ui, "Volumetric fog");
@@ -398,9 +405,9 @@ pub(super) fn graphics_page(
         "Contact shadows: off"
     });
     ui.label(if effective.realtime_gi {
-        "Real-time GI: on (light probe volumes traced again, two probes a frame)"
+        realtime_gi_in_use(effective.realtime_gi_tier)
     } else {
-        "Real-time GI: off (light probe volumes keep their bakes)"
+        "Real-time GI: off (light probe volumes keep their bakes)".to_owned()
     });
     ui.label(ray_tracing_in_use(&effective));
     ui.label(match effective.cloud_quality.steps() {
@@ -686,6 +693,19 @@ fn ray_tracing_section(
             ui.end_row();
         });
     restart
+}
+
+/// What real-time GI traces at `tier` (roadmap R18.4), for the "In use"
+/// list.
+fn realtime_gi_in_use(tier: axcenity_render::RealtimeGiTier) -> String {
+    let probes = match tier.probes_per_frame {
+        1 => "one probe".to_owned(),
+        count => format!("{count} probes"),
+    };
+    format!(
+        "Real-time GI: on (light probe volumes traced again, {probes} a frame at {size}² a face)",
+        size = tier.face_size
+    )
 }
 
 /// Whether the GPU must be opened again for Hardware ray tracing to be as

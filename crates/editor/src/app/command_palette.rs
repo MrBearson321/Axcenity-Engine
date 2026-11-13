@@ -211,6 +211,8 @@ pub(super) enum Command {
     CollisionGroups,
     Insert(Insertable),
     BakeProbes,
+    /// Fill with Probes (roadmap R18.4).
+    FillProbes,
     Solid(SolidAction),
     Weld,
     /// `None` stops the Constraint tool.
@@ -977,6 +979,14 @@ impl EditorApp {
             None,
             when(!playing, "Press Stop to edit."),
         );
+        add(
+            Command::FillProbes,
+            "Fill with Probes",
+            &ribbon("Lights & Sky"),
+            &["light probe volume", "global illumination"],
+            None,
+            when(!playing, "Press Stop to edit."),
+        );
         let parts = self.solid_parts();
         for action in SolidAction::ALL {
             add(
@@ -1266,6 +1276,9 @@ impl EditorApp {
                 self.act(Action::Insert { what, near });
             }
             Command::BakeProbes if !playing => self.bake_probes_asked = true,
+            Command::FillProbes if !playing => {
+                self.fill_with_probes();
+            }
             Command::Solid(action) if !playing => self.solid_action(action),
             Command::Weld if !playing => self.weld_selected(),
             Command::Constraint(class) => {
@@ -1289,6 +1302,7 @@ impl EditorApp {
             Command::FindInScripts => self.find.show_and_focus(),
             Command::Insert(_)
             | Command::BakeProbes
+            | Command::FillProbes
             | Command::Solid(_)
             | Command::Weld
             | Command::InsertScript(_)
