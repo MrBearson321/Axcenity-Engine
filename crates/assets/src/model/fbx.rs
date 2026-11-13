@@ -55,6 +55,7 @@ pub(super) fn load(
         primitives: Vec::new(),
         warnings: Vec::new(),
         level: 0,
+        pieces: super::collision::Pieces::default(),
     };
     let mut models = Vec::new();
     for pick in picks {
@@ -67,7 +68,11 @@ pub(super) fn load(
         if let Some(path) = missing(&wanted, &found) {
             return Err(ModelError::NoObject(path));
         }
-        let mut model = fit(std::mem::take(&mut reader.primitives), in_project)?;
+        let mut model = fit(
+            std::mem::take(&mut reader.primitives),
+            reader.pieces.take(),
+            in_project,
+        )?;
         if !reader.joints.is_empty() {
             model.rig = Some(Arc::new(rig(&scene, &reader.joints, fit_matrix(&model))));
         }
@@ -571,6 +576,8 @@ struct Reader<'a> {
     warnings: Vec<String>,
     /// The level of detail of the objects being read (see [`super::lod`]).
     level: u8,
+    /// The collision pieces read (see [`super::collision`]).
+    pieces: super::collision::Pieces,
 }
 
 impl Reader<'_> {
@@ -594,17 +601,31 @@ impl Reader<'_> {
             // Everything inside a `_LOD1` node is part of that copy.
             let outer = self.level;
             self.level = self.level.max(super::lod::level_of(&node_name(child)));
+            // And everything inside a `_COL` node is part of that piece.
+            let outer_piece = self.pieces.enter(&node_name(child));
             // Hidden in the program it was made in, so hidden here too. A
             // level-of-detail group shows one copy at a time, so the others
-            // are often hidden; they're still read.
+            // are often hidden, and collision pieces usually are; they're
+            // still read.
             if let Some(mesh) = &child.mesh
-                && (child.visible || self.level > 0)
+                && (child.visible || self.level > 0 || self.pieces.reading())
                 && want(wanted, found, &child_path)
             {
-                self.mesh(child, mesh);
+                if self.pieces.reading() {
+                    let transform = mat4(&child.geometry_to_world);
+                    self.pieces.add(mesh.vertices.iter().map(|corner| {
+                        transform
+                            .transform_point3(dvec3(*corner))
+                            .as_vec3()
+                            .to_array()
+                    }));
+                } else {
+                    self.mesh(child, mesh);
+                }
             }
             self.children(child, &child_path, wanted, found);
             self.level = outer;
+            self.pieces.leave(outer_piece);
         }
     }
 

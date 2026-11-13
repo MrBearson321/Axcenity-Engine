@@ -190,7 +190,7 @@ Items: `Uniform`, `Impact`
 
 The choices of `Enum.CollisionFidelity`.
 
-Items: `Box`, `Hull`, `PreciseConvexDecomposition`
+Items: `Default`, `Box`, `Hull`, `PreciseConvexDecomposition`
 
 ## Enum.ProximityPromptExclusivity
 

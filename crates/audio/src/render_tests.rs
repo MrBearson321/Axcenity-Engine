@@ -403,3 +403,47 @@ fn the_decoded_sounds_memory_is_their_samples() {
     let frames = RATE as usize + STEP_PERIOD;
     assert_eq!(used.bytes, frames * 8);
 }
+
+/// A 16-bit mono WAV file of `samples` at [`RATE`].
+fn wav(samples: &[f32]) -> Vec<u8> {
+    let data = (samples.len() * 2) as u32;
+    let mut out = Vec::new();
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1u16.to_le_bytes()); // mono
+    out.extend_from_slice(&RATE.to_le_bytes());
+    out.extend_from_slice(&(RATE * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data.to_le_bytes());
+    for sample in samples {
+        out.extend_from_slice(&((sample * 32767.0) as i16).to_le_bytes());
+    }
+    out
+}
+
+/// G1: a Toolbox preview plays a file's bytes on their own, is heard, and
+/// stops when asked or at its end; a file that isn't sound says so.
+#[test]
+fn a_file_plays_on_its_own_until_it_ends_or_is_stopped() {
+    let mut rig = Rig::new();
+    let noise = noise_samples(RATE as usize / 4, 3);
+    rig.engine.play_file("birds.wav", wav(&noise)).unwrap();
+    assert!(rig.engine.file_playing());
+    let heard = rig.play(0.1);
+    assert!(rms(&heard) > 0.05, "heard: {}", rms(&heard));
+    rig.engine.stop_file();
+    rig.play(0.05);
+    assert!(!rig.engine.file_playing());
+    // Played to its end, it stops by itself.
+    rig.engine.play_file("birds.wav", wav(&noise)).unwrap();
+    rig.play(0.5);
+    assert!(!rig.engine.file_playing());
+    let err = rig.engine.play_file("page.html", b"<html>".to_vec());
+    assert!(matches!(err, Err(AudioError::Decode { .. })), "{err:?}");
+    assert!(!rig.engine.file_playing());
+}

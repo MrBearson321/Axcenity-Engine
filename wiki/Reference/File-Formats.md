@@ -30,7 +30,7 @@ Every file the engine reads or writes, with its owner and where the full format 
 | `*.prefab.json` | Prefabs, variants | `project::prefabs` | — | `docs/project/world.md` |
 | `*.data.json` | Data tables | `assets::data_table` | — | `docs/project/data-tables.md` |
 | `*.behaviortree.json`, `*.dialogue.json` | Behavior trees, dialogues | `nav`, `script` | — | `docs/architecture/navigation.md`, `docs/scripting/api-dialogue.md` |
-| `*.meshedit.json` | Model Studio sidecar (modifiers, paint layers) | `mesh_edit::sidecar` | — | `docs/editor/model-studio.md` |
+| `*.meshedit.json` | Model Studio sidecar (modifiers, paint layers, sculpt masks) | `mesh_edit::sidecar` | — | `docs/editor/model-studio.md` |
 | `<asset>.import.json` | Stable asset ID `ax://…` | `assets::asset_id` | format_version 1 | `docs/editor/assets.md` |
 | `tests/**/*.spec.lua` | Game tests | `testing` | — | `docs/project/game-tests.md` |
 | `objects/**/*.lua` | Scripts inside objects, named by a script node's `SourceFile` (G2); world, level and prefab files holding such nodes are written as format `2` | `project` | — | `docs/project/world.md` |

@@ -73,10 +73,10 @@ The color the whole solid is drawn in while UsePartColor is on. Union sets it to
 #### CollisionFidelity
 
 ```luau
-UnionOperation.CollisionFidelity: EnumCollisionFidelity | "Box" | "Hull" | "PreciseConvexDecomposition"
+UnionOperation.CollisionFidelity: EnumCollisionFidelity | "Default" | "Box" | "Hull" | "PreciseConvexDecomposition"
 ```
 
-What it collides as: `Enum.CollisionFidelity.Box` (its box), `Hull` (the default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build.
+What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.
 
 #### CastShadow
 
