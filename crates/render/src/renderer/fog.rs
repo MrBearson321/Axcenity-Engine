@@ -75,9 +75,7 @@ impl DustRaw {
         let rows = dust.to_box.transpose();
         Self {
             params: [dust.density.max(0.0), forward, edge, falloff],
-            color: color
-                .extend(f32::from(u8::from(dust.interior)))
-                .to_array(),
+            color: color.extend(f32::from(u8::from(dust.interior))).to_array(),
             sun: (sun_radiance * color).extend(0.0).to_array(),
             ambient: (sky.max(Vec3::ZERO) * color).extend(0.0).to_array(),
             rows: [

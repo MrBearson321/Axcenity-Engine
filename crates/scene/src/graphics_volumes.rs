@@ -186,8 +186,7 @@ fn applied(
     }
     // A FogEffect with a Density (or an interior) is air in the box
     // (`dust_boxes`), not the camera's fog.
-    if let Some(fog) = first(ClassName::FogEffect).filter(|fog| !is_air(fog))
-    {
+    if let Some(fog) = first(ClassName::FogEffect).filter(|fog| !is_air(fog)) {
         let start = number(fog, "Start").unwrap_or(0.0).max(0.0);
         let end = number(fog, "End").unwrap_or(200.0).max(start);
         let color = fog.property("Color").and_then(Value::as_color3);
@@ -586,7 +585,11 @@ mod tests {
         );
         for x in [0.0, 300.0] {
             let look = seen_from(&world, x);
-            let dust = *look.fog.dust.first().expect("dust, inside the box or far away");
+            let dust = *look
+                .fog
+                .dust
+                .first()
+                .expect("dust, inside the box or far away");
             assert!(close(dust.density, 0.03));
             assert_eq!(dust.color, [1.0, 0.9, 0.8]);
             assert!(
@@ -615,7 +618,12 @@ mod tests {
         for (i, x) in [-100.0, 0.0, 100.0].into_iter().enumerate() {
             let room = volume(&mut world, [x, 5.0, -20.0], [40.0, 20.0, 40.0], 2.0);
             let fog = child(&mut world, room, ClassName::FogEffect);
-            set(&mut world, fog, "Density", Value::Number(0.01 * (i + 1) as f64));
+            set(
+                &mut world,
+                fog,
+                "Density",
+                Value::Number(0.01 * (i + 1) as f64),
+            );
             volumes.push((room, fog));
         }
         // The middle one is an interior above the others.
