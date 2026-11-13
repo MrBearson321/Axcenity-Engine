@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Particles can change size, color and transparency along curves over their lives"
+details = "A ParticleEmitter's new SizeOverLife, TransparencyOverLife and ColorOverLife take a NumberSequence or ColorSequence (keypoints from birth to death, with an envelope for a per-particle spread), edited in Properties as a curve or gradient and from scripts with NumberSequence.new and ColorSequence.new. Unset, Size/SizeEnd and the other pairs work as before."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = [284]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

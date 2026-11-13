@@ -40,6 +40,22 @@ pub fn show(value: &Value) -> String {
         Value::Instance(Some(id)) => quoted(&id_text(*id)),
         Value::PhysicalProperties(None) => "null".to_owned(),
         Value::PhysicalProperties(Some(physical)) => list(&physical.to_array().map(f64::from)),
+        Value::NumberSequence(sequence) => {
+            let rows: Vec<String> = sequence
+                .to_rows()
+                .iter()
+                .map(|row| list(&row.map(f64::from)))
+                .collect();
+            format!("[{}]", rows.join(","))
+        }
+        Value::ColorSequence(sequence) => {
+            let rows: Vec<String> = sequence
+                .to_rows()
+                .iter()
+                .map(|row| list(&row.map(f64::from)))
+                .collect();
+            format!("[{}]", rows.join(","))
+        }
     }
 }
 
@@ -78,6 +94,8 @@ pub fn type_name(value: &Value) -> &'static str {
         Value::EnumItem(_) => "enum",
         Value::Instance(_) => "object",
         Value::PhysicalProperties(_) => "physical",
+        Value::NumberSequence(_) => "number sequence",
+        Value::ColorSequence(_) => "color sequence",
     }
 }
 
