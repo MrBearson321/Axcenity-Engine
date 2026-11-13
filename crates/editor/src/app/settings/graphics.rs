@@ -474,6 +474,43 @@ fn ray_tracing_section(
         ))
         .color(palette.text_secondary),
     );
+    // The simple way: everything that goes with ray tracing in one click.
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button("Use the ray traced look")
+            .on_hover_text(
+                "Turns on Hardware ray tracing, ray traced shadows and ambient occlusion \
+                 (Medium), shadows and reflections at least High, and TAA, which smooths \
+                 the rays. The rest of your settings stay. Needs a GPU that can ray trace; \
+                 the first time, restart the editor afterward.",
+            )
+            .clicked()
+        {
+            *settings = settings.ray_traced();
+        }
+        if ui
+            .button("Ray traced effects off")
+            .on_hover_text(
+                "Turns every ray traced effect off. Hardware ray tracing stays as it is \
+                 (turning it off takes a restart).",
+            )
+            .clicked()
+        {
+            *settings = settings.without_ray_traced_effects();
+        }
+    });
+    if settings.ray_tracing()
+        && !capabilities.ray_queries
+        && axcenity_render::adapters::adapter_can_ray_trace()
+    {
+        ui.label(
+            egui::RichText::new(
+                "Restart the editor to start ray tracing. Opened from a Desktop shortcut, \
+                 check it's this version of the editor.",
+            )
+            .color(palette.warning),
+        );
+    }
     egui::Grid::new("ray tracing settings")
         .num_columns(2)
         .spacing([12.0, 8.0])

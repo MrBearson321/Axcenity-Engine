@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "editor"
+title = "One click for the ray traced look, and a Learn guide to ray tracing"
+details = "Settings > Graphics > Ray tracing has Use the ray traced look, which turns on Hardware ray tracing, ray traced shadows and ambient occlusion and the settings they look best with, keeping the rest, and Ray traced effects off. When a restart is still needed it says so, and to check a Desktop shortcut opens this version. A new Learn page, Ray tracing: the best look, simply, explains turning it on, reading the viewport badge, and getting good shadows and sky."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -145,6 +145,40 @@ impl EditorApp {
     }
 }
 
+impl EditorApp {
+    /// Lets the sky follow `ClockTime`: Lighting's `SkyImage` cleared, and
+    /// an Atmosphere added to Lighting if there's none (with one, the sky is
+    /// sunlight scattered by air, so it turns orange at sunset and dark at
+    /// night). Says what it did.
+    pub(super) fn use_time_of_day_sky(&mut self) {
+        let lighting = shown(&self.world, &self.play).lighting();
+        self.apply(
+            lighting,
+            Edit::Property("SkyImage", Value::String(String::new())),
+        );
+        self.history.seal();
+        let has_air = shown(&self.world, &self.play)
+            .get(lighting)
+            .is_some_and(|instance| {
+                instance.children().iter().any(|&child| {
+                    shown(&self.world, &self.play)
+                        .get(child)
+                        .is_some_and(|child| child.class() == ClassName::Atmosphere)
+                })
+            });
+        if !has_air && self.play.is_none() {
+            self.insert(Insertable::Atmosphere, Some(lighting));
+        }
+        self.toasts
+            .success("The sky now follows the time of day".to_owned());
+        self.output.info(
+            "Lighting.SkyImage is cleared and Lighting has an Atmosphere: change ClockTime to \
+             see the sky and the sun move together."
+                .to_owned(),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +213,34 @@ mod tests {
         assert_eq!(sky_image(&app), "assets/sky/noon.hdr");
         app.undo();
         assert_eq!(sky_image(&app), "", "undo puts the old sky back");
+    }
+
+    #[test]
+    fn the_time_of_day_sky_clears_the_picture_and_adds_air_once() {
+        let mut app = EditorApp::new(Some(&super::super::tests::example("hello-graphics")));
+        app.drop_asset(&sky_entry("assets/sky/noon.hdr"), None);
+        app.answer_sky(true);
+        assert_eq!(sky_image(&app), "assets/sky/noon.hdr");
+        let lighting = app.world.lighting();
+        let atmospheres = |app: &EditorApp| {
+            app.world.get(lighting).map_or(0, |lighting| {
+                lighting
+                    .children()
+                    .iter()
+                    .filter(|&&child| {
+                        app.world
+                            .get(child)
+                            .is_some_and(|child| child.class() == ClassName::Atmosphere)
+                    })
+                    .count()
+            })
+        };
+        let before = atmospheres(&app);
+        app.use_time_of_day_sky();
+        assert_eq!(sky_image(&app), "");
+        assert_eq!(atmospheres(&app), before.max(1));
+        app.use_time_of_day_sky();
+        assert_eq!(atmospheres(&app), before.max(1), "never a second one");
     }
 
     /// The sun button writes the default sky into the project, asks, and
