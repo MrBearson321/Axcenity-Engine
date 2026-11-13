@@ -22,7 +22,7 @@ Every significant optimization: the problem, its root cause, the fix, and what i
 
 | Item | PR | Area | Headline (Measured) | Machine |
 |---|---|---|---|---|
-| Editor open without a frozen first frame | this PR (Farmhouse freeze) | Editor startup | Abandoned Farmhouse first open (debug, lavapipe): first editor frame after the load 8 s → 1.5 s; the rest goes to the GPU behind a counted loading screen | Container |
+| Editor open without a frozen first frame | #290 | Editor startup | Abandoned Farmhouse first open (debug, lavapipe): first editor frame after the load 8 s → 1.5 s; the rest goes to the GPU behind a counted loading screen | Container |
 | Collaborate packing and the world load | C11 | Collaborate, project | S10k join message 953 → 82 KiB; `project::load` of S10k 5.66 → 0.19 s | Container |
 | Streaming world: only what changed | Phase 80 (unified plan) | Network, ownership | Server with 1 player: Network send 16.7 → 2.0 ms, frame 21.9 → 4.2 ms | Container |
 | DirectX 12 shader compiler and parallel pipelines | #172, #182 | Startup | Wet Patch assets loaded 11.4 → 2.25 s on DirectX 12 (Vulkan 0.98 s) | Desktop |
