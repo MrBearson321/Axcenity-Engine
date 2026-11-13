@@ -35,7 +35,9 @@ pub(super) struct FogRaw {
     pub(super) height: [f32; 4],
     pub(super) sun: [f32; 4],
     pub(super) sun_direction: [f32; 4],
-    /// x: how many of `dust` are drawn.
+    /// x: how many of `dust` are drawn, y: where the ray traced air (LE3)
+    /// starts in the ray traced shadow mask, in u32s (0: not traced; the
+    /// scene sets it, `RayShadows::air_words`).
     pub(super) dust_count: [u32; 4],
     /// The boxes of dust (`Fog::dust`), in the order they apply.
     pub(super) dust: [DustRaw; MAX_DUST_BOXES],

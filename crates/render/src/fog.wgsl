@@ -27,7 +27,9 @@ struct Fog {
     sun: vec4<f32>,
     // xyz: toward the sun.
     sun_direction: vec4<f32>,
-    // x: how many of `dust` are drawn.
+    // x: how many of `dust` are drawn, y: where the ray traced air (LE3,
+    // ray_shadows.wgsl's `cs_air`) starts in `ray_shadow_mask`, in u32s
+    // (0 while the air isn't traced).
     dust_count: vec4<u32>,
     // Boxes of dust, mist or haze (FogEffects with a Density, or marked
     // Interior), in the order they apply: lowest priority first.

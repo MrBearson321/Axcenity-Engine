@@ -30,7 +30,8 @@ pub(super) struct RayShadowUniform {
     /// xyz: toward the sun, w: how wide the sun looks (0: hard shadows).
     sun: [f32; 4],
     /// Rays per pixel, a number changing each frame under TAA, a pixel's
-    /// size per stud away, unused.
+    /// size per stud away, and how far the fog's grid reaches while its
+    /// air is traced (0 while not).
     settings: [f32; 4],
     /// The scene's width and height in pixels.
     size: [u32; 4],
@@ -48,6 +49,21 @@ pub(super) struct RayShadowUniform {
 /// spread over its own rectangle instead.
 pub(super) const MAX_LAMP_SIZE: f32 = 1.0;
 
+/// The volumetric fog's grid, whose cells' sunlight is traced (LE3).
+const AIR_GRID: [u32; 3] = super::fog::GRID;
+const AIR_CELLS: u64 = AIR_GRID[0] as u64 * AIR_GRID[1] as u64 * AIR_GRID[2] as u64;
+
+/// What a `RayShadows`' buffers are made for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Shape {
+    /// The soft passes' buffers.
+    pub(super) soft: bool,
+    /// The lamps' part of the mask (LE1).
+    pub(super) lamps: bool,
+    /// The volumetric fog's air's part of the mask (LE3).
+    pub(super) air: bool,
+}
+
 /// How the world's shadows are ray traced this frame, if they are.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct RayShadowPlan {
@@ -62,6 +78,9 @@ pub(super) struct RayShadowPlan {
     /// Whether lamps' shadows are traced too: some lamp drawn casts
     /// shadows (LE1).
     pub(super) lamps: bool,
+    /// Whether the volumetric fog's air is traced too (LE3): its grid is
+    /// drawn. The scene sets it.
+    pub(super) air: bool,
 }
 
 impl RayShadowPlan {
@@ -94,6 +113,7 @@ impl RayShadowPlan {
                 1
             },
             lamps: list.lights.iter().any(casts_shadows),
+            air: false,
         })
     }
 
@@ -102,8 +122,12 @@ impl RayShadowPlan {
     }
 
     /// What the buffers are sized for: the soft passes, and lamps.
-    pub(super) fn shape(&self) -> (bool, bool) {
-        (self.soft(), self.lamps)
+    pub(super) fn shape(&self) -> Shape {
+        Shape {
+            soft: self.soft(),
+            lamps: self.lamps,
+            air: self.air,
+        }
     }
 }
 
@@ -147,6 +171,8 @@ pub(super) struct RayShadows {
     /// for its lamps.
     pub(super) mask: wgpu::Buffer,
     lamp_offset: u64,
+    /// Where the air's part starts (LE3), in bytes, while traced.
+    air_offset: Option<u64>,
     /// The soft passes' rays, then rays smoothed across.
     soft_buffers: Option<[wgpu::Buffer; 2]>,
     /// Bound where a pass reads nothing.
@@ -154,12 +180,16 @@ pub(super) struct RayShadows {
     /// Bound for the lamps' half while lamps aren't traced (written by
     /// nothing; apart from `nothing`, which is bound read-only).
     no_lamps: wgpu::Buffer,
+    /// Bound for the air's part while the air isn't traced.
+    no_air: wgpu::Buffer,
+    /// Traces the air's sunlight (`cs_air`).
+    air: wgpu::ComputePipeline,
 }
 
 impl RayShadows {
     pub(super) fn new(
         device: &wgpu::Device,
-        (size, (soft, lamps)): ((u32, u32), (bool, bool)),
+        (size, Shape { soft, lamps, air }): ((u32, u32), Shape),
     ) -> Self {
         let texture = |binding, sample_type| wgpu::BindGroupLayoutEntry {
             binding,
@@ -221,6 +251,8 @@ impl RayShadows {
                 buffer(10, wgpu::BufferBindingType::Storage { read_only: true }),
                 buffer(11, wgpu::BufferBindingType::Storage { read_only: true }),
                 buffer(12, wgpu::BufferBindingType::Storage { read_only: false }),
+                // The volumetric fog's air (LE3): its part of the mask.
+                buffer(13, wgpu::BufferBindingType::Storage { read_only: false }),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -252,9 +284,12 @@ impl RayShadows {
         let pixels = u64::from(size.0.max(1)) * u64::from(size.1.max(1)) * 4;
         // Where the lamps' half starts: storage bindings start on 256 bytes.
         let lamp_offset = pixels.next_multiple_of(256);
+        let lamps_end = if lamps { lamp_offset + pixels } else { pixels };
+        // Then the air's, a u32 per cell of the fog's grid.
+        let air_offset = air.then(|| lamps_end.next_multiple_of(256));
         let mask = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ray traced shadow mask"),
-            size: if lamps { lamp_offset + pixels } else { pixels },
+            size: air_offset.map_or(lamps_end, |offset| offset + AIR_CELLS * 4),
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -262,6 +297,7 @@ impl RayShadows {
             trace: pipeline("cs_trace"),
             blur_across: pipeline("cs_blur_across"),
             blur_down: pipeline("cs_blur_down"),
+            air: pipeline("cs_air"),
             layout,
             uniform,
             size,
@@ -269,6 +305,7 @@ impl RayShadows {
             lamps,
             mask,
             lamp_offset,
+            air_offset,
             soft_buffers: soft.then(|| {
                 [
                     pixel_buffer(device, "ray traced shadow rays", size),
@@ -277,13 +314,17 @@ impl RayShadows {
             }),
             nothing: stand_in(device),
             no_lamps: stand_in(device),
+            no_air: stand_in(device),
         }
     }
 
     /// Whether these buffers are for a scene of `size` drawn with this
     /// `shape` (soft or not, lamps or not).
-    pub(super) fn fits(&self, size: (u32, u32), (soft, lamps): (bool, bool)) -> bool {
-        self.size == size && self.soft == soft && self.lamps == lamps
+    pub(super) fn fits(&self, size: (u32, u32), shape: Shape) -> bool {
+        self.size == size
+            && self.soft == shape.soft
+            && self.lamps == shape.lamps
+            && self.air_offset.is_some() == shape.air
     }
 
     /// The sun's half of the mask.
@@ -305,6 +346,12 @@ impl RayShadows {
         } else {
             0
         }
+    }
+
+    /// Where the air's part of the mask starts, in u32s (for the fog's
+    /// `dust_count.y`), or 0 while the air isn't traced.
+    pub(super) fn air_words(&self) -> u32 {
+        self.air_offset.map_or(0, |offset| (offset / 4) as u32)
     }
 
     /// Bytes of its buffers.
@@ -336,6 +383,14 @@ impl RayShadows {
             })
         } else {
             self.no_lamps.as_entire_binding()
+        };
+        let air_mask = match self.air_offset {
+            Some(offset) => wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &self.mask,
+                offset,
+                size: wgpu::BufferSize::new(AIR_CELLS * 4),
+            }),
+            None => self.no_air.as_entire_binding(),
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(uniform));
         let group = |source: &wgpu::Buffer, destination: wgpu::BindingResource| {
@@ -395,6 +450,10 @@ impl RayShadows {
                         binding: 12,
                         resource: lamp_mask.clone(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: air_mask.clone(),
+                    },
                 ],
             })
         };
@@ -415,6 +474,18 @@ impl RayShadows {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.dispatch_workgroups(groups.0, groups.1, 1);
+        }
+        // The air's sunlight, a cell of the fog's grid per thread.
+        if self.air_offset.is_some() {
+            let group = group(&self.nothing, self.sun_mask());
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("ray traced shadows (air)"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.air);
+            pass.set_bind_group(0, &group, &[]);
+            let [x, y, z] = AIR_GRID;
+            pass.dispatch_workgroups(x.div_ceil(4), y.div_ceil(4), z.div_ceil(4));
         }
     }
 }
@@ -441,7 +512,11 @@ pub(super) fn ray_shadow_uniform(
             plan.rays as f32,
             turn,
             2.0 * tan_half / size.1.max(1) as f32,
-            0.0,
+            if plan.air {
+                super::fog::VOLUMETRIC_REACH
+            } else {
+                0.0
+            },
         ],
         size: [size.0, size.1, 0, 0],
         lamps: [

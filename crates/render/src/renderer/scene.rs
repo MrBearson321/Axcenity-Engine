@@ -839,7 +839,9 @@ impl ScenePipeline {
                 }
                 None
             }
-            Some(plan) => {
+            Some(mut plan) => {
+                // The fog's air is traced too while its grid is drawn (LE3).
+                plan.air = volumetric;
                 let size = self.frame_targets.size;
                 if !self
                     .ray_shadows
@@ -857,6 +859,10 @@ impl ScenePipeline {
                     .as_ref()
                     .map_or(0, |shadows| shadows.lamp_words());
                 frame_uniform.ray_shadows = [1.0, size.0 as f32, plan.reach, lamp_words as f32];
+                frame_uniform.fog.dust_count[1] = self
+                    .ray_shadows
+                    .as_ref()
+                    .map_or(0, |shadows| shadows.air_words());
                 // Under TAA the rays turn each frame, and TAA averages them.
                 let taa = self
                     .frame_targets

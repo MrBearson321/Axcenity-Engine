@@ -212,6 +212,71 @@ fn volumetric_fog_shadows_the_suns_light_in_the_air_at_ultra() {
     );
 }
 
+/// LE3: with ray traced shadows on, the air's sunlight is traced by rays
+/// too, so the shafts show with no shadow map at all, and see-through
+/// items let the sun through.
+#[test]
+fn ray_traced_shadows_trace_the_suns_shafts_in_the_air_without_shadow_maps() {
+    let Some((device, queue)) = ray_test_device() else {
+        eprintln!("skipped: no graphics adapter with ray queries on this machine");
+        return;
+    };
+    let (mut list, shadowed, open) = shafts();
+    let settings = |rays| GraphicsSettings {
+        shadow_quality: Some(crate::ShadowQuality::Off),
+        ray_traced_shadows: Some(rays),
+        ..ultra(true)
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.set_graphics(&settings(crate::RayTracedShadows::Off));
+    renderer.render(&list).unwrap();
+    let mapless = renderer.read_pixels();
+    renderer.set_graphics(&settings(crate::RayTracedShadows::Low));
+    renderer.render(&list).unwrap();
+    assert!(
+        renderer
+            .scene
+            .ray_shadows
+            .as_ref()
+            .is_some_and(|shadows| shadows.air_words() > 0),
+        "the air is traced while volumetric fog is drawn"
+    );
+    let traced = renderer.read_pixels();
+
+    let [lit_mapless, ..] = pixel_at(&mapless, screen_of(&list, open));
+    let [lit_traced, ..] = pixel_at(&traced, screen_of(&list, open));
+    assert!(lit_mapless > 120, "the sun glows in the fog: {lit_mapless}");
+    assert!(
+        lit_traced.abs_diff(lit_mapless) <= 8,
+        "open air scatters the same: {lit_traced} vs {lit_mapless}"
+    );
+    let [dark_mapless, ..] = pixel_at(&mapless, screen_of(&list, shadowed));
+    let [dark_traced, ..] = pixel_at(&traced, screen_of(&list, shadowed));
+    assert!(
+        dark_mapless > 90,
+        "with no shadow map, the air before the wall glows: {dark_mapless}"
+    );
+    assert!(
+        dark_traced + 60 < dark_mapless,
+        "the wall's ray traced shadow in the air: {dark_traced} vs {dark_mapless}"
+    );
+
+    // A see-through wall (glass) lets the sun into the air behind it.
+    list.items[0].material.opacity = 0.3;
+    renderer.render(&list).unwrap();
+    let glass = renderer.read_pixels();
+    let [through, ..] = pixel_at(&glass, screen_of(&list, shadowed));
+    assert!(
+        through > dark_traced + 40,
+        "light through glass: {through} vs {dark_traced}"
+    );
+
+    // Off again: nothing of the air is kept.
+    renderer.set_graphics(&ultra(true));
+    renderer.render(&list).unwrap();
+    assert!(renderer.scene.ray_shadows.is_none());
+}
+
 #[test]
 fn volumetric_fog_is_absent_below_ultra_and_costs_nothing() {
     let Some((device, queue)) = test_device() else {
