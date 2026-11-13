@@ -1479,10 +1479,13 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
 }
 
 /// An Insert menu item: the icon, in its class's colour, then the name.
-pub(crate) fn insert_item(ui: &egui::Ui, what: Insertable) -> (egui::RichText, &'static str) {
-    let icon = egui::RichText::new(theme::insert_icon(what))
-        .color(theme::class_color(what.class(), ui.visuals()));
-    (icon, what.label())
+pub(crate) fn insert_item(ui: &egui::Ui, what: Insertable) -> egui::Atoms<'static> {
+    theme::menu_item_tinted(
+        ui.ctx(),
+        theme::insert_icon(what),
+        theme::class_color(what.class(), ui.visuals()),
+        what.label(),
+    )
 }
 
 #[cfg(test)]
