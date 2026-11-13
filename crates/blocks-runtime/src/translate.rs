@@ -116,6 +116,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             BlockKind::SendChatMessage { .. } | BlockKind::ShowSystemMessage { .. } => {
                 services.insert("TextChatService");
             }
+            BlockKind::WhenLayerChanged { .. } | BlockKind::SetLayerActive { .. } => {
+                services.insert("DataLayerService");
+            }
             BlockKind::WhenCommandRun { .. } => {
                 services.insert("ConsoleService");
             }
@@ -137,6 +140,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
                 }
                 Expression::DataRow { .. } => {
                     services.insert("DataService");
+                }
+                Expression::LayerActive { .. } => {
+                    services.insert("DataLayerService");
                 }
                 _ => {}
             });
@@ -506,6 +512,16 @@ impl Writer {
                 ));
                 self.indent += 1;
                 self.line(format!("if {seat}.Occupant then"));
+                self.nested(body, ids)?;
+                self.line("end");
+                self.indent -= 1;
+                self.line("end)");
+                return Ok(());
+            }
+            BlockKind::WhenLayerChanged { data_layer, body } => {
+                self.line("DataLayerService.LayerChanged:Connect(function(layerName)".to_owned());
+                self.indent += 1;
+                self.line(format!("if layerName == {} then", quote(data_layer)));
                 self.nested(body, ids)?;
                 self.line("end");
                 self.indent -= 1;
@@ -907,6 +923,13 @@ impl Writer {
                 let text = self.expression(text)?;
                 self.line(format!("TextChatService:DisplaySystemMessage({text})"));
             }
+            BlockKind::SetLayerActive { data_layer, active } => {
+                let active = self.expression(active)?;
+                self.line(format!(
+                    "DataLayerService:SetLayerActive({}, {active})",
+                    quote(data_layer)
+                ));
+            }
             BlockKind::KickPlayer { player, reason } => {
                 let player = self.expression(player)?;
                 let reason = self.expression(reason)?;
@@ -1227,6 +1250,7 @@ impl Writer {
             | BlockKind::WhenAgentSenses { .. }
             | BlockKind::WhenSplineReached { .. }
             | BlockKind::WhenSeatOccupied { .. }
+            | BlockKind::WhenLayerChanged { .. }
             | BlockKind::WhenPropertyChanged { .. }
             | BlockKind::WhenAttributeChanged { .. }
             | BlockKind::WhenPromptTriggered { .. }
@@ -1400,6 +1424,9 @@ impl Writer {
             Expression::TouchingPart => return Err(TranslateError::TouchingPartOutsideTouched),
             Expression::KeyDown { key: name } => {
                 format!("UserInputService:IsKeyDown({})", key(name)?)
+            }
+            Expression::LayerActive { data_layer } => {
+                format!("DataLayerService:IsLayerActive({})", quote(data_layer))
             }
             Expression::AnimatorBool {
                 animator,

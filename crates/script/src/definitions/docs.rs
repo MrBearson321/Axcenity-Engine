@@ -3313,6 +3313,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, a game starts with the layer's Instances set aside, until a script makes it active (roadmap R16.4). The editor shows every layer whatever this is; hiding one there is the Layers panel's eye.",
     ),
     (
+        ClassName::DataLayer,
+        "Active",
+        "Whether the layer is on in the running game (roadmap R16.4): a game starts it at ActiveOnStart. Read-only: DataLayerService:SetLayerActive switches it, and every device sees the change.",
+    ),
+    (
         ClassName::TextChatService,
         "ChatEnabled",
         "If false, the default chat window isn't drawn and `/` doesn't open it, for a game with its own chat or none. Scripts can still send and hear messages.",
@@ -5084,6 +5089,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires once when the character's Health reaches 0, after the Health's own Died and StateChanged to Dead. By then the controller has stopped and RagdollOnDeath and BreakJointsOnDeath are done.",
     ),
     (
+        ClassName::DataLayerService,
+        "LayerChanged",
+        "Fires with the layer's name and whether it's now on, after SetLayerActive switched it (or a save slot loaded with it the other way). On both sides: a player's device hears it once the change and the parts arrive.",
+    ),
+    (
         ClassName::TextChatService,
         "MessageReceived",
         "Fires on each device as a chat message arrives there, with the message: `message.Text`, and `message.Player` (nil for a system message). On both sides, after the server's OnIncomingMessage.",
@@ -5332,7 +5342,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups."
         }
         ClassName::DataLayerService => {
-            "The service that holds the project's DataLayers (roadmap R16). Every level shares them."
+            "The service that holds the project's DataLayers (roadmap R16). Every level shares them. In a game, a switched-off layer's Instances are set aside inside the layer: not simulated, drawn or sent to players. SetLayerActive (Scripts only) switches a layer, IsLayerActive reads it and LayerChanged reports it on every device. A loaded level's own members of a switched-off layer are set aside too, and save slots keep each layer's state."
         }
         ClassName::DataLayer => {
             "A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag."

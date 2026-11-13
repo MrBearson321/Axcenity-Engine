@@ -343,6 +343,10 @@ fn described_fields_and_methods_exist() {
             ClassName::AnimationTrack,
             "Instance.new('Animator'):LoadAnimation(Instance.new('Animation'))",
         ),
+        (
+            ClassName::DataLayerService,
+            "game:GetService('DataLayerService')",
+        ),
         (ClassName::Camera, "workspace.CurrentCamera"),
         (ClassName::Player, "game.Players.LocalPlayer"),
     ];

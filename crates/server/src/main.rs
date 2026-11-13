@@ -157,6 +157,8 @@ fn main() -> Result<()> {
         eprintln!("error: {:#}", anyhow::Error::new(problem));
     }
     let mut world = project.world;
+    // Switched-off data layers start set aside (R16.4).
+    axcenity_core::data_layers::start(&mut world);
     let assets = Assets::new(&project.folder);
     let mut scripts = axcenity_sim::script_runtime();
     scripts.set_dedicated();

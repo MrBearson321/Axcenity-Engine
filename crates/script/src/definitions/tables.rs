@@ -2112,6 +2112,24 @@ const INTERSECT_ASYNC_DOC: &str = "Keeps only where the part and all of `parts` 
 
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
     (
+        ClassName::DataLayerService,
+        Function {
+            name: "SetLayerActive",
+            doc: "Scripts only (roadmap R16.4): switches the layer `name` on or off. Off, each topmost Instance tagged with it moves inside the layer, out of the game; on, each goes back under its old parent at its old place (one whose parent was destroyed meanwhile goes with it). An Instance in two layers stays out while either is off. Errors if there's no such layer.",
+            params: &[("name", "string"), ("active", "boolean")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::DataLayerService,
+        Function {
+            name: "IsLayerActive",
+            doc: "True if the layer `name` is on (its Active). Works on both sides. Errors if there's no such layer.",
+            params: &[("name", "string")],
+            returns: "boolean",
+        },
+    ),
+    (
         ClassName::TextChatService,
         Function {
             name: "SendMessage",

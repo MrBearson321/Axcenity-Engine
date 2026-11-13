@@ -351,6 +351,10 @@ pub struct World {
     collision_groups: CollisionGroups,
     /// The player's master volume (see [`World::master_volume`]).
     master_volume: f64,
+    /// Where each Instance a switched-off data layer set aside was: its
+    /// parent and its place among that parent's children (roadmap R16.4,
+    /// see [`crate::data_layers`]).
+    parked: FxHashMap<InstanceId, (InstanceId, usize)>,
     /// Goes up each time an Instance changes parent (see
     /// [`World::structure_version`]).
     structure_version: u64,
@@ -519,6 +523,7 @@ impl World {
             ui_settings: UiSettings::default(),
             collision_groups: CollisionGroups::default(),
             master_volume: 1.0,
+            parked: FxHashMap::default(),
             structure_version: 0,
             workspace_moves: VecDeque::new(),
             service_versions: FxHashMap::default(),
@@ -859,11 +864,30 @@ impl World {
         [self.server_script_service, self.server_storage]
     }
 
-    /// True if `id` is in a [server-only service](Self::server_only_services).
+    /// True if `id` is in a [server-only service](Self::server_only_services),
+    /// or set aside inside a `DataLayer` (roadmap R16.4: the layers
+    /// themselves go to players, what a switched-off one holds doesn't).
     pub fn is_server_only(&self, id: InstanceId) -> bool {
         self.server_only_services()
             .into_iter()
             .any(|service| id == service || self.is_descendant_of(id, service))
+            || self
+                .get(id)
+                .and_then(|instance| instance.parent)
+                .is_some_and(|parent| {
+                    parent != self.data_layer_service
+                        && self.is_descendant_of(parent, self.data_layer_service)
+                })
+    }
+
+    /// Where each Instance a switched-off data layer set aside was (see
+    /// [`crate::data_layers`]).
+    pub(crate) fn parked(&self) -> &FxHashMap<InstanceId, (InstanceId, usize)> {
+        &self.parked
+    }
+
+    pub(crate) fn parked_mut(&mut self) -> &mut FxHashMap<InstanceId, (InstanceId, usize)> {
+        &mut self.parked
     }
 
     /// `StarterPlayer.StarterPlayerScripts`, which holds the LocalScripts.

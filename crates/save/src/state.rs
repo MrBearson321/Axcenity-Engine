@@ -26,7 +26,7 @@ use std::collections::{BTreeMap, HashMap};
 use axcenity_core::{
     CFrame, ClassName, Color3, ColorSequence, EnumItem, InstanceId, Material, NumberSequence,
     PartType, ParticleType, PhysicalProperties, TextureChannel, ToneMapping, UDim2, Value,
-    ValueKind, Vector2, Vector3, World,
+    ValueKind, Vector2, Vector3, World, data_layers,
 };
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -59,6 +59,10 @@ pub struct WorldState {
     /// Every saved Instance, each parent before its children.
     #[serde(default)]
     pub instances: Vec<SavedInstance>,
+    /// Whether each data layer was on, by name (roadmap R16.4). Left out
+    /// by worlds without layers and by older saves, which load unchanged.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layers: BTreeMap<String, bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -229,6 +233,12 @@ pub fn snapshot(world: &World) -> WorldState {
 /// [`instances`](WorldState::instances) entries was saved from.
 pub(crate) fn snapshot_with_ids(world: &World) -> (WorldState, Vec<InstanceId>) {
     let mut state = WorldState::default();
+    for layer in data_layers::layers(world) {
+        if let Some(instance) = world.get(layer) {
+            let on = data_layers::is_active(world, layer);
+            state.layers.insert(instance.name().to_owned(), on);
+        }
+    }
     let mut ids = Vec::new();
     for class in SERVICES {
         let Some(service) = world.service(class) else {
@@ -334,6 +344,12 @@ fn changed_properties(world: &World, id: InstanceId) -> Properties {
 /// the live Instance each [`instances`](WorldState::instances) entry became,
 /// or `None` for an entry that was left out.
 pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>> {
+    // Layers first, so what a switched-off layer held is set aside (or put
+    // back) before the Workspace is matched with the save. A layer the
+    // game no longer has is skipped.
+    for (name, &on) in &state.layers {
+        let _ = data_layers::set_active(world, name, on);
+    }
     let mut restored = vec![None; state.instances.len()];
     let none = Properties::new();
     for class in saved_services(state) {

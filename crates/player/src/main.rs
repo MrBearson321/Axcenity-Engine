@@ -310,6 +310,8 @@ fn main() -> Result<()> {
     }
     scripts.set_levels(&start_level, &start_level, levels);
     if replay.is_none() {
+        // Switched-off data layers start set aside (R16.4).
+        axcenity_core::data_layers::start(&mut world);
         start_scripts(&mut scripts, &mut world, &project.scripts);
     }
     // Hosting or joining from the command line, once the scripts listen

@@ -185,6 +185,8 @@ pub fn field_help(name: &str) -> Option<&'static str> {
         "parameter" => "the state machine parameter's name",
         "state" => "the state's name",
         "layer" => "the state machine layer's name",
+        "data_layer" => "the data layer's name, as the Layers panel shows it",
+        "active" => "true switches it on, false off",
         "weight" => "how much it counts, 0 to 1",
         "animation" => "the Animation, picked from the tree",
         "spline" => "the Spline, picked from the tree",
@@ -336,6 +338,11 @@ fn block_words(kind: &BlockKind) -> Words {
             "When seat taken",
             "Runs when a character sits on the Seat.",
             "Start a ride when someone sits down.",
+        ),
+        B::WhenLayerChanged { .. } => (
+            "When layer changes",
+            "Runs when a data layer is switched on or off, on the server and on every player's device.",
+            "Play the night music when the Night layer comes on.",
         ),
         B::WhenPropertyChanged { .. } => (
             "When property changes",
@@ -652,6 +659,11 @@ fn block_words(kind: &BlockKind) -> Words {
             "Show system message",
             "Shows text in the chat as the game's own message.",
             "Announce \"Round 2 begins\".",
+        ),
+        B::SetLayerActive { .. } => (
+            "Set layer active",
+            "Switches a data layer on or off: off sets everything tagged with it aside, on puts it back where it was. Scripts only.",
+            "Switch to the Night layer when the sun sets.",
         ),
         // Camera and world.
         B::SetCameraType { .. } => (
@@ -1033,6 +1045,12 @@ fn expression_words(
             "Key down",
             "Whether a key is held down now. LocalScripts only.",
             "Run while Shift is held.",
+            "true or false",
+        ),
+        E::LayerActive { .. } => (
+            "Layer is active",
+            "Whether a data layer is on now.",
+            "Only open the night market while Night is on.",
             "true or false",
         ),
         E::AnimatorBool { .. } => (

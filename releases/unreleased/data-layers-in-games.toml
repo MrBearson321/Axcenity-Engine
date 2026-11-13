@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "scripting"
+title = "Switch data layers on and off while a game runs"
+details = "DataLayerService:SetLayerActive(name, active) sets a layer's objects aside and puts them back where they were, in the same order. A layer whose Active On Start is off starts set aside. IsLayerActive reads a layer, and LayerChanged fires on the server and on every player's device, where the parts leave and come back. Levels set aside their own members of a switched-off layer, and save slots and checkpoints keep each layer's state. Blocks: set layer active, layer is active and when layer changes."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -16,6 +16,7 @@ pub mod bench;
 mod class;
 mod collision_groups;
 pub mod csg;
+pub mod data_layers;
 pub mod dialogue;
 mod enums;
 mod index;
