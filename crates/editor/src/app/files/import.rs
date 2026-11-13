@@ -95,7 +95,17 @@ impl EditorApp {
         everything.extend(axcenity_assets::HDR_SKY_EXTENSIONS);
         everything.push("json");
         everything.push(project::PACKAGE_EXTENSION);
-        let dialog = rfd::FileDialog::new()
+        // Plugins' importers (G10) add their kinds.
+        let importers: Vec<(String, Vec<String>)> = self
+            .plugins
+            .importers()
+            .into_iter()
+            .map(|importer| (importer.name.clone(), importer.extensions.clone()))
+            .collect();
+        for (_, extensions) in &importers {
+            everything.extend(extensions.iter().map(String::as_str));
+        }
+        let mut dialog = rfd::FileDialog::new()
             .set_title("Import")
             .add_filter(
                 "Models, images, skies, sounds, prefabs and packages",
@@ -107,6 +117,9 @@ impl EditorApp {
             .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
             .add_filter("Prefab", &["json"])
             .add_filter("Asset package", &[project::PACKAGE_EXTENSION]);
+        for (name, extensions) in &importers {
+            dialog = dialog.add_filter(name, extensions);
+        }
         // `None` means the dialog was cancelled.
         if let Some(files) = dialog.pick_files() {
             self.import_files(files, image_folder);
@@ -318,6 +331,7 @@ impl EditorApp {
         ));
         let copy_path = copy.to_owned();
         self.toolbox_imported(file, &copy_path);
+        self.plugins_asset_imported(&copy_path);
         let animation = dialog
             .animation
             .as_ref()

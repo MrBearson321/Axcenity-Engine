@@ -69,6 +69,7 @@ mod move_overlay;
 mod overlays;
 mod plugin_drawings;
 mod plugin_handles;
+mod ray_badge;
 mod streaming_overlay;
 pub use plugin_handles::HandleMove;
 mod view_cube;
@@ -1587,6 +1588,14 @@ impl Viewport {
         }
         if legend::paint(ui, rect, view_mode, &render.stats, self.overdraw.as_ref()) {
             self.measure_overdraw = true;
+        }
+        if let Some(badge) = ray_badge::badge(
+            target.renderer.graphics(),
+            graphics.ray_tracing(),
+            axcenity_render::adapters::adapter_can_ray_trace(),
+            &render.stats.ray_tracing,
+        ) {
+            ray_badge::paint(ui, rect, &badge);
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(

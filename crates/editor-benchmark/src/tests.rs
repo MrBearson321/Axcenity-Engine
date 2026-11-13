@@ -86,8 +86,8 @@ fn changes_list_only_what_apply_would_change() {
 #[test]
 fn changes_has_a_row_for_every_setting() {
     use axcenity_render::{
-        AmbientOcclusion, CloudQuality, DepthOfFieldQuality, MotionBlurQuality, ReflectionQuality,
-        TextureQuality,
+        AmbientOcclusion, CloudQuality, DepthOfFieldQuality, MotionBlurQuality, RayTracedShadows,
+        ReflectionQuality, TextureQuality,
     };
     /// `a` unless the setting already draws as `a`.
     fn other<T: PartialEq>(now: T, a: T, b: T) -> Option<T> {
@@ -119,9 +119,11 @@ fn changes_has_a_row_for_every_setting() {
         sharpen: _,
         motion_blur: _,
         ray_tracing_distance: _,
+        ray_traced_shadows: _,
+        ray_traced_ambient_occlusion: _,
         ray_tracing: _,
     } = &high;
-    let edits: [fn(&mut GraphicsSettings); 23] = [
+    let edits: [fn(&mut GraphicsSettings); 25] = [
         |s| s.quality = Quality::Low,
         |s| s.automatic = !s.automatic,
         |s| s.shadow_quality = other(s.shadow_quality(), ShadowQuality::Low, ShadowQuality::Ultra),
@@ -174,6 +176,20 @@ fn changes_has_a_row_for_every_setting() {
             )
         },
         |s| s.ray_tracing_distance = Some(s.ray_tracing_distance() + 100.0),
+        |s| {
+            s.ray_traced_shadows = other(
+                s.ray_traced_shadows(),
+                RayTracedShadows::Off,
+                RayTracedShadows::High,
+            )
+        },
+        |s| {
+            s.ray_traced_ambient_occlusion = other(
+                s.ray_traced_ambient_occlusion(),
+                axcenity_render::RayTracedAmbientOcclusion::Off,
+                axcenity_render::RayTracedAmbientOcclusion::High,
+            )
+        },
         |s| s.ray_tracing = Some(!s.ray_tracing()),
     ];
     for (index, edit) in edits.iter().enumerate() {

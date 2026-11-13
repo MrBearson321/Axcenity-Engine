@@ -64,6 +64,10 @@ pub struct Entry {
     /// Its rows in the Properties panel (`plugin:AddPropertyRow`), as of
     /// its last call.
     pub rows: Vec<axcenity_plugins::PropertyRow>,
+    /// Its importers (`plugin:AddImporter`) and Assets panel items
+    /// (`plugin:AddAssetAction`), as of its last call.
+    pub importers: Vec<axcenity_plugins::Importer>,
+    pub asset_actions: Vec<axcenity_plugins::AssetAction>,
 }
 
 /// How many of a plugin's errors the panel keeps.
@@ -127,6 +131,47 @@ pub struct Plugins {
 }
 
 impl Plugins {
+    /// The running plugins' Assets panel items, each with its plugin's
+    /// place in the list.
+    pub fn asset_actions(&self) -> Vec<(usize, axcenity_plugins::AssetAction)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.running.is_some())
+            .flat_map(|(index, entry)| {
+                entry
+                    .asset_actions
+                    .iter()
+                    .map(move |action| (index, action.clone()))
+            })
+            .collect()
+    }
+
+    /// The running plugin and importer that take a file named `name`
+    /// (the first plugin's, when several do).
+    pub fn importer_for(&self, name: &str) -> Option<(usize, &axcenity_plugins::Importer)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.running.is_some())
+            .find_map(|(index, entry)| {
+                entry
+                    .importers
+                    .iter()
+                    .find(|importer| importer.takes(name))
+                    .map(|importer| (index, importer))
+            })
+    }
+
+    /// The running plugins' importers, for the Import… file picker.
+    pub fn importers(&self) -> Vec<&axcenity_plugins::Importer> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.running.is_some())
+            .flat_map(|entry| &entry.importers)
+            .collect()
+    }
+
     /// The running plugins' Properties rows, for the panel.
     pub fn property_rows(&self) -> Vec<crate::properties::PluginRows<'_>> {
         self.entries

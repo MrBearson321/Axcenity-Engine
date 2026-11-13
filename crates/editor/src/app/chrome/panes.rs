@@ -170,6 +170,11 @@ impl EditorApp {
             } else {
                 spline_models.map(|(_, models)| Picking::SplineModels(models))
             };
+            self.asset_browser.plugin_actions = if self.playing() {
+                Vec::new()
+            } else {
+                self.plugins.asset_actions()
+            };
             self.asset_browser
                 .show(ui, !self.playing(), can_save, picking.as_ref())
         };
@@ -203,6 +208,11 @@ impl EditorApp {
             Some(BrowserAction::EditModel(path)) => self.open_in_model_studio(&path),
             Some(BrowserAction::FindReferences(path)) => self.find_asset_references(&path),
             Some(BrowserAction::View(path)) => self.view_asset(&path),
+            Some(BrowserAction::PluginAction {
+                plugin,
+                action,
+                path,
+            }) => self.plugin_asset_action(plugin, action, &path),
             Some(BrowserAction::RenameAsset { from, to }) => self.rename_asset(&from, &to),
             Some(BrowserAction::FindUnused(paths)) => self.find_unused_assets(&paths),
             Some(BrowserAction::SetImportPreset { path, preset }) => {

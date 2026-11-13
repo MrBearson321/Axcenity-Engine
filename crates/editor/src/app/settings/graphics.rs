@@ -400,14 +400,7 @@ pub(super) fn graphics_page(
     } else {
         "Real-time GI: off (light probe volumes keep their bakes)"
     });
-    ui.label(if effective.ray_queries {
-        format!(
-            "Ray tracing: available, up to {} studs (no ray traced effects on)",
-            effective.ray_tracing_distance.round()
-        )
-    } else {
-        "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available".to_owned()
-    });
+    ui.label(ray_tracing_in_use(&effective));
     ui.label(match effective.cloud_quality.steps() {
         (0, _) => "Clouds: Low, a flat sheet".to_owned(),
         (steps, _) => format!(
@@ -534,6 +527,64 @@ fn ray_tracing_section(
                 }
             });
             ui.end_row();
+
+            found_label(ui, "Ray traced shadows");
+            let label = |shadows: Option<RayTracedShadows>| match shadows {
+                Some(shadows) => shadows.label().to_owned(),
+                None => format!("Preset ({})", preset.ray_traced_shadows().label()),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced shadows")
+                    .selected_text(label(settings.ray_traced_shadows))
+                    .show_ui(ui, |ui| {
+                        for choice in std::iter::once(None).chain(RayTracedShadows::ALL.map(Some)) {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_shadows,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "The sun's shadows traced as rays: exact up close, with no shadow map \
+                         blur or gaps. Low, Medium and High trace 1, 2 or 4 rays a pixel where \
+                         the world's ShadowSoftness makes shadows soft; past the ray tracing \
+                         distance the shadow maps take over. Needs Hardware ray tracing on.",
+                    );
+            });
+            ui.end_row();
+
+            found_label(ui, "Ray traced ambient occlusion");
+            let label = |rays: Option<RayTracedAmbientOcclusion>| match rays {
+                Some(rays) => rays.label().to_owned(),
+                None => format!("Preset ({})", preset.ray_traced_ambient_occlusion().label()),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced ambient occlusion")
+                    .selected_text(label(settings.ray_traced_ambient_occlusion))
+                    .show_ui(ui, |ui| {
+                        for choice in
+                            std::iter::once(None).chain(RayTracedAmbientOcclusion::ALL.map(Some))
+                        {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_ambient_occlusion,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Corners and creases darkened by short rays instead of guessed from \
+                         the screen, so things off screen or behind others count too. Low, \
+                         Medium and High trace 2, 4 or 8 rays a pixel. It draws ambient \
+                         occlusion even with Ambient occlusion off; past the ray tracing \
+                         distance only screen-space ambient occlusion is left. Needs Hardware \
+                         ray tracing on.",
+                    );
+            });
+            ui.end_row();
         });
 }
 
@@ -556,5 +607,34 @@ pub(super) fn ray_tracing_status(opened: bool, can: bool, wanted: bool) -> &'sta
             "This GPU can't ray trace (it needs DirectX 12 ray tracing tier 1.1, Vulkan ray \
              queries or Metal on macOS 15). Everything is drawn without it."
         }
+    }
+}
+
+/// The "In use" line for ray tracing: off, or each ray traced effect on.
+pub(super) fn ray_tracing_in_use(effective: &EffectiveGraphics) -> String {
+    if !effective.ray_queries {
+        return "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available"
+            .to_owned();
+    }
+    let mut effects = Vec::new();
+    if effective.ray_traced_shadows != RayTracedShadows::Off {
+        effects.push(format!(
+            "shadows {} ({} rays a pixel where soft)",
+            effective.ray_traced_shadows.label(),
+            effective.ray_traced_shadows.rays()
+        ));
+    }
+    if effective.ray_traced_ambient_occlusion != RayTracedAmbientOcclusion::Off {
+        effects.push(format!(
+            "ambient occlusion {} ({} rays a pixel)",
+            effective.ray_traced_ambient_occlusion.label(),
+            effective.ray_traced_ambient_occlusion.rays()
+        ));
+    }
+    let reach = effective.ray_tracing_distance.round();
+    if effects.is_empty() {
+        format!("Ray tracing: available, up to {reach} studs (no ray traced effects on)")
+    } else {
+        format!("Ray tracing up to {reach} studs: {}", effects.join(", "))
     }
 }
