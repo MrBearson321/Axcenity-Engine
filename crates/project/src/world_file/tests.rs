@@ -1312,7 +1312,7 @@ fn particle_sequences_are_written_as_keypoint_rows_and_read_back() {
         text.contains("\"ColorOverLife\": [[0, 1, 0, 0], [1, 0, 0, 1]]"),
         "{text}"
     );
-    assert!(!text.contains("TransparencyOverLife"), "{text}");
+    assert!(text.contains("\"TransparencyOverLife\": []"), "{text}");
     assert_eq!(write_world(&parse_world(&text).unwrap()), text);
     let message = parse_err(
         r#"{ "format_version": 1, "workspace": { "children": [
