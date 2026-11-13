@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "build"
+title = "Build Game uses build profiles and writes a build report"
+details = "File > Build Game > Build profile picks Release (the build it always made), Development (texture sources kept, fast compression, Developer Console on) or a profile from the project's build-profiles.json; --build-game takes --profile. Every build first runs Asset Check's missing files, bad references, broken dependencies and failed imports, and writes build-report.json and build-report.txt beside the game with the engine version, Git commit, settings, files by kind, largest files, left-out sources, problems and notes. Release packs exactly as before."
+features = ["project.build-game"]
+fixes = []
+introduces_issues = []
+prs = [268]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

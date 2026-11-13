@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "The Streaming overlay shows what streams in around the camera while editing"
+details = "With Workspace.StreamingEnabled on, Overlays > Streaming outlines each streaming unit within the unload radius by where it stands from the camera (there at once, loads, or kept if loaded), the parts that are always there and both radii. Its legend counts what a player standing there would have and names any unit too big to stream well."
+features = []
+fixes = []
+introduces_issues = []
+prs = [280]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
