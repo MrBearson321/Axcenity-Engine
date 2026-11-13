@@ -2015,7 +2015,7 @@ fn speed_label(speed: f32) -> String {
 /// While Editing on (roadmap R16.3), what Play would leave out around the
 /// camera isn't drawn, but what's selected always is, so nothing being
 /// edited vanishes. Off, editing shows everything, whatever Play streamed,
-/// but hidden data layers.
+/// but the hidden data layers (R16.2).
 fn stream_editing(
     streaming: &mut axcenity_scene::Streaming,
     world: &World,
@@ -2028,7 +2028,8 @@ fn stream_editing(
         streaming.step(world, focus, seconds);
         streaming.show_anyway(world, selection.iter().copied());
     } else if streaming.settings().is_some() {
-        // Hidden data layers stay hidden.
+        // Editing shows everything, whatever Play streamed, but the hidden
+        // data layers.
         let layers = streaming.take_also_hidden();
         *streaming = axcenity_scene::Streaming::default();
         streaming.set_also_hidden(layers);
