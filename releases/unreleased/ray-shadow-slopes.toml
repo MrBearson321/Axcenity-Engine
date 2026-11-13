@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "renderer"
+title = "Soft ray traced shadows on slopes no longer look dithered"
+details = "The smoothing of soft ray traced shadows left out pixels of a surface seen side-on, so a shadow's soft edge on a slope showed the rays' per-pixel pattern as a dither. It now compares neighbours by the surface's plane."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -402,6 +402,7 @@ pub(super) fn ray_test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = crate::adapters::instance();
     let adapter = pollster::block_on(crate::adapters::adapter(&instance, None)).ok()?;
     let mut descriptor = wgpu::DeviceDescriptor::default();
+    crate::adapters::want_ray_tracing(true);
     crate::adapters::with_ray_queries(&adapter, &mut descriptor);
     if !descriptor
         .required_features
@@ -974,6 +975,7 @@ fn stats_time_each_pass_the_frame_draws() {
         let expected = !matches!(
             pass,
             FramePass::AccelerationStructures
+                | FramePass::RayTracedShadows
                 | FramePass::Ui
                 | FramePass::VolumetricFog
                 | FramePass::Particles
@@ -2421,6 +2423,57 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             held(),
             before,
             "round {round}: a dropped renderer left GPU objects"
+        );
+    }
+}
+
+/// The frame drawn with a tiny block giving off `emissive`, bloom on.
+fn tiny_glow(device: &wgpu::Device, queue: &wgpu::Queue, emissive: f32) -> Vec<u8> {
+    let glowing = DrawItem {
+        material: Material {
+            base_color: [0.0; 3],
+            emissive: [emissive; 3],
+            ..Material::default()
+        },
+        transform: Mat4::from_scale_rotation_translation(
+            Vec3::splat(0.05),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.0, 0.0, -5.0),
+        ),
+        ..big_block()
+    };
+    let mut list = list_of(vec![glowing]);
+    list.post.enabled = true;
+    list.post.bloom_enabled = true;
+    let mut renderer = TextureRenderer::new(device, queue, 128, 128);
+    renderer.render(&list).unwrap();
+    renderer.read_pixels()
+}
+
+#[test]
+fn a_pixel_too_bright_or_not_a_number_does_not_spread_through_bloom() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let differs = |a: &[u8], b: &[u8]| a.iter().zip(b).filter(|(a, b)| a.abs_diff(**b) > 2).count();
+    // Light past what 16 bits hold (a sky image's sun) glows like the most
+    // they hold.
+    let most = tiny_glow(&device, &queue, 60000.0);
+    let drawn = tiny_glow(&device, &queue, 1.0e6);
+    assert_eq!(differs(&drawn, &most), 0, "1e6 glows like 60000");
+    // Light so bright the lighting overflows, infinite light and light
+    // that isn't a number end up as infinity or NaN in the scene: either
+    // way the frame is the brightest glow or none, never one gone grey (as
+    // NaN spread through bloom drew it before) or a square.
+    let none = tiny_glow(&device, &queue, 0.0);
+    for emissive in [1.0e30, f32::INFINITY, f32::NAN] {
+        let drawn = tiny_glow(&device, &queue, emissive);
+        assert!(
+            differs(&drawn, &none) == 0 || differs(&drawn, &most) == 0,
+            "{emissive}: {} bytes differ from no glow, {} from the brightest",
+            differs(&drawn, &none),
+            differs(&drawn, &most)
         );
     }
 }

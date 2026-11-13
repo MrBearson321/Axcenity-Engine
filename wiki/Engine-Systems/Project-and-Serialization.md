@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [project]
-source: [crates/project/src/lib.rs, crates/project/src/world_file.rs, crates/project/src/migrate.rs, crates/project/src/migrate_animation.rs, crates/project/src/levels.rs, crates/project/src/prefabs.rs, crates/project/src/packed.rs, crates/project/src/package.rs, crates/project/src/versions.rs, crates/project/src/watch.rs, crates/project/src/validate.rs, crates/project/src/asset_refs.rs]
+source: [crates/project/src/lib.rs, crates/project/src/world_file.rs, crates/project/src/migrate.rs, crates/project/src/migrate_animation.rs, crates/project/src/levels.rs, crates/project/src/prefabs.rs, crates/project/src/packed.rs, crates/project/src/build_profiles.rs, crates/project/src/package.rs, crates/project/src/versions.rs, crates/project/src/watch.rs, crates/project/src/validate.rs, crates/project/src/asset_refs.rs]
 docs: [docs/project-and-export.md, docs/project/layout.md, docs/project/world.md, docs/project/export.md, docs/project/levels.md, docs/project/packages.md, crates/project/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -41,6 +41,8 @@ flowchart TB
 ## Integration
 
 All four hosts load through `project::load`. The editor adds save, version history (`versions.rs`: pins, checkpoints, restores), backups (`backup.rs`), Asset Check (`validate.rs`, `asset_fix.rs`: plans without writing; identical textures, models and sounds from `duplicates.rs`, R12), asset references, rename and merge (`asset_refs.rs`), and Build Game (`editor/src/build_game.rs` pairs `game.axgame` with a player executable per OS).
+
+**Build profiles and reports** (R13, `build_profiles.rs`): Build Game builds with a profile (Release, Development, or the project's own in `build-profiles.json`) that sets the target, cooked-only, the zstd level, the Developer Console and whether Asset Check problems stop the build; `packed.rs::pack_game_reporting` returns what went in, and the build writes `build-report.json`/`.txt` beside the game (engine version, Git commit, settings, files by kind, largest files, problems). Release packs exactly as before. Details: `docs/project/export.md`.
 
 ## Performance
 

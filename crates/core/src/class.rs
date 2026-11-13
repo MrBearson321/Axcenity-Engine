@@ -3,6 +3,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
+use crate::sequence::{ColorSequence, NumberSequence};
 use crate::value::{CFrame, Color3, EnumItem, UDim2, Value, Vector2, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
@@ -1424,6 +1425,35 @@ impl ClassName {
                     ("ColorEnd", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                     ("Transparency", Value::Number(0.0)),
                     ("TransparencyEnd", Value::Number(1.0)),
+                    // Over each particle's life, from birth (0) to death (1),
+                    // in place of the start and end values above while set
+                    // (roadmap R17.1). Empty is unset.
+                    (
+                        "SizeOverLife",
+                        Value::NumberSequence(NumberSequence::default()),
+                    ),
+                    (
+                        "ColorOverLife",
+                        Value::ColorSequence(ColorSequence::default()),
+                    ),
+                    (
+                        "TransparencyOverLife",
+                        Value::NumberSequence(NumberSequence::default()),
+                    ),
+                    // Multiplies Speed over each particle's life while set
+                    // (roadmap R17.2). Empty is unset.
+                    (
+                        "SpeedOverLife",
+                        Value::NumberSequence(NumberSequence::default()),
+                    ),
+                    // Where in the part they're born: a Box, Sphere,
+                    // Cylinder or Disc filling it, all of it (Volume) or
+                    // only its Surface (roadmap R17.2).
+                    ("Shape", enum_item("ParticleEmitterShape", "Box")),
+                    (
+                        "ShapeStyle",
+                        enum_item("ParticleEmitterShapeStyle", "Volume"),
+                    ),
                     // Starting turn, in degrees, and degrees a second.
                     ("Rotation", Value::Number(0.0)),
                     ("RotSpeed", Value::Number(0.0)),
@@ -3130,6 +3160,14 @@ fn slide_actuator() -> [(&'static str, Value); 9] {
         ("Speed", Value::Number(5.0)),
         ("ServoMaxForce", Value::Number(100_000.0)),
     ]
+}
+
+/// An item of `enum_name`, as a property's default.
+fn enum_item(enum_name: &str, item: &str) -> Value {
+    Value::EnumItem(EnumItem {
+        enum_name: enum_name.to_owned(),
+        item: item.to_owned(),
+    })
 }
 
 /// An `ActuatorType` item: None, Motor or Servo.

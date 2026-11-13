@@ -735,7 +735,11 @@ impl Explorer {
                         });
                         return;
                     }
-                    if tree::check_editable(world, row.id).is_ok() {
+                    // A script that is a file in its service can be dragged
+                    // onto an object, to attach it there.
+                    if tree::check_editable(world, row.id).is_ok()
+                        || world.get(row.id).is_some_and(tree::can_attach)
+                    {
                         label.dnd_set_drag_payload(DraggedRow(row.id));
                     }
                     if let Some(action) = drop_onto(ui, &label, world, dragged, row.id) {
@@ -1006,7 +1010,7 @@ fn drop_onto(
     if dragged == target || label.dnd_hover_payload::<DraggedRow>().is_none() {
         return None;
     }
-    let allowed = tree::check_move(world, dragged, target);
+    let allowed = tree::check_attach(world, dragged, target);
     match allowed {
         Ok(()) => {
             let stroke = egui::Stroke::new(1.5_f32, DROP_COLOR);

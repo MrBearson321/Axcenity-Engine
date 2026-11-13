@@ -59,7 +59,7 @@ flowchart LR
 | Environment | Sky baked into a cubemap only when it changes; GGX-filtered mips; spherical harmonics on the CPU | Reflection quality Low (analytic, no maps) → Ultra (256²) |
 | Default sky | New Baseplate and Empty projects get a CC0 Poly Haven HDRI (`project/src/default_sky.rs`, 2K `.hdr`, 5.4 MB) as `SkyImage`, with `ClockTime` and latitude set to its sun | A project file like any sky; exported with the game |
 | Reflection probes | Editor bakes a cubemap at a part's middle; used inside its box with `BlendDistance` | Left out at Low |
-| Light probe volumes | Grid of probes in a part's box (`Spacing`, max 16 a side); diffuse indirect light | Bake fingerprint warns when stale |
+| Light probe volumes | Grid of probes in a part's box (`Spacing`, max 16 a side); diffuse indirect light | Bake fingerprint warns when stale; the editor's Light Probes overlay (R18.1) shows each probe's baked light and each volume's bake state |
 | Real-time GI | Re-traces `PROBES_PER_FRAME` (2) probes each frame with a kept `ProbeCamera` | `realtime_gi` setting, off by default |
 | Volumetric fog | Froxel grid in compute, sun shafts | Setting |
 
@@ -83,6 +83,7 @@ flowchart LR
 - Rect lights light from a representative point, not a true area integral.
 - Bakes go stale when the world changes; the editor flags them but doesn't rebake automatically.
 - Real-time GI draws six faces of the whole scene per probe. With hardware ray tracing (planned RT2, `docs/research/hardware-ray-tracing.md`) rays would update the same light probe volumes instead.
+- Probes inside walls and solid parts leak light, volumes can't be seen in the viewport, and without real-time GI a sky change leaves volumes lit as baked. R18 (`docs/research/global-illumination.md`) plans a probe overlay, invalid probes, sky light kept apart, and placement and GI tiers, all in the same volumes.
 
 ## Related documentation
 

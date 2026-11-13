@@ -67,6 +67,12 @@ mod input;
 mod legend;
 mod move_overlay;
 mod overlays;
+mod plugin_drawings;
+mod plugin_handles;
+mod probe_overlay;
+mod ray_badge;
+mod streaming_overlay;
+pub use plugin_handles::HandleMove;
 mod view_cube;
 mod view_mode;
 use overlays::*;
@@ -209,6 +215,8 @@ pub struct ViewportOutput {
     /// The mouse over the Scene View for the editor's plugins
     /// (`plugin:GetMouse()`), while any run and the game doesn't.
     pub plugin_mouse: Option<axcenity_plugins::MouseInput>,
+    /// A plugin handle the user dragged (`plugin:CreateHandle`).
+    pub plugin_handle: Option<HandleMove>,
     /// What drawing the scene took, for the Profiler.
     pub render: Option<RenderCost>,
     /// Materials whose surface shaders didn't compile, each once, for the
@@ -376,6 +384,9 @@ pub struct ViewportScene<'a> {
     /// The path each NavigationAgent is walking during Play, from its feet,
     /// for the Agent Paths overlay.
     pub agent_paths: &'a [(InstanceId, Vec<axcenity_core::Vector3>)],
+    /// The LightProbeVolumes whose bake was made from a different world,
+    /// for the Light Probes overlay.
+    pub stale_light_probes: &'a [InstanceId],
     /// The simulation's contacts and bodies during Play, for the Contacts
     /// and Bodies overlays; `None` outside Play or with both off.
     pub physics: Option<&'a axcenity_physics::DebugView>,
@@ -396,6 +407,12 @@ pub struct ViewportScene<'a> {
     /// While plugins run (outside Play): whether one has the left button
     /// (`plugin:Activate(true)`), which then neither selects nor drags.
     pub plugin_mouse: Option<bool>,
+    /// What running plugins draw over the Scene View (`plugin:DrawLine`
+    /// and the rest; roadmap G10). Empty during Play.
+    pub plugin_drawings: Vec<&'a axcenity_plugins::Drawing>,
+    /// Running plugins' handles, each with its plugin's index in the
+    /// editor's list. Empty during Play.
+    pub plugin_handles: Vec<(usize, &'a axcenity_plugins::Handle)>,
     /// The camera during Play (`Session::shown_camera`, with whether the
     /// game holds the view). A controller's or a script's camera doesn't
     /// move the fly camera, so Stop shows it where it was.
@@ -433,6 +450,12 @@ pub struct OverlayToggles {
     /// During Play: each moving body's center of mass, coloured by
     /// whether it's awake or asleep (roadmap G15).
     pub bodies: bool,
+    /// With Workspace streaming on, what streams around the camera, while
+    /// editing too (roadmap R16).
+    pub streaming: bool,
+    /// Every light probe volume's probes, filled with their baked light,
+    /// and whether each volume's bake is there and up to date (roadmap R18.1).
+    pub light_probes: bool,
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
@@ -449,6 +472,8 @@ impl OverlayToggles {
             || self.constraints
             || self.contacts
             || self.bodies
+            || self.streaming
+            || self.light_probes
             || self.culling
     }
 }
@@ -662,6 +687,13 @@ pub struct Viewport {
     looking: bool,
     /// Made on the first frame, once eframe has set up the GPU.
     target: Option<Target>,
+    /// The renderer being made on a thread while a project opens (see
+    /// [`Self::make_renderer_in_background`]), taken on the first frame.
+    making: Option<std::sync::mpsc::Receiver<TextureRenderer>>,
+    /// While a project opens behind the loading screen, its meshes and
+    /// textures go to the GPU on the renderer's upload thread, so no frame
+    /// waits for all of them (see `app/session.rs`).
+    pub opening: bool,
     /// When the flying speed last changed (egui's clock, in seconds), to
     /// show and fade the speed pop-up.
     speed_changed_at: Option<f64>,
@@ -701,11 +733,16 @@ pub struct Viewport {
     /// Where the camera was when the culling overlay went on: culling
     /// stays there until it goes off.
     frozen_culling: Option<axcenity_render::Camera>,
+    /// The Streaming overlay's split of the world (roadmap R16).
+    streaming_overlay: streaming_overlay::StreamingOverlay,
     /// The Overdraw view's numbers, once its legend's Measure was clicked;
     /// cleared when the view changes.
     overdraw: Option<axcenity_render::OverdrawStats>,
     /// Measure was clicked: the next frame drawn is read back.
     measure_overdraw: bool,
+    /// The ray tracing badge's Restart now was clicked; the app restarts
+    /// the editor (`take_restart_request`).
+    restart_requested: bool,
     /// The LOD inspector's preview: this item (`scene::item_id`) drawn at
     /// this level whatever its size. Only what's drawn changes.
     pub lod_preview: Option<(u64, usize)>,
@@ -719,6 +756,8 @@ pub struct Viewport {
     /// The left button went down on a Spline's curve and is held, so it
     /// neither selects nor drags anything else.
     spline_press: bool,
+    /// A plugin's handle being dragged.
+    handle_drag: Option<plugin_handles::HandleDrag>,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -728,6 +767,12 @@ struct Target {
 }
 
 impl Viewport {
+    /// Whether the ray tracing badge's Restart now was clicked since last
+    /// asked.
+    pub fn take_restart_request(&mut self) -> bool {
+        std::mem::take(&mut self.restart_requested)
+    }
+
     /// The graphics values the viewport draws with, once it has drawn.
     #[cfg(test)]
     pub fn graphics(&self) -> Option<&axcenity_render::EffectiveGraphics> {
@@ -753,16 +798,49 @@ impl Viewport {
             .map_or(0, |target| target.renderer.culling_bounds().len())
     }
 
+    /// Starts making the viewport's renderer on a thread, if it isn't made
+    /// yet: setting up its pipelines takes a second or more on some cards,
+    /// which would otherwise freeze the first frame that draws the scene.
+    /// Called while a project loads, so it's ready when the project opens.
+    pub fn make_renderer_in_background(&mut self, render_state: &RenderState) {
+        if self.target.is_some() || self.making.is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let device = render_state.device.clone();
+        let queue = render_state.queue.clone();
+        // The size is a stand-in: the first frame resizes it to the panel.
+        let spawned = std::thread::Builder::new()
+            .name("viewport renderer".to_owned())
+            .spawn(move || {
+                let _ = sender.send(TextureRenderer::new(&device, &queue, 640, 360));
+            });
+        if spawned.is_ok() {
+            self.making = Some(receiver);
+        }
+    }
+
+    /// How many meshes and textures are still on their way to the GPU
+    /// (only while [`Self::opening`] sends them on a thread).
+    pub fn pending_uploads(&self) -> usize {
+        self.target
+            .as_ref()
+            .map_or(0, |target| target.renderer.pending_uploads())
+    }
+
     pub fn new() -> Self {
         Self {
             camera: start_camera(),
             keys: MoveKeys::default(),
             looking: false,
             target: None,
+            making: None,
+            opening: false,
             speed_changed_at: None,
             drag: None,
             spline_drag: None,
             spline_press: false,
+            handle_drag: None,
             particles: Particles::new(),
             terrain_stroke: false,
             plugin_press: false,
@@ -776,8 +854,10 @@ impl Viewport {
             last_rect: egui::Rect::NOTHING,
             last_pixels: (0, 0),
             frozen_culling: None,
+            streaming_overlay: Default::default(),
             overdraw: None,
             measure_overdraw: false,
+            restart_requested: false,
             lod_preview: None,
             swing: None,
             grid_labels: Default::default(),
@@ -1038,6 +1118,7 @@ impl Viewport {
             debug_rays,
             nav_mesh,
             agent_paths,
+            stale_light_probes,
             physics,
             poses,
             blends,
@@ -1046,6 +1127,8 @@ impl Viewport {
             constraint_pick,
             spline_editing,
             plugin_mouse,
+            plugin_drawings,
+            plugin_handles,
             play_camera,
             graphics,
             others,
@@ -1257,16 +1340,29 @@ impl Viewport {
         if cube_hit.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        // Plugin handles take a press on them while editing, before anything else.
+        let (plugin_handle, handle_taken) =
+            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+                let step = snap.move_on.then_some(snap.move_step);
+                self.plugin_handle_input(ui, &response, &screen, &plugin_handles, step)
+            } else {
+                self.handle_drag = None;
+                (None, false)
+            };
         // Splines take a press on their curve or points while editing.
         let (spline, spline_taken, spline_released) =
-            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+            if editing && brush.is_none() && picking.is_none() && !plugin_button && !handle_taken {
                 self.spline_input(ui, &response, &screen, world, spline_editing)
             } else {
                 self.spline_drag = None;
                 self.spline_press = false;
                 (None, false, false)
             };
-        let drag_tool = if spline_taken { None } else { drag_tool };
+        let drag_tool = if spline_taken || handle_taken {
+            None
+        } else {
+            drag_tool
+        };
         let drag = self.drag_input(
             ui,
             &response,
@@ -1296,6 +1392,7 @@ impl Viewport {
                 || picking.is_some()
                 || plugin_button
                 || spline_taken
+                || handle_taken
                 || cube_hit.is_some() =>
             {
                 None
@@ -1321,9 +1418,15 @@ impl Viewport {
             widget_values.extend(released.value);
         }
         let text_box = clicked_ui(axcenity_ui::UiLayout::hit_text_box).flatten();
+        let making = self.making.take();
         let target = self.target.get_or_insert_with(|| {
-            let renderer =
-                TextureRenderer::new(&render_state.device, &render_state.queue, width, height);
+            // Made on a thread while the project loaded, if it was: waits
+            // for the rest of it (the thread failing makes one here).
+            let renderer = making
+                .and_then(|receiver| receiver.recv().ok())
+                .unwrap_or_else(|| {
+                    TextureRenderer::new(&render_state.device, &render_state.queue, width, height)
+                });
             let texture_id = render_state.renderer.write().register_native_texture(
                 &render_state.device,
                 renderer.view(),
@@ -1380,7 +1483,7 @@ impl Viewport {
         }
         target
             .renderer
-            .set_background_uploads(self.terrain.streaming.settings().is_some());
+            .set_background_uploads(self.terrain.streaming.settings().is_some() || self.opening);
         let render_started = Instant::now();
         // Blueprint textures are for building by: the game never shows them.
         assets.set_blueprint(
@@ -1525,14 +1628,43 @@ impl Viewport {
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
         }
+        if !plugin_drawings.is_empty() {
+            plugin_drawings::paint(&ui.painter_at(rect), &screen, &plugin_drawings);
+        }
+        if !plugin_handles.is_empty() {
+            plugin_handles::paint_handles(
+                &ui.painter_at(rect),
+                &screen,
+                &plugin_handles,
+                self.handle_drag,
+            );
+        }
         if let Some(physics) = physics {
             paint_physics(&ui.painter_at(rect), &screen, physics, overlays);
         }
-        if game_playing && let Some(settings) = self.terrain.streaming.settings() {
-            paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
+        if overlays.streaming {
+            self.streaming_overlay.paint(ui, rect, &screen, world, eye);
+        } else {
+            self.streaming_overlay.clear();
+            if game_playing && let Some(settings) = self.terrain.streaming.settings() {
+                paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
+            }
+        }
+        if overlays.light_probes {
+            probe_overlay::paint(ui, rect, &screen, world, assets, stale_light_probes, eye);
         }
         if legend::paint(ui, rect, view_mode, &render.stats, self.overdraw.as_ref()) {
             self.measure_overdraw = true;
+        }
+        if let Some(badge) = ray_badge::badge(
+            target.renderer.graphics(),
+            graphics.ray_tracing(),
+            axcenity_render::adapters::adapter_can_ray_trace(),
+            axcenity_render::adapters::ray_tracing_override(),
+            &render.stats.ray_tracing,
+        ) && ray_badge::paint(ui, rect, &badge)
+        {
+            self.restart_requested = true;
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(
@@ -1669,6 +1801,7 @@ impl Viewport {
             surface,
             spline,
             plugin_mouse,
+            plugin_handle,
             render: Some(render),
             shader_errors,
         }

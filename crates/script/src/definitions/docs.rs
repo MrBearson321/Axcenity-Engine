@@ -1963,6 +1963,36 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ParticleEmitter,
+        "SizeOverLife",
+        "A NumberSequence of studs across over each particle's life, from birth (0) to death (1), in place of Size and SizeEnd. nil (the default) uses them.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "ColorOverLife",
+        "A ColorSequence over each particle's life, in place of Color and ColorEnd. nil (the default) uses them.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "TransparencyOverLife",
+        "A NumberSequence from 0 (solid) to 1 (invisible) over each particle's life, in place of Transparency and TransparencyEnd. nil (the default) uses them.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "SpeedOverLife",
+        "A NumberSequence that multiplies Speed over each particle's life, from birth (0) to death (1): how far it moves each moment, with Acceleration and Drag still acting on its velocity. Envelopes aren't used. nil (the default) keeps Speed.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Shape",
+        "Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). They still head along Direction within SpreadAngle.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "ShapeStyle",
+        "`Enum.ParticleEmitterShapeStyle.Volume` (the default) gives off particles anywhere inside the Shape; `Surface` only on it: a box's faces, the sphere, a cylinder's round side or a disc's rim.",
+    ),
+    (
+        ClassName::ParticleEmitter,
         "Rotation",
         "How far each particle is turned when it's born, in degrees.",
     ),

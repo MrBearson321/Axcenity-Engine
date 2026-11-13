@@ -55,7 +55,9 @@ pub(crate) fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
         required_features,
         ..Default::default()
     };
-    // As the player does, so ray traced effects can be measured too.
+    // With hardware ray tracing (as the player opens it once the setting is
+    // on), so ray traced effects can be measured too.
+    axcenity_render::adapters::want_ray_tracing(true);
     axcenity_render::adapters::with_ray_queries(&adapter, &mut descriptor);
     pollster::block_on(adapter.request_device(&descriptor)).ok()
 }

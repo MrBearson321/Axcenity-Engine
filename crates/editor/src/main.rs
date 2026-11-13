@@ -59,6 +59,7 @@ mod material_editor;
 mod material_graph;
 mod mixer;
 mod output;
+mod people_history;
 mod placing;
 mod play;
 mod plugins;
@@ -135,8 +136,9 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
         // Cooked textures go up as BC7 where the GPU reads it.
         descriptor.required_features |= adapter.features()
             & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_BC);
-        // Hardware ray tracing where the GPU has it, for the optional ray
-        // traced effects (`axcenity_render::adapters::with_ray_queries`).
+        // Hardware ray tracing, if Settings > Graphics turned it on and the
+        // GPU has it (`axcenity_render::adapters::with_ray_queries`).
+        axcenity_render::adapters::want_ray_tracing(app::settings::saved_ray_tracing());
         axcenity_render::adapters::with_ray_queries(adapter, &mut descriptor);
         descriptor
     });
@@ -166,8 +168,9 @@ fn main() -> eframe::Result {
 
     // An optional project folder to open, such as `examples/hello-touched`.
     // `args_os` instead of `args` so folder names that aren't valid Unicode still work.
-    // A debug editor relaunched into after a rebuild gets `--resume <handoff>`
-    // instead (see `relaunch.rs`); release builds never take it.
+    // An editor relaunched into, after a rebuild or by Restart now (a
+    // setting that needs a restart, such as Hardware ray tracing), gets
+    // `--resume <handoff>` instead (see `relaunch.rs`).
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
     if first.as_deref() == Some(cooking::COOK_FLAG.as_ref()) {
@@ -210,9 +213,7 @@ fn main() -> eframe::Result {
     let mut rest: Vec<String> = Vec::new();
     let mut offered: Option<String> = None;
     let (folder, handoff) = match first {
-        Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {
-            (None, args.next().map(PathBuf::from))
-        }
+        Some(flag) if flag == relaunch::RESUME_FLAG => (None, args.next().map(PathBuf::from)),
         Some(flag) if flag == app::team::JOIN_FLAG || flag == app::team::OLD_JOIN_FLAG => {
             rest.push(app::team::JOIN_FLAG.to_owned());
             (None, None)

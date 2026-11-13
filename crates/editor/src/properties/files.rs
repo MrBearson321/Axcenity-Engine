@@ -183,6 +183,30 @@ pub(super) fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Opt
         }
         file_label(ui, assets, path);
     });
+    if !path.is_empty() {
+        // A picture can't change with the time of day: say so, with the
+        // way to a sky that does.
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                egui::RichText::new(
+                    "A sky picture keeps its colors: ClockTime moves the sun and dims it \
+                     toward night.",
+                )
+                .small()
+                .weak(),
+            );
+            if ui
+                .small_button("Follow time of day")
+                .on_hover_text(
+                    "Go back to a drawn sky that follows ClockTime, with an Atmosphere so \
+                     it turns orange at sunrise and sunset and dark at night",
+                )
+                .clicked()
+            {
+                edit = Some(Edit::UseTimeOfDaySky);
+            }
+        });
+    }
     if let Some(held) = row
         .response
         .dnd_hover_payload::<crate::asset_browser::AssetPayload>()

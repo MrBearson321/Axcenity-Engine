@@ -168,3 +168,19 @@ UserGameSettings.MotionBlur: EnumMotionBlur
 
 How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.
 
+#### RayTracedShadows
+
+```luau
+UserGameSettings.RayTracedShadows: EnumRayTracedShadows
+```
+
+Hardware ray traced sun shadows: Off, Low (1 ray per pixel), Medium (2) or High (4). Off at every preset. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the shadow maps are drawn. Lighting's ShadowSoftness still sets how soft they are.
+
+#### RayTracedAmbientOcclusion
+
+```luau
+UserGameSettings.RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
+```
+
+Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.
+

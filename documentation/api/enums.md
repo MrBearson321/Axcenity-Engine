@@ -258,3 +258,27 @@ The choices of `Enum.StreamingState`.
 
 Items: `StreamedIn`, `StreamedOut`
 
+## Enum.RayTracedShadows
+
+The choices of `Enum.RayTracedShadows`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+
+## Enum.ParticleEmitterShape
+
+The choices of `Enum.ParticleEmitterShape`.
+
+Items: `Box`, `Sphere`, `Cylinder`, `Disc`
+
+## Enum.ParticleEmitterShapeStyle
+
+The choices of `Enum.ParticleEmitterShapeStyle`.
+
+Items: `Volume`, `Surface`
+
+## Enum.RayTracedAmbientOcclusion
+
+The choices of `Enum.RayTracedAmbientOcclusion`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+

@@ -20,6 +20,7 @@
 * [Explorer and hierarchy](learn/explorer-and-hierarchy.md)
 * [Materials and textures](learn/materials-and-textures.md)
 * [Lighting and rendering](learn/lighting-and-rendering.md)
+* [Ray tracing: the best look, simply](learn/ray-tracing.md)
 * [Terrain tools](learn/terrain.md)
 
 ## Learn: Bringing it to life
@@ -215,6 +216,10 @@
     * [Color3](api/types/Color3.md)
     * [CFrame](api/types/CFrame.md)
     * [Random](api/types/Random.md)
+    * [NumberSequence](api/types/NumberSequence.md)
+    * [NumberSequenceKeypoint](api/types/NumberSequenceKeypoint.md)
+    * [ColorSequence](api/types/ColorSequence.md)
+    * [ColorSequenceKeypoint](api/types/ColorSequenceKeypoint.md)
     * [PhysicalProperties](api/types/PhysicalProperties.md)
     * [UDim](api/types/UDim.md)
     * [UDim2](api/types/UDim2.md)

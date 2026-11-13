@@ -168,6 +168,10 @@ pub(super) struct FrameUniform {
     /// x: how wet surfaces are, y: how much snow covers them, each from 0
     /// to 1 (lighting.wgsl's `weathered`).
     pub(super) weather: [f32; 4],
+    /// x: 1 while ray traced sun shadows are drawn, y: the scene's width in
+    /// pixels (to find a pixel in the mask), z: how far they reach in studs
+    /// (lighting.wgsl's `ray_traced_sun`).
+    pub(super) ray_shadows: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.
@@ -759,13 +763,14 @@ pub(super) struct FxaaTarget {
 /// size, which the composite pass (or FXAA) draws into, and the output-sized
 /// one it's upscaled into before it's sharpened into the output.
 pub(super) struct UpscaleTarget {
-    /// Drawn into: [`FXAA_FORMAT`], encoding to sRGB.
+    /// Drawn into: [`FXAA_FORMAT`], encoding to sRGB. At the scene's size,
+    /// or at the output's when TAA upscaled already.
     pub(super) view: wgpu::TextureView,
     /// `view`'s texture read as plain [`UPSCALE_FORMAT`].
     pub(super) source_group: wgpu::BindGroup,
-    /// The upscaled picture, at the output's size.
-    pub(super) upscaled: wgpu::TextureView,
-    pub(super) upscaled_group: wgpu::BindGroup,
+    /// The upscaled picture, at the output's size, and its bind group:
+    /// `None` when TAA upscaled already, and only the sharpen runs.
+    pub(super) upscaled: Option<(wgpu::TextureView, wgpu::BindGroup)>,
     /// A clone of [`TargetsAlive::upscale`].
     pub(super) _alive: Arc<()>,
 }
@@ -1063,6 +1068,13 @@ pub(super) struct ScenePipeline {
     /// Hardware ray tracing's acceleration structures, while something
     /// traces rays (renderer/ray_tracing.rs).
     pub(super) ray_scene: Option<Box<super::ray_tracing::RayScene>>,
+    /// Ray traced sun shadows' pass and mask, while drawn
+    /// (renderer/ray_shadows.rs), and the 4-byte mask bound without them.
+    pub(super) ray_shadows: Option<Box<super::ray_shadows::RayShadows>>,
+    pub(super) no_ray_shadows: wgpu::Buffer,
+    /// Ray traced ambient occlusion's pass, while drawn
+    /// (renderer/ray_ao.rs).
+    pub(super) ray_ao: Option<Box<super::ray_ao::RayAmbientOcclusion>>,
     /// The editor's debug view, while one is shown (renderer/debug_views.rs).
     #[cfg(feature = "debug-views")]
     pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,

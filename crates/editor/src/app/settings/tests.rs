@@ -140,6 +140,9 @@ fn graphics_settings_survive_a_restart() {
         sharpen: Some(false),
         motion_blur: Some(MotionBlurQuality::Low),
         ray_tracing_distance: Some(300.0),
+        ray_traced_shadows: Some(RayTracedShadows::Medium),
+        ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Low),
+        ray_tracing: Some(true),
     };
     let mut storage = MemoryStorage::default();
     eframe::App::save(&mut app, &mut storage);
@@ -365,4 +368,39 @@ fn branding_is_kept_in_the_manifest_used_by_branding_paths_and_previewed() {
             .is_some_and(|p| p.contains("400×400"))
     );
     assert_eq!(banner.problem(Picture::Icon), None);
+}
+
+#[test]
+fn the_ray_tracing_section_says_what_a_restart_will_do() {
+    use super::graphics::{needs_restart, ray_tracing_status};
+    assert!(ray_tracing_status(false, false, true).contains("can't ray trace"));
+    assert!(ray_tracing_status(false, true, false).contains("Turn on Hardware ray tracing"));
+    assert!(ray_tracing_status(false, true, true).contains("turns on when the editor restarts"));
+    assert!(ray_tracing_status(true, true, false).contains("turns off"));
+    assert!(ray_tracing_status(true, true, true).contains("is on"));
+    // Restart now shows only when a restart changes what the GPU was opened with.
+    assert!(needs_restart(false, true, true));
+    assert!(needs_restart(true, true, false));
+    assert!(
+        !needs_restart(false, false, true),
+        "a GPU that can't, can't"
+    );
+    assert!(!needs_restart(true, true, true));
+    assert!(!needs_restart(false, true, false));
+}
+
+#[test]
+fn the_in_use_line_lists_each_ray_traced_effect() {
+    use super::graphics::ray_tracing_in_use;
+    use axcenity_render::{EffectiveGraphics, RayTracedAmbientOcclusion};
+    let mut effective = EffectiveGraphics::default();
+    assert!(ray_tracing_in_use(&effective).contains("off"));
+    effective.ray_queries = true;
+    effective.ray_tracing_distance = 400.0;
+    assert!(ray_tracing_in_use(&effective).contains("no ray traced effects"));
+    effective.ray_traced_shadows = RayTracedShadows::Low;
+    effective.ray_traced_ambient_occlusion = RayTracedAmbientOcclusion::High;
+    let line = ray_tracing_in_use(&effective);
+    assert!(line.contains("shadows Low"), "{line}");
+    assert!(line.contains("ambient occlusion High (8 rays"), "{line}");
 }

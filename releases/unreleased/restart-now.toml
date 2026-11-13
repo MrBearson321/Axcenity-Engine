@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "editor"
+title = "Restart now, for Hardware ray tracing"
+details = "When Hardware ray tracing needs a restart, Settings > Graphics > Ray tracing and the Scene view's ray tracing badge have a Restart now button. It starts the editor again with the same project, keeping unsaved world and script edits, so ray tracing turns on without closing and reopening anything by hand."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

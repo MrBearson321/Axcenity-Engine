@@ -13,9 +13,38 @@ use crate::theme::{
 use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    GraphicsSettings, MotionBlurQuality, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE,
-    ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
+    EffectiveGraphics, GraphicsSettings, MotionBlurQuality, Quality, RAY_TRACING_DISTANCE_RANGE,
+    RENDER_SCALE_RANGE, RayTracedAmbientOcclusion, RayTracedShadows, ReflectionQuality,
+    ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
+
+/// The file beside eframe's saved settings that says whether the GPU is
+/// opened with hardware ray tracing: the device is made before the app (and
+/// its settings) exists, so the choice is kept where `main` can read it.
+fn ray_tracing_file() -> Option<std::path::PathBuf> {
+    eframe::storage_dir(crate::APP_ID).map(|folder| folder.join("hardware-ray-tracing.txt"))
+}
+
+/// Whether Settings > Graphics > Hardware ray tracing was on when the
+/// editor last saved. Off without the file.
+pub(crate) fn saved_ray_tracing() -> bool {
+    ray_tracing_file()
+        .and_then(|file| std::fs::read_to_string(file).ok())
+        .is_some_and(|text| text.trim() == "on")
+}
+
+/// Keeps `on` for the next start ([`saved_ray_tracing`]). Never in tests.
+pub(super) fn remember_ray_tracing(on: bool) {
+    if cfg!(test) || saved_ray_tracing() == on {
+        return;
+    }
+    if let Some(file) = ray_tracing_file() {
+        let _ = std::fs::create_dir_all(file.parent().unwrap_or(&file));
+        if let Err(err) = std::fs::write(&file, if on { "on" } else { "off" }) {
+            log::warn!("couldn't keep the hardware ray tracing setting: {err}");
+        }
+    }
+}
 
 /// The pages of the Settings window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -140,6 +169,7 @@ impl EditorApp {
             return;
         }
         let mut open = true;
+        let mut restart = false;
         let mut appearance = self.appearance.clone();
         widgets::tool_window(icons::GEAR_SIX, "Settings")
             .id("settings window")
@@ -188,7 +218,7 @@ impl EditorApp {
                                 SettingsPage::Viewport => self.viewport_page(ui),
                                 SettingsPage::Graphics => {
                                     let capabilities = self.capabilities.unwrap_or_default();
-                                    graphics_page(ui, &mut self.graphics, &capabilities);
+                                    restart |= graphics_page(ui, &mut self.graphics, &capabilities);
                                 }
                                 SettingsPage::Shortcuts => shortcuts_page(ui),
                                 SettingsPage::Accessibility => {
@@ -206,6 +236,9 @@ impl EditorApp {
         self.set_appearance(ctx, appearance);
         if !open {
             self.settings.open = false;
+        }
+        if restart {
+            self.restart_editor();
         }
     }
 
@@ -460,6 +493,22 @@ impl EditorApp {
             )
             .on_hover_text("Each moving body's center of mass, awake or asleep, during Play.");
         found(ui, &row, "Show bodies");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.streaming,
+                theme::with_icon(icons::BROADCAST, "Show streaming"),
+            )
+            .on_hover_text("What streams around the camera, with Workspace streaming on.");
+        found(ui, &row, "Show streaming");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.light_probes,
+                theme::with_icon(icons::LIGHTBULB, "Show light probes"),
+            )
+            .on_hover_text(
+                "Each light probe volume's probes, filled with their baked light, and which bakes are missing or out of date.",
+            );
+        found(ui, &row, "Show light probes");
         let row = ui
             .checkbox(
                 &mut self.overlays.culling,

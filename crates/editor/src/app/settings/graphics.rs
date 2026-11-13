@@ -5,11 +5,12 @@ use super::*;
 
 /// This computer's graphics settings: a preset, its overrides, and what's
 /// in use once the GPU's limits are applied, with why anything was lowered.
+/// True when Restart now was clicked.
 pub(super) fn graphics_page(
     ui: &mut egui::Ui,
     settings: &mut GraphicsSettings,
     capabilities: &Capabilities,
-) {
+) -> bool {
     page_title(
         ui,
         "Graphics",
@@ -337,7 +338,7 @@ pub(super) fn graphics_page(
             }
         });
     ui.add_space(space::L);
-    ray_tracing_section(ui, settings, capabilities, &preset);
+    let restart = ray_tracing_section(ui, settings, capabilities, &preset);
     ui.add_space(space::L);
     section(ui, "In use");
     let effective = settings.effective(capabilities);
@@ -400,14 +401,7 @@ pub(super) fn graphics_page(
     } else {
         "Real-time GI: off (light probe volumes keep their bakes)"
     });
-    ui.label(if effective.ray_queries {
-        format!(
-            "Ray tracing: available, up to {} studs (no ray traced effects on)",
-            effective.ray_tracing_distance.round()
-        )
-    } else {
-        "Ray tracing: not available on this GPU".to_owned()
-    });
+    ui.label(ray_tracing_in_use(&effective));
     ui.label(match effective.cloud_quality.steps() {
         (0, _) => "Clouds: Low, a flat sheet".to_owned(),
         (steps, _) => format!(
@@ -460,33 +454,106 @@ pub(super) fn graphics_page(
         )
         .color(palette.text_secondary),
     );
+    restart
 }
 
 /// Hardware ray tracing: whether this GPU can, and how far rays reach. Each
 /// ray traced effect is its own switch here, off unless turned on
 /// (`docs/rendering/ray-tracing.md`).
+/// The Ray tracing section. True when Restart now was clicked.
 fn ray_tracing_section(
     ui: &mut egui::Ui,
     settings: &mut GraphicsSettings,
     capabilities: &Capabilities,
     preset: &GraphicsSettings,
-) {
+) -> bool {
     let palette = theme::palette(ui.ctx());
     section(ui, "Ray tracing");
     ui.label(
-        egui::RichText::new(if capabilities.ray_queries {
-            "This GPU can ray trace. No ray traced effects yet: View Mode > Ray Hits shows \
-             what rays would hit."
-        } else {
-            "This GPU can't ray trace (it needs DirectX 12 ray tracing tier 1.1, Vulkan ray \
-             queries or Metal on macOS 15). Everything is drawn without it."
-        })
+        egui::RichText::new(ray_tracing_status(
+            capabilities.ray_queries,
+            axcenity_render::adapters::adapter_can_ray_trace(),
+            settings.ray_tracing(),
+        ))
         .color(palette.text_secondary),
     );
+    // The simple way: everything that goes with ray tracing in one click.
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button("Use the ray traced look")
+            .on_hover_text(
+                "Turns on Hardware ray tracing, ray traced shadows and ambient occlusion \
+                 (Medium), shadows and reflections at least High, and TAA, which smooths \
+                 the rays. The rest of your settings stay. Needs a GPU that can ray trace; \
+                 the first time, restart the editor afterward.",
+            )
+            .clicked()
+        {
+            *settings = settings.ray_traced();
+        }
+        if ui
+            .button("Ray traced effects off")
+            .on_hover_text(
+                "Turns every ray traced effect off. Hardware ray tracing stays as it is \
+                 (turning it off takes a restart).",
+            )
+            .clicked()
+        {
+            *settings = settings.without_ray_traced_effects();
+        }
+    });
+    let mut restart = false;
+    if needs_restart(
+        capabilities.ray_queries,
+        axcenity_render::adapters::adapter_can_ray_trace(),
+        settings.ray_tracing(),
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                egui::RichText::new(
+                    if settings.ray_tracing()
+                        && axcenity_render::adapters::ray_tracing_override() == Some(false)
+                    {
+                        "AXCENITY_RAY_TRACING=0, set where the editor was started, keeps ray \
+                     tracing off. Restart now starts it without that."
+                    } else if settings.ray_tracing() {
+                        "Restart the editor to start ray tracing."
+                    } else {
+                        "Restart the editor to stop ray tracing."
+                    },
+                )
+                .color(palette.warning),
+            );
+            restart = ui
+                .button("Restart now")
+                .on_hover_text(
+                    "Saves these settings and starts the editor again with this project, \
+                     carrying unsaved world and script edits (save Event Graphs, behavior \
+                     trees, data tables and materials first). If it still asks to restart \
+                     afterward, check your Desktop shortcut opens this version of the editor.",
+                )
+                .clicked();
+        });
+    }
     egui::Grid::new("ray tracing settings")
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
+            found_label(ui, "Hardware ray tracing");
+            let mut on = settings.ray_tracing();
+            if ui
+                .checkbox(&mut on, "On (after a restart)")
+                .on_hover_text(
+                    "Opens the GPU with ray tracing the next time the editor starts, so ray \
+                     traced effects and View Mode > Ray Hits can be used. Off, the GPU is \
+                     opened as before ray tracing existed.",
+                )
+                .changed()
+            {
+                settings.ray_tracing = on.then_some(true);
+            }
+            ui.end_row();
+
             found_label(ui, "Ray tracing distance");
             ui.horizontal(|ui| {
                 let mut custom = settings.ray_tracing_distance.is_some();
@@ -521,5 +588,122 @@ fn ray_tracing_section(
                 }
             });
             ui.end_row();
+
+            found_label(ui, "Ray traced shadows");
+            let label = |shadows: Option<RayTracedShadows>| match shadows {
+                Some(shadows) => shadows.label().to_owned(),
+                None => format!("Preset ({})", preset.ray_traced_shadows().label()),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced shadows")
+                    .selected_text(label(settings.ray_traced_shadows))
+                    .show_ui(ui, |ui| {
+                        for choice in std::iter::once(None).chain(RayTracedShadows::ALL.map(Some)) {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_shadows,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "The sun's shadows traced as rays: exact up close, with no shadow map \
+                         blur or gaps. Low, Medium and High trace 1, 2 or 4 rays a pixel where \
+                         the world's ShadowSoftness makes shadows soft; past the ray tracing \
+                         distance the shadow maps take over. Needs Hardware ray tracing on.",
+                    );
+            });
+            ui.end_row();
+
+            found_label(ui, "Ray traced ambient occlusion");
+            let label = |rays: Option<RayTracedAmbientOcclusion>| match rays {
+                Some(rays) => rays.label().to_owned(),
+                None => format!("Preset ({})", preset.ray_traced_ambient_occlusion().label()),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced ambient occlusion")
+                    .selected_text(label(settings.ray_traced_ambient_occlusion))
+                    .show_ui(ui, |ui| {
+                        for choice in
+                            std::iter::once(None).chain(RayTracedAmbientOcclusion::ALL.map(Some))
+                        {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_ambient_occlusion,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Corners and creases darkened by short rays instead of guessed from \
+                         the screen, so things off screen or behind others count too. Low, \
+                         Medium and High trace 2, 4 or 8 rays a pixel. It draws ambient \
+                         occlusion even with Ambient occlusion off; past the ray tracing \
+                         distance only screen-space ambient occlusion is left. Needs Hardware \
+                         ray tracing on.",
+                    );
+            });
+            ui.end_row();
         });
+    restart
+}
+
+/// Whether the GPU must be opened again for Hardware ray tracing to be as
+/// set: `wanted` but not `opened` on a GPU that `can`, or opened but no
+/// longer wanted.
+pub(super) fn needs_restart(opened: bool, can: bool, wanted: bool) -> bool {
+    if wanted { !opened && can } else { opened }
+}
+
+/// What the Ray tracing section says about this GPU: whether the device
+/// was `opened` with ray tracing, whether its adapter `can` ray trace, and
+/// whether it's set to be opened with it (`wanted`) at the next start.
+pub(super) fn ray_tracing_status(opened: bool, can: bool, wanted: bool) -> &'static str {
+    match (opened, can, wanted) {
+        (true, _, true) => {
+            "Hardware ray tracing is on. Each ray traced effect is off until turned on; \
+             View Mode > Ray Hits shows what rays hit."
+        }
+        (true, _, false) => "Hardware ray tracing turns off when the editor restarts.",
+        (false, true, true) => "Hardware ray tracing turns on when the editor restarts.",
+        (false, true, false) => {
+            "This GPU can ray trace. Turn on Hardware ray tracing and restart the editor to \
+             use it; until then the GPU is opened without it."
+        }
+        (false, false, _) => {
+            "This GPU can't ray trace (it needs DirectX 12 ray tracing tier 1.1, Vulkan ray \
+             queries or Metal on macOS 15). Everything is drawn without it."
+        }
+    }
+}
+
+/// The "In use" line for ray tracing: off, or each ray traced effect on.
+pub(super) fn ray_tracing_in_use(effective: &EffectiveGraphics) -> String {
+    if !effective.ray_queries {
+        return "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available"
+            .to_owned();
+    }
+    let mut effects = Vec::new();
+    if effective.ray_traced_shadows != RayTracedShadows::Off {
+        effects.push(format!(
+            "shadows {} ({} rays a pixel where soft)",
+            effective.ray_traced_shadows.label(),
+            effective.ray_traced_shadows.rays()
+        ));
+    }
+    if effective.ray_traced_ambient_occlusion != RayTracedAmbientOcclusion::Off {
+        effects.push(format!(
+            "ambient occlusion {} ({} rays a pixel)",
+            effective.ray_traced_ambient_occlusion.label(),
+            effective.ray_traced_ambient_occlusion.rays()
+        ));
+    }
+    let reach = effective.ray_tracing_distance.round();
+    if effects.is_empty() {
+        format!("Ray tracing: available, up to {reach} studs (no ray traced effects on)")
+    } else {
+        format!("Ray tracing up to {reach} studs: {}", effects.join(", "))
+    }
 }

@@ -222,6 +222,23 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Viewport,
+            "Show streaming",
+            &["Streaming diagnostics", "Streaming radius", "Large worlds"],
+            "What streams around the camera, with Workspace streaming on.",
+        ),
+        setting(
+            Viewport,
+            "Show light probes",
+            &[
+                "Global illumination",
+                "Probe volumes",
+                "Indirect light",
+                "Bake",
+            ],
+            "Each light probe volume's probes, filled with their baked light, and which bakes are missing or out of date.",
+        ),
+        setting(
+            Viewport,
             "Show culling",
             &["Frustum", "Occlusion", "Culled objects"],
             "What's drawn and what's culled for the current view.",

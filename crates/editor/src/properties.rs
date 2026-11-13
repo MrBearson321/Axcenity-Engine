@@ -288,7 +288,17 @@ pub fn show(
                     {
                         edit = Some(Edit::Keep(field, keep));
                     }
-                    let enabled = !locked || name == "Locked";
+                    // A start and end pair gives way to its curve while the
+                    // curve is set.
+                    let replaced = instance.class() == ClassName::ParticleEmitter
+                        && groups::replacing_curve(name)
+                            .and_then(|curve| instance.property(curve))
+                            .is_some_and(|curve| match curve {
+                                Value::NumberSequence(sequence) => !sequence.is_empty(),
+                                Value::ColorSequence(sequence) => !sequence.is_empty(),
+                                _ => false,
+                            });
+                    let enabled = (!locked || name == "Locked") && !replaced;
                     let made = ui.add_enabled_ui(enabled, |ui| match value {
                         // Who sits there is up to the game, not the editor.
                         Value::Instance(target)
@@ -402,13 +412,16 @@ pub fn show(
     edit
 }
 
+mod curves;
 mod files;
 mod groups;
 mod many;
+mod plugin_rows;
 mod values;
 #[cfg(test)]
 pub use many::shared_names;
 pub use many::{count_name, show_many};
+pub use plugin_rows::{PluginRows, RowAction, plugin_sections};
 
 use files::*;
 use groups::*;
@@ -645,6 +658,8 @@ fn section_titled(
         "Attributes" => icons::LIST_BULLETS,
         "Tags" => icons::TAG,
         ADVANCED => icons::SLIDERS_HORIZONTAL,
+        // A plugin's rows (`plugin_rows.rs`).
+        plugin if plugin.starts_with("plugin:") => icons::PUZZLE_PIECE,
         _ => icons::DOTS_THREE_OUTLINE,
     };
     // Every section's names take the same width (from the panel's), so the

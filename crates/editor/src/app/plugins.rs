@@ -81,6 +81,11 @@ impl EditorApp {
                 errors: Vec::new(),
                 stylesheets: Vec::new(),
                 widgets: Vec::new(),
+                drawings: Vec::new(),
+                handles: Vec::new(),
+                rows: Vec::new(),
+                importers: Vec::new(),
+                asset_actions: Vec::new(),
             });
         }
         let roots = [
@@ -149,6 +154,11 @@ impl EditorApp {
             return;
         };
         entry.widgets.clear();
+        entry.drawings.clear();
+        entry.handles.clear();
+        entry.rows.clear();
+        entry.importers.clear();
+        entry.asset_actions.clear();
         if let Some(plugin) = entry.running.take() {
             plugin.stop(&mut self.world);
         }
@@ -272,6 +282,19 @@ impl EditorApp {
         };
         let lines = plugin.take_output();
         let settings = plugin.take_settings();
+        if let Some(drawings) = plugin.take_drawings() {
+            entry.drawings = drawings;
+        }
+        if let Some(handles) = plugin.take_handles() {
+            entry.handles = handles;
+        }
+        if let Some(rows) = plugin.take_rows() {
+            entry.rows = rows;
+        }
+        if let Some((importers, actions)) = plugin.take_asset_hooks() {
+            entry.importers = importers;
+            entry.asset_actions = actions;
+        }
         for line in lines {
             match line.kind {
                 axcenity_script::OutputKind::Print => self.output.info(line.text),
@@ -435,6 +458,97 @@ impl EditorApp {
     }
 
     /// Whether a plugin has the Scene View's left button (`plugin:Activate(true)`).
+    /// The user dragged a plugin's handle: it moves there, and the plugin
+    /// hears of it (`Dragged`, or `DragEnded` when let go).
+    pub(in crate::app) fn drag_plugin_handle(&mut self, moved: crate::viewport::HandleMove) {
+        self.call_plugin(moved.plugin, |plugin, world| {
+            plugin.drag_handle(world, moved.id, moved.position, moved.ended);
+        });
+    }
+
+    /// A plugin's Properties row was used on `id`: an attribute row's value
+    /// is set as its own undo step, then the plugin hears of it
+    /// (`Changed`); a button row fires `Activated`.
+    pub(in crate::app) fn plugin_row_action(
+        &mut self,
+        id: InstanceId,
+        action: crate::properties::RowAction,
+    ) {
+        match action {
+            crate::properties::RowAction::Set {
+                plugin,
+                row,
+                name,
+                value,
+            } => {
+                self.apply(
+                    id,
+                    crate::properties::Edit::Attribute(name, Some(value.clone())),
+                );
+                self.call_plugin(plugin, |p, world| p.row_changed(world, row, id, &value));
+            }
+            crate::properties::RowAction::Click { plugin, row } => {
+                self.call_plugin(plugin, |p, world| p.activate_row(world, row, id));
+            }
+        }
+    }
+
+    /// Imports `file` with a running plugin's importer, if one takes its
+    /// kind (`plugin:AddImporter`): the plugin gets its name and contents,
+    /// and what it changes is an undo step. `false` when no plugin takes
+    /// it.
+    pub(in crate::app) fn import_with_plugin(&mut self, file: &std::path::Path) -> bool {
+        let name = file
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let Some((index, importer)) = self.plugins.importer_for(&name) else {
+            return false;
+        };
+        let (id, plugin_name) = (importer.id, self.plugins.entries[index].found.name());
+        let read = match std::fs::metadata(file) {
+            Ok(meta) if meta.len() > axcenity_plugins::MAX_IMPORT_BYTES => Err(format!(
+                "it's over {} MB, the most a plugin's importer is given",
+                axcenity_plugins::MAX_IMPORT_BYTES / (1024 * 1024)
+            )),
+            _ => std::fs::read(file).map_err(|err| err.to_string()),
+        };
+        let contents = match read {
+            Ok(contents) => contents,
+            Err(err) => {
+                self.toasts
+                    .error("Could not import that file. Output says why.");
+                self.output
+                    .error(format!("Could not import `{}`: {err}", file.display()));
+                return true;
+            }
+        };
+        self.call_plugin(index, |plugin, world| {
+            plugin.import_file(world, id, &name, &contents);
+        });
+        self.toasts.success(format!("Imported `{name}`"));
+        self.output.info(format!(
+            "Imported `{}` with the plugin \"{plugin_name}\".",
+            file.display()
+        ));
+        true
+    }
+
+    /// Tells the running plugins the editor imported a file itself, now
+    /// the project file at `path` (`plugin.AssetImported`).
+    pub(in crate::app) fn plugins_asset_imported(&mut self, path: &str) {
+        for index in 0..self.plugins.entries.len() {
+            if self.plugins.entries[index].running.is_some() {
+                self.call_plugin(index, |plugin, world| plugin.asset_imported(world, path));
+            }
+        }
+    }
+
+    /// A plugin's Assets panel item was picked for the asset at `path`.
+    pub(in crate::app) fn plugin_asset_action(&mut self, plugin: usize, action: u64, path: &str) {
+        self.call_plugin(plugin, |p, world| p.asset_action(world, action, path));
+    }
+
     pub(in crate::app) fn plugin_has_mouse(&self) -> bool {
         self.plugins
             .entries

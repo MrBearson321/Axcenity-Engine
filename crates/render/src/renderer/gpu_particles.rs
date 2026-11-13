@@ -17,7 +17,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
 use super::gpu::{PARTICLE_SHADER, shader_module};
-use crate::draw_list::{DrawList, ParticleEmitter};
+use crate::draw_list::{CURVE_ENTRIES, DrawList, ParticleEmitter};
 
 /// The most particles one emitter keeps on the GPU.
 pub const MAX_GPU_PARTICLES: u32 = 1 << 18;
@@ -41,6 +41,13 @@ struct EmitterUniform {
     color_start: [f32; 4],
     color_end: [f32; 4],
     look: [f32; 4],
+    /// The spawn shape's code (`SpawnShape::code`), 1 for only its
+    /// surface, and two unused.
+    spawn_shape: [u32; 4],
+    /// Size, transparency and color over life while `look[3]` is 1
+    /// (`ParticleCurves`; colors' fourth number is the speed multiplier).
+    shape: [[f32; 4]; CURVE_ENTRIES],
+    colors: [[f32; 4]; CURVE_ENTRIES],
 }
 
 /// Bytes per particle: one `Particle`, one `Key` and one `SpriteOut` in
@@ -389,7 +396,21 @@ fn uniform_of(
             look.spin_degrees.to_radians(),
             look.brightness,
             look.light_emission,
-            0.0,
+            if look.curves.is_some() { 1.0 } else { 0.0 },
         ],
+        spawn_shape: [emitter.shape.code(), u32::from(emitter.shape.surface), 0, 0],
+        shape: look
+            .curves
+            .as_ref()
+            .map_or([[0.0; 4]; CURVE_ENTRIES], |curves| curves.shape),
+        colors: look
+            .curves
+            .as_ref()
+            .map_or([[0.0, 0.0, 0.0, 1.0]; CURVE_ENTRIES], |curves| {
+                std::array::from_fn(|entry| {
+                    let [r, g, b] = curves.color[entry];
+                    [r, g, b, curves.speed[entry]]
+                })
+            }),
     }
 }

@@ -109,6 +109,10 @@ impl EditorApp {
                 self.ask_default_sky();
                 return;
             }
+            Edit::UseTimeOfDaySky => {
+                self.use_time_of_day_sky();
+                return;
+            }
             Edit::OpenSourceFile => {
                 self.open_script_instance(id);
                 return;
@@ -1279,6 +1283,8 @@ impl EditorApp {
             self.output
                 .error(format!("Could not restore a project file: {err}"));
         }
+        // A script attached to an object, or put back in its service.
+        self.follow_service_script_files(&files);
         // Scripts inside objects' files (G2): their code as the file now is.
         for file in &files {
             if self.is_object_file(&file.path) {
@@ -1471,6 +1477,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::PickSkyImage
         | Edit::AskSkyImage(_)
         | Edit::UseDefaultSky
+        | Edit::UseTimeOfDaySky
         | Edit::PickClip
         | Edit::OpenClip
         | Edit::Animate

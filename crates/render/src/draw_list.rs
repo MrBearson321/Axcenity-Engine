@@ -276,7 +276,101 @@ pub struct ParticleEmitter {
     pub drag: f32,
     /// The air's speed: still, or the wind.
     pub air: Vec3,
+    /// Where in the spawn box they're born (roadmap R17.2).
+    pub shape: SpawnShape,
     pub look: ParticleLook,
+}
+
+/// The shape particles are born in, filling the spawn transform's 1×1×1
+/// cube (roadmap R17.2, `ParticleEmitter.Shape` and `ShapeStyle`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpawnShape {
+    pub kind: SpawnKind,
+    /// Only on the shape's surface, not anywhere inside it.
+    pub surface: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpawnKind {
+    /// The whole cube (the surface: its six faces, by their area).
+    #[default]
+    Box,
+    /// The ball inside the cube (its surface: the sphere).
+    Sphere,
+    /// The upright cylinder inside the cube, along its Y (its surface:
+    /// the round side).
+    Cylinder,
+    /// The flat disc across the cube's middle, facing its Y (its surface:
+    /// the rim).
+    Disc,
+}
+
+impl SpawnShape {
+    /// The number particles.wgsl's `born` reads for the kind.
+    pub fn code(self) -> u32 {
+        match self.kind {
+            SpawnKind::Box => 0,
+            SpawnKind::Sphere => 1,
+            SpawnKind::Cylinder => 2,
+            SpawnKind::Disc => 3,
+        }
+    }
+
+    /// Where a particle is born in the centered 1×1×1 cube, from three
+    /// random numbers from 0 up to 1, for a spawn transform that stretches
+    /// the cube by `scale`: the same sum as particles.wgsl's `born`.
+    pub fn point(self, random: [f32; 3], scale: Vec3) -> Vec3 {
+        let [a, b, c] = random;
+        let tau = std::f32::consts::TAU;
+        match self.kind {
+            SpawnKind::Box if self.surface => {
+                // A face, by its area, then a point on it.
+                let areas = [scale.y * scale.z, scale.x * scale.z, scale.x * scale.y];
+                let total: f32 = areas.iter().map(|area| area.abs()).sum();
+                if total.is_nan() || total <= 0.0 {
+                    return Vec3::new(a, b, c) - 0.5;
+                }
+                let mut pick = a * total;
+                let mut axis = 2;
+                for (index, area) in areas.iter().enumerate() {
+                    if pick < area.abs() {
+                        axis = index;
+                        break;
+                    }
+                    pick -= area.abs();
+                }
+                let side = if pick < areas[axis].abs() / 2.0 {
+                    -0.5
+                } else {
+                    0.5
+                };
+                let (u, v) = (b - 0.5, c - 0.5);
+                match axis {
+                    0 => Vec3::new(side, u, v),
+                    1 => Vec3::new(u, side, v),
+                    _ => Vec3::new(u, v, side),
+                }
+            }
+            SpawnKind::Box => Vec3::new(a, b, c) - 0.5,
+            SpawnKind::Sphere => {
+                let z = 1.0 - 2.0 * a;
+                let across = (1.0 - z * z).max(0.0).sqrt();
+                let around = b * tau;
+                let radius = if self.surface { 0.5 } else { 0.5 * c.cbrt() };
+                Vec3::new(across * around.cos(), z, across * around.sin()) * radius
+            }
+            SpawnKind::Cylinder | SpawnKind::Disc => {
+                let around = a * tau;
+                let radius = if self.surface { 0.5 } else { 0.5 * b.sqrt() };
+                let y = if self.kind == SpawnKind::Disc {
+                    0.0
+                } else {
+                    c - 0.5
+                };
+                Vec3::new(around.cos() * radius, y, around.sin() * radius)
+            }
+        }
+    }
 }
 
 /// How a [`ParticleEmitter`]'s particles look over their lives: each pair
@@ -299,6 +393,104 @@ pub struct ParticleLook {
     pub light_emission: f32,
     /// As [`Sprite::texture`].
     pub texture: Option<Arc<dyn TextureSource>>,
+    /// Size, transparency and color over life (roadmap R17.1), in place of
+    /// the pairs above; `None` blends the pairs.
+    pub curves: Option<Arc<ParticleCurves>>,
+}
+
+/// How many evenly spaced times over a particle's life [`ParticleCurves`]
+/// holds, from birth to death.
+pub const CURVE_ENTRIES: usize = 32;
+
+/// A particle's size, transparency and color over its life, sampled at
+/// [`CURVE_ENTRIES`] times from birth (0) to death (1), with straight
+/// lines between: the table particles.wgsl reads, and the CPU's particles
+/// too ([`sample`](Self::sample)), so the two look alike.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParticleCurves {
+    /// Size (studs), its envelope, transparency and its envelope. A
+    /// particle's value is the entry's plus its envelope times a spread
+    /// from −1 to 1 picked once for it.
+    pub shape: [[f32; 4]; CURVE_ENTRIES],
+    /// sRGB color.
+    pub color: [[f32; 3]; CURVE_ENTRIES],
+    /// What `Speed` is multiplied by as they move (roadmap R17.2's
+    /// `SpeedOverLife`); 1 when it isn't set.
+    pub speed: [f32; CURVE_ENTRIES],
+}
+
+impl ParticleCurves {
+    /// The table of `at(time)`'s shape and color at each entry's time.
+    pub fn from_fn(at: impl Fn(f32) -> ([f32; 4], [f32; 3])) -> Self {
+        let mut curves = Self {
+            shape: [[0.0; 4]; CURVE_ENTRIES],
+            color: [[0.0; 3]; CURVE_ENTRIES],
+            speed: [1.0; CURVE_ENTRIES],
+        };
+        for entry in 0..CURVE_ENTRIES {
+            let (shape, color) = at(entry as f32 / (CURVE_ENTRIES - 1) as f32);
+            curves.shape[entry] = shape;
+            curves.color[entry] = color;
+        }
+        curves
+    }
+
+    /// The size, transparency and sRGB color at `time` (0 to 1) for a
+    /// particle whose two spreads (from −1 to 1) are `spread`, as
+    /// particles.wgsl's `write` works them out.
+    pub fn sample(&self, time: f32, spread: [f32; 2]) -> (f32, f32, [f32; 3]) {
+        let x = if time.is_nan() {
+            0.0
+        } else {
+            time.clamp(0.0, 1.0)
+        } * (CURVE_ENTRIES - 1) as f32;
+        let index = (x.floor() as usize).min(CURVE_ENTRIES - 1);
+        let next = (index + 1).min(CURVE_ENTRIES - 1);
+        let along = x - index as f32;
+        let mix = |a: f32, b: f32| a + (b - a) * along;
+        let (a, b) = (self.shape[index], self.shape[next]);
+        let shape = [0, 1, 2, 3].map(|i| mix(a[i], b[i]));
+        let (a, b) = (self.color[index], self.color[next]);
+        let color = [0, 1, 2].map(|i| mix(a[i], b[i]));
+        (
+            (shape[0] + shape[1] * spread[0]).max(0.0),
+            (shape[2] + shape[3] * spread[1]).clamp(0.0, 1.0),
+            color,
+        )
+    }
+
+    /// The speed multiplier at `time` (0 to 1), as particles.wgsl's
+    /// `simulate` works it out.
+    pub fn speed_at(&self, time: f32) -> f32 {
+        curve_at(&self.speed, time)
+    }
+
+    /// A particle's two spreads, from −1 to 1, from a number that stays
+    /// the same over its life (`pcg`, as particles.wgsl's).
+    pub fn spreads(seed: u32) -> [f32; 2] {
+        let first = pcg(seed);
+        let second = pcg(first);
+        [first, second].map(|n| (n >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0)
+    }
+}
+
+/// `table`'s value at `time` (0 to 1), blending the two nearest entries.
+pub fn curve_at(table: &[f32; CURVE_ENTRIES], time: f32) -> f32 {
+    let x = if time.is_nan() {
+        0.0
+    } else {
+        time.clamp(0.0, 1.0)
+    } * (CURVE_ENTRIES - 1) as f32;
+    let index = (x.floor() as usize).min(CURVE_ENTRIES - 1);
+    let next = (index + 1).min(CURVE_ENTRIES - 1);
+    table[index] + (table[next] - table[index]) * (x - index as f32)
+}
+
+/// The PCG hash particles.wgsl uses for its random numbers.
+fn pcg(v: u32) -> u32 {
+    let state = v.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+    let word = ((state >> ((state >> 28) + 4)) ^ state).wrapping_mul(277_803_737);
+    (word >> 22) ^ word
 }
 
 impl Default for ParticleLook {
@@ -312,6 +504,7 @@ impl Default for ParticleLook {
             brightness: 1.0,
             light_emission: 0.0,
             texture: None,
+            curves: None,
         }
     }
 }
@@ -985,8 +1178,10 @@ pub struct Sky {
     /// Air that scatters the sun's and moon's light, drawn and lit in
     /// place of the colors above (but not of an image).
     pub atmosphere: Option<Atmosphere>,
-    /// How much of their light the colors above give: 1 by day, less at
-    /// night. Not applied to an image or an atmosphere.
+    /// How much of their light the colors above or an image give: 1 by
+    /// day, less at night, so a sky picture darkens as the sun sets too
+    /// (its colors stay the picture's). Not applied to an atmosphere, which
+    /// works out its own.
     pub daylight: f32,
     /// How bright the stars are, from 0 (by day) to 1. Drawn over the
     /// colors or an atmosphere, never over an image.

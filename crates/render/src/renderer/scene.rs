@@ -57,6 +57,7 @@ impl ScenePipeline {
         let (environment_view, sky_image_view) = environment.views();
         let probes = probes::Probes::new(&device, &queue);
         let light_probes = light_probes::LightProbes::new(&device);
+        let no_ray_shadows = ray_shadows::stand_in(&device);
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
@@ -66,6 +67,7 @@ impl ScenePipeline {
                 &tile_buffer,
                 &skinning.joints,
                 light_probes.buffer(),
+                &no_ray_shadows,
             ],
             [
                 &empty_shadow_view,
@@ -369,6 +371,9 @@ impl ScenePipeline {
             culling_bounds: Vec::new(),
             lods: LodStates::default(),
             ray_scene: None,
+            ray_shadows: None,
+            no_ray_shadows,
+            ray_ao: None,
             #[cfg(feature = "debug-views")]
             debug_views: None,
             texture_bytes,
@@ -626,9 +631,25 @@ impl ScenePipeline {
         // With TAA, the scene is drawn a fraction of a pixel to one side,
         // a different way each frame (renderer/temporal.rs).
         let view_proj = camera_view_projection(&list.camera, aspect);
+        // Upscaling TAA steps through more places, since each output pixel
+        // gets fewer of the scene's.
+        let taa_upscales = self
+            .frame_targets
+            .temporal
+            .as_ref()
+            .is_some_and(|temporal| temporal.upscales());
+        let jitter_phases = if taa_upscales {
+            temporal::jitter_phases(
+                self.frame_targets.size.0 as f32 / self.frame_targets.output.0.max(1) as f32,
+            )
+        } else {
+            temporal::JITTER_PHASES
+        };
+        let jitter = self.history.jitter(jitter_phases);
         let drawn_view_proj = match &self.frame_targets.temporal {
             Some(temporal) if temporal.has_taa() => {
-                self.history.jittered(view_proj, self.frame_targets.size)
+                self.history
+                    .jittered(view_proj, self.frame_targets.size, jitter_phases)
             }
             _ => view_proj,
         };
@@ -648,7 +669,25 @@ impl ScenePipeline {
         } else {
             0.0
         };
-        frame_uniform.night = [stars, f32::from(u8::from(sky.scattered)), 0.0, 0.0];
+        // A creator's sky picture dims at night as the colors do; an
+        // atmosphere's works out its own light.
+        let picture_light =
+            if sky.image.is_some() && !sky.scattered && list.sky.daylight.is_finite() {
+                list.sky.daylight.clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+        for coefficient in &mut frame_uniform.sky_light {
+            for channel in &mut coefficient[..3] {
+                *channel *= picture_light;
+            }
+        }
+        frame_uniform.night = [
+            stars,
+            f32::from(u8::from(sky.scattered)),
+            picture_light,
+            0.0,
+        ];
         // Volumetric fog needs the prepass's depth, which its setting keeps.
         let volumetric = fog::volumetric_drawn(&list.fog, &self.graphics)
             && self.frame_targets.occlusion.is_some();
@@ -719,6 +758,71 @@ impl ScenePipeline {
         // Far cascades of a heavy scene take turns being drawn: those not
         // drawn this frame keep what they last drew, and the matrix it was
         // drawn with goes in `frame_uniform`.
+        // Ray traced sun shadows, while drawn (renderer/ray_shadows.rs):
+        // their mask is bound in the frame's place 17.
+        let ray_shadow_uniform = match ray_shadows::RayShadowPlan::of(list, &self.graphics)
+            .filter(|_| self.frame_targets.occlusion.is_some())
+        {
+            None => {
+                if self.ray_shadows.take().is_some() {
+                    self.bind_frame();
+                }
+                None
+            }
+            Some(plan) => {
+                let size = self.frame_targets.size;
+                if !self
+                    .ray_shadows
+                    .as_ref()
+                    .is_some_and(|shadows| shadows.fits(size, plan.soft()))
+                {
+                    self.ray_shadows = Some(Box::new(ray_shadows::RayShadows::new(
+                        &self.device,
+                        (size, plan.soft()),
+                    )));
+                    self.bind_frame();
+                }
+                frame_uniform.ray_shadows = [1.0, size.0 as f32, plan.reach, 0.0];
+                // Under TAA the rays turn each frame, and TAA averages them.
+                let taa = self
+                    .frame_targets
+                    .temporal
+                    .as_ref()
+                    .is_some_and(|temporal| temporal.has_taa());
+                let turn = if taa { (self.frame % 64) as f32 } else { 0.0 };
+                Some(ray_shadows::ray_shadow_uniform(
+                    list,
+                    &plan,
+                    (
+                        drawn_view_proj.inverse(),
+                        glam::Mat4::from_cols_array_2d(&frame_uniform.view),
+                    ),
+                    size,
+                    turn,
+                ))
+            }
+        };
+        // Ray traced ambient occlusion, while drawn (renderer/ray_ao.rs).
+        let ray_ao_uniform =
+            if ray_ao::traced(&self.graphics) && self.frame_targets.occlusion.is_some() {
+                if self.ray_ao.is_none() {
+                    self.ray_ao = Some(Box::new(ray_ao::RayAmbientOcclusion::new(
+                        &self.device,
+                        &self.occlusion,
+                    )));
+                }
+                let taa = self
+                    .frame_targets
+                    .temporal
+                    .as_ref()
+                    .is_some_and(|temporal| temporal.has_taa());
+                let turn = if taa { (self.frame % 64) as f32 } else { 0.0 };
+                let (view, _) = lighting::camera_matrices(&list.camera, aspect);
+                Some(ray_ao::ray_ao_uniform(list, &self.graphics, view, turn))
+            } else {
+                self.ray_ao = None;
+                None
+            };
         let cascade_drawn = self.schedule_cascades(list, &mut frame_uniform);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
@@ -748,7 +852,11 @@ impl ScenePipeline {
                 bytemuck::cast_slice(&planned_lights.tiles),
             );
         }
-        let ambient_occlusion = self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off;
+        // Ambient occlusion is drawn screen-space, ray traced or both (the
+        // rays over screen-space's, fading into it toward their reach).
+        let screen_space_occlusion =
+            self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off;
+        let ambient_occlusion = screen_space_occlusion || ray_ao_uniform.is_some();
         if ambient_occlusion && self.frame_targets.occlusion.is_some() {
             let uniform = occlusion_uniform(list, aspect, self.graphics.ambient_occlusion);
             self.queue
@@ -857,8 +965,11 @@ impl ScenePipeline {
             self.temporal.prepare(
                 (&self.device, &self.queue),
                 &self.history,
-                (view_proj, drawn_view_proj),
-                self.frame_targets.size,
+                (view_proj, drawn_view_proj, jitter),
+                (
+                    self.frame_targets.size,
+                    taa_upscales.then_some(self.frame_targets.output),
+                ),
                 (blur, self.graphics.motion_blur),
                 &moved,
             );
@@ -1073,7 +1184,8 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        let traces_rays = self.traces_rays();
+        let traces_rays =
+            self.traces_rays(ray_shadow_uniform.is_some() || ray_ao_uniform.is_some());
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
             Some(timer) if self.time_gpu => timer.collect(&self.device),
@@ -1262,12 +1374,43 @@ impl ScenePipeline {
                 );
             }
             mark(&mut encoder, FramePass::AmbientOcclusion);
+            if screen_space_occlusion {
+                self.occlusion.draw_raw(&mut encoder, occlusion);
+            }
+            if let (Some(pass), Some(uniform), Some(rays)) =
+                (&self.ray_ao, &ray_ao_uniform, &self.ray_scene)
+            {
+                pass.draw(
+                    (&self.device, &self.queue),
+                    &mut encoder,
+                    (rays.tlas(), occlusion),
+                    uniform,
+                    screen_space_occlusion,
+                );
+            }
             if ambient_occlusion {
-                self.occlusion.draw(&mut encoder, occlusion);
+                self.occlusion.blur(&mut encoder, occlusion);
             }
         } else {
             mark(&mut encoder, FramePass::AmbientOcclusion);
         }
+        mark(&mut encoder, FramePass::RayTracedShadows);
+        let ray_shadows_drawn = if let (Some(shadows), Some(uniform), Some(rays), Some(prepass)) = (
+            &self.ray_shadows,
+            &ray_shadow_uniform,
+            &self.ray_scene,
+            &self.frame_targets.occlusion,
+        ) {
+            shadows.draw(
+                (&self.device, &self.queue),
+                &mut encoder,
+                (rays.tlas(), prepass),
+                uniform,
+            );
+            true
+        } else {
+            false
+        };
         mark(&mut encoder, FramePass::VolumetricFog);
         if let Some(fog) = &self.volumetric_fog {
             fog.scatter(&mut encoder);
@@ -1429,16 +1572,27 @@ impl ScenePipeline {
         }
         mark(&mut encoder, FramePass::PostProcessing);
 
-        // TAA, then motion blur, each copied over the scene.
-        if let Some(temporal) = &self.frame_targets.temporal {
-            self.temporal.draw_post(
-                &mut encoder,
-                (temporal, &self.history),
-                &self.frame_targets.hdr,
-            );
+        // TAA, then motion blur, each copied over the scene, then depth of
+        // field. While TAA upscales, it comes last: motion blur and depth of
+        // field are drawn on the scene first, and TAA reads the result.
+        let targets = &self.frame_targets;
+        let temporal_targets = targets.temporal.as_ref().map(|t| (t, &self.history));
+        if let Some(temporal) = temporal_targets
+            && !taa_upscales
+        {
+            self.temporal.draw_taa(&mut encoder, temporal, &targets.hdr);
         }
-        if let Some(target) = &self.frame_targets.depth_of_field {
+        if let Some(temporal) = temporal_targets {
+            self.temporal
+                .draw_motion_blur(&mut encoder, temporal, &targets.hdr);
+        }
+        if let Some(target) = &targets.depth_of_field {
             self.post.depth_of_field.draw(&mut encoder, target);
+        }
+        if let Some(temporal) = temporal_targets
+            && taa_upscales
+        {
+            self.temporal.draw_taa(&mut encoder, temporal, &targets.hdr);
         }
         self.post.draw(
             &mut encoder,
@@ -1550,6 +1704,7 @@ impl ScenePipeline {
                     shadows,
                     prepass,
                     prepass && ambient_occlusion,
+                    ray_shadows_drawn,
                     self.volumetric_fog.is_some(),
                     self.gpu_particles.is_some(),
                     true,
@@ -1696,13 +1851,20 @@ impl ScenePipeline {
             .map_or(empty, |map| &map.array);
         let prepass = self.frame_targets.occlusion.as_ref();
         let occlusion = prepass
-            .filter(|_| self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off)
+            .filter(|_| {
+                self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off
+                    || ray_ao::traced(&self.graphics)
+            })
             .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
         let prepass_depth = prepass
             .filter(|_| self.graphics.contact_shadows || self.decals)
             .map_or(&self.no_prepass_depth_view, |targets| &targets.depth_view);
         let (environment, sky_image) = self.environment.views();
         let probes = self.probes.view();
+        let ray_shadow_mask = self
+            .ray_shadows
+            .as_ref()
+            .map_or(&self.no_ray_shadows, |shadows| &shadows.mask);
         let bind = |layout, prepass_depth, occlusion| {
             create_frame_bind_group(
                 &self.device,
@@ -1713,6 +1875,7 @@ impl ScenePipeline {
                     &self.tile_buffer,
                     &self.skinning.joints,
                     self.light_probes.buffer(),
+                    ray_shadow_mask,
                 ],
                 [
                     sun,
@@ -1916,7 +2079,11 @@ impl ScenePipeline {
                 + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
                 + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum::<u64>()
-                + self.gpu_particles.as_ref().map_or(0, |p| p.bytes()),
+                + self.gpu_particles.as_ref().map_or(0, |p| p.bytes())
+                + self
+                    .ray_shadows
+                    .as_ref()
+                    .map_or(0, |shadows| shadows.bytes()),
         }
     }
 
@@ -2702,6 +2869,7 @@ fn frame_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
         storage_entry(3),
         storage_entry(4),
         storage_entry(16),
+        storage_entry(17),
         skinning::joints_entry(),
         wgpu::BindGroupLayoutEntry {
             binding: 6,
@@ -2809,8 +2977,10 @@ fn targets_used(
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
         graphics.ambient_occlusion != crate::AmbientOcclusion::Off
+            || ray_ao::traced(graphics)
             || graphics.contact_shadows
             || graphics.volumetric_fog
+            || graphics.ray_traced_shadows != crate::RayTracedShadows::Off
             || edges
             || depth_of_field
             || temporal.any(),

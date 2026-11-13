@@ -544,10 +544,14 @@ pub enum EnumType {
     NormalId,
     ModelStreamingMode,
     StreamingState,
+    RayTracedShadows,
+    ParticleEmitterShape,
+    ParticleEmitterShapeStyle,
+    RayTracedAmbientOcclusion,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 42] = [
+    pub const ALL: [EnumType; 46] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -590,6 +594,10 @@ impl EnumType {
         EnumType::NormalId,
         EnumType::ModelStreamingMode,
         EnumType::StreamingState,
+        EnumType::RayTracedShadows,
+        EnumType::ParticleEmitterShape,
+        EnumType::ParticleEmitterShapeStyle,
+        EnumType::RayTracedAmbientOcclusion,
     ];
 
     pub fn name(self) -> &'static str {
@@ -612,6 +620,10 @@ impl EnumType {
             EnumType::CloudQuality => "CloudQuality",
             EnumType::DepthOfField => "DepthOfField",
             EnumType::MotionBlur => "MotionBlur",
+            EnumType::RayTracedShadows => "RayTracedShadows",
+            EnumType::ParticleEmitterShape => "ParticleEmitterShape",
+            EnumType::ParticleEmitterShapeStyle => "ParticleEmitterShapeStyle",
+            EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::AssetFetchStatus => "AssetFetchStatus",
@@ -660,6 +672,10 @@ impl EnumType {
             EnumType::CloudQuality => user_settings::cloud_quality_names(),
             EnumType::DepthOfField => user_settings::depth_of_field_quality_names(),
             EnumType::MotionBlur => user_settings::motion_blur_quality_names(),
+            EnumType::RayTracedShadows => user_settings::ray_traced_shadows_names(),
+            EnumType::RayTracedAmbientOcclusion => {
+                user_settings::ray_traced_ambient_occlusion_names()
+            }
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             // How a file went, for `ContentProvider:PreloadAsync`'s callback.
@@ -697,6 +713,9 @@ impl EnumType {
             // (Phase 80).
             EnumType::ModelStreamingMode => axcenity_core::streaming::STREAMING_MODES.to_vec(),
             EnumType::StreamingState => vec!["StreamedIn", "StreamedOut"],
+            // Where a ParticleEmitter's particles are born (roadmap R17.2).
+            EnumType::ParticleEmitterShape => vec!["Box", "Sphere", "Cylinder", "Disc"],
+            EnumType::ParticleEmitterShapeStyle => vec!["Volume", "Surface"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -814,6 +833,8 @@ impl LuaEnumItem {
             | EnumType::CloudQuality
             | EnumType::DepthOfField
             | EnumType::MotionBlur
+            | EnumType::RayTracedShadows
+            | EnumType::RayTracedAmbientOcclusion
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::AssetFetchStatus
@@ -837,7 +858,9 @@ impl LuaEnumItem {
             | EnumType::EffectOperation
             | EnumType::NormalId
             | EnumType::ModelStreamingMode
-            | EnumType::StreamingState => None,
+            | EnumType::StreamingState
+            | EnumType::ParticleEmitterShape
+            | EnumType::ParticleEmitterShapeStyle => None,
         }
     }
 }
@@ -958,6 +981,13 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
             None => item.item.as_str().into_lua(lua),
         },
         Value::PhysicalProperties(p) => p.map(crate::physical::LuaPhysicalProperties).into_lua(lua),
+        // An unset (empty) sequence reads as nil.
+        Value::NumberSequence(sequence) => (!sequence.is_empty())
+            .then(|| crate::keypoints::LuaNumberSequence(sequence.clone()))
+            .into_lua(lua),
+        Value::ColorSequence(sequence) => (!sequence.is_empty())
+            .then(|| crate::keypoints::LuaColorSequence(sequence.clone()))
+            .into_lua(lua),
         // An ObjectValue pointing at a destroyed Instance holds nil.
         Value::Instance(id) => {
             let alive = id
@@ -1068,6 +1098,22 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
                 .ok()
                 .map(|p| Value::PhysicalProperties(Some(p.0.clamped())))
         }
+        (ValueKind::NumberSequence, mlua::Value::Nil) => {
+            Some(Value::NumberSequence(Default::default()))
+        }
+        (ValueKind::NumberSequence, _) => {
+            crate::keypoints::LuaNumberSequence::from_lua(value.clone(), lua)
+                .ok()
+                .map(|s| Value::NumberSequence(s.0))
+        }
+        (ValueKind::ColorSequence, mlua::Value::Nil) => {
+            Some(Value::ColorSequence(Default::default()))
+        }
+        (ValueKind::ColorSequence, _) => {
+            crate::keypoints::LuaColorSequence::from_lua(value.clone(), lua)
+                .ok()
+                .map(|s| Value::ColorSequence(s.0))
+        }
         (ValueKind::Instance, mlua::Value::Nil) => Some(Value::Instance(None)),
         (ValueKind::Instance, _) => LuaInstance::from_lua(value.clone(), lua)
             .ok()
@@ -1161,6 +1207,27 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
         if data.is::<crate::physical::LuaPhysicalProperties>() {
             return "PhysicalProperties".to_owned();
+        }
+        let sequences = [
+            (
+                data.is::<crate::keypoints::LuaNumberSequence>(),
+                "NumberSequence",
+            ),
+            (
+                data.is::<crate::keypoints::LuaNumberKeypoint>(),
+                "NumberSequenceKeypoint",
+            ),
+            (
+                data.is::<crate::keypoints::LuaColorSequence>(),
+                "ColorSequence",
+            ),
+            (
+                data.is::<crate::keypoints::LuaColorKeypoint>(),
+                "ColorSequenceKeypoint",
+            ),
+        ];
+        if let Some((_, name)) = sequences.into_iter().find(|(is, _)| *is) {
+            return name.to_owned();
         }
         if let Ok(item) = data.borrow::<LuaEnumItem>() {
             return item.enum_type.name().to_owned();

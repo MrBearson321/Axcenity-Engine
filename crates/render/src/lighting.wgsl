@@ -73,7 +73,9 @@ struct Frame {
     // the wind in studs a second (`DrawList::wind`), for swaying plants.
     clock: vec4<f32>,
     // x: how bright the stars are (0 by day), y: 1 when the sky image is an
-    // atmosphere's, so the sun or moon and the stars are drawn over it.
+    // atmosphere's, so the sun or moon and the stars are drawn over it, z:
+    // how much of its light a creator's sky image gives (dimmer at night;
+    // 1 otherwise), also scaling the environment maps made from it.
     night: vec4<f32>,
     // What fades into the distance (fog.wgsl).
     fog: Fog,
@@ -82,6 +84,9 @@ struct Frame {
     // x: how wet surfaces are, y: how much snow covers them, each from 0
     // to 1 (`weathered`).
     weather: vec4<f32>,
+    // x: 1 while ray traced sun shadows are drawn, y: the scene's width in
+    // pixels, z: how far they reach in studs (`ray_traced_sun`).
+    ray_shadows: vec4<f32>,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in
@@ -177,6 +182,10 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // the hemisphere and divided by pi, like `Frame.sky_light`. Probes run x
 // first, then y, then z. One blank probe while there are none.
 @group(0) @binding(16) var<storage, read> light_probes: array<vec4<f32>>;
+// Ray traced sun shadows (ray_shadows.wgsl), a u32 per scene pixel: the
+// surface's distance from the camera in the top 24 bits, how much sunlight
+// reaches it in the low 8. One blank entry while they're off.
+@group(0) @binding(17) var<storage, read> ray_shadow_mask: array<u32>;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -271,12 +280,51 @@ fn cascade_visibility(
     return vec2<f32>(lit / 16.0, edge);
 }
 
+// Ray traced sunlight at `pixel` (`frame.ray_shadows`), if the mask was
+// traced from this very surface: from 0 in shadow to 1 in the open, or -1
+// where it has nothing for it (see-through surfaces, the edge of something
+// in front, past the reach, or while ray traced shadows are off).
+fn ray_traced_sun(world_position: vec3<f32>, pixel: vec2<f32>) -> f32 {
+    if frame.ray_shadows.x == 0.0 {
+        return -1.0;
+    }
+    let at = vec2<u32>(pixel);
+    let index = at.y * u32(frame.ray_shadows.y) + at.x;
+    if index >= arrayLength(&ray_shadow_mask) {
+        return -1.0;
+    }
+    let packed = ray_shadow_mask[index];
+    let traced = bitcast<f32>(packed & 0xFFFFFF00u);
+    let here = distance(frame.camera_position.xyz, world_position);
+    if !(traced > 0.0) || abs(traced - here) > 0.02 * here + 0.05 {
+        return -1.0;
+    }
+    return f32(packed & 255u) / 255.0;
+}
+
 // How much sunlight reaches `world_position`: 1 in the open, 0 in shadow.
-// `normal` is the surface's own (unmapped) normal, used to push the point
+// Ray traced where `ray_traced_sun` has it, fading into the shadow maps
+// toward its reach; otherwise the shadow maps (`cascade_sun_visibility`).
+fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
+    let traced = ray_traced_sun(world_position, pixel);
+    if traced < 0.0 {
+        return cascade_sun_visibility(world_position, normal, pixel);
+    }
+    let reach = frame.ray_shadows.z;
+    let away = distance(frame.camera_position.xyz, world_position);
+    let blend = smoothstep(reach * 0.85, reach, away);
+    if blend <= 0.0 {
+        return traced;
+    }
+    return mix(traced, cascade_sun_visibility(world_position, normal, pixel), blend);
+}
+
+// How much sunlight reaches `world_position` by the shadow maps: 1 in the
+// open, 0 in shadow. `normal` is the surface's own (unmapped) normal, used to push the point
 // off the surface so it doesn't shadow itself, and `pixel` where it is on
 // screen. The nearest cascade covering the point is used, blended into the
 // next one near its edge so the change in sharpness doesn't show.
-fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
+fn cascade_sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
     if frame.shadow.x == 0.0 {
         return 1.0;
     }
@@ -526,7 +574,8 @@ fn sky_radiance(dir: vec3<f32>, spread: f32) -> vec3<f32> {
         // average).
         let across = max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.0625);
         let level = log2(max(spread * frame.environment.w / (2.0 * PI) / across, 1.0));
-        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb;
+        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb
+            * frame.night.z;
         if frame.night.y < 0.5 {
             return sky;
         }
@@ -617,7 +666,8 @@ fn sky_diffuse(n: vec3<f32>) -> vec3<f32> {
 fn sky_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     if frame.environment.x > 0.5 {
         let level = roughness * frame.environment.y;
-        return textureSampleLevel(environment_map, environment_sampler, dir, level).rgb;
+        return textureSampleLevel(environment_map, environment_sampler, dir, level).rgb
+            * frame.night.z;
     }
     return environment_specular(dir, roughness);
 }

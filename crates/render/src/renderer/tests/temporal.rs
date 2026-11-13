@@ -329,6 +329,19 @@ fn taa_smooths_edges_and_thin_geometry_over_frames() {
 
 #[test]
 fn taa_leaves_no_ghost_behind_a_moving_part() {
+    leaves_no_ghost(1.0, 2.0);
+}
+
+/// G9 stage 2: TAA that upscales (from half the size) leaves none either.
+/// Its edges are softer, so more round the part is left out.
+#[test]
+fn upscaling_taa_leaves_no_ghost_behind_a_moving_part() {
+    leaves_no_ghost(0.5, 4.0);
+}
+
+/// A part crossing a wall with TAA at `render_scale`, against the wall drawn
+/// without TAA at full size, away from `margin` pixels round the part.
+fn leaves_no_ghost(render_scale: f32, margin: f32) {
     let Some((device, queue)) = test_device() else {
         eprintln!("skipped: no graphics adapter on this machine");
         return;
@@ -342,8 +355,12 @@ fn taa_leaves_no_ghost_behind_a_moving_part() {
     let mut taa = renderer(
         &device,
         &queue,
-        &settings(AntiAliasing::Taa, MotionBlurQuality::Off),
+        &GraphicsSettings {
+            render_scale: Some(render_scale),
+            ..settings(AntiAliasing::Taa, MotionBlurQuality::Off)
+        },
     );
+
     let frames = 12;
     for frame in 0..frames {
         taa.render(&at(frame)).unwrap();
@@ -358,7 +375,7 @@ fn taa_leaves_no_ghost_behind_a_moving_part() {
     let theirs = draw(&mut off, &last);
     // Away from the part's edges (where the anti-aliasing differs), and
     // above all where it was in the frames before, TAA shows the wall.
-    let part = screen_box(&last, &[&last.items[1]], 2.0);
+    let part = screen_box(&last, &[&last.items[1]], margin);
     let trail = screen_box(&at(frames - 6), &[&at(frames - 6).items[1]], 0.0);
     assert!(trail[0] < part[0], "the part was to the left");
     let mut trail_pixels = 0;

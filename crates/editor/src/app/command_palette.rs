@@ -30,11 +30,13 @@ pub(super) enum Overlay {
     Constraints,
     Contacts,
     Bodies,
+    Streaming,
+    LightProbes,
     Culling,
 }
 
 impl Overlay {
-    pub(super) const ALL: [Overlay; 10] = [
+    pub(super) const ALL: [Overlay; 12] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -44,6 +46,8 @@ impl Overlay {
         Overlay::Constraints,
         Overlay::Contacts,
         Overlay::Bodies,
+        Overlay::Streaming,
+        Overlay::LightProbes,
         Overlay::Culling,
     ];
 
@@ -58,6 +62,8 @@ impl Overlay {
             Overlay::Constraints => "Constraints",
             Overlay::Contacts => "Contacts",
             Overlay::Bodies => "Bodies",
+            Overlay::Streaming => "Streaming",
+            Overlay::LightProbes => "Light Probes",
             Overlay::Culling => "Culling",
         }
     }
@@ -73,6 +79,8 @@ impl Overlay {
             Overlay::Constraints => &mut overlays.constraints,
             Overlay::Contacts => &mut overlays.contacts,
             Overlay::Bodies => &mut overlays.bodies,
+            Overlay::Streaming => &mut overlays.streaming,
+            Overlay::LightProbes => &mut overlays.light_probes,
             Overlay::Culling => &mut overlays.culling,
         }
     }
@@ -148,6 +156,8 @@ pub(super) enum Command {
     Import,
     /// `None`: for this OS.
     BuildGame(Option<ExportTarget>),
+    /// File ▸ Build Game's build profile, by name (R13).
+    BuildProfile(String),
     LoadingScreen(LoadingChoice),
     WaitForScript,
     /// File ▸ Build Game's Developer Console switch (Phase 71).
@@ -473,6 +483,17 @@ impl EditorApp {
             );
         }
         if let Some(open) = &self.project {
+            let profiles = axcenity_project::BuildProfiles::read(&open.folder).unwrap_or_default();
+            for name in profiles.names() {
+                add(
+                    Command::BuildProfile(name.clone()),
+                    &format!("Build Profile: {name}"),
+                    "File › Build Game",
+                    &[&name],
+                    None,
+                    Ok(()),
+                );
+            }
             let mut choices = vec![
                 (LoadingChoice::Splash, "Axcenity splash".to_owned()),
                 (LoadingChoice::Nothing, "None".to_owned()),
@@ -1115,6 +1136,7 @@ impl EditorApp {
             Command::Import => self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER),
             Command::BuildGame(None) => self.export_game_with_dialog(),
             Command::BuildGame(Some(target)) => self.export_game_for_with_dialog(target),
+            Command::BuildProfile(name) => self.pick_build_profile(&name),
             Command::LoadingScreen(choice) => {
                 let Some(project) = &self.project else {
                     return;

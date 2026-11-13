@@ -7,31 +7,48 @@
 //!
 //! A [`Plugin`] doesn't know about undo or the editor's panels. The host
 //! calls it (a button's click, a new selection, the mouse, a frame), then
-//! reads what it made ([`Plugin::toolbars`], [`Plugin::widgets`]) and asked
+//! reads what it made ([`Plugin::toolbars`], [`Plugin::widgets`],
+//! [`Plugin::take_drawings`]) and asked
 //! for ([`Plugin::take_requests`]), and its output.
 
 mod api;
+mod assets;
 pub mod bundle;
+mod draw;
 pub mod files;
 mod manifest;
+mod rows;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use axcenity_core::{InstanceId, RecordedChange, Vector3, World};
+use axcenity_core::{InstanceId, RecordedChange, Value, Vector3, World};
 use axcenity_script::{EditRuntime, OutputLine};
 use mlua::{IntoLuaMulti, MultiValue};
 
+pub use assets::{AssetAction, Importer, MAX_ASSET_HOOKS, MAX_IMPORT_BYTES, extension_of};
 pub use bundle::{
     Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
+};
+pub use draw::{
+    DEFAULT_COLOR, DEFAULT_HANDLE_SIZE, DEFAULT_THICKNESS, Drawing, Handle, MAX_DRAWINGS,
+    MAX_HANDLES, Shape,
 };
 pub use manifest::{
     ENTRY_FILE, Found, MANIFEST_FILE, Manifest, Origin, PLUGINS_FOLDER, Permission, find_plugins,
     plugin_files,
 };
+pub use rows::{MAX_ROWS, PropertyRow, RowKind};
 pub use serde_json::Value as Json;
 
 use api::{PluginState, SignalKey};
+
+/// The plugin API's version, `plugin.ApiVersion`: 1 was Phase 54's
+/// (toolbars, dock widgets, selection, undo, settings, files, the mouse);
+/// 2 added viewport drawing, handles, Properties rows, importers and
+/// Assets panel items (roadmap G10). Raise it when the API grows, and list
+/// what came in `docs/editor/plugins.md`; never take a name away.
+pub const PLUGIN_API_VERSION: u32 = 2;
 
 /// The luau-lsp definitions of the plugin API, to load after the engine's
 /// (`definitions/axcenity-plugin.d.luau`).
@@ -163,6 +180,10 @@ impl Plugin {
             mouse_active: false,
             modules: BTreeMap::new(),
             env: None,
+            drawings: Default::default(),
+            handles: Default::default(),
+            rows: Default::default(),
+            assets: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -205,6 +226,144 @@ impl Plugin {
         self.state()
             .map(|state| state.widgets.clone())
             .unwrap_or_default()
+    }
+
+    /// What it draws in the Scene View, when that changed since the last
+    /// call (drawings stay until the plugin removes them).
+    pub fn take_drawings(&self) -> Option<Vec<Drawing>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.drawings.changed)
+            .then(|| state.drawings.shapes.values().cloned().collect())
+    }
+
+    /// Its handles in the Scene View, when they changed since the last call.
+    pub fn take_handles(&self) -> Option<Vec<Handle>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.handles.changed)
+            .then(|| state.handles.handles.values().cloned().collect())
+    }
+
+    /// Its Properties rows, when they changed since the last call.
+    pub fn take_rows(&self) -> Option<Vec<PropertyRow>> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        std::mem::take(&mut state.rows.changed).then(|| state.rows.rows.values().cloned().collect())
+    }
+
+    /// The Properties button row numbered `row` was clicked for
+    /// `instance`: fires its `Activated(instance)`.
+    pub fn activate_row(&self, world: &mut World, row: u64, instance: InstanceId) {
+        if self.has_row(row) && world.contains(instance) {
+            let instance = axcenity_script::LuaInstance(instance);
+            self.fire(world, SignalKey::RowActivated(row), instance);
+        }
+    }
+
+    /// The attribute row numbered `row` was edited on `instance` (the
+    /// editor already set the attribute): fires its `Changed(instance,
+    /// value)`.
+    pub fn row_changed(&self, world: &mut World, row: u64, instance: InstanceId, value: &Value) {
+        if !self.has_row(row) || !world.contains(instance) {
+            return;
+        }
+        let lua = self.runtime.lua();
+        let Ok(value) = axcenity_script::system::value_to_lua(lua, value) else {
+            return;
+        };
+        let instance = axcenity_script::LuaInstance(instance);
+        self.fire(world, SignalKey::RowChanged(row), (instance, value));
+    }
+
+    /// Its importers and Assets panel actions, when they changed since the
+    /// last call.
+    pub fn take_asset_hooks(&self) -> Option<(Vec<Importer>, Vec<AssetAction>)> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        let hooks = &mut state.assets;
+        std::mem::take(&mut hooks.changed).then(|| {
+            (
+                hooks.importers.values().cloned().collect(),
+                hooks.actions.values().cloned().collect(),
+            )
+        })
+    }
+
+    /// The file `name` (its name only, no folders) with `contents` is
+    /// imported with the importer numbered `importer`: fires its
+    /// `Imported(name, contents)`. `false` when it has no such importer.
+    pub fn import_file(
+        &self,
+        world: &mut World,
+        importer: u64,
+        name: &str,
+        contents: &[u8],
+    ) -> bool {
+        let known = self
+            .state()
+            .is_some_and(|state| state.assets.importers.contains_key(&importer));
+        if !known {
+            return false;
+        }
+        let lua = self.runtime.lua();
+        let Ok(contents) = lua.create_string(contents) else {
+            return false;
+        };
+        self.fire(
+            world,
+            SignalKey::Imported(importer),
+            (name.to_owned(), contents),
+        );
+        true
+    }
+
+    /// Its asset action numbered `action` was picked for the project asset
+    /// at `path`: fires its `Activated(path)`.
+    pub fn asset_action(&self, world: &mut World, action: u64, path: &str) {
+        let known = self
+            .state()
+            .is_some_and(|state| state.assets.actions.contains_key(&action));
+        if known {
+            self.fire(world, SignalKey::AssetAction(action), path.to_owned());
+        }
+    }
+
+    /// The editor imported a file itself, now the project file at `path`:
+    /// fires `plugin.AssetImported(path)`.
+    pub fn asset_imported(&self, world: &mut World, path: &str) {
+        self.fire(world, SignalKey::AssetImported, path.to_owned());
+    }
+
+    fn has_row(&self, row: u64) -> bool {
+        self.state()
+            .is_some_and(|state| state.rows.rows.contains_key(&row))
+    }
+
+    /// The user dragged the handle numbered `id` to `position`: moves it
+    /// and fires its `Dragged(position)`, or its `DragEnded(position)` when
+    /// the button was let go (`ended`).
+    pub fn drag_handle(&self, world: &mut World, id: u64, position: Vector3, ended: bool) {
+        let moved = match api::state(self.runtime.lua()) {
+            Ok(mut state) => {
+                let handles = &mut state.handles;
+                match handles.handles.get_mut(&id) {
+                    Some(handle) => {
+                        handle.position = position;
+                        handles.changed = true;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            Err(_) => false,
+        };
+        if !moved {
+            return;
+        }
+        let at = axcenity_script::system::LuaVector3(position);
+        let key = if ended {
+            SignalKey::HandleDragEnded(id)
+        } else {
+            SignalKey::HandleDragged(id)
+        };
+        self.fire(world, key, at);
     }
 
     /// Whether it took the Scene View's left button (`plugin:Activate(true)`).

@@ -115,6 +115,13 @@ impl EditorApp {
             return;
         }
         let mut style_edit = None;
+        let mut row_action = None;
+        // Plugins only run while editing.
+        let plugin_rows = if editing {
+            self.plugins.property_rows()
+        } else {
+            Vec::new()
+        };
         // What this editor is dragging, for the others (C6).
         if !ui.input(|input| input.pointer.any_down()) {
             self.team_panel.editing_field = None;
@@ -124,7 +131,11 @@ impl EditorApp {
             if editing {
                 style_edit = style_panel::show(ui, world, selected, stylesheets);
             }
+            if let Some(instance) = selected.and_then(|id| world.get(id)) {
+                row_action = properties::plugin_sections(ui, instance, &plugin_rows, None);
+            }
         });
+        drop(plugin_rows);
         // Other panels may already be drawn this frame, so draw again to
         // show the change everywhere.
         if let (Some(id), Some(edit)) = (selected, edit) {
@@ -138,6 +149,10 @@ impl EditorApp {
         }
         if let (Some(id), Some(edit)) = (selected, style_edit) {
             self.apply_style(id, edit);
+            ui.ctx().request_repaint();
+        }
+        if let (Some(id), Some(action)) = (selected, row_action) {
+            self.plugin_row_action(id, action);
             ui.ctx().request_repaint();
         }
     }
@@ -154,6 +169,11 @@ impl EditorApp {
                 Some(Picking::Foliage(self.terrain.foliage_source.clone()))
             } else {
                 spline_models.map(|(_, models)| Picking::SplineModels(models))
+            };
+            self.asset_browser.plugin_actions = if self.playing() {
+                Vec::new()
+            } else {
+                self.plugins.asset_actions()
             };
             self.asset_browser
                 .show(ui, !self.playing(), can_save, picking.as_ref())
@@ -188,6 +208,11 @@ impl EditorApp {
             Some(BrowserAction::EditModel(path)) => self.open_in_model_studio(&path),
             Some(BrowserAction::FindReferences(path)) => self.find_asset_references(&path),
             Some(BrowserAction::View(path)) => self.view_asset(&path),
+            Some(BrowserAction::PluginAction {
+                plugin,
+                action,
+                path,
+            }) => self.plugin_asset_action(plugin, action, &path),
             Some(BrowserAction::RenameAsset { from, to }) => self.rename_asset(&from, &to),
             Some(BrowserAction::FindUnused(paths)) => self.find_unused_assets(&paths),
             Some(BrowserAction::SetImportPreset { path, preset }) => {
@@ -972,6 +997,11 @@ impl EditorApp {
         // The game's particles and streaming, which its frame moves on, are
         // drawn in the viewport while it shows Play; swapped back below.
         self.swap_play_effects();
+        let stale_light_probes = if self.overlays.light_probes {
+            self.stale_light_probe_volumes()
+        } else {
+            Vec::new()
+        };
         // The Sequencer's preview, outside Play (Phase 51): its own copy
         // of the world, posed and seen from its camera cut.
         let sequence = (!self.playing() && self.layout.is_open(Pane::Sequencer))
@@ -992,6 +1022,28 @@ impl EditorApp {
             .iter()
             .any(|entry| entry.running.is_some())
             .then(|| self.plugin_has_mouse());
+        // Plugins only run while editing, so their drawings go in Play.
+        let plugin_drawings: Vec<&axcenity_plugins::Drawing> = if self.playing() {
+            Vec::new()
+        } else {
+            self.plugins
+                .entries
+                .iter()
+                .filter(|entry| entry.running.is_some())
+                .flat_map(|entry| &entry.drawings)
+                .collect()
+        };
+        let plugin_handles: Vec<(usize, &axcenity_plugins::Handle)> = if self.playing() {
+            Vec::new()
+        } else {
+            self.plugins
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.running.is_some())
+                .flat_map(|(index, entry)| entry.handles.iter().map(move |h| (index, h)))
+                .collect()
+        };
         let mut console = self.dev_console_items();
         let emits = std::mem::take(&mut self.pending_emits);
         let debug_rays = self
@@ -1065,6 +1117,7 @@ impl EditorApp {
                             move_guide: self.move_guide,
                             grid_strength: self.grid_strength,
                             overlays: self.overlays,
+                            stale_light_probes: &stale_light_probes,
                             view_mode: self.view_mode,
                             playing: self.play.is_some(),
                             debug_rays: &debug_rays,
@@ -1088,6 +1141,8 @@ impl EditorApp {
                                 .map(|tool| tool.first.map(|first| first.point)),
                             spline_editing,
                             plugin_mouse,
+                            plugin_drawings,
+                            plugin_handles,
                             play_camera: match sequence.and_then(|p| p.camera) {
                                 Some(shot) => Some(crate::viewport::PlayCamera {
                                     shown: axcenity_script::CameraView {

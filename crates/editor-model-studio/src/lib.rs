@@ -22,8 +22,14 @@
 //!   view, with a checker drawn on the uvs in the view.
 //! - Paint mode (Phase 59; `paint.rs`): the active object's material maps
 //!   painted in layers, in the view or the UV editor, saved as PNGs.
-//! - Sculpting, retopology and baking were removed in Phase 90: creators
-//!   sculpt and bake in Blender and import the result.
+//! - Sculpt mode (Phase 60; `sculpt.rs`): brushes push the active
+//!   object's surface about, with a mask, symmetry, Voxel Remesh and
+//!   Subdivide; the view draws it in chunks, sending only touched ones to
+//!   the GPU again.
+//! - Baking (Phase 61, back in R15; `bake.rs`): a reference object (the
+//!   sculpt), Make Low Poly, and Bake (normal, occlusion, curvature and
+//!   base color maps onto the active object's uvs). Retopology by hand
+//!   stays out (Phase 90).
 //! - Rigging (Phase 62; `rig.rs`): Rig mode edits the armature (the
 //!   Humanoid template, bones added, extruded, parented, rolled and
 //!   mirrored) and skins objects to it; Weights mode paints the weights;
@@ -34,19 +40,23 @@
 //! editor's history (`app/model_studio.rs`). The 3D view, picking and the
 //! overlay are `view.rs`.
 
+pub mod bake;
 mod modal;
 mod modifiers;
 pub mod paint;
 mod proportional;
 pub mod rig;
+pub mod sculpt;
 mod tools;
 pub mod uv_editor;
 mod view;
 
+pub use bake::BakeState;
 pub use modal::{Modal, ModalKind};
 pub use paint::PaintState;
 pub use proportional::{Falloff, Pivot, Proportional};
 pub use rig::RigState;
+pub use sculpt::SculptState;
 pub use uv_editor::UvEditor;
 
 use std::collections::{BTreeSet, HashMap};
@@ -69,7 +79,7 @@ use axcenity_editor_tools::gizmo::{self, MoveAxes, Snap, Tool};
 use axcenity_editor_tools::preview;
 use axcenity_editor_tools::shortcuts::{self, Action};
 
-/// Object mode, Edit mode, Paint, Rig, Weights or Pose mode.
+/// Object mode, Edit mode, Paint, Sculpt, Rig, Weights or Pose mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -77,6 +87,8 @@ pub enum Mode {
     Edit,
     /// Texture painting on the active object (Phase 59).
     Paint,
+    /// Sculpting the active object (Phase 60).
+    Sculpt,
     /// Editing the model's armature and skinning objects to it (Phase 62).
     Armature,
     /// Painting the active object's weights to the active bone.
@@ -86,10 +98,11 @@ pub enum Mode {
 }
 
 /// What each of the toolbar's modes is for, in the switch's order.
-const MODE_TIPS: [&str; 4] = [
+const MODE_TIPS: [&str; 5] = [
     "Object: pick, move, turn and scale whole objects (Tab goes to Edit)",
     "Edit: change the active object's shape, its vertices, edges and faces (Tab)",
     "Paint: paint colour and surface maps onto the active object",
+    "Sculpt: push, pull and smooth the surface like clay",
     "Rig: give the model bones so it can be animated, paint how much each bone moves, and test a pose",
 ];
 
@@ -109,6 +122,8 @@ pub enum StudioAction {
     Save,
     /// Read this project image as the paint brush's image.
     BrushImage(String),
+    /// Bake the reference onto the active object and write the maps.
+    Bake,
 }
 
 /// Everything an undo step puts back.
@@ -158,6 +173,9 @@ pub struct StudioDoc {
     pub last_op: Option<LastOp>,
     /// The object and undo step a modifier change under way goes into.
     modifier_edit: Option<(usize, usize)>,
+    /// The high-poly object Make Low Poly copies and Bake bakes from
+    /// (Phase 61). Not an undo step.
+    pub reference: Option<usize>,
 }
 
 impl StudioDoc {
@@ -183,6 +201,7 @@ impl StudioDoc {
             saved: if saved { 1 } else { 0 },
             last_op: None,
             modifier_edit: None,
+            reference: None,
         }
     }
 
@@ -233,7 +252,12 @@ impl StudioDoc {
     pub fn run(&mut self, op: MeshOp) -> Result<(), String> {
         let targets: Vec<(usize, Selection)> = match self.mode {
             Mode::Edit => vec![(self.active, self.selection.clone())],
-            Mode::Object | Mode::Paint | Mode::Armature | Mode::Weights | Mode::Pose => self
+            Mode::Object
+            | Mode::Paint
+            | Mode::Sculpt
+            | Mode::Armature
+            | Mode::Weights
+            | Mode::Pose => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -378,7 +402,7 @@ impl StudioDoc {
     }
 
     /// Why `mode` can't be entered now, in words for the toolbar, or
-    /// `None` if it can. Edit, Paint and Weights mode need the
+    /// `None` if it can. Edit, Paint, Sculpt and Weights mode need the
     /// active object to have a mesh; Weights and Pose mode need bones.
     pub fn refuses(&self, mode: Mode) -> Option<&'static str> {
         let bones = self
@@ -388,7 +412,7 @@ impl StudioDoc {
             .is_some_and(|arm| !arm.bones.is_empty());
         match mode {
             Mode::Object | Mode::Armature => None,
-            Mode::Edit | Mode::Paint | Mode::Weights if self.mesh().is_none() => {
+            Mode::Edit | Mode::Paint | Mode::Sculpt | Mode::Weights if self.mesh().is_none() => {
                 Some("Pick an object with a mesh first (a group has none).")
             }
             Mode::Weights | Mode::Pose if !bones => {
@@ -459,7 +483,12 @@ impl StudioDoc {
                 .into_iter()
                 .filter(|(_, vertices)| !vertices.is_empty())
                 .collect(),
-            Mode::Object | Mode::Paint | Mode::Armature | Mode::Weights | Mode::Pose => self
+            Mode::Object
+            | Mode::Paint
+            | Mode::Sculpt
+            | Mode::Armature
+            | Mode::Weights
+            | Mode::Pose => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -706,6 +735,10 @@ pub struct ModelStudio {
     pub uv: UvEditor,
     /// Paint mode's brush, map, layer and strokes.
     pub paint: PaintState,
+    /// Sculpt mode's brush, the sculpt and its strokes.
+    pub sculpt: SculptState,
+    /// The reference, Make Low Poly and Bake (Phase 61, back in R15).
+    pub bake: BakeState,
     /// The active bone, the weight brush and the pose tested (Phase 62).
     pub rig: RigState,
     /// The project's images, for a paint brush's image.
@@ -740,6 +773,8 @@ impl Default for ModelStudio {
             moves: MoveSettings::default(),
             uv: UvEditor::default(),
             paint: PaintState::default(),
+            sculpt: SculptState::default(),
+            bake: BakeState::default(),
             rig: RigState::default(),
             images: Vec::new(),
             modal: None,
@@ -779,6 +814,7 @@ impl ModelStudio {
             || self.tools.busy()
             || self.uv.busy()
             || self.paint.busy()
+            || self.sculpt.busy()
             || self.rig.busy()
     }
 
@@ -797,6 +833,8 @@ impl ModelStudio {
         self.tools = tools::Tools::default();
         self.uv.forget();
         self.paint.forget();
+        self.sculpt.forget();
+        self.bake.forget();
         self.rig.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
@@ -852,10 +890,14 @@ impl ModelStudio {
                         ui.add_space(8.0);
                         match self.doc.as_ref().map(|d| d.mode) {
                             Some(Mode::Paint) => self.paint_panel(ui, editable, &mut actions),
+                            Some(Mode::Sculpt) => self.sculpt_panel(ui, editable),
                             Some(Mode::Armature | Mode::Weights | Mode::Pose) => {
                                 self.rig_panel(ui, editable)
                             }
-                            _ => self.modifier_panel(ui, editable),
+                            _ => {
+                                self.modifier_panel(ui, editable);
+                                self.bake_panel(ui, editable, &mut actions);
+                            }
                         }
                     });
             } else if self.uv.open && self.doc.as_ref().is_some_and(|doc| shows_uvs(doc.mode)) {
@@ -983,6 +1025,7 @@ impl ModelStudio {
                     (Mode::Object, Some(icons::CUBE), "Object"),
                     (Mode::Edit, Some(icons::POLYGON), "Edit"),
                     (Mode::Paint, Some(icons::PAINT_BRUSH), "Paint"),
+                    (Mode::Sculpt, Some(icons::HAND_GRABBING), "Sculpt"),
                     (Mode::Armature, Some(icons::BONE), "Rig"),
                 ],
                 &MODE_TIPS,
@@ -1281,6 +1324,7 @@ impl ModelStudio {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let mode = self.doc.as_ref().map(|doc| doc.mode);
         let painting = mode == Some(Mode::Paint);
+        let sculpting = mode == Some(Mode::Sculpt);
         let rigging = mode.is_some_and(rig::shows_bones);
         let context = view::Frame {
             rect,
@@ -1298,12 +1342,15 @@ impl ModelStudio {
                 .uv
                 .checker
                 .then_some(self.uv.channel)
-                .filter(|_| !painting),
+                .filter(|_| !painting && !sculpting),
+            sculpt: self.sculpt_items(),
         };
         if editable && response.contains_pointer() {
-            if painting || rigging {
+            if painting || sculpting || rigging {
                 if painting {
                     self.paint_keys(ui);
+                } else if sculpting {
+                    self.sculpt_keys(ui);
                 } else {
                     let at = ui
                         .input(|input| input.pointer.latest_pos())
@@ -1322,6 +1369,9 @@ impl ModelStudio {
         let mut extras = self.extras();
         if painting {
             extras.hint = self.paint.status.clone();
+        }
+        if sculpting {
+            extras.hint = self.sculpt.status.clone();
         }
         // Weights and Pose mode draw the model skinned.
         match self.rig_model_key() {
@@ -1346,9 +1396,11 @@ impl ModelStudio {
             }
             return;
         }
-        if painting {
-            if editable {
+        if painting || sculpting {
+            if editable && painting {
                 self.paint_in_view(ui, &response, &event.screen);
+            } else if editable {
+                self.sculpt_in_view(ui, &response, &event.screen);
             }
             return;
         }
@@ -1686,10 +1738,13 @@ fn save_name(doc: &StudioDoc) -> String {
     }
 }
 
-// The test modules' helpers (a cube, a chair, a rigged humanoid, strokes
-// and screens) are shared with the editor's own tests, behind
+// The test modules' helpers (a cube, a chair, a rigged humanoid, a sculpted
+// face, strokes and screens) are shared with the editor's own tests, behind
 // the `test-support` feature. Outside `cargo test` their `#[test]`s drop out,
 // so helpers only those use look unused.
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod bake_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code, unused_imports))]
 pub mod modifiers_tests;
@@ -1699,6 +1754,9 @@ pub mod paint_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code, unused_imports))]
 pub mod rig_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+pub mod sculpt_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code, unused_imports))]
 pub mod tests;

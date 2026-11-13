@@ -1,4 +1,6 @@
-//! Relaunching into a rebuilt editor without losing the session.
+//! Relaunching into a rebuilt editor, or restarting this one (Restart now,
+//! for a setting read only at start such as Hardware ray tracing), without
+//! losing the session.
 //!
 //! Before it closes, the editor writes a handoff folder in its data folder
 //! (never the project): the open project, its unsaved world and script
@@ -364,6 +366,23 @@ pub fn launch(source: &EngineSource, handoff: &Path) -> std::io::Result<()> {
         .arg(RESUME_FLAG)
         .arg(handoff)
         .spawn()?;
+    Ok(())
+}
+
+/// Starts this same editor program again, giving it the handoff in
+/// `handoff`: Restart now, for a setting that's read only when the editor
+/// starts (Hardware ray tracing opens the GPU with it).
+pub fn restart(handoff: &Path) -> std::io::Result<()> {
+    let program = std::env::current_exe()?;
+    let mut command = std::process::Command::new(&program);
+    if let Ok(folder) = std::env::current_dir() {
+        command.current_dir(folder);
+    }
+    // Restarting is for the settings to apply, so an override of the ray
+    // tracing setting left in the environment (`AXCENITY_RAY_TRACING=0`
+    // from a test) doesn't come along.
+    command.env_remove(axcenity_render::adapters::RAY_TRACING_VARIABLE);
+    command.arg(RESUME_FLAG).arg(handoff).spawn()?;
     Ok(())
 }
 
