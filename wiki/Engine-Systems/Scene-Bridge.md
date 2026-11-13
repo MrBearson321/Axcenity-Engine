@@ -46,7 +46,7 @@ flowchart LR
 
 ## Integration
 
-- **Particle collisions** (R17.4): `scene` can't depend on `physics`, so colliding particles land on what a host's `Surfaces` closure finds: `Particles::update_against` with `physics::surface_hits` (one Workspace walk per emitter for all its paths, at most `MAX_SURFACE_RAYS` a frame). Sub-emitters are child ParticleEmitters with `EmitOn`; both keep their emitters on the CPU, as GPU particles aren't read back (`particles/collisions.rs`).
+- **Particle collisions** (R17.4): `scene` can't depend on `physics`, so colliding particles land on what a host's `Surfaces` closure finds: `Particles::update_against` with `physics::surface_hits` (one Workspace walk per emitter for all its paths, at most `MAX_SURFACE_RAYS` a frame). Sub-emitters are child ParticleEmitters with `EmitOn`; both keep their emitters on the CPU, as GPU particles aren't read back (`particles/collisions.rs`). Effect presets (R17.5, `particles/presets.rs`) live here too, not in the editor, so the player's `bench_effects` times the same emitters the Effect tab adds; they read the place's Lighting and wind once, when made.
 - **Player**: the `draw.scene` and `draw.ui` steps. **Editor**: the viewport, each egui frame; Play's particles and streaming belong to the `Session` and the viewport borrows them (`Session::swap_effects`).
 - `model_slot` never waits once background loading is on: a model not loaded yet draws **nothing** (M5 follow-up), then appears.
 - `preload.rs` lists the asset files a world needs (`scene::asset_files`), which the player's preload and the editor's loading screen read ahead.

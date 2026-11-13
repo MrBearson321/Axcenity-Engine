@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Effect tab: presets that suit the place, an Environment module and the place's backdrop"
+details = "The Effect tab's Add menu adds a Fire, Smoke, Sparks, Magic, Explosion or Dripping effect to the selected part as one undo step. Each suits the place when added: glowing effects are brighter by day than at night, smoke takes on the sky's haze, and in a windy place drifting particles follow the wind. A new Environment module holds the emitter's wind setting and the place's wind, and the backdrop menu can show the place's own lighting and weather behind the effect."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

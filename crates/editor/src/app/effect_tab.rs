@@ -32,8 +32,46 @@ impl EditorApp {
                 self.save_effect(root);
             }
             Some(EffectAction::Save(_)) => self.output.error("Press Stop to save an effect."),
+            Some(EffectAction::AddPreset(target, preset)) if !playing => {
+                self.add_preset(target, preset);
+            }
+            Some(EffectAction::AddPreset(..)) => {
+                self.output.error("Press Stop to add a preset.");
+            }
             None => {}
         }
+    }
+
+    /// Adds `preset`'s emitter (suited to the place's Lighting and wind)
+    /// to `target`, as one undo step, and selects it (roadmap R17.5): into
+    /// a part or Attachment; beside a free emitter, where it stands; or
+    /// into a model or folder, at the middle of its effect. Returns it.
+    pub(super) fn add_preset(
+        &mut self,
+        target: InstanceId,
+        preset: axcenity_scene::EffectPreset,
+    ) -> Option<InstanceId> {
+        let instance = self.world.get(target)?;
+        let class = instance.class();
+        let (parent, position) = if class.is_base_part() || class == ClassName::Attachment {
+            (target, None)
+        } else if class == ClassName::ParticleEmitter {
+            let at = instance.property("Position").and_then(Value::as_vector3);
+            (instance.parent()?, at)
+        } else {
+            let middle = self.effect_editor.middle();
+            (target, Some(Vector3::new(middle.x, middle.y, middle.z)))
+        };
+        let spec = axcenity_scene::preset_emitter(&self.world, preset);
+        let id = axcenity_scene::create_preset(&mut self.world, &spec, position);
+        let name = tree::unique_name(&self.world, parent, spec.name);
+        self.world.set_name(id, &name).expect("just made");
+        let index = self.world.get(parent).map_or(0, |p| p.children().len());
+        if self.place(id, Some(Place { parent, index }), format!("Add {name}")) {
+            self.select_from_viewport(Some(id));
+            return Some(id);
+        }
+        None
     }
 
     /// Saves the effect at `root` as an effect asset (a prefab in
@@ -115,9 +153,74 @@ mod tests {
         };
         let output = crate::theme::run(&ctx, input(), |ui| app.effect_pane(ui, None));
         let shapes = format!("{:?}", output.shapes);
-        for text in ["Sparks", "Spawn", "Birth", "Over life", "Render", "Rate"] {
+        for text in [
+            "Sparks",
+            "Spawn",
+            "Birth",
+            "Over life",
+            "Render",
+            "Environment",
+            "Rate",
+            "GlobalWind",
+        ] {
             assert!(shapes.contains(text), "`{text}` is drawn");
         }
         assert_eq!(app.effect_editor.root(), Some(part));
+    }
+
+    /// R17.5: a preset goes into the selected part as one undo step,
+    /// suited to the place: at night its fire glows less bright.
+    #[test]
+    fn a_preset_goes_into_the_part_as_one_undo_step() {
+        let mut app = EditorApp::new(None);
+        let workspace = app.world.workspace();
+        let part = app.world.create(ClassName::Part).unwrap();
+        app.world.set_parent(part, Some(workspace)).unwrap();
+        app.history.seal();
+
+        let fire = app
+            .add_preset(part, axcenity_scene::EffectPreset::Fire)
+            .expect("added");
+        app.history.seal();
+        assert_eq!(app.world.get(fire).unwrap().parent(), Some(part));
+        assert_eq!(app.selected, Some(fire));
+        assert_eq!(effect_root(&app.world, Some(fire)), Some(part));
+        let brightness = |app: &EditorApp, id| {
+            app.world
+                .get(id)
+                .and_then(|i| i.property("Brightness"))
+                .and_then(Value::as_number)
+                .unwrap()
+        };
+        let by_day = brightness(&app, fire);
+
+        // A second one gets its own name; an explosion keeps its smoke.
+        let lighting = app.world.lighting();
+        app.world
+            .set_property(lighting, "ClockTime", Value::Number(0.0))
+            .unwrap();
+        app.history.seal();
+        let again = app
+            .add_preset(part, axcenity_scene::EffectPreset::Fire)
+            .expect("added");
+        app.history.seal();
+        assert_ne!(
+            app.world.get(again).unwrap().name(),
+            app.world.get(fire).unwrap().name()
+        );
+        assert!(brightness(&app, again) < by_day, "dimmer at night");
+        let boom = app
+            .add_preset(part, axcenity_scene::EffectPreset::Explosion)
+            .expect("added");
+        app.history.seal();
+        assert_eq!(app.world.get(boom).unwrap().children().len(), 1);
+
+        // One undo takes the explosion and its smoke out together (kept
+        // detached, so redo can put them back).
+        app.undo();
+        let parent = |app: &EditorApp, id| app.world.get(id).and_then(|i| i.parent());
+        assert_eq!(parent(&app, boom), None);
+        assert_eq!(parent(&app, again), Some(part));
+        assert_eq!(app.world.get(boom).unwrap().children().len(), 1);
     }
 }

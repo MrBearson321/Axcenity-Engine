@@ -591,6 +591,50 @@ fn particles(out: f32, gpu: bool) {
     println!("  particles out: {}\n", particles.count());
 }
 
+/// R17.5: each effect preset (`axcenity_scene::EffectPreset`) on a part,
+/// on the CPU and the GPU as the player draws it, so a preset that costs
+/// too much shows here. The Dripping preset's splashes need surfaces, which
+/// this bench leaves out (`Particles::update`), so they don't spawn.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_effects() {
+    for preset in axcenity_scene::EffectPreset::ALL {
+        let mut world = World::new();
+        add_floor(&mut world, 100.0);
+        let part = add_part(
+            &mut world,
+            ClassName::Part,
+            &[
+                ("Position", vector(0.0, 2.0, 0.0)),
+                ("Size", vector(2.0, 1.0, 2.0)),
+            ],
+        );
+        let spec = axcenity_scene::preset_emitter(&world, preset);
+        let effect = axcenity_scene::create_preset(&mut world, &spec, None);
+        world.set_parent(effect, Some(part)).unwrap();
+        let assets = Assets::default();
+        let mut particles = axcenity_scene::Particles::new();
+        particles.set_gpu(true);
+        // Filled before measuring, as the bench's warm-up won't be long
+        // enough for a slow, long-lived smoke.
+        for _ in 0..300 {
+            particles.update(&world, 1.0 / 60.0);
+        }
+        let camera = camera(Vec3::new(0.0, 6.0, 16.0), Vec3::new(0.0, 4.0, 0.0));
+        run(&format!("bench_effects: {}", preset.name()), |steps| {
+            steps.time("Particles::update", || particles.update(&world, 1.0 / 60.0));
+            let mut list = steps.time("build_draw_list", || {
+                axcenity_scene::build_draw_list(&world, &assets, camera)
+            });
+            steps.time("Particles::draw", || {
+                particles.draw(&mut list, &world, &assets)
+            });
+            list
+        });
+        println!("  particles out: {}\n", particles.count());
+    }
+}
+
 /// Phase 75: 500 bullet holes spawned by `workspace:SpawnDecal` on the
 /// graphics reference scene (hello-graphics), all kept (its cap raised),
 /// against the same view without them. The holes must stay within a 60

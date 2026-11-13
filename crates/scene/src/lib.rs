@@ -57,8 +57,9 @@ pub use light_probes::{LightProbePoints, light_bake_fingerprint, light_probe_poi
 pub use material::part_material_file;
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
 pub use particles::{
-    GPU_PARTICLE_THRESHOLD, MAX_PER_EMITTER, MAX_SURFACE_RAYS, Particles, SurfaceHit, Surfaces,
-    built_in as built_in_particle,
+    EffectPreset, GPU_PARTICLE_THRESHOLD, MAX_PER_EMITTER, MAX_SURFACE_RAYS, Particles,
+    PresetEmitter, SurfaceHit, Surfaces, built_in as built_in_particle, create_preset,
+    preset_emitter,
 };
 pub use pick::{
     CameraView, Hit, Occluders, Ray, part_box_edges, part_half_extent, part_hit, pick, pick_hit,
