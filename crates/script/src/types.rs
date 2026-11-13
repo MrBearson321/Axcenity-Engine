@@ -548,12 +548,14 @@ pub enum EnumType {
     ParticleEmitterShape,
     ParticleEmitterShapeStyle,
     ParticleEmitterShapeInOut,
+    ParticleFlipbookLayout,
+    ParticleFlipbookMode,
     RayTracedAmbientOcclusion,
     RayTracedGlobalIllumination,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 48] = [
+    pub const ALL: [EnumType; 50] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -600,6 +602,8 @@ impl EnumType {
         EnumType::ParticleEmitterShape,
         EnumType::ParticleEmitterShapeStyle,
         EnumType::ParticleEmitterShapeInOut,
+        EnumType::ParticleFlipbookLayout,
+        EnumType::ParticleFlipbookMode,
         EnumType::RayTracedAmbientOcclusion,
         EnumType::RayTracedGlobalIllumination,
     ];
@@ -628,6 +632,8 @@ impl EnumType {
             EnumType::ParticleEmitterShape => "ParticleEmitterShape",
             EnumType::ParticleEmitterShapeStyle => "ParticleEmitterShapeStyle",
             EnumType::ParticleEmitterShapeInOut => "ParticleEmitterShapeInOut",
+            EnumType::ParticleFlipbookLayout => "ParticleFlipbookLayout",
+            EnumType::ParticleFlipbookMode => "ParticleFlipbookMode",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::RayTracedGlobalIllumination => "RayTracedGlobalIllumination",
             EnumType::UserInputType => "UserInputType",
@@ -727,6 +733,9 @@ impl EnumType {
             EnumType::ParticleEmitterShapeStyle => vec!["Volume", "Surface"],
             // Which way they head from it (roadmap R17.2b).
             EnumType::ParticleEmitterShapeInOut => vec!["Outward", "Inward", "InAndOut"],
+            // A particle texture's frames (roadmap R17.2c).
+            EnumType::ParticleFlipbookLayout => vec!["None", "Grid2x2", "Grid4x4", "Grid8x8"],
+            EnumType::ParticleFlipbookMode => vec!["Loop", "OneShot", "PingPong", "Random"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -873,7 +882,9 @@ impl LuaEnumItem {
             | EnumType::StreamingState
             | EnumType::ParticleEmitterShape
             | EnumType::ParticleEmitterShapeStyle
-            | EnumType::ParticleEmitterShapeInOut => None,
+            | EnumType::ParticleEmitterShapeInOut
+            | EnumType::ParticleFlipbookLayout
+            | EnumType::ParticleFlipbookMode => None,
         }
     }
 }

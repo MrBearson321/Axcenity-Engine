@@ -282,6 +282,18 @@ The choices of `Enum.ParticleEmitterShapeInOut`.
 
 Items: `Outward`, `Inward`, `InAndOut`
 
+## Enum.ParticleFlipbookLayout
+
+The choices of `Enum.ParticleFlipbookLayout`.
+
+Items: `None`, `Grid2x2`, `Grid4x4`, `Grid8x8`
+
+## Enum.ParticleFlipbookMode
+
+The choices of `Enum.ParticleFlipbookMode`.
+
+Items: `Loop`, `OneShot`, `PingPong`, `Random`
+
 ## Enum.RayTracedAmbientOcclusion
 
 The choices of `Enum.RayTracedAmbientOcclusion`.

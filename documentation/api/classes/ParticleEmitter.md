@@ -246,6 +246,38 @@ ParticleEmitter.RotSpeed: number
 
 How fast particles spin, in degrees a second.
 
+#### FlipbookLayout
+
+```luau
+ParticleEmitter.FlipbookLayout: EnumParticleFlipbookLayout | "None" | "Grid2x2" | "Grid4x4" | "Grid8x8"
+```
+
+Cuts the Texture into a grid of frames that each particle shows one at a time, read left to right, then top to bottom: `Enum.ParticleFlipbookLayout.Grid2x2`, `Grid4x4` or `Grid8x8` (4, 16 or 64 frames). `None` (the default) shows the whole Texture. The built-in ParticleType pictures have no frames, so it needs a Texture.
+
+#### FlipbookMode
+
+```luau
+ParticleEmitter.FlipbookMode: EnumParticleFlipbookMode | "Loop" | "OneShot" | "PingPong" | "Random"
+```
+
+Which frame a particle shows as it ages: `Enum.ParticleFlipbookMode.Loop` (the default: in order at FlipbookFramerate, then from the first again), `OneShot` (every frame once over its life, whatever the frame rate), `PingPong` (in order, then back) or `Random` (a frame at random, again at the frame rate).
+
+#### FlipbookFramerate
+
+```luau
+ParticleEmitter.FlipbookFramerate: number
+```
+
+How many flipbook frames a second each particle moves on (default 1). OneShot ignores it.
+
+#### FlipbookStartRandom
+
+```luau
+ParticleEmitter.FlipbookStartRandom: boolean
+```
+
+When true, each particle starts on a frame of its own instead of the first (Loop and PingPong), so a puff of smoke doesn't animate in step.
+
 #### LightEmission
 
 ```luau

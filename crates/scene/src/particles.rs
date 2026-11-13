@@ -31,8 +31,9 @@ use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    CURVE_ENTRIES, DrawList, MAX_GPU_PARTICLES, ParticleCurves, ParticleEmitter, ParticleLook,
-    ShapeInOut, SpawnKind, SpawnShape, Sprite, TextureSource, curve_at,
+    CURVE_ENTRIES, DrawList, Flipbook, FlipbookFrame, FlipbookMode, MAX_GPU_PARTICLES,
+    ParticleCurves, ParticleEmitter, ParticleLook, ShapeInOut, SpawnKind, SpawnShape, Sprite,
+    TextureSource, curve_at,
 };
 
 use crate::draw_list::image_texture;
@@ -264,6 +265,41 @@ impl Settings {
 
 /// An emitter's `Shape` and `ShapeStyle` (roadmap R17.2): a Box filled by
 /// default, as before they existed.
+/// An emitter's flipbook (roadmap R17.2c), or `None` while its
+/// FlipbookLayout is None.
+fn flipbook(instance: &Instance) -> Option<Flipbook> {
+    let item = |name| match instance.property(name) {
+        Some(Value::EnumItem(item)) => item.item.clone(),
+        _ => String::new(),
+    };
+    let grid = match item("FlipbookLayout").as_str() {
+        "Grid2x2" => 2,
+        "Grid4x4" => 4,
+        "Grid8x8" => 8,
+        _ => return None,
+    };
+    let mode = match item("FlipbookMode").as_str() {
+        "OneShot" => FlipbookMode::OneShot,
+        "PingPong" => FlipbookMode::PingPong,
+        "Random" => FlipbookMode::Random,
+        _ => FlipbookMode::Loop,
+    };
+    let framerate = instance
+        .property("FlipbookFramerate")
+        .and_then(Value::as_number)
+        .map_or(1.0, |n| n as f32);
+    let start_random = instance
+        .property("FlipbookStartRandom")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Some(Flipbook {
+        grid,
+        mode,
+        framerate,
+        start_random,
+    })
+}
+
 fn spawn_shape(instance: &Instance) -> SpawnShape {
     let item = |name| match instance.property(name) {
         Some(Value::EnumItem(item)) => item.item.clone(),
@@ -557,6 +593,7 @@ impl Particles {
                     light_emission: look.light_emission,
                     texture: look.texture,
                     curves: look.curves,
+                    flipbook: look.flipbook,
                 },
                 ..gpu.draw.clone()
             });
@@ -599,6 +636,12 @@ impl Particles {
                     brightness: look.brightness,
                     light_emission: look.light_emission,
                     texture: look.texture.clone(),
+                    // The same frame as on the GPU, from the same kind of
+                    // seed (its life; the GPU mixes in its slot).
+                    frame: look.flipbook.map(|book| FlipbookFrame {
+                        grid: book.grid,
+                        frame: book.frame(particle.age, particle.life, particle.life.to_bits()),
+                    }),
                 });
             }
         }
@@ -735,6 +778,8 @@ struct Look {
     texture: Option<Arc<dyn TextureSource>>,
     /// While any of the OverLife sequences is set (roadmap R17.1).
     curves: Option<Arc<ParticleCurves>>,
+    /// While FlipbookLayout cuts a Texture into frames (roadmap R17.2c).
+    flipbook: Option<Flipbook>,
 }
 
 impl Look {
@@ -757,16 +802,16 @@ impl Look {
             .unwrap_or_default();
         // A texture that can't be loaded is reported once by `Assets`, and
         // the built-in picture shows instead.
-        let texture = assets
-            .texture(path)
-            .map(|image| image_texture(&image))
-            .or_else(|| {
-                let kind = instance
-                    .property("ParticleType")
-                    .and_then(Value::as_particle_type)
-                    .unwrap_or(ParticleType::Circle);
-                Some(built_in(kind))
-            });
+        let loaded = assets.texture(path).map(|image| image_texture(&image));
+        // Only a Texture has frames: the built-in pictures are whole.
+        let flipbook = loaded.as_ref().and_then(|_| flipbook(instance));
+        let texture = loaded.or_else(|| {
+            let kind = instance
+                .property("ParticleType")
+                .and_then(Value::as_particle_type)
+                .unwrap_or(ParticleType::Circle);
+            Some(built_in(kind))
+        });
         let size = (number("Size", 1.0), number("SizeEnd", 1.0));
         let colors = (color("Color"), color("ColorEnd"));
         let transparency = (number("Transparency", 0.0), number("TransparencyEnd", 1.0));
@@ -781,6 +826,7 @@ impl Look {
             light_emission: number("LightEmission", 0.0).clamp(0.0, 1.0),
             brightness: number("Brightness", 1.0).max(0.0),
             texture,
+            flipbook,
         }
     }
 }
@@ -1094,6 +1140,82 @@ mod tests {
     /// R17.1: set, the OverLife sequences shape particles in place of the
     /// start and end values; an envelope spreads particles apart, each
     /// keeping its own place in it; cleared, the pairs come back.
+    /// R17.2c: with FlipbookLayout set and a Texture, each sprite shows a
+    /// frame for its age (here OneShot: a quarter of its life each); the
+    /// built-in pictures and None show the whole picture.
+    #[test]
+    fn particles_show_their_flipbook_frame_of_a_texture() {
+        const IMAGE: &str = "assets/textures/flip.png";
+        let folder = std::env::temp_dir().join(format!("axcenity-flipbook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/textures")).unwrap();
+        image::RgbaImage::new(4, 4)
+            .save(folder.join(IMAGE))
+            .unwrap();
+        let assets = Assets::new(&folder);
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let set = |world: &mut World, name: &str, value: Value| {
+            world.set_property(emitter, name, value).unwrap();
+        };
+        let item = |enum_name: &str, item: &str| {
+            Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: enum_name.to_owned(),
+                item: item.to_owned(),
+            })
+        };
+        set(&mut world, "Lifetime", Value::Number(1.0));
+        set(
+            &mut world,
+            "FlipbookLayout",
+            item("ParticleFlipbookLayout", "Grid2x2"),
+        );
+        set(
+            &mut world,
+            "FlipbookMode",
+            item("ParticleFlipbookMode", "OneShot"),
+        );
+        let mut particles = Particles::new();
+        particles.emit(&world, emitter, 20);
+        let frames = |particles: &Particles, world: &World| -> Vec<Option<FlipbookFrame>> {
+            particles
+                .sprites(world, &assets)
+                .iter()
+                .map(|sprite| sprite.frame)
+                .collect()
+        };
+        // Without a Texture, the built-in picture is whole.
+        assert!(frames(&particles, &world).iter().all(Option::is_none));
+        set(&mut world, "Texture", Value::String(IMAGE.into()));
+        let born = frames(&particles, &world);
+        assert!(
+            born.iter()
+                .all(|frame| *frame == Some(FlipbookFrame { grid: 2, frame: 0 })),
+            "{born:?}"
+        );
+        // Lives are 0.8 to 1.2 seconds: at 0.5 s, 42% to 63% of the way,
+        // the second or third frame.
+        particles.update(&world, 0.25);
+        particles.update(&world, 0.25);
+        let later = frames(&particles, &world);
+        assert!(
+            later.iter().all(|frame| matches!(
+                frame,
+                Some(FlipbookFrame {
+                    grid: 2,
+                    frame: 1 | 2
+                })
+            )),
+            "{later:?}"
+        );
+        set(
+            &mut world,
+            "FlipbookLayout",
+            item("ParticleFlipbookLayout", "None"),
+        );
+        assert!(frames(&particles, &world).iter().all(Option::is_none));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     #[test]
     fn particles_follow_their_curves_over_life_and_the_pairs_when_unset() {
         use axcenity_core::{ColorSequence, NumberKeypoint, NumberSequence};
