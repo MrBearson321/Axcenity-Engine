@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "editor"
+title = "Ray tracing says when AXCENITY_RAY_TRACING=0 keeps it off"
+details = "When the editor was started with AXCENITY_RAY_TRACING=0 (for example left set in a PowerShell window after a test), ray tracing stayed off however often it restarted, and the badge only said to restart. The badge and Settings > Graphics now name the variable, and Restart now starts the editor without it."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

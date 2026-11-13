@@ -169,6 +169,7 @@ impl EditorApp {
             return;
         }
         let mut open = true;
+        let mut restart = false;
         let mut appearance = self.appearance.clone();
         widgets::tool_window(icons::GEAR_SIX, "Settings")
             .id("settings window")
@@ -217,7 +218,7 @@ impl EditorApp {
                                 SettingsPage::Viewport => self.viewport_page(ui),
                                 SettingsPage::Graphics => {
                                     let capabilities = self.capabilities.unwrap_or_default();
-                                    graphics_page(ui, &mut self.graphics, &capabilities);
+                                    restart |= graphics_page(ui, &mut self.graphics, &capabilities);
                                 }
                                 SettingsPage::Shortcuts => shortcuts_page(ui),
                                 SettingsPage::Accessibility => {
@@ -235,6 +236,9 @@ impl EditorApp {
         self.set_appearance(ctx, appearance);
         if !open {
             self.settings.open = false;
+        }
+        if restart {
+            self.restart_editor();
         }
     }
 
@@ -496,6 +500,15 @@ impl EditorApp {
             )
             .on_hover_text("What streams around the camera, with Workspace streaming on.");
         found(ui, &row, "Show streaming");
+        let row = ui
+            .checkbox(
+                &mut self.overlays.light_probes,
+                theme::with_icon(icons::LIGHTBULB, "Show light probes"),
+            )
+            .on_hover_text(
+                "Each light probe volume's probes, filled with their baked light, and which bakes are missing or out of date.",
+            );
+        found(ui, &row, "Show light probes");
         let row = ui
             .checkbox(
                 &mut self.overlays.culling,

@@ -373,12 +373,21 @@ fn branding_is_kept_in_the_manifest_used_by_branding_paths_and_previewed() {
 
 #[test]
 fn the_ray_tracing_section_says_what_a_restart_will_do() {
-    use super::graphics::ray_tracing_status;
+    use super::graphics::{needs_restart, ray_tracing_status};
     assert!(ray_tracing_status(false, false, true).contains("can't ray trace"));
     assert!(ray_tracing_status(false, true, false).contains("Turn on Hardware ray tracing"));
     assert!(ray_tracing_status(false, true, true).contains("turns on when the editor restarts"));
     assert!(ray_tracing_status(true, true, false).contains("turns off"));
     assert!(ray_tracing_status(true, true, true).contains("is on"));
+    // Restart now shows only when a restart changes what the GPU was opened with.
+    assert!(needs_restart(false, true, true));
+    assert!(needs_restart(true, true, false));
+    assert!(
+        !needs_restart(false, false, true),
+        "a GPU that can't, can't"
+    );
+    assert!(!needs_restart(true, true, true));
+    assert!(!needs_restart(false, true, false));
 }
 
 #[test]

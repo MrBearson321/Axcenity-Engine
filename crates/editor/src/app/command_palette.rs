@@ -31,11 +31,12 @@ pub(super) enum Overlay {
     Contacts,
     Bodies,
     Streaming,
+    LightProbes,
     Culling,
 }
 
 impl Overlay {
-    pub(super) const ALL: [Overlay; 11] = [
+    pub(super) const ALL: [Overlay; 12] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -46,6 +47,7 @@ impl Overlay {
         Overlay::Contacts,
         Overlay::Bodies,
         Overlay::Streaming,
+        Overlay::LightProbes,
         Overlay::Culling,
     ];
 
@@ -61,6 +63,7 @@ impl Overlay {
             Overlay::Contacts => "Contacts",
             Overlay::Bodies => "Bodies",
             Overlay::Streaming => "Streaming",
+            Overlay::LightProbes => "Light Probes",
             Overlay::Culling => "Culling",
         }
     }
@@ -77,6 +80,7 @@ impl Overlay {
             Overlay::Contacts => &mut overlays.contacts,
             Overlay::Bodies => &mut overlays.bodies,
             Overlay::Streaming => &mut overlays.streaming,
+            Overlay::LightProbes => &mut overlays.light_probes,
             Overlay::Culling => &mut overlays.culling,
         }
     }

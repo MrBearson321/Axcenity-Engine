@@ -22,15 +22,16 @@ pub use atmosphere::Atmosphere;
 pub use axcenity_render_types::Camera;
 pub use decal::{Decal, DecalRole, decal_quad};
 pub use draw_list::{
-    AmbientLight, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone, DepthOfField,
-    DrawItem, DrawList, Edges, FilmGrain, Fog, GridPlane, GridTint, ItemChunk, LensEffects, Light,
-    LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline,
-    ParticleEmitter, ParticleLook, PointShadows, PostProcessing, ProbeImage, RectArea,
-    ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows,
-    Sprite, Sun, Sway, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign,
-    TextShadow, TextSpan, TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip,
-    UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Vignette, Weather,
-    is_turned, turn_point, turned_bounds,
+    AmbientLight, CURVE_ENTRIES, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
+    DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Fog, GridPlane, GridTint, ItemChunk,
+    LensEffects, Light, LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource,
+    NormalMap, Outline, ParticleCurves, ParticleEmitter, ParticleLook, PointShadows,
+    PostProcessing, ProbeImage, RectArea, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows,
+    Shape, Skin, Sky, SkyImage, SpawnKind, SpawnShape, SpotShadows, Sprite, Sun, Sway,
+    TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan,
+    TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem, UiImage,
+    UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Vignette, Weather, curve_at, is_turned,
+    turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{

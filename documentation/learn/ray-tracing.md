@@ -12,7 +12,7 @@ Ray tracing follows real rays of light through the world. It gives exact shadows
 
 1. Open **Settings > Graphics** and scroll to **Ray tracing**.
 2. Click **Use the ray traced look**. This one click turns on Hardware ray tracing, ray traced shadows and ambient occlusion at Medium, and what they look best with: shadows and reflections at High or above, and TAA, which smooths the rays. Your other settings stay as they are.
-3. **Restart the editor** the first time. The graphics card is set up for ray tracing when the editor starts. Start the same editor you've been using: an old Desktop shortcut can open an older installed copy that can't ray trace.
+3. Click **Restart now**, there or on the Scene view's badge. The graphics card is set up for ray tracing when the editor starts, so it's needed the first time. Your project opens again as it was, unsaved changes to the world and scripts included (save Event Graphs, behavior trees, data tables and materials first). If it still asks for a restart, an old Desktop shortcut may be opening an older installed copy that can't ray trace: start this version instead.
 
 **Ray traced effects off** turns the effects off again without a restart.
 
@@ -24,7 +24,8 @@ While Hardware ray tracing is on, a small badge sits at the bottom right of the 
 |---|---|
 | **Ray tracing: Shadows Medium, AO Medium · 812 items traced** | It's working: these effects are drawn, and that many objects are in the ray traced scene. |
 | **Ray tracing on: no effects** | The card is ready, but no ray traced effect is on. Click **Use the ray traced look**. |
-| **Ray tracing: restart to turn on** | Restart the editor. |
+| **Ray tracing: restart to turn on** | Click **Restart now** beside it. |
+| **Ray tracing: kept off by AXCENITY_RAY_TRACING=0** | The editor was started from a window where that variable was set, which keeps ray tracing off. Click **Restart now**, or open a new terminal window to start the editor from. |
 | **Ray tracing: not on this GPU** | This card or its driver can't ray trace. Everything is drawn the usual way. |
 
 Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.

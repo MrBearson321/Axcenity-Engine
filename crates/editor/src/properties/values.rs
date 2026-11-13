@@ -298,6 +298,12 @@ pub(super) fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<
         // Edited with the world at hand (`object_control`), and with the
         // part's material at hand (`physical_control`).
         Value::Instance(_) | Value::PhysicalProperties(_) => None,
+        Value::NumberSequence(sequence) => {
+            super::curves::number_sequence_control(ui, name, &sequence).map(Value::NumberSequence)
+        }
+        Value::ColorSequence(sequence) => {
+            super::curves::color_sequence_control(ui, &sequence).map(Value::ColorSequence)
+        }
     }
 }
 
@@ -409,6 +415,9 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         "ToneMapping" => ToneMapping::ALL.iter().map(|t| t.as_str()).collect(),
         // What drives a joint (Phase 36).
         "ActuatorType" => vec!["None", "Motor", "Servo"],
+        // Where a ParticleEmitter's particles are born (roadmap R17.2).
+        "ParticleEmitterShape" => vec!["Box", "Sphere", "Cylinder", "Disc"],
+        "ParticleEmitterShapeStyle" => vec!["Volume", "Surface"],
         // A mover's axes and an align's target (Phase 37).
         "ActuatorRelativeTo" => vec!["Attachment0", "Attachment1", "World"],
         "PositionAlignmentMode" | "OrientationAlignmentMode" => {

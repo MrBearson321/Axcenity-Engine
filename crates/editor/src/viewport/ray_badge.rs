@@ -20,6 +20,9 @@ pub(super) struct Badge {
     /// True while ray tracing is wanted but not drawing (a restart or a GPU
     /// that can't), shown in the warning color.
     pub warning: bool,
+    /// True when a restart would start ray tracing: the badge has a
+    /// Restart now button.
+    pub restart: bool,
 }
 
 /// The ray traced effects `effective` draws, shortly: "Shadows High".
@@ -45,12 +48,14 @@ pub(super) fn traced_effects(effective: &EffectiveGraphics) -> Vec<String> {
 
 /// The badge for `effective` (its `ray_queries`: the GPU was opened with
 /// ray tracing), whether Hardware ray tracing is `wanted` at the next
-/// start, whether this GPU `can` ray trace, and this frame's `stats`. None
-/// while it's neither wanted nor on.
+/// start, whether this GPU `can` ray trace, what `AXCENITY_RAY_TRACING`
+/// `forced` (`adapters::ray_tracing_override`), and this frame's `stats`.
+/// None while it's neither wanted nor on.
 pub(super) fn badge(
     effective: &EffectiveGraphics,
     wanted: bool,
     can: bool,
+    forced: Option<bool>,
     stats: &RayTracingStats,
 ) -> Option<Badge> {
     let settings = "Settings > Graphics > Ray tracing";
@@ -58,13 +63,29 @@ pub(super) fn badge(
         if !wanted {
             return None;
         }
-        return Some(if can {
+        return Some(if can && forced == Some(false) {
+            Badge {
+                text: "Ray tracing: kept off by AXCENITY_RAY_TRACING=0".to_owned(),
+                detail: "The setting is on, but the editor was started with the environment \
+                         variable AXCENITY_RAY_TRACING set to 0, which opens the GPU without \
+                         ray tracing whatever the setting. Restart now starts the editor \
+                         without it. In PowerShell, Remove-Item Env:AXCENITY_RAY_TRACING (or \
+                         a new window) stops it coming back."
+                    .to_owned(),
+                warning: true,
+                restart: true,
+            }
+        } else if can {
             Badge {
                 text: "Ray tracing: restart to turn on".to_owned(),
                 detail: "Hardware ray tracing is on in the settings, but the GPU was opened \
-                         without it. Restart the editor to ray trace."
+                         without it. Restart now starts the editor again with this project, \
+                         keeping unsaved world and script edits. If it still says this \
+                         afterward, check your Desktop shortcut opens this version of the \
+                         editor."
                     .to_owned(),
                 warning: true,
+                restart: true,
             }
         } else {
             Badge {
@@ -74,6 +95,7 @@ pub(super) fn badge(
                          drawn without it."
                     .to_owned(),
                 warning: true,
+                restart: false,
             }
         });
     }
@@ -93,6 +115,7 @@ pub(super) fn badge(
                 }
             ),
             warning: false,
+            restart: false,
         });
     }
     let seen = if stats.instances == 0 {
@@ -122,12 +145,15 @@ pub(super) fn badge(
             stats.meshes, stats.triangles
         ),
         warning: false,
+        restart: false,
     })
 }
 
-/// Draws `badge` at the bottom right of `rect`.
-pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) {
+/// Draws `badge` at the bottom right of `rect`. True when its Restart now
+/// was clicked.
+pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) -> bool {
     let palette = crate::theme::palette(ui.ctx());
+    let mut restart = false;
     egui::Area::new(egui::Id::new("ray tracing badge"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::RIGHT_BOTTOM)
@@ -143,13 +169,22 @@ pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) {
                     } else {
                         palette.text
                     };
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(&badge.text).small().color(color))
-                            .sense(egui::Sense::hover()),
-                    )
-                    .on_hover_text(&badge.detail);
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&badge.text).small().color(color))
+                                .sense(egui::Sense::hover()),
+                        )
+                        .on_hover_text(&badge.detail);
+                        if badge.restart {
+                            restart = ui
+                                .small_button("Restart now")
+                                .on_hover_text(&badge.detail)
+                                .clicked();
+                        }
+                    });
                 });
         });
+    restart
 }
 
 #[cfg(test)]
@@ -171,28 +206,38 @@ mod tests {
     #[test]
     fn nothing_shows_while_ray_tracing_is_neither_wanted_nor_on() {
         let off = effective(false, RayTracedShadows::Off);
-        assert_eq!(badge(&off, false, true, &RayTracingStats::default()), None);
+        assert_eq!(
+            badge(&off, false, true, None, &RayTracingStats::default()),
+            None
+        );
     }
 
     #[test]
     fn wanted_but_not_opened_says_why_in_the_warning_color() {
         let off = effective(false, RayTracedShadows::High);
-        let restart = badge(&off, true, true, &RayTracingStats::default()).unwrap();
+        let restart = badge(&off, true, true, None, &RayTracingStats::default()).unwrap();
         assert!(
-            restart.warning && restart.text.contains("restart"),
+            restart.warning && restart.restart && restart.text.contains("restart"),
             "{restart:?}"
         );
-        let cannot = badge(&off, true, false, &RayTracingStats::default()).unwrap();
+        let cannot = badge(&off, true, false, None, &RayTracingStats::default()).unwrap();
         assert!(
-            cannot.warning && cannot.text.contains("not on this GPU"),
+            cannot.warning && !cannot.restart && cannot.text.contains("not on this GPU"),
             "{cannot:?}"
+        );
+        // An environment variable keeping it off is named, with Restart now,
+        // which starts the editor without it.
+        let forced = badge(&off, true, true, Some(false), &RayTracingStats::default()).unwrap();
+        assert!(
+            forced.warning && forced.restart && forced.text.contains("AXCENITY_RAY_TRACING=0"),
+            "{forced:?}"
         );
     }
 
     #[test]
     fn on_without_effects_says_nothing_looks_different_yet() {
         let on = effective(true, RayTracedShadows::Off);
-        let shown = badge(&on, true, true, &RayTracingStats::default()).unwrap();
+        let shown = badge(&on, true, true, None, &RayTracingStats::default()).unwrap();
         assert_eq!(shown.text, "Ray tracing on: no effects");
         assert!(!shown.warning);
     }
@@ -206,7 +251,7 @@ mod tests {
             triangles: 120_000,
             ..RayTracingStats::default()
         };
-        let shown = badge(&on, true, true, &stats).unwrap();
+        let shown = badge(&on, true, true, None, &stats).unwrap();
         assert_eq!(shown.text, "Ray tracing: Shadows Medium · 812 items traced");
         let both = GraphicsSettings {
             ray_traced_shadows: Some(RayTracedShadows::High),
@@ -222,7 +267,7 @@ mod tests {
             traced_effects(&both),
             ["Shadows High", "AO Low", "GI Medium"]
         );
-        let empty = badge(&on, true, true, &RayTracingStats::default()).unwrap();
+        let empty = badge(&on, true, true, None, &RayTracingStats::default()).unwrap();
         assert!(
             empty.text.ends_with("nothing in reach yet"),
             "{}",

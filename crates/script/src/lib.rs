@@ -78,6 +78,7 @@ pub mod hot_reload;
 mod http;
 mod input;
 mod instance;
+mod keypoints;
 mod lag;
 mod lent;
 mod levels;
@@ -1170,3 +1171,5 @@ fn releases(event: &InputEvent) -> bool {
         InputKind::MouseMove { .. } | InputKind::Wheel { .. } | InputKind::PadStick { .. } => false,
     }
 }
+#[cfg(test)]
+mod keypoints_tests;

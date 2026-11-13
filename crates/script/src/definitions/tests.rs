@@ -472,6 +472,19 @@ fn described_fields_and_methods_exist() {
             "workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))",
         ),
         ("PhysicalProperties", "PhysicalProperties.new(1, 0.5, 0.25)"),
+        ("NumberSequence", "NumberSequence.new(1, 0)"),
+        (
+            "NumberSequenceKeypoint",
+            "NumberSequenceKeypoint.new(0.5, 2, 0.1)",
+        ),
+        (
+            "ColorSequence",
+            "ColorSequence.new(Color3.new(1, 0, 0), Color3.new(0, 0, 1))",
+        ),
+        (
+            "ColorSequenceKeypoint",
+            "ColorSequenceKeypoint.new(0.5, Color3.new())",
+        ),
         ("PhysicsService", "game:GetService('PhysicsService')"),
         ("RaycastParams", "RaycastParams.new()"),
         ("OverlapParams", "OverlapParams.new()"),

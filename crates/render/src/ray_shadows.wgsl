@@ -171,8 +171,12 @@ fn smoothed_along(pixel: vec2<i32>, step: vec2<i32>) -> vec2<f32> {
     let point = world_at(pixel);
     let distance = length(point.xyz - rays.camera.xyz);
     let normal = textureLoad(normal_texture, pixel, 0).xyz;
+    let world_normal = normalize((rays.view_to_world * vec4<f32>(normal, 0.0)).xyz);
     let last = vec2<i32>(rays.size.xy) - 1;
-    let tolerance = 0.02 * distance + 0.05;
+    // How far a neighbour may be off this pixel's surface (its plane, so a
+    // slope seen side-on, whose pixels lie far apart in depth, still
+    // smooths: comparing distances from the camera left it dithered).
+    let tolerance = 0.01 * distance + 0.05;
     // The widest soft edge near here: a lit pixel next to a shadow has no
     // blocker of its own but lies in that shadow's edge.
     var blocker = here.y;
@@ -191,7 +195,7 @@ fn smoothed_along(pixel: vec2<i32>, step: vec2<i32>) -> vec2<f32> {
             continue;
         }
         let there = world_at(at);
-        let apart = abs(length(there.xyz - rays.camera.xyz) - distance);
+        let apart = abs(dot(there.xyz - point.xyz, world_normal));
         let facing = dot(textureLoad(normal_texture, at, 0).xyz, normal);
         let x = f32(k) / radius;
         let weight = exp(-2.0 * x * x)

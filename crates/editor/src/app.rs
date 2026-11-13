@@ -174,8 +174,14 @@ const IMPORT_HOVER: &str = "Import models (.gltf, .glb or .fbx), images, sounds 
 /// the game ahead by the whole pause; treat the frame as at most this long.
 /// The same cap as the player's.
 const MAX_FRAME_SECONDS: f64 = 0.1;
-/// How many frames the loading screen stays up after a project opens.
+/// How many frames the loading screen stays up after a project opens, at
+/// the least: then it stays while the scene's meshes and textures are
+/// still on their way to the GPU (see `app/session.rs`).
 const FINISHING_FRAMES: u64 = 2;
+/// The longest the loading screen waits for the scene's meshes and
+/// textures, in seconds: what's still on its way after that arrives in
+/// the open editor (drawn white, or not yet drawn, until it does).
+const FINISHING_LIMIT: f32 = 60.0;
 /// After the last input, frames keep coming at the display's rate for this
 /// long (see [`EditorApp::keep_frames_steady`]).
 const STEADY_FRAME_SECONDS: f64 = 1.0;
@@ -386,8 +392,13 @@ pub struct EditorApp {
     /// project opened. Frames, not calls: egui may draw a frame twice.
     cover_until: Option<u64>,
     /// Whether that load took long enough to show its screen; if not, the
-    /// cover is only the background.
+    /// cover is only the background (until it's been up for
+    /// [`loading::GRACE`] itself).
     cover_shown: bool,
+    /// When the cover went up, and the most meshes and textures it has
+    /// seen on their way to the GPU at once (its count's total).
+    cover_started: Option<Instant>,
+    cover_uploads: usize,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
     /// The script tabs closed last in each project, for the welcome page.
@@ -508,8 +519,9 @@ pub struct EditorApp {
     /// Settings > Engine: rebuilding the editor when engine code changes
     /// (a debug editor run from the source tree only; see `engine.rs`).
     rebuilds: Rebuilds,
-    /// A handoff written for the rebuilt editor, which `update` starts.
-    launching: Option<PathBuf>,
+    /// A handoff written for the rebuilt editor, or for this one again
+    /// (Restart now), which `update` starts.
+    launching: Option<(PathBuf, engine::LaunchInto)>,
     /// A handoff from the editor this one was relaunched from, with its
     /// folder, applied once its project has opened.
     pending_handoff: Option<(PathBuf, Handoff)>,
@@ -794,6 +806,7 @@ const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
 const OVERLAY_CONTACTS_KEY: &str = "overlay contacts";
 const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const OVERLAY_STREAMING_KEY: &str = "overlay streaming";
+const OVERLAY_LIGHT_PROBES_KEY: &str = "overlay light probes";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -1008,6 +1021,8 @@ impl EditorApp {
             loading: None,
             cover_until: None,
             cover_shown: false,
+            cover_started: None,
+            cover_uploads: 0,
             recent: Vec::new(),
             recent_tabs: welcome::RecentTabs::default(),
             start: StartScreen::default(),
@@ -1150,6 +1165,8 @@ impl EditorApp {
             self.overlays.bodies = storage.get_string(OVERLAY_BODIES_KEY).as_deref() == Some("on");
             self.overlays.streaming =
                 storage.get_string(OVERLAY_STREAMING_KEY).as_deref() == Some("on");
+            self.overlays.light_probes =
+                storage.get_string(OVERLAY_LIGHT_PROBES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
                 self.recent_tabs = welcome::RecentTabs::from_text(&text);
             }
@@ -1223,7 +1240,12 @@ impl eframe::App for EditorApp {
         // After the frame, so the menu bar shows what it changed.
         self.sync_native_menu(&ctx);
         self.pace_frame();
-        // Relaunching into a rebuilt editor saves the settings first.
+        // Restart now, on the viewport's ray tracing badge.
+        if self.viewport.take_restart_request() {
+            self.restart_editor();
+        }
+        // Relaunching into a rebuilt editor, or restarting, saves the
+        // settings first.
         self.launch(&ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
         // live here.
@@ -1294,6 +1316,10 @@ impl eframe::App for EditorApp {
         storage.set_string(
             OVERLAY_STREAMING_KEY,
             flag(self.overlays.streaming).to_owned(),
+        );
+        storage.set_string(
+            OVERLAY_LIGHT_PROBES_KEY,
+            flag(self.overlays.light_probes).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
@@ -1455,7 +1481,13 @@ impl EditorApp {
         }
         // Engine code changed: rebuild in the background (debug editors only).
         self.engine_frame(ctx);
-        // While a project loads, only the header and the loading screen.
+        // While a project loads, only the header and the loading screen;
+        // meanwhile the viewport's renderer is made, ready for it.
+        if self.loading.is_some()
+            && let Some(render_state) = render_state
+        {
+            self.viewport.make_renderer_in_background(render_state);
+        }
         if self.follow_loading(ctx) {
             self.loading_frame(ui);
             return;
