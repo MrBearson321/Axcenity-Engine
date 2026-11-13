@@ -534,7 +534,8 @@ impl EditorApp {
         ui.separator();
         crate::widgets::menu_button(ui, Some(icons::EYE), "View Mode", |ui| {
             for mode in ViewMode::all() {
-                let item = egui::Button::selectable(self.view_mode == mode, mode.label());
+                let item =
+                    egui::Button::selectable(self.view_mode == mode, plain(ui, mode.label()));
                 if ui.add(item).on_hover_text(mode.hint()).clicked() {
                     self.view_mode = mode;
                     ui.close();
