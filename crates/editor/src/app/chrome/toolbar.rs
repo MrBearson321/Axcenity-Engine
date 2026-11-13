@@ -38,9 +38,24 @@ impl EditorApp {
                 ui.set_min_height(tallest);
                 let top = ui.min_rect().top();
                 let scene = self.scene_shown(ui.ctx());
+                // Centred, the groups start half the room they leave from the
+                // left: their width is known from the last frame this tab
+                // was drawn (the first frame of a tab is drawn again).
+                let centered = self.appearance.ribbon == theme::RibbonAlign::Centered;
+                let room = ui.available_width();
+                let width_id = egui::Id::new(("ribbon width", format!("{groups:?}"), scene));
                 egui::ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
+                        if centered {
+                            match ui.data(|d| d.get_temp::<f32>(width_id)) {
+                                Some(width) => {
+                                    ui.add_space(((room - width) / 2.0).max(0.0).floor())
+                                }
+                                None => ui.ctx().request_discard("ribbon width"),
+                            }
+                        }
+                        let start = ui.cursor().left();
                         // Show Scene goes before the first greyed-out group,
                         // where it's seen however narrow the window is.
                         let mut offered = scene;
@@ -68,6 +83,14 @@ impl EditorApp {
                                 })
                                 .response
                                 .on_disabled_hover_text(SCENE_HIDDEN);
+                            }
+                        }
+                        let width = ui.min_rect().right() - start;
+                        let known = ui.data(|d| d.get_temp::<f32>(width_id));
+                        if known.is_none_or(|known| (known - width).abs() > 0.5) {
+                            ui.data_mut(|d| d.insert_temp(width_id, width));
+                            if known.is_some() {
+                                ui.ctx().request_repaint();
                             }
                         }
                     });

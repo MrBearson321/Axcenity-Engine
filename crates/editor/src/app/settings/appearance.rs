@@ -43,6 +43,21 @@ pub(super) fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         .collect();
     widgets::segmented(ui, &mut appearance.ui_scale, &options);
     ui.add_space(space::L);
+    section(ui, "Ribbon");
+    widgets::segmented(
+        ui,
+        &mut appearance.ribbon,
+        &RibbonAlign::ALL.map(|place| (place, None, place.label())),
+    );
+    let palette = theme::palette(ui.ctx());
+    ui.label(
+        egui::RichText::new(
+            "Where the ribbon's buttons sit across the window: from the left edge, or in the \
+             middle under the tabs.",
+        )
+        .color(palette.text_secondary),
+    );
+    ui.add_space(space::L);
     section(ui, "Menu icons");
     widgets::segmented(
         ui,
