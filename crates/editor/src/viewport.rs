@@ -725,6 +725,9 @@ pub struct Viewport {
     overdraw: Option<axcenity_render::OverdrawStats>,
     /// Measure was clicked: the next frame drawn is read back.
     measure_overdraw: bool,
+    /// The ray tracing badge's Restart now was clicked; the app restarts
+    /// the editor (`take_restart_request`).
+    restart_requested: bool,
     /// The LOD inspector's preview: this item (`scene::item_id`) drawn at
     /// this level whatever its size. Only what's drawn changes.
     pub lod_preview: Option<(u64, usize)>,
@@ -749,6 +752,12 @@ struct Target {
 }
 
 impl Viewport {
+    /// Whether the ray tracing badge's Restart now was clicked since last
+    /// asked.
+    pub fn take_restart_request(&mut self) -> bool {
+        std::mem::take(&mut self.restart_requested)
+    }
+
     /// The graphics values the viewport draws with, once it has drawn.
     #[cfg(test)]
     pub fn graphics(&self) -> Option<&axcenity_render::EffectiveGraphics> {
@@ -801,6 +810,7 @@ impl Viewport {
             streaming_overlay: Default::default(),
             overdraw: None,
             measure_overdraw: false,
+            restart_requested: false,
             lod_preview: None,
             swing: None,
             grid_labels: Default::default(),
@@ -1594,8 +1604,9 @@ impl Viewport {
             graphics.ray_tracing(),
             axcenity_render::adapters::adapter_can_ray_trace(),
             &render.stats.ray_tracing,
-        ) {
-            ray_badge::paint(ui, rect, &badge);
+        ) && ray_badge::paint(ui, rect, &badge)
+        {
+            self.restart_requested = true;
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(

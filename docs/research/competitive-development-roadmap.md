@@ -549,7 +549,7 @@ Require representative benchmark evidence demonstrating a meaningful bottleneck 
 ## 6.3 Global illumination improvements
 
 **Priority:** Medium
-**Status:** Partial (R18). Baked light probe volumes with stale-bake warnings, baked reflection probes, and optional real-time probe GI (off by default).
+**Status:** Partial (R18). Baked light probe volumes with stale-bake warnings, baked reflection probes, and optional real-time probe GI (off by default). Options and stages R18.1–R18.4 (probe overlay, invalid probes, sky light kept apart, placement and tiers): [global-illumination.md](global-illumination.md).
 
 **Ray-traced GI:** RT2 in [hardware-ray-tracing.md](hardware-ray-tracing.md) (ray-traced probe GI, DDGI-style) writes into the same light probe volumes and replaces `realtime_gi.rs`'s raster cube faces when ray tracing is on. It is R18's additional real-time GI technique on RT-capable GPUs. The rest of R18 (probe placement, diagnostics, quality settings, the non-RT path) applies to every GPU. G9 stage 2 is independent, because RT denoisers run before TAA.
 
@@ -1155,7 +1155,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
 | 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1); design in [vfx-editor.md](vfx-editor.md) | R17.2 spawn shapes and bursts, then the effect editor and asset |
-| 18 | Global illumination improvements | New (R18) | Partial | Measure and document options |
+| 18 | Global illumination improvements | New (R18) | Partial; options and stages in [global-illumination.md](global-illumination.md) | R18.1 probe overlay, then invalid probes and sky light apart |
 | 19 | Online services architecture | New (R19) | Designed in [online-services.md](online-services.md) | Build only when Paul says; O1 and O2 need no website |
 | 20 | Platform expansion | New (R20) | Deferred | Research document only |
 
