@@ -1603,6 +1603,7 @@ impl Viewport {
             target.renderer.graphics(),
             graphics.ray_tracing(),
             axcenity_render::adapters::adapter_can_ray_trace(),
+            axcenity_render::adapters::ray_tracing_override(),
             &render.stats.ray_tracing,
         ) && ray_badge::paint(ui, rect, &badge)
         {

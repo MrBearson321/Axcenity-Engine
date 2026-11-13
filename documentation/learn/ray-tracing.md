@@ -25,6 +25,7 @@ While Hardware ray tracing is on, a small badge sits at the bottom right of the 
 | **Ray tracing: Shadows Medium, AO Medium · 812 items traced** | It's working: these effects are drawn, and that many objects are in the ray traced scene. |
 | **Ray tracing on: no effects** | The card is ready, but no ray traced effect is on. Click **Use the ray traced look**. |
 | **Ray tracing: restart to turn on** | Click **Restart now** beside it. |
+| **Ray tracing: kept off by AXCENITY_RAY_TRACING=0** | The editor was started from a window where that variable was set, which keeps ray tracing off. Click **Restart now**, or open a new terminal window to start the editor from. |
 | **Ray tracing: not on this GPU** | This card or its driver can't ray trace. Everything is drawn the usual way. |
 
 Hover the badge for more detail. **Viewport > View Mode > Ray Hits** shows what the rays hit, each object in its own colour.
