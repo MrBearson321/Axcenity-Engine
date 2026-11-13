@@ -125,6 +125,12 @@ pub enum StudioAction {
     BrushImage(String),
     /// Bake the reference onto the active object and write the maps.
     Bake,
+    /// Save the open model if it needs it, then open its file in Blender
+    /// (R15.4).
+    EditInBlender,
+    /// Open the model file at this project path again, in place of the
+    /// open one: it changed on disk and the user chose to load it.
+    Reload(String),
 }
 
 /// Everything an undo step puts back.
@@ -170,6 +176,9 @@ pub struct StudioDoc {
     pub paint_revision: u64,
     /// The revision last saved.
     saved: u64,
+    /// True once a mask changed since the last save (R15.1b): masks are
+    /// saved but aren't undo steps, so they don't change the revision.
+    masks_changed: bool,
     /// The last operation, until anything else is done.
     pub last_op: Option<LastOp>,
     /// The object and undo step a modifier change under way goes into.
@@ -209,6 +218,7 @@ impl StudioDoc {
             revision: 1,
             paint_revision: 0,
             saved: if saved { 1 } else { 0 },
+            masks_changed: false,
             last_op: None,
             modifier_edit: None,
             reference: None,
@@ -219,11 +229,26 @@ impl StudioDoc {
     }
 
     pub fn unsaved(&self) -> bool {
-        self.revision != self.saved
+        self.revision != self.saved || self.masks_changed
     }
 
     pub fn mark_saved(&mut self) {
         self.saved = self.revision;
+        self.masks_changed = false;
+    }
+
+    /// Puts `mask` (one value per vertex) on object `index`, to be saved
+    /// with it (R15.1b). Not an undo step.
+    pub fn set_mask(&mut self, index: usize, mask: &[f32]) {
+        let Some(object) = self.model.objects.get_mut(index) else {
+            return;
+        };
+        let masked = mask.iter().any(|&value| value > 0.0);
+        let kept: &[f32] = if masked { mask } else { &[] };
+        if object.mask != kept {
+            object.mask = kept.to_vec();
+            self.masks_changed = true;
+        }
     }
 
     /// Its file's name, for the tab.
@@ -242,7 +267,26 @@ impl StudioDoc {
     }
 
     fn restore(&mut self, snapshot: Snapshot) {
-        self.model = snapshot.model;
+        // Masks aren't undo steps: each object keeps the one it has now
+        // where its vertices and faces are still the same ones (a stroke
+        // only moves them; Voxel Remesh makes new ones).
+        let now = std::mem::replace(&mut self.model, snapshot.model);
+        for (object, old) in self.model.objects.iter_mut().zip(now.objects) {
+            let same = match (&object.mesh, &old.mesh) {
+                (Some(a), Some(b)) => {
+                    a.vertex_count() == b.vertex_count()
+                        && a.half_edges().len() == b.half_edges().len()
+                        && a.half_edges()
+                            .iter()
+                            .zip(b.half_edges())
+                            .all(|(a, b)| a.vertex == b.vertex)
+                }
+                _ => false,
+            };
+            if object.name == old.name && same {
+                object.mask = old.mask;
+            }
+        }
         self.mode = snapshot.mode;
         self.active = snapshot.active;
         self.objects = snapshot.objects;
@@ -765,6 +809,12 @@ pub struct ModelStudio {
     hovered: bool,
     /// A model waiting to replace one with unsaved changes.
     pending: Option<StudioDoc>,
+    /// The open model's file changed on disk since it was opened or saved
+    /// (Blender saved it, say), and the user hasn't answered yet.
+    changed_on_disk: bool,
+    /// A hash of the bytes the editor last wrote to the open model's file,
+    /// so its own save isn't taken for another program's.
+    written: Option<u64>,
     /// Why the last mode picked on the toolbar couldn't be entered, and
     /// the mode the Studio stayed in (the note goes once that changes).
     mode_note: Option<(Mode, &'static str)>,
@@ -795,6 +845,8 @@ impl Default for ModelStudio {
             view: view::View::default(),
             hovered: false,
             pending: None,
+            changed_on_disk: false,
+            written: None,
             mode_note: None,
             notices: Vec::new(),
             stack_errors: (0, 0, Vec::new()),
@@ -851,6 +903,35 @@ impl ModelStudio {
         self.rig.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
+        self.changed_on_disk = false;
+        self.written = None;
+    }
+
+    /// The editor wrote `bytes` to the open model's file (Save).
+    pub fn note_written(&mut self, bytes: &[u8]) {
+        self.written = Some(hash(bytes));
+    }
+
+    /// The project file `path` changed on disk, now holding `bytes`
+    /// (`None` if it's gone). If it's the open model's and not what the
+    /// editor last wrote there, the tab offers to load it again (R15.4).
+    pub fn file_changed(&mut self, path: &str, bytes: Option<&[u8]>) {
+        let Some(doc) = &self.doc else {
+            return;
+        };
+        if doc.path.is_empty() || doc.path != path {
+            return;
+        }
+        if let Some(bytes) = bytes
+            && self.written != Some(hash(bytes))
+        {
+            self.changed_on_disk = true;
+        }
+    }
+
+    /// True while the tab offers to load its file again.
+    pub fn offers_reload(&self) -> bool {
+        self.changed_on_disk
     }
 
     /// Undoes the open model's last edit. False if there was none.
@@ -881,6 +962,7 @@ impl ModelStudio {
         let mut actions = Vec::new();
         self.hovered = ui.rect_contains_pointer(ui.max_rect());
         self.pending_bar(ui);
+        self.disk_bar(ui, editable, &mut actions);
         self.toolbar(ui, models, editable, &mut actions);
         ui.separator();
         if self.doc.is_none() {
@@ -920,6 +1002,51 @@ impl ModelStudio {
             }
         });
         actions
+    }
+
+    /// Offers to load the open model's file again after another program
+    /// (Blender) saved it, keeping the edits here if the user says so.
+    fn disk_bar(&mut self, ui: &mut egui::Ui, editable: bool, actions: &mut Vec<StudioAction>) {
+        if !self.changed_on_disk {
+            return;
+        }
+        let Some(doc) = &self.doc else {
+            return;
+        };
+        let palette = theme::palette(ui.ctx());
+        let unsaved = doc.unsaved();
+        let path = doc.path.clone();
+        responsive::toolbar(ui, |ui| {
+            let text = if unsaved {
+                format!(
+                    "{} was changed outside the editor. Load it again, losing your edits here?",
+                    doc.name()
+                )
+            } else {
+                format!("{} was changed outside the editor.", doc.name())
+            };
+            ui.colored_label(palette.warning, text);
+            let role = if unsaved { Role::Danger } else { Role::Primary };
+            if ui
+                .add_enabled(
+                    editable,
+                    widgets::button(
+                        role,
+                        Some(icons::ARROW_CLOCKWISE),
+                        "Load it again",
+                        &palette,
+                    ),
+                )
+                .clicked()
+            {
+                actions.push(StudioAction::Reload(path.clone()));
+                self.changed_on_disk = false;
+            }
+            let keep = if unsaved { "Keep my edits" } else { "Not now" };
+            if ui.button(keep).clicked() {
+                self.changed_on_disk = false;
+            }
+        });
     }
 
     /// Asks before a model replaces one with unsaved changes.
@@ -1021,6 +1148,24 @@ impl ModelStudio {
                 .clicked()
             {
                 actions.push(StudioAction::Save);
+            }
+            if ui
+                .add_enabled(
+                    editable,
+                    widgets::button(
+                        Role::Secondary,
+                        Some(icons::ARROW_SQUARE_OUT),
+                        "Edit in Blender",
+                        &palette,
+                    ),
+                )
+                .on_hover_text(
+                    "Save, then open the .glb in Blender. Saving there (Ctrl+S) sends it \
+                     back, and this tab offers to load it again.",
+                )
+                .clicked()
+            {
+                actions.push(StudioAction::EditInBlender);
             }
             ui.separator();
             // Five modes; Rig's three steps (bones, weights, a test pose)
@@ -1750,6 +1895,14 @@ fn save_name(doc: &StudioDoc) -> String {
     } else {
         doc.path.clone()
     }
+}
+
+/// A hash of a file's bytes, to tell the editor's own writes from others'.
+fn hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 
 // The test modules' helpers (a cube, a chair, a rigged humanoid, a sculpted

@@ -42,6 +42,7 @@ mod retained;
 mod streaming;
 mod surfaces;
 mod terrain;
+mod terrain_water;
 mod time_of_day;
 mod weather;
 

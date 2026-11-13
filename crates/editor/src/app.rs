@@ -493,6 +493,9 @@ pub struct EditorApp {
     /// just the selected one's. Saved between runs.
     /// AutoRecover's setting and snapshots (`app/autorecover.rs`).
     autorecover: autorecover::AutoRecover,
+    /// Settings > External tools > Blender: the Blender program Edit in
+    /// Blender starts, or empty to look for it (`blender.rs`, R15.4).
+    blender_path: String,
     /// Where Save as Template… writes and New Project lists the user's
     /// templates (`app/save_template.rs`).
     templates_folder: Option<PathBuf>,
@@ -802,6 +805,7 @@ struct BlockDocument {
 const THEME_KEY: &str = "theme";
 const APPEARANCE_KEY: &str = "appearance";
 const RECENT_KEY: &str = "recent projects";
+const BLENDER_KEY: &str = "blender path";
 const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
@@ -1085,6 +1089,7 @@ impl EditorApp {
             pending_layout: None,
             ribbon_tabs: RibbonTabs::default(),
             autorecover: Default::default(),
+            blender_path: String::new(),
             templates_folder: None,
             template_draft: None,
             light_cones: false,
@@ -1158,6 +1163,9 @@ impl EditorApp {
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(autorecover::AUTORECOVER_KEY) {
                 self.autorecover.read(&text);
+            }
+            if let Some(text) = storage.get_string(BLENDER_KEY) {
+                self.blender_path = text;
             }
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
@@ -1299,6 +1307,7 @@ impl eframe::App for EditorApp {
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         storage.set_string(autorecover::AUTORECOVER_KEY, self.autorecover.to_text());
+        storage.set_string(BLENDER_KEY, self.blender_path.clone());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
         let ai = if self.ai.allowed { "on" } else { "off" };

@@ -231,6 +231,7 @@ impl EditorApp {
             }
             Some(BrowserAction::EditMaterial(path)) => self.open_material(&path),
             Some(BrowserAction::EditModel(path)) => self.open_in_model_studio(&path),
+            Some(BrowserAction::EditInBlender(path)) => self.edit_in_blender(&path),
             Some(BrowserAction::FindReferences(path)) => self.find_asset_references(&path),
             Some(BrowserAction::View(path)) => self.view_asset(&path),
             Some(BrowserAction::PluginAction {

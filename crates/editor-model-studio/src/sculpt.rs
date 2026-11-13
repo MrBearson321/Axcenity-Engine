@@ -13,8 +13,9 @@
 //! Shift smooths; `[` and `]` change the radius; a pen's pressure (where
 //! the platform reports it) changes the radius or strength. Grab and Snake
 //! Hook drag on the plane facing the camera through where they took hold.
-//! The mask isn't an undo step and isn't saved; Hide Masked hides the
-//! masked triangles until Show All. Voxel Remesh and Subdivide replace the
+//! The mask isn't an undo step; it's kept on the object and saved in the
+//! sidecar (R15.1b), so it's there again after reopening. Hide Masked
+//! hides the masked triangles until Show All. Voxel Remesh and Subdivide replace the
 //! mesh, as an undo step each.
 
 use std::sync::Arc;
@@ -199,8 +200,8 @@ impl SculptState {
 }
 
 /// The sculpt of `doc`'s active object in `cache`, made again if the mesh
-/// changed some other way since (an undo, an operation). The mask stays if
-/// the vertices are the same ones.
+/// changed some other way since (an undo, an operation). The mask is the
+/// object's, if it still fits the vertices.
 fn sculpt_of<'a>(
     cache: &'a mut Option<SculptCache>,
     doc: &StudioDoc,
@@ -211,10 +212,8 @@ fn sculpt_of<'a>(
         .is_some_and(|cache| cache.object == doc.active && cache.revision == doc.revision);
     if !fresh {
         let mut sculpt = Sculpt::new(mesh);
-        if let Some(old) = cache.as_ref()
-            && old.object == doc.active
-        {
-            sculpt.set_mask(old.sculpt.mask());
+        if let Some(mask) = doc.model.objects.get(doc.active).and_then(|o| o.mask()) {
+            sculpt.set_mask(mask);
         }
         *cache = Some(SculptCache {
             object: doc.active,
@@ -234,6 +233,8 @@ impl StudioDoc {
             return;
         };
         object.mesh = Some(mesh);
+        // New vertices: the old mask doesn't fit them.
+        object.mask.clear();
         self.selection.clear();
         self.record(label, before);
     }
@@ -407,6 +408,8 @@ impl ModelStudio {
             return;
         };
         let Some(before) = stroke.before else {
+            // A Mask stroke: the object keeps the mask, to be saved.
+            doc.set_mask(cache.object, cache.sculpt.mask());
             return;
         };
         let Some(mesh) = doc
@@ -563,11 +566,12 @@ impl ModelStudio {
 
     /// A mask action (not an undo step): `change` on the sculpt.
     pub fn change_mask(&mut self, change: impl FnOnce(&mut Sculpt)) {
-        let Some(doc) = &self.doc else {
+        let Some(doc) = &mut self.doc else {
             return;
         };
         if let Some(cache) = sculpt_of(&mut self.sculpt.cache, doc) {
             change(&mut cache.sculpt);
+            doc.set_mask(cache.object, cache.sculpt.mask());
         }
     }
 

@@ -175,6 +175,8 @@ struct Entry {
     layers: Option<Arc<TerrainLayers>>,
     /// Its painted plants and models, built once.
     foliage: Option<crate::foliage::PaintedFoliage>,
+    /// Each chunk's lowest ground, for its water (`terrain_water.rs`).
+    lowest: crate::terrain_water::Lowest,
 }
 
 #[derive(Default)]
@@ -364,6 +366,7 @@ impl TerrainCache {
             chunks: HashMap::new(),
             layers: None,
             foliage: None,
+            lowest: Default::default(),
         });
         // Another landscape or another size: nothing kept fits it.
         if entry.uid != data.uid() || entry.samples != data.size() || entry.size != placement.size {
@@ -374,6 +377,7 @@ impl TerrainCache {
                 chunks: HashMap::new(),
                 layers: None,
                 foliage: None,
+                lowest: Default::default(),
             };
         }
         let layers = match &entry.layers {
@@ -486,6 +490,9 @@ impl TerrainCache {
                 };
                 items.push(chunk_item(mesh, weights, &layers, transform, casts_shadow));
             }
+        }
+        if let Some(water) = crate::terrain_water::TerrainWater::of(instance) {
+            crate::terrain_water::draw(&water, &data, &placement, &mut entry.lowest, items);
         }
         crate::foliage::draw_terrain(&mut entry.foliage, id, &placement, &data, assets, chunks);
     }
@@ -930,5 +937,78 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    fn water_items(items: &[DrawItem]) -> Vec<&DrawItem> {
+        items
+            .iter()
+            .filter(|item| item.material.water.is_some())
+            .collect()
+    }
+
+    #[test]
+    fn terrain_water_fills_only_the_chunks_whose_ground_dips_below_its_level() {
+        let (mut world, terrain) = world_with_terrain();
+        let ground = {
+            let data = world.terrain(terrain).unwrap();
+            -32.0 + data.height(48, 48) * 128.0
+        };
+        world
+            .set_property(terrain, "Water", Value::Bool(true))
+            .unwrap();
+        world
+            .set_property(
+                terrain,
+                "WaterLevel",
+                Value::Number(f64::from(ground) - 4.0),
+            )
+            .unwrap();
+        world
+            .set_property(terrain, "WaveHeight", Value::Number(1.5))
+            .unwrap();
+        let mut cache = TerrainCache::new();
+        let assets = Assets::default();
+        let camera = camera_at(Vec3::new(0.0, 50.0, 0.0));
+        let mut items = Vec::new();
+        cache.draw_all(&world, &assets, &camera, &mut items, &mut Vec::new());
+        assert!(
+            water_items(&items).is_empty(),
+            "the ground is above the water everywhere"
+        );
+
+        // A hole in chunk (1, 1): only that chunk floods.
+        let data = world.terrain_mut(terrain).unwrap();
+        let hole = axcenity_core::SampleRect::new(48, 48, 49, 49);
+        data.heights_mut_in(hole)[48 * 257 + 48] = 0.0;
+        let mut items = Vec::new();
+        cache.draw_all(&world, &assets, &camera, &mut items, &mut Vec::new());
+        let water = water_items(&items);
+        assert_eq!(water.len(), 1);
+        assert_eq!(water[0].material.water.unwrap().wave_height, 1.5);
+        // 32 cells of 2 studs, from x = z = -256 + 64; its top at the level.
+        let (scale, _, middle) = water[0].transform.to_scale_rotation_translation();
+        assert_eq!(scale, Vec3::new(64.0, 1.0, 64.0));
+        assert_eq!(middle, Vec3::new(-160.0, ground - 4.5, -160.0));
+        assert!(!water[0].casts_shadow);
+
+        // Up over all the ground: every chunk has water.
+        world
+            .set_property(
+                terrain,
+                "WaterLevel",
+                Value::Number(f64::from(ground) + 1.0),
+            )
+            .unwrap();
+        let mut items = Vec::new();
+        cache.draw_all(&world, &assets, &camera, &mut items, &mut Vec::new());
+        assert_eq!(water_items(&items).len(), 64);
+
+        // Off: none.
+        world
+            .set_property(terrain, "Water", Value::Bool(false))
+            .unwrap();
+        let mut items = Vec::new();
+        cache.draw_all(&world, &assets, &camera, &mut items, &mut Vec::new());
+        assert!(water_items(&items).is_empty());
     }
 }

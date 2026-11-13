@@ -1569,6 +1569,18 @@ pub fn insert_hint(what: Insertable) -> String {
              Correction or an Atmosphere inside it; where volumes overlap, the higher Priority \
              wins."
         }
+        Insertable::FogVolume => {
+            "Insert a Fog Volume: a big invisible box of haze (200 × 60 × 200 studs) that the \
+             sun's light shines through in shafts, lit by lamps too. Resize it to fit; its Fog \
+             sets the Density, Color, Glare and HeightFalloff (low-lying haze). Shafts need \
+             Volumetric fog (Ultra)."
+        }
+        Insertable::InteriorVolume => {
+            "Insert an Interior: an invisible box for a room or building. Inside it the outdoor \
+             fog and haze is cleared, and its own Fog fills it instead (a little dust, so light \
+             through windows shows as shafts; set Density to 0 for clear air). Fit it to the \
+             room's walls."
+        }
         Insertable::ExposureEffect => {
             "Insert an ExposureEffect into the selected Graphics Volume (or a new one): the \
              exposure inside it, in place of Lighting's."
