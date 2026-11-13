@@ -508,8 +508,9 @@ pub struct EditorApp {
     /// Settings > Engine: rebuilding the editor when engine code changes
     /// (a debug editor run from the source tree only; see `engine.rs`).
     rebuilds: Rebuilds,
-    /// A handoff written for the rebuilt editor, which `update` starts.
-    launching: Option<PathBuf>,
+    /// A handoff written for the rebuilt editor, or for this one again
+    /// (Restart now), which `update` starts.
+    launching: Option<(PathBuf, engine::LaunchInto)>,
     /// A handoff from the editor this one was relaunched from, with its
     /// folder, applied once its project has opened.
     pending_handoff: Option<(PathBuf, Handoff)>,
@@ -1223,7 +1224,12 @@ impl eframe::App for EditorApp {
         // After the frame, so the menu bar shows what it changed.
         self.sync_native_menu(&ctx);
         self.pace_frame();
-        // Relaunching into a rebuilt editor saves the settings first.
+        // Restart now, on the viewport's ray tracing badge.
+        if self.viewport.take_restart_request() {
+            self.restart_editor();
+        }
+        // Relaunching into a rebuilt editor, or restarting, saves the
+        // settings first.
         self.launch(&ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
         // live here.
