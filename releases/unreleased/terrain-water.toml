@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Terrain water: seas, lakes and rivers that fill the terrain's hollows"
+details = "A Terrain has a Water switch and a WaterLevel: every part of the ground below the level is under water with waves, foam where it meets the ground, what's under seen through it and reflections, the same water as water materials. WaterColor, WaterClarity, WaveHeight, WaveLength, WaveSpeed and WaveDirection set its look. The Terrain Studio has a Water section with a level slider. Water is only drawn for now: nothing swims or floats in it."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

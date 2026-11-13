@@ -441,3 +441,55 @@ fn water_is_drawn_after_solid_items_and_before_other_see_through_ones() {
         "water casts no shadow"
     );
 }
+
+/// LE5: with hardware ray tracing, water reflecting the screen traces a ray
+/// where the screen has nothing, so a part above the view shows in the
+/// water, and only then.
+#[test]
+fn ray_traced_water_reflects_what_is_off_the_screen() {
+    let Some((device, queue)) = ray_test_device() else {
+        eprintln!("skipped: no graphics adapter with ray queries on this machine");
+        return;
+    };
+    // Looking down at the water, with a glowing red block high above it:
+    // above the top of the frame, but its reflection on screen.
+    let mut list = open_water(false, false);
+    list.camera.look_at = Vec3::new(0.0, -4.0, -10.0);
+    let mut red = block(
+        Vec3::new(12.0, 4.0, 1.0),
+        Vec3::new(0.0, 10.0, -10.0),
+        [0.0; 3],
+    );
+    red.material.emissive = [1.0, 0.0, 0.0];
+    list.items.push(red);
+    let block_on_screen = on_screen(&list, Vec3::new(0.0, 8.0, -10.0));
+    assert!(block_on_screen.y < 0.0, "the block is above the frame");
+    let mirrored = Vec3::new(0.0, -10.0, -10.0);
+
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.set_graphics(&graphics(Quality::High));
+    assert!(WaterMode::of(&list, renderer.graphics()).traces_rays(renderer.graphics()));
+    let [traced] = pixels_of(&mut renderer, &list, [mirrored]);
+    assert!(renderer.scene.water.traced().is_some());
+    assert!(renderer.stats().ray_tracing.instances >= 1);
+
+    // Without ray queries: only the screen's reflection, which can't see it.
+    let mut plain = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    plain.set_graphics(&graphics(Quality::High));
+    plain.limit_capabilities(&crate::Capabilities {
+        ray_queries: false,
+        ..*plain.capabilities()
+    });
+    let [screen_only] = pixels_of(&mut plain, &list, [mirrored]);
+    assert!(plain.scene.water.traced().is_none());
+    assert!(
+        traced[0] > screen_only[0] + 40 && traced[0] > traced[1] + 40,
+        "rays find the red block off the screen: {screen_only:?} -> {traced:?}"
+    );
+
+    // Medium reflects only the sky, and traces nothing.
+    renderer.set_graphics(&graphics(Quality::Medium));
+    let [medium] = pixels_of(&mut renderer, &list, [mirrored]);
+    assert!(renderer.scene.water.traced().is_none());
+    assert!(medium[0] + 40 < traced[0], "{medium:?} vs {traced:?}");
+}
