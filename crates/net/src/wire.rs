@@ -9,8 +9,9 @@
 //! same Instance on every computer in the game.
 
 use axcenity_core::{
-    CFrame, Color3, EnumItem, InstanceId, Material, PartType, ParticleType, PhysicalProperties,
-    TextureChannel, ToneMapping, UDim, UDim2, Value, Vector2, Vector3,
+    CFrame, Color3, ColorSequence, EnumItem, InstanceId, Material, NumberSequence, PartType,
+    ParticleType, PhysicalProperties, TextureChannel, ToneMapping, UDim, UDim2, Value, Vector2,
+    Vector3,
 };
 use axcenity_script::{Message, MessageKind, RemoteValue, Side};
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,10 @@ pub enum WireValue {
     Instance(Option<u64>),
     /// Density, friction, elasticity, friction weight, elasticity weight.
     PhysicalProperties(Option<[f32; 5]>),
+    /// Each keypoint's time, value and envelope (R17.1).
+    NumberSequence(Vec<[f32; 3]>),
+    /// Each keypoint's time, r, g and b (R17.1).
+    ColorSequence(Vec<[f32; 4]>),
 }
 
 fn triple(v: Vector3) -> [f32; 3] {
@@ -85,6 +90,8 @@ impl WireValue {
                     p.elasticity_weight,
                 ]
             })),
+            Value::NumberSequence(sequence) => WireValue::NumberSequence(sequence.to_rows()),
+            Value::ColorSequence(sequence) => WireValue::ColorSequence(sequence.to_rows()),
         }
     }
 
@@ -141,6 +148,12 @@ impl WireValue {
                     }
                 },
             )),
+            WireValue::NumberSequence(rows) => {
+                Value::NumberSequence(NumberSequence::from_rows(rows).ok()?)
+            }
+            WireValue::ColorSequence(rows) => {
+                Value::ColorSequence(ColorSequence::from_rows(rows).ok()?)
+            }
         };
         Some(value)
     }

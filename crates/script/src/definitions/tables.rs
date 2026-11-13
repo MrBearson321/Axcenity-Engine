@@ -409,6 +409,69 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "NumberSequence",
+        doc: "A number that changes over time from 0 to 1, such as a particle's size over its life: keypoints in time order, with straight lines between them.",
+        fields: &[Field {
+            name: "Keypoints",
+            ty: "{ NumberSequenceKeypoint }",
+            doc: "Its keypoints, the first at time 0 and the last at 1.",
+        }],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "NumberSequenceKeypoint",
+        doc: "One point of a NumberSequence.",
+        fields: &[
+            Field {
+                name: "Time",
+                ty: "number",
+                doc: "When, from 0 to 1.",
+            },
+            Field {
+                name: "Value",
+                ty: "number",
+                doc: "The number then.",
+            },
+            Field {
+                name: "Envelope",
+                ty: "number",
+                doc: "Give or take: each particle picks once where in this range it is.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "ColorSequence",
+        doc: "A color that changes over time from 0 to 1, such as a particle's color over its life.",
+        fields: &[Field {
+            name: "Keypoints",
+            ty: "{ ColorSequenceKeypoint }",
+            doc: "Its keypoints, the first at time 0 and the last at 1.",
+        }],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "ColorSequenceKeypoint",
+        doc: "One point of a ColorSequence.",
+        fields: &[
+            Field {
+                name: "Time",
+                ty: "number",
+                doc: "When, from 0 to 1.",
+            },
+            Field {
+                name: "Value",
+                ty: "Color3",
+                doc: "The color then.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "PhysicalProperties",
         doc: "How a part weighs, grips and bounces. Where two parts touch, each coefficient is the average of theirs, weighted by their weights.",
         fields: &[
@@ -3883,6 +3946,60 @@ pub(super) const LIBRARIES: &[Library] = &[
             doc: "A new Vector2. Left-out components are 0.",
             params: &[("x?", "number"), ("y?", "number")],
             returns: "Vector2",
+        }],
+    },
+    Library {
+        global: "NumberSequence",
+        doc: "Creates NumberSequences, such as a ParticleEmitter's `SizeOverLife`.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "The same number throughout (`NumberSequence.new(2)`), a start and an end (`NumberSequence.new(1, 0)`), or a list of 2 to 20 NumberSequenceKeypoints in time order from 0 to 1.",
+            params: &[
+                ("valueOrKeypoints", "number | { NumberSequenceKeypoint }"),
+                ("endValue?", "number"),
+            ],
+            returns: "NumberSequence",
+        }],
+    },
+    Library {
+        global: "NumberSequenceKeypoint",
+        doc: "Creates the points of a NumberSequence.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "A point at `time` (0 to 1) with `value`, give or take `envelope` (0 when left out).",
+            params: &[
+                ("time", "number"),
+                ("value", "number"),
+                ("envelope?", "number"),
+            ],
+            returns: "NumberSequenceKeypoint",
+        }],
+    },
+    Library {
+        global: "ColorSequence",
+        doc: "Creates ColorSequences, such as a ParticleEmitter's `ColorOverLife`.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "The same color throughout, a start and an end color, or a list of 2 to 20 ColorSequenceKeypoints in time order from 0 to 1.",
+            params: &[
+                ("colorOrKeypoints", "Color3 | { ColorSequenceKeypoint }"),
+                ("endColor?", "Color3"),
+            ],
+            returns: "ColorSequence",
+        }],
+    },
+    Library {
+        global: "ColorSequenceKeypoint",
+        doc: "Creates the points of a ColorSequence.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "A point at `time` (0 to 1) with `color`.",
+            params: &[("time", "number"), ("color", "Color3")],
+            returns: "ColorSequenceKeypoint",
         }],
     },
     Library {

@@ -345,6 +345,9 @@ pub(super) const GROUPS: [(&str, &[&str]); 35] = [
             "ColorEnd",
             "Transparency",
             "TransparencyEnd",
+            "SizeOverLife",
+            "ColorOverLife",
+            "TransparencyOverLife",
             "Rotation",
             "RotSpeed",
             "LightEmission",
@@ -512,4 +515,16 @@ pub fn is_advanced(class: ClassName, name: &str) -> bool {
         }
     };
     names.contains(&name)
+}
+
+/// The curve that replaces a ParticleEmitter's start and end pair while it is
+/// set, so Properties can grey the pair out: `Size` and `SizeEnd` give
+/// `SizeOverLife`, and so on.
+pub(super) fn replacing_curve(name: &str) -> Option<&'static str> {
+    match name {
+        "Size" | "SizeEnd" => Some("SizeOverLife"),
+        "Color" | "ColorEnd" => Some("ColorOverLife"),
+        "Transparency" | "TransparencyEnd" => Some("TransparencyOverLife"),
+        _ => None,
+    }
 }
