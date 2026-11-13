@@ -1517,7 +1517,7 @@ impl ScenePipeline {
                 pass.draw(
                     (&self.device, &self.queue),
                     &mut encoder,
-                    (rays.tlas(), occlusion),
+                    (rays, occlusion),
                     uniform,
                     screen_space_occlusion,
                 );
@@ -1556,7 +1556,7 @@ impl ScenePipeline {
             gi.trace(
                 (&self.device, &self.queue),
                 &mut encoder,
-                (rays.tlas(), &surfaces.buffer),
+                (rays.tlas(), &surfaces.buffer, &rays.cut_outs),
                 batch,
                 &self.light_probes,
             );
@@ -2024,7 +2024,39 @@ impl ScenePipeline {
     /// and prepass depth alive, binding the empty stand-in for each that
     /// isn't, so a freed map or target isn't kept alive by the bindings,
     /// and with the frame's joints (the shadow passes' bindings too).
-    fn bind_frame(&mut self) {
+    /// A bind group of `layout`, which holds only `bindings` of the frame's
+    /// (of its uniform 0, lamps 3, sky 10 to 12 and light probes 16): for
+    /// compute passes that would pass eight storage buffers a stage with
+    /// all of them.
+    pub(super) fn frame_subset(
+        &self,
+        layout: &wgpu::BindGroupLayout,
+        bindings: &[u32],
+    ) -> wgpu::BindGroup {
+        let (environment, sky_image) = self.environment.views();
+        let entries: Vec<wgpu::BindGroupEntry> = bindings
+            .iter()
+            .map(|&binding| wgpu::BindGroupEntry {
+                binding,
+                resource: match binding {
+                    0 => self.frame_buffer.as_entire_binding(),
+                    3 => self.light_buffer.as_entire_binding(),
+                    10 => wgpu::BindingResource::TextureView(environment),
+                    11 => wgpu::BindingResource::Sampler(&self.environment.sampler),
+                    12 => wgpu::BindingResource::TextureView(sky_image),
+                    16 => self.light_probes.buffer().as_entire_binding(),
+                    _ => unreachable!("frame binding {binding} isn't offered on its own"),
+                },
+            })
+            .collect();
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("frame (part)"),
+            layout,
+            entries: &entries,
+        })
+    }
+
+    pub(super) fn bind_frame(&mut self) {
         let empty = &self.empty_shadow_view;
         let sun = self.shadow_map.as_ref().map_or(empty, |map| &map.array);
         let spot = self
@@ -2096,7 +2128,7 @@ impl ScenePipeline {
         let ray_gi_group = self
             .ray_gi
             .as_ref()
-            .map(|gi| bind(&gi.frame_layout, prepass_depth, occlusion));
+            .map(|gi| self.frame_subset(&gi.frame_layout, &ray_gi::FRAME_BINDINGS));
         if let Some(fog) = &mut self.volumetric_fog {
             fog.frame_group = fog_group;
         }

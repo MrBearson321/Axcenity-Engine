@@ -68,12 +68,19 @@ pub(super) struct RayGlobalIllumination {
     pub(super) probes_traced: u64,
 }
 
+/// The frame's bindings the pass reads: its uniform, its lamps, its sky
+/// and the light probes. Only these: with all of the frame's storage
+/// buffers, the pass's own and the cut-outs' would pass the default limit
+/// of eight a stage.
+pub(super) const FRAME_BINDINGS: [u32; 6] = [0, 3, 10, 11, 12, 16];
+
 impl RayGlobalIllumination {
-    /// `frame_entries` are the frame's bindings, made visible to the
-    /// compute pass here.
+    /// `frame_entries` are the frame's bindings; those the pass reads
+    /// ([`FRAME_BINDINGS`]) are made visible to it here.
     pub(super) fn new(device: &wgpu::Device, frame_entries: &[wgpu::BindGroupLayoutEntry]) -> Self {
         let compute_entries: Vec<_> = frame_entries
             .iter()
+            .filter(|entry| FRAME_BINDINGS.contains(&entry.binding))
             .map(|entry| wgpu::BindGroupLayoutEntry {
                 visibility: entry.visibility | wgpu::ShaderStages::COMPUTE,
                 ..*entry
@@ -94,6 +101,7 @@ impl RayGlobalIllumination {
             has_dynamic_offset: false,
             min_binding_size: None,
         };
+        let cut_outs = super::ray_cut_outs::layout_entries(5, wgpu::ShaderStages::COMPUTE);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ray traced GI"),
             entries: &[
@@ -114,6 +122,11 @@ impl RayGlobalIllumination {
                 entry(2, storage(true)),
                 entry(3, storage(true)),
                 entry(4, storage(false)),
+                // Cut-outs' holes (LE7).
+                cut_outs[0],
+                cut_outs[1],
+                cut_outs[2],
+                cut_outs[3],
             ],
         });
         let shader = super::gpu::shader_module(device, "ray traced GI", super::gpu::RAY_GI_SHADER);
@@ -208,7 +221,7 @@ impl RayGlobalIllumination {
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (tlas, surfaces): (&wgpu::Tlas, &wgpu::Buffer),
+        (tlas, surfaces, cut_outs): (&wgpu::Tlas, &wgpu::Buffer, &super::ray_cut_outs::CutOuts),
         batch: &Batch,
         probes: &LightProbes,
     ) {
@@ -216,6 +229,7 @@ impl RayGlobalIllumination {
             return;
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&batch.uniform));
+        let [a, b, c, d] = cut_outs.entries(5);
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ray traced GI"),
             layout: &self.layout,
@@ -240,6 +254,10 @@ impl RayGlobalIllumination {
                     binding: 4,
                     resource: self.traced.as_entire_binding(),
                 },
+                a,
+                b,
+                c,
+                d,
             ],
         });
         {

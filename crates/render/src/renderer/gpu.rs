@@ -108,7 +108,15 @@ pub(super) const RAY_GI_SHADER: &str = concat!(
     include_str!("../fog.wgsl"),
     include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
+    include_str!("../ray_cut_outs.wgsl"),
     include_str!("../ray_gi.wgsl")
+);
+/// Ray traced ambient occlusion's pass (`ray_ao.wgsl`, renderer/ray_ao.rs):
+/// ray queries turned on first, then cut-outs' holes.
+pub(super) const RAY_AO_SHADER: &str = concat!(
+    "enable wgpu_ray_query;\n",
+    include_str!("../ray_cut_outs.wgsl"),
+    include_str!("../ray_ao.wgsl")
 );
 /// The shader that bakes the sky's environment maps: the sky's colors,
 /// then `environment.wgsl`.

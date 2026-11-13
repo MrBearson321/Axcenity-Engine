@@ -5,8 +5,8 @@
 // Drawn at half the scene's size into the same target as ssao.wgsl, then
 // blurred by its `fs_blur`. Blended over it: near the ray tracing distance
 // the rays fade out into what's beneath (screen-space ambient occlusion,
-// or nothing hidden).
-enable wgpu_ray_query;
+// or nothing hidden). Compiled after `ray_cut_outs.wgsl`, with
+// `enable wgpu_ray_query;` put first (renderer/gpu.rs).
 
 // Must match `OcclusionUniform` in renderer/types.rs (ssao.wgsl's).
 struct Occlusion {
@@ -30,17 +30,23 @@ struct RayAo {
 @group(0) @binding(0) var depth_texture: texture_depth_2d;
 @group(0) @binding(1) var normal_texture: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> occlusion: Occlusion;
-@group(1) @binding(0) var scene: acceleration_structure;
+@group(1) @binding(0) var ray_scene: acceleration_structure;
 @group(1) @binding(1) var<uniform> rays: RayAo;
+// Cut-outs' holes (LE7, ray_cut_outs.wgsl).
+@group(1) @binding(2) var<storage, read> cut_outs: array<CutOut>;
+@group(1) @binding(3) var<storage, read> cut_out_uvs: array<vec2<f32>>;
+@group(1) @binding(4) var cut_out_alpha: texture_2d_array<f32>;
+@group(1) @binding(5) var cut_out_sampler: sampler;
 
 // Instance masks (renderer/ray_tracing.rs): solid items and cut-outs,
 // casting shadows or not, but not see-through ones, as the prepass draws
 // them.
 const MASK_SOLID: u32 = 9u;
 const MASK_CUT_OUTS: u32 = 18u;
-// Cut-outs are traced as solid cards (their holes aren't looked up), so
-// one nearer than this isn't counted: leaves lying on the ground would
-// darken it in card-shaped blotches (ray_shadows.wgsl's CUT_OUT_NEAR).
+// Rays pass through cut-outs' holes (LE7), but a cut-out nearer than this
+// still isn't counted: a leaf card lying on the ground, or a grass clump's
+// foot, would darken the ground it stands in (ray_shadows.wgsl's
+// CUT_OUT_NEAR).
 const CUT_OUT_NEAR: f32 = 0.35;
 
 @vertex
@@ -78,11 +84,7 @@ fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32) -> f32 {
 // How far along the ray from `origin` the nearest item of `mask` is,
 // between `near` and `radius` (`radius` for nothing).
 fn nearest_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32, radius: f32) -> f32 {
-    var query: ray_query;
-    rayQueryInitialize(&query, scene, RayDesc(
-        RAY_FLAG_FORCE_OPAQUE, mask, near, radius, origin, direction));
-    while rayQueryProceed(&query) {}
-    let hit = rayQueryGetCommittedIntersection(&query);
+    let hit = trace_through_holes(RayDesc(0u, mask, near, radius, origin, direction));
     if hit.kind == RAY_QUERY_INTERSECTION_NONE {
         return radius;
     }

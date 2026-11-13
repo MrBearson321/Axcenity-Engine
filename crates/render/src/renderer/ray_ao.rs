@@ -41,6 +41,7 @@ impl RayAmbientOcclusion {
     /// the prepass's depth and normals and the occlusion uniform) and its
     /// own: the ray traced scene and [`RayAoUniform`].
     pub(super) fn new(device: &wgpu::Device, passes: &OcclusionPasses) -> Self {
+        let cut_outs = super::ray_cut_outs::layout_entries(2, wgpu::ShaderStages::FRAGMENT);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ray traced ambient occlusion"),
             entries: &[
@@ -62,6 +63,11 @@ impl RayAmbientOcclusion {
                     },
                     count: None,
                 },
+                // Cut-outs' holes (LE7).
+                cut_outs[0],
+                cut_outs[1],
+                cut_outs[2],
+                cut_outs[3],
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -72,7 +78,7 @@ impl RayAmbientOcclusion {
         let shader = super::gpu::shader_module(
             device,
             "ray traced ambient occlusion",
-            include_str!("../ray_ao.wgsl"),
+            super::gpu::RAY_AO_SHADER,
         );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ray traced ambient occlusion"),
@@ -120,23 +126,28 @@ impl RayAmbientOcclusion {
         &self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (tlas, targets): (&wgpu::Tlas, &OcclusionTargets),
+        (scene, targets): (&super::ray_tracing::RayScene, &OcclusionTargets),
         uniform: &RayAoUniform,
         over_screen_space: bool,
     ) {
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(uniform));
+        let [a, b, c, d] = scene.cut_outs.entries(2);
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ray traced ambient occlusion"),
             layout: &self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: tlas.as_binding(),
+                    resource: scene.tlas().as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: self.uniform.as_entire_binding(),
                 },
+                a,
+                b,
+                c,
+                d,
             ],
         });
         let load = if over_screen_space {
