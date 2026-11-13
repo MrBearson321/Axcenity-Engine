@@ -681,6 +681,8 @@ impl ScenePipeline {
             self.realtime_gi = None;
         }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
+        // The time and wind plants sway by, kept for next frame's motion.
+        let clock = frame_uniform.clock;
         // With TAA, the scene is drawn a fraction of a pixel to one side,
         // a different way each frame (renderer/temporal.rs).
         let view_proj = camera_view_projection(&list.camera, aspect);
@@ -756,9 +758,23 @@ impl ScenePipeline {
             )));
             self.bind_frame();
         }
+        // The sky's light averaged over every way (as `sky_diffuse` sees it,
+        // times the environment intensity), which lights dust where no
+        // volumetric fog or light probes say how open it is.
+        let sky_average = {
+            let rgb = |slot: &[f32; 4]| glam::Vec3::from_slice(&slot[..3]);
+            let average = if frame_uniform.environment[0] > 0.5 {
+                rgb(&frame_uniform.sky_light[0]) * 0.282_095
+            } else {
+                let sky = rgb(&frame_uniform.sky_horizon).lerp(rgb(&frame_uniform.sky_top), 0.5);
+                (sky + rgb(&frame_uniform.sky_ground)) * 0.5
+            };
+            average * frame_uniform.sky_top[3]
+        };
         frame_uniform.fog = fog::FogRaw::new(
             &list.fog,
             sky.colors[1],
+            sky_average,
             glam::Vec3::from_slice(&frame_uniform.sun_direction[..3]),
             glam::Vec3::from_slice(&frame_uniform.sun_radiance[..3]),
             if volumetric {
@@ -1010,7 +1026,7 @@ impl ScenePipeline {
         self.culling_bounds = seen;
         // What moved since last frame, for the motion vectors.
         let moved = self.frame_targets.temporal.as_ref().map(|_| {
-            let moved = self.history.moved(&draws, &joints, &skins);
+            let moved = self.history.moved(&draws, &joints, &skins, clock);
             let blur = list
                 .lens
                 .motion_blur
@@ -1025,6 +1041,7 @@ impl ScenePipeline {
                     taa_upscales.then_some(self.frame_targets.output),
                 ),
                 (blur, self.graphics.motion_blur),
+                clock,
                 &moved,
             );
             moved
@@ -1478,7 +1495,7 @@ impl ScenePipeline {
             shadows.draw(
                 (&self.device, &self.queue),
                 &mut encoder,
-                (rays.tlas(), prepass),
+                (rays, prepass),
                 uniform,
             );
             true
@@ -1663,8 +1680,15 @@ impl ScenePipeline {
             );
         }
         // Sun rays streaming from the sky's gaps, added to the scene.
+        // Under TAA their noise turns each frame, so TAA averages it away.
+        let taa = self
+            .frame_targets
+            .temporal
+            .as_ref()
+            .is_some_and(|temporal| temporal.has_taa());
+        let turn = if taa { (self.frame % 64) as f32 } else { 0.0 };
         if let (Some(rays), Some(occlusion)) = (
-            sun_rays::uniform(list, &self.graphics, aspect),
+            sun_rays::uniform(list, &self.graphics, aspect, turn),
             &self.frame_targets.occlusion,
         ) {
             let pass = self
@@ -1828,7 +1852,9 @@ impl ScenePipeline {
         counts.cascade_triangles = cascade_counts.map(|(_, triangles)| triangles);
         self.counts = counts;
         match &self.frame_targets.temporal {
-            Some(temporal) => self.history.finish(list, view_proj, temporal.has_taa()),
+            Some(temporal) => self
+                .history
+                .finish(list, view_proj, clock, temporal.has_taa()),
             None => self.history.reset(),
         }
         self.forget_undrawn();

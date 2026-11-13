@@ -71,14 +71,11 @@ fn air_sun_visibility(position: vec3<f32>) -> f32 {
     return 1.0;
 }
 
-// The light scattered toward the camera at `position` (looking along
-// `dir`, at `uv` on screen) by the fog there, per stud, as a share of the
-// fog: the sun's where it isn't shadowed, and each lamp listed for the
-// cell's tile of the screen, where its shadows allow.
-fn air_light(position: vec3<f32>, dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
-    let fog = frame.fog;
-    var light = fog.sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.sun.w)
-        * air_sun_visibility(position) * cloud_shadow(frame.clouds, position, fog.sun_direction.xyz);
+// The lamps' light at `position` scattered toward the camera looking along
+// `dir` (at `uv` on screen), before the fog's own share of it: each lamp
+// listed for the cell's tile of the screen, where its shadows allow.
+fn lamp_air_light(position: vec3<f32>, dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    var light = vec3<f32>(0.0);
     if frame.lights.x == 0u {
         return light;
     }
@@ -95,27 +92,115 @@ fn air_light(position: vec3<f32>, dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
         let l = reach.xyz / max(length(reach.xyz), 0.0001);
         let to_light = lamp.position_range.xyz - position;
         if strength > 0.0 {
-            light += lamp.radiance_cone.rgb * strength * fog.distance.z
-                * fog_phase(dir, l, LAMP_FORWARD)
+            light += lamp.radiance_cone.rgb * strength * fog_phase(dir, l, LAMP_FORWARD)
                 * lamp_visibility(lamp, position, l, to_light, unturned);
         }
     }
     return light;
 }
 
-// 1. Each cell's fog (a) and the light it scatters toward the camera per
-// stud (rgb), at its middle.
+// How many points of each cell the sun's shadow is looked up at.
+const SUN_SAMPLES: u32 = 8u;
+
+// Points spread evenly through a cell (0 to 1 each way): the first of the
+// Halton (2, 3, 5) sequence. Every cell uses the same ones: shifting them
+// at random per cell left a speckle of cell-sized blotches, which TAA's
+// clamp can't average away (it would flicker if they changed per frame).
+const CELL_POINTS = array<vec3<f32>, 8>(
+    vec3<f32>(0.5, 0.333333, 0.2),
+    vec3<f32>(0.25, 0.666667, 0.4),
+    vec3<f32>(0.75, 0.111111, 0.6),
+    vec3<f32>(0.125, 0.444444, 0.8),
+    vec3<f32>(0.625, 0.777778, 0.04),
+    vec3<f32>(0.375, 0.222222, 0.24),
+    vec3<f32>(0.875, 0.555556, 0.44),
+    vec3<f32>(0.0625, 0.888889, 0.64),
+);
+
+// How much of the sun reaches cell `id`'s air: its shadow looked up at
+// points spread through the whole cell and averaged, so a shaft's edge
+// crossing a cell counts by how much of it is lit. One point in the middle
+// made shafts step from cell to cell, and the steps crawled as the view
+// moved.
+fn cell_sun_visibility(id: vec3<u32>) -> f32 {
+    if frame.shadow.x == 0.0 {
+        return 1.0;
+    }
+    let near = slice_distance(f32(id.z));
+    let far = slice_distance(f32(id.z) + 1.0);
+    var lit = 0.0;
+    for (var k = 0u; k < SUN_SAMPLES; k++) {
+        let point = CELL_POINTS[k];
+        let uv = (vec2<f32>(id.xy) + point.xy) / vec2<f32>(GRID.xy);
+        let position = frame.camera_position.xyz + view_ray(uv) * mix(near, far, point.z);
+        lit += air_sun_visibility(position);
+    }
+    return lit / f32(SUN_SAMPLES);
+}
+
+// The light arriving at `position` from all around, averaged over every
+// way (for light scattered alike every way): what light probe volumes, or
+// ray traced GI's probes, found there, or the sky's where there are none.
+// The probes hold first-order harmonics, whose average over every way is
+// exactly the mean of two opposite ones.
+fn surrounding_light(position: vec3<f32>) -> vec3<f32> {
+    let environment = frame.sky_top.w;
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    return 0.5 * (surrounding_diffuse(position, up, environment)
+        + surrounding_diffuse(position, -up, environment));
+}
+
+// How open the air is to the sky where the light around it is `around`:
+// that light over the open sky's (1 in the open, or with no light probes
+// to say; toward 0 in a closed room). Height fog's own color is the open
+// air's.
+fn openness(around: vec3<f32>) -> f32 {
+    let environment = frame.sky_top.w;
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    let open = environment * 0.5 * (sky_diffuse(up) + sky_diffuse(-up));
+    let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let sky = dot(open, luma);
+    if sky <= 1e-5 {
+        return 1.0;
+    }
+    return clamp(dot(around, luma) / sky, 0.0, 2.0);
+}
+
+// 1. Each cell's fog and dust (a: the light they take away per stud) and
+// the light they scatter toward the camera per stud (rgb): the sun's where
+// it isn't shadowed, the lamps', and the light around (height fog's own
+// color by how open the air is, and for dust the light probes' light).
 @compute @workgroup_size(4, 4, 4)
 fn cs_scatter(@builtin(global_invocation_id) id: vec3<u32>) {
     if any(id >= GRID) {
         return;
     }
+    let fog = frame.fog;
     let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(GRID.xy);
     let dir = view_ray(uv);
     let middle = 0.5 * (slice_distance(f32(id.z)) + slice_distance(f32(id.z) + 1.0));
     let position = frame.camera_position.xyz + dir * middle;
-    let density = frame.fog.height.x * fog_thickness(frame.fog, position.y);
-    textureStore(scatter_out, id, vec4<f32>(air_light(position, dir, uv) * density, density));
+    let fog_density = fog.height.x * fog_thickness(fog, position.y);
+    let dust = dust_density(fog, position);
+    let density = fog_density + dust;
+    if density <= 0.0 {
+        textureStore(scatter_out, id, vec4<f32>(0.0));
+        return;
+    }
+    let sun = cell_sun_visibility(id) * cloud_shadow(frame.clouds, position, fog.sun_direction.xyz);
+    let lamps = lamp_air_light(position, dir, uv);
+    var light = fog_density * (fog.sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.sun.w) * sun
+        + fog.distance.z * lamps);
+    let own = fog.distance.w > 0.5;
+    if own || dust > 0.0 {
+        let around = surrounding_light(position);
+        if own {
+            light += fog_density * fog.color.rgb * openness(around);
+        }
+        light += dust * fog.dust_color.rgb * (around + lamps);
+    }
+    light += dust * fog.dust_sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.dust.y) * sun;
+    textureStore(scatter_out, id, vec4<f32>(light, density));
 }
 
 // 2. Along each ray, front to back: the light gathered up to the end of

@@ -242,3 +242,119 @@ fn volumetric_fog_is_absent_below_ultra_and_costs_nothing() {
     assert_eq!(renderer.scene.volumetric_fogs_alive(), 0);
     assert!(renderer.stats().target_bytes < with_grid);
 }
+
+/// `shafts()` with grey fog instead of black: its own light shows too.
+fn grey_shafts() -> (DrawList, Vec3, Vec3) {
+    let (mut list, shadowed, open) = shafts();
+    list.fog.color = Some([0.5; 3]);
+    (list, shadowed, open)
+}
+
+#[test]
+fn height_fogs_own_light_looks_the_same_in_the_open_with_volumetric_fog() {
+    // The grid scatters the fog's own light by how open the air is to the
+    // sky; with no light probes to say otherwise that's the open sky, so the
+    // picture doesn't change where nothing shadows the air.
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let (list, _, open) = grey_shafts();
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.set_graphics(&ultra(true));
+    renderer.render(&list).unwrap();
+    let on = renderer.read_pixels();
+    renderer.set_graphics(&ultra(false));
+    renderer.render(&list).unwrap();
+    let off = renderer.read_pixels();
+    let (lit_on, lit_off) = (
+        pixel_at(&on, screen_of(&list, open)),
+        pixel_at(&off, screen_of(&list, open)),
+    );
+    for channel in 0..3 {
+        assert!(
+            lit_on[channel].abs_diff(lit_off[channel]) <= 8,
+            "open air: {lit_on:?} vs {lit_off:?}"
+        );
+    }
+}
+
+/// Dust filling a box from `x0` to `x1` across, 60 studs high and from 2
+/// to 60 studs in front of the camera, white and fairly thick.
+fn dust_box(x0: f32, x1: f32) -> crate::Dust {
+    let middle = Vec3::new((x0 + x1) * 0.5, 0.0, -31.0);
+    crate::Dust {
+        density: 0.04,
+        color: [1.0; 3],
+        forward_scattering: 0.6,
+        to_box: Mat4::from_translation(-middle),
+        half_size: Vec3::new((x1 - x0) * 0.5, 30.0, 29.0),
+        edge: 0.5,
+    }
+}
+
+#[test]
+fn dust_glows_only_inside_its_box_with_or_without_volumetric_fog() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // A black wall far behind, and the sun high ahead (low, the wall would
+    // shadow the dust in front of it); dust only on the left.
+    let mut wall = red_block(Vec3::new(0.0, 0.0, -80.0), Vec3::new(200.0, 100.0, 1.0));
+    wall.material.emissive = [0.0; 3];
+    let mut list = list_of(vec![wall]);
+    list.sun.direction = Vec3::new(0.0, 1.0, -0.3);
+    list.fog = Fog {
+        dust: Some(dust_box(-60.0, -2.0)),
+        ..Fog::default()
+    };
+    let (inside, outside) = (Vec3::new(-20.0, 0.0, -80.0), Vec3::new(20.0, 0.0, -80.0));
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    for volumetric in [true, false] {
+        renderer.set_graphics(&ultra(volumetric));
+        renderer.render(&list).unwrap();
+        assert_eq!(
+            renderer.scene.volumetric_fogs_alive(),
+            usize::from(volumetric),
+            "dust alone draws the volumetric fog at Ultra"
+        );
+        let pixels = renderer.read_pixels();
+        let glow = pixel_at(&pixels, screen_of(&list, inside));
+        let clear = pixel_at(&pixels, screen_of(&list, outside));
+        assert!(
+            glow[0] > 40,
+            "the dust glows (volumetric {volumetric}): {glow:?}"
+        );
+        assert!(
+            clear[0] < 12,
+            "no dust outside its box (volumetric {volumetric}): {clear:?}"
+        );
+    }
+}
+
+#[test]
+fn dust_in_a_walls_shadow_loses_the_suns_light_at_ultra() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // `shafts()`'s wall shadows the air in front of its half of the view,
+    // here filled with dust (and no fog) all the way across.
+    let (mut list, shadowed, open) = shafts();
+    list.fog = Fog {
+        dust: Some(dust_box(-60.0, 60.0)),
+        ..Fog::default()
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.set_graphics(&ultra(true));
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    let [dark, ..] = pixel_at(&pixels, screen_of(&list, shadowed));
+    let [lit, ..] = pixel_at(&pixels, screen_of(&list, open));
+    assert!(lit > 60, "sunlit dust glows: {lit}");
+    assert!(
+        dark + 30 < lit,
+        "the wall's shadow in the dust: {dark} vs {lit}"
+    );
+}
