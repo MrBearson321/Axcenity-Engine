@@ -195,7 +195,7 @@ Each phase is one PR from `main`, with GPU tests (lavapipe in the cloud, the RX 
 | **RT4 Reflections** | Half-res rays below a roughness cutoff (GI-1.0 used 0.2), hits shaded from the material table, probe GI and a sun ray; misses and rough surfaces fall back to reflection probes and the environment; reflection denoiser port; water uses it | Mirror and water tests; ~1–2 ms at 1440p |
 | **RT5 Scale** (only if measurements need it) | Skinned BLAS rebuild budget; GPU-written TLAS instances through the hal or upstream; hybrid shadow tile classifier; disabling naga's ray query runtime checks once stable | Driven by a measured bottleneck |
 
-Not planned: ReSTIR DI/GI, path tracing, ray tracing pipelines (Vulkan only in wgpu), NRD, DLSS or FSR ray reconstruction.
+Not planned: ReSTIR DI/GI, ray tracing pipelines (Vulkan only in wgpu), NRD, DLSS or FSR ray reconstruction. Path tracing was added as an editor view mode on 2026-11-13 ([lighting-engine-audit.md](lighting-engine-audit.md), LE6).
 
 ## How this fits the roadmap
 

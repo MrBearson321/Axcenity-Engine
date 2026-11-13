@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Drag a Toolbox card onto the Assets panel to get it into the project"
+details = "A Toolbox result can now be dragged onto the Assets panel as well as the scene. It downloads into the project without being placed, and the Assets panel then shows the new texture set or sound, picked. The panel is outlined while a card is held over it. A sky still asks to be used and a model still opens the Import dialog."
+features = []
+fixes = []
+introduces_issues = []
+prs = [314]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
