@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Big worlds can stream while you edit them"
+details = "Viewport menu > Overlays > Stream While Editing (also Settings > Viewport): with the Workspace's StreamingEnabled on, the viewport leaves out what's beyond StreamingTargetRadius of the camera while editing, as Play does, so a big world edits as light as it plays. Whatever is selected always shows. Off by default and kept between runs."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -965,6 +965,13 @@ impl EditorApp {
             "Light Cones",
             "Show where every light shines. Off, only the selected light (or the part it's in) shows its cone.",
         );
+        overlay_menu_item(
+            ui,
+            &mut overlays.stream_editing,
+            icons::BROADCAST,
+            "Stream While Editing",
+            "With Workspace.StreamingEnabled on, leave out what's beyond StreamingTargetRadius of the camera while editing, as in Play, so a big world edits as light as it plays. What's selected always shows.",
+        );
     }
 
     /// Beside Play and Stop (Phases 64 and 67): how many clients Play

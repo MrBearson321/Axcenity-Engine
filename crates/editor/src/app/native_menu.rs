@@ -331,6 +331,11 @@ impl EditorApp {
             ("View Cube", Command::ViewCube, self.view_cube),
             ("Light Cones", Command::LightCones, self.light_cones),
             ("Movement Guide", Command::MovementGuide, self.move_guide),
+            (
+                "Stream While Editing",
+                Command::StreamEditing,
+                self.overlays.stream_editing,
+            ),
         ] {
             viewport.check(label, MenuAction::Command(command), ready, on);
         }

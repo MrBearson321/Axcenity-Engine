@@ -484,6 +484,9 @@ fn command_description(command: &Command) -> String {
         Command::SavedLayout(name) => return format!("Switch to the layout you saved as {name}."),
         Command::SaveLayout => "Keep where the panels are now, by name, to switch back to later.",
         Command::LightCones => "Show every light's cone, not only the selected one's.",
+        Command::StreamEditing => {
+            "With Workspace streaming on, leave out what's far from the camera while editing, as in Play."
+        }
         Command::ViewCube => "The cube in the viewport's corner that turns the camera to a face.",
         Command::Grid => "Lines and distances in studs on the baseplate, while editing.",
         Command::MovementGuide => {

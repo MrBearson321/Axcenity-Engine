@@ -118,6 +118,22 @@ impl Streaming {
         self.shown = shown;
     }
 
+    /// Draws `ids` and everything inside them even when they're out of range,
+    /// until the next step goes over the units again. The editor keeps the
+    /// selection shown this way while it streams (roadmap R16.3), so
+    /// what's being edited never vanishes.
+    pub fn show_anyway(&mut self, world: &World, ids: impl IntoIterator<Item = InstanceId>) {
+        if self.hidden.is_empty() {
+            return;
+        }
+        for id in ids {
+            self.hidden.remove(&id);
+            for inside in world.descendants_iter(id) {
+                self.hidden.remove(&inside);
+            }
+        }
+    }
+
     /// Whether the terrain chunk at `center`, reaching `half` on each side
     /// of it, should be kept (within the unload radius) or built (within
     /// the target radius). `None` while streaming is off.
@@ -193,6 +209,34 @@ mod tests {
             .streaming
             .step(&world, Vec3::new(900.0, 0.0, 0.0), 1.0);
         assert_eq!(drawn(&world, &mut cache), 1, "now only the far one is near");
+    }
+
+    #[test]
+    fn what_is_shown_anyway_draws_however_far_until_the_next_go_over() {
+        let mut world = world_with_parts(&[0.0]);
+        let model = world.create(ClassName::Model).unwrap();
+        let workspace = world.workspace();
+        world.set_parent(model, Some(workspace)).unwrap();
+        let far = world.create(ClassName::Part).unwrap();
+        world
+            .set_property(
+                far,
+                "Position",
+                Value::Vector3(Vector3::new(900.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        world.set_parent(far, Some(model)).unwrap();
+        let mut cache = TerrainCache::new();
+        cache.streaming.step(&world, Vec3::ZERO, 1.0);
+        assert_eq!(drawn(&world, &mut cache), 1);
+
+        // The selected Model shows with everything inside it.
+        cache.streaming.show_anyway(&world, [model]);
+        assert!(!cache.streaming.is_hidden(far));
+        assert_eq!(drawn(&world, &mut cache), 2);
+
+        cache.streaming.step(&world, Vec3::ZERO, 1.0);
+        assert!(cache.streaming.is_hidden(far), "it's out of range again");
     }
 
     #[test]

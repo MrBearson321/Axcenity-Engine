@@ -821,6 +821,7 @@ const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
 const OVERLAY_CONTACTS_KEY: &str = "overlay contacts";
 const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const OVERLAY_STREAMING_KEY: &str = "overlay streaming";
+const STREAM_EDITING_KEY: &str = "stream while editing";
 const OVERLAY_LIGHT_PROBES_KEY: &str = "overlay light probes";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
@@ -1183,6 +1184,8 @@ impl EditorApp {
             self.overlays.bodies = storage.get_string(OVERLAY_BODIES_KEY).as_deref() == Some("on");
             self.overlays.streaming =
                 storage.get_string(OVERLAY_STREAMING_KEY).as_deref() == Some("on");
+            self.overlays.stream_editing =
+                storage.get_string(STREAM_EDITING_KEY).as_deref() == Some("on");
             self.overlays.light_probes =
                 storage.get_string(OVERLAY_LIGHT_PROBES_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
@@ -1334,6 +1337,10 @@ impl eframe::App for EditorApp {
         storage.set_string(
             OVERLAY_STREAMING_KEY,
             flag(self.overlays.streaming).to_owned(),
+        );
+        storage.set_string(
+            STREAM_EDITING_KEY,
+            flag(self.overlays.stream_editing).to_owned(),
         );
         storage.set_string(
             OVERLAY_LIGHT_PROBES_KEY,
