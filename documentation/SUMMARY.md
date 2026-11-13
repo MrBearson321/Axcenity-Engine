@@ -20,6 +20,7 @@
 * [Explorer and hierarchy](learn/explorer-and-hierarchy.md)
 * [Materials and textures](learn/materials-and-textures.md)
 * [Lighting and rendering](learn/lighting-and-rendering.md)
+* [Ray tracing: the best look, simply](learn/ray-tracing.md)
 * [Terrain tools](learn/terrain.md)
 
 ## Learn: Bringing it to life
