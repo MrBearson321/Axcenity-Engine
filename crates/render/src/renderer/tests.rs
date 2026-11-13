@@ -769,6 +769,7 @@ fn red_sprite(z: f32, light_emission: f32) -> crate::Sprite {
         brightness: 1.0,
         light_emission,
         texture: None,
+        frame: None,
     }
 }
 

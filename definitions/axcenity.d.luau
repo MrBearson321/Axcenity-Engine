@@ -1327,6 +1327,30 @@ declare extern type EnumParticleEmitterShapeInOutItems with
 	InAndOut: EnumParticleEmitterShapeInOut
 end
 
+--- One choice of `Enum.ParticleFlipbookLayout`.
+declare extern type EnumParticleFlipbookLayout extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleFlipbookLayout`.
+declare extern type EnumParticleFlipbookLayoutItems with
+	None: EnumParticleFlipbookLayout
+	Grid2x2: EnumParticleFlipbookLayout
+	Grid4x4: EnumParticleFlipbookLayout
+	Grid8x8: EnumParticleFlipbookLayout
+end
+
+--- One choice of `Enum.ParticleFlipbookMode`.
+declare extern type EnumParticleFlipbookMode extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleFlipbookMode`.
+declare extern type EnumParticleFlipbookModeItems with
+	Loop: EnumParticleFlipbookMode
+	OneShot: EnumParticleFlipbookMode
+	PingPong: EnumParticleFlipbookMode
+	Random: EnumParticleFlipbookMode
+end
+
 --- One choice of `Enum.RayTracedAmbientOcclusion`.
 declare extern type EnumRayTracedAmbientOcclusion extends EnumItem with
 end
@@ -1399,6 +1423,8 @@ declare extern type EnumLibrary with
 	ParticleEmitterShape: EnumParticleEmitterShapeItems
 	ParticleEmitterShapeStyle: EnumParticleEmitterShapeStyleItems
 	ParticleEmitterShapeInOut: EnumParticleEmitterShapeInOutItems
+	ParticleFlipbookLayout: EnumParticleFlipbookLayoutItems
+	ParticleFlipbookMode: EnumParticleFlipbookModeItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
 end
@@ -4172,6 +4198,14 @@ declare extern type ParticleEmitter extends Instance with
 	Rotation: number
 	--- How fast particles spin, in degrees a second.
 	RotSpeed: number
+	--- Cuts the Texture into a grid of frames that each particle shows one at a time, read left to right, then top to bottom: `Enum.ParticleFlipbookLayout.Grid2x2`, `Grid4x4` or `Grid8x8` (4, 16 or 64 frames). `None` (the default) shows the whole Texture. The built-in ParticleType pictures have no frames, so it needs a Texture.
+	FlipbookLayout: EnumParticleFlipbookLayout | "None" | "Grid2x2" | "Grid4x4" | "Grid8x8"
+	--- Which frame a particle shows as it ages: `Enum.ParticleFlipbookMode.Loop` (the default: in order at FlipbookFramerate, then from the first again), `OneShot` (every frame once over its life, whatever the frame rate), `PingPong` (in order, then back) or `Random` (a frame at random, again at the frame rate).
+	FlipbookMode: EnumParticleFlipbookMode | "Loop" | "OneShot" | "PingPong" | "Random"
+	--- How many flipbook frames a second each particle moves on (default 1). OneShot ignores it.
+	FlipbookFramerate: number
+	--- When true, each particle starts on a frame of its own instead of the first (Loop and PingPong), so a puff of smoke doesn't animate in step.
+	FlipbookStartRandom: boolean
 	--- From 0 (particles paint over what's behind them, like smoke) to 1 (they add their light, like fire and sparks).
 	LightEmission: number
 	--- How brightly particles glow: 1 is their color as it is; higher values bloom.

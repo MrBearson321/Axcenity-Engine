@@ -1486,6 +1486,17 @@ impl ClassName {
                     // Starting turn, in degrees, and degrees a second.
                     ("Rotation", Value::Number(0.0)),
                     ("RotSpeed", Value::Number(0.0)),
+                    // The Texture cut into a grid of frames, shown one at a
+                    // time: Loop, OneShot (over each life), PingPong or
+                    // Random, at FlipbookFramerate frames a second
+                    // (roadmap R17.2c). None shows the whole Texture.
+                    (
+                        "FlipbookLayout",
+                        enum_item("ParticleFlipbookLayout", "None"),
+                    ),
+                    ("FlipbookMode", enum_item("ParticleFlipbookMode", "Loop")),
+                    ("FlipbookFramerate", Value::Number(1.0)),
+                    ("FlipbookStartRandom", Value::Bool(false)),
                     // 0 paints over what's behind; 1 adds light (fire, sparks).
                     ("LightEmission", Value::Number(0.0)),
                     // Above 1 glows (and blooms).

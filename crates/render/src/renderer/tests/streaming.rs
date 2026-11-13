@@ -107,9 +107,21 @@ fn what_stops_being_drawn_leaves_the_gpu_and_uploads_again_on_the_way_back() {
     let bytes = renderer.scene.mesh_bytes.total();
     assert!(bytes > 0);
 
-    // A long time passes without it being drawn.
+    // Many frames without it being drawn, but quick ones: within
+    // `KEEP_UNDRAWN_SECONDS` it stays, so turning back doesn't upload it
+    // again.
     let empty = list_of(Vec::new());
     renderer.scene.frame += KEEP_UNDRAWN_FRAMES;
+    renderer.render(&empty).unwrap();
+    assert!(
+        renderer.scene.gpu_mesh(MeshKey::Custom(902)).is_some(),
+        "kept while it was drawn only seconds ago"
+    );
+
+    // A long time passes without it being drawn: the frames and the
+    // seconds (the clock of recent frames forgets them).
+    renderer.scene.frame += KEEP_UNDRAWN_FRAMES;
+    renderer.scene.frame_clock.clear();
     renderer.render(&empty).unwrap();
     assert!(
         renderer.scene.gpu_mesh(MeshKey::Custom(902)).is_none(),
