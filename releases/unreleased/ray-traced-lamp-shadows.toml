@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Ray traced shadows for point, spot and rect lights"
+details = "With Settings > Graphics > Ray traced shadows on, every PointLight, SpotLight and RectLight with Shadows on near the camera casts ray traced shadows, not only the few the shadow maps allowed. Soft shadows follow Lighting's ShadowSoftness: a lamp's shadow softens with its bulb size, and a RectLight's is traced over its whole rectangle. A lamp's own fixture doesn't shade it. Lights inserted in the editor now have Shadows on; turn it on for existing lamps."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

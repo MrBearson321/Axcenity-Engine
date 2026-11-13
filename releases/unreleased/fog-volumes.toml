@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Fog Volumes and Interiors: big local haze, and rooms with their own air"
+details = "Lighting ribbon > Volumes > Fog Volume inserts a 200 x 60 x 200 stud box of haze that sunlight shines through in shafts (with Volumetric fog) and lamps light; its Fog sets Density, Color, Glare and the new HeightFalloff for haze lying low. Interior inserts a room-sized box whose FogEffect has the new Interior switch: inside it the outdoor fog and haze is cleared and only its own dust fills it, so light through windows shows as shafts. Up to 8 fog volumes now draw at once (only the nearest one did before)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

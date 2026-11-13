@@ -54,4 +54,4 @@ Put parts in named groups with their **CollisionGroup** property, then choose wh
 
 Scripts ask the world what's where without moving anything: `workspace:Raycast()` finds the first part along a line, `workspace:GetPartBoundsInBox()` and `workspace:GetPartBoundsInRadius()` find parts in an area. **Viewport > Overlays > Raycasts** shows recent rays during Play.
 
-> **Known limits.** Imported models (MeshParts) collide as their convex hull, so hollows are filled in; split a hollow model into pieces, or use a Union with **CollisionFidelity** set to `PreciseConvexDecomposition`. A ragdoll can briefly bend past its joint limits on a hard landing.
+> **Known limits.** Imported models (MeshParts) collide as their convex hull by default, so hollows are filled in. To keep a doorway or an arch open, give the model its own collision pieces (objects named like it with `_COL` on the end, such as `Arch_COL1` and `Arch_COL2`, each a convex shape; they aren't drawn), or set the MeshPart's **CollisionFidelity** to `PreciseConvexDecomposition`. A ragdoll can briefly bend past its joint limits on a hard landing.

@@ -26,8 +26,8 @@ Physics uses **rapier**, a Rust physics engine, on its own pool of threads. Lear
 | Object | Collides as |
 |---|---|
 | Part | Its exact shape: block, ball, cylinder, wedge or capsule. |
-| MeshPart | The convex hull of its mesh (hollows are filled), or its own triangles when it's small and already convex. |
-| UnionOperation | Set by `UnionOperation.CollisionFidelity`: a box, a hull, or `PreciseConvexDecomposition` (several hulls, keeps hollows). |
+| MeshPart | Set by `MeshPart.CollisionFidelity`. `Default`: the model's own collision pieces (its `_COL` objects) when it has any, otherwise the convex hull of its mesh (hollows are filled), or its own triangles when it's small and already convex. Or a box, a hull, or `PreciseConvexDecomposition` (several hulls, keeps hollows). |
+| UnionOperation | Set by `UnionOperation.CollisionFidelity`: a box, a hull (the default), or `PreciseConvexDecomposition` (several hulls, keeps hollows). |
 | Terrain | A heightfield. |
 
 **Viewport > Overlays > Colliders** draws the shapes.
@@ -72,6 +72,6 @@ end
 
 In a multiplayer game the server simulates physics. `Part:SetNetworkOwner()` lets one player's device simulate an assembly (good for something they drive); the server checks how far it may move.
 
-> **Known limits.** MeshParts collide as hulls. Setting `Position` stops a part. A ragdoll can bend past its joint limits for a moment on a hard landing.
+> **Known limits.** MeshParts without collision pieces collide as hulls unless set to `PreciseConvexDecomposition`. Setting `Position` stops a part. A ragdoll can bend past its joint limits for a moment on a hard landing.
 
 More: [Physics in the engineering wiki](https://github.com/MrBearson321/axcenity-engine/blob/main/wiki/Engine-Systems/Physics.md).

@@ -79,7 +79,8 @@ impl Assets {
     }
 }
 
-/// A model's own bytes: its primitives and hull, not its images.
+/// A model's own bytes: its primitives, hull and collision pieces, not its
+/// images.
 pub fn model_bytes(model: &Model) -> usize {
     model
         .primitives
@@ -87,6 +88,11 @@ pub fn model_bytes(model: &Model) -> usize {
         .map(|primitive| primitive.heap_bytes())
         .sum::<usize>()
         + std::mem::size_of_val(model.hull_points.as_slice())
+        + model
+            .collision
+            .iter()
+            .map(|piece| std::mem::size_of_val(piece.as_slice()))
+            .sum::<usize>()
 }
 
 fn light_probe_bytes(probes: &LightProbes) -> usize {

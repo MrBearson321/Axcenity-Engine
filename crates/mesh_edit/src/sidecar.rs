@@ -6,7 +6,8 @@
 //! object's seams, pinned vertices and second uvs (Phase 58), which the
 //! Studio reads back from no `.glb`. Painted objects (Phase 59) keep their
 //! layers' settings here and their pixels as PNGs in the sidecar folder
-//! (`paint.rs`).
+//! (`paint.rs`). A sculpted object's mask (R15.1b) is kept here too, by
+//! the vertices of the object's own mesh, which the sidecar also keeps.
 //!
 //! The sidecar names the `.glb` it goes with by a hash of its bytes. If
 //! the `.glb` was changed since (exported again from another program), the
@@ -52,6 +53,9 @@ struct SidecarObject {
     /// its modifiers on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     skin: Option<Skin>,
+    /// Its sculpt mask: each masked vertex of `mesh` and how much (R15.1b).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    mask: Vec<(u32, f32)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -93,7 +97,7 @@ pub fn sidecar_path(model: &str) -> String {
 impl ModelDoc {
     /// The sidecar for this model saved as `glb` (what [`write_glb`]
     /// made), or `None` if no object has modifiers, seams, pins, second
-    /// uvs or paint, so there's nothing a `.glb` can't hold.
+    /// uvs, paint or a mask, so there's nothing a `.glb` can't hold.
     ///
     /// [`write_glb`]: ModelDoc::write_glb
     pub fn write_sidecar(&self, glb: &[u8]) -> Option<Vec<u8>> {
@@ -105,7 +109,10 @@ impl ModelDoc {
                 let marked = object.mesh.as_ref().is_some_and(|mesh| {
                     !mesh.seams().is_empty() || !mesh.pins().is_empty() || mesh.has_uv2()
                 });
-                !object.modifiers.is_empty() || !object.paint.is_empty() || marked
+                !object.modifiers.is_empty()
+                    || !object.paint.is_empty()
+                    || marked
+                    || object.mask().is_some()
             })
             .filter_map(|(index, object)| {
                 Some(SidecarObject {
@@ -116,6 +123,7 @@ impl ModelDoc {
                     mesh: mesh_data(object.mesh.as_ref()?),
                     paint: object.paint.iter().map(|set| set.data(index)).collect(),
                     skin: object.skin.clone(),
+                    mask: object.mask().map_or(Vec::new(), masked),
                 })
             })
             .collect();
@@ -201,7 +209,9 @@ impl ModelDoc {
                         .unwrap_or(0) as u32
                 })
                 .collect();
-            object.mesh = Some(edit_mesh(saved.mesh, &slot_now));
+            let mesh = edit_mesh(saved.mesh, &slot_now);
+            object.mask = mask_of(&saved.mask, mesh.vertex_count());
+            object.mesh = Some(mesh);
             object.modifiers = saved.modifiers;
             if saved.skin.is_some() {
                 object.skin = saved.skin;
@@ -275,6 +285,31 @@ fn edit_mesh(data: MeshData, slot_now: &[u32]) -> EditMesh {
     mesh.set_seams(data.seams, true);
     mesh.set_pins(data.pins, true);
     mesh
+}
+
+/// The masked vertices of `mask` (one value per vertex), each with its
+/// value.
+fn masked(mask: &[f32]) -> Vec<(u32, f32)> {
+    mask.iter()
+        .enumerate()
+        .filter(|(_, value)| **value > 0.0)
+        .map(|(vertex, &value)| (vertex as u32, value))
+        .collect()
+}
+
+/// A mask of `count` vertices with the `masked` ones set; empty when none
+/// is (vertices past the end are left out).
+fn mask_of(masked: &[(u32, f32)], count: usize) -> Vec<f32> {
+    if masked.is_empty() {
+        return Vec::new();
+    }
+    let mut mask = vec![0.0; count];
+    for &(vertex, value) in masked {
+        if let Some(slot) = mask.get_mut(vertex as usize) {
+            *slot = value.clamp(0.0, 1.0);
+        }
+    }
+    mask
 }
 
 /// A hash of `bytes` (64-bit FNV-1a), as hex: the same everywhere, so a

@@ -1029,6 +1029,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How much of the dust's light goes forward, away from the sun, from 0 to 10 (0 by default): more makes it glow brighter looking toward the sun.",
     ),
     (
+        ClassName::FogEffect,
+        "HeightFalloff",
+        "Studs above the volume's bottom over which its dust thins by e, for haze lying low in a valley; 0 (the default) keeps it even all the way up.",
+    ),
+    (
+        ClassName::FogEffect,
+        "Interior",
+        "Makes the volume an interior (a room, a building): inside its box the air outside is cleared (an Atmosphere's fog, Lighting's fog and lower volumes' dust), and only this effect's own Density fills it, 0 for clear air. False by default.",
+    ),
+    (
         ClassName::BloomEffect,
         "Enabled",
         "If false, it changes nothing.",
@@ -2243,11 +2253,6 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The color the whole solid is drawn in while UsePartColor is on. Union sets it to the first part's.",
     ),
     (
-        ClassName::UnionOperation,
-        "CollisionFidelity",
-        "What it collides as: `Enum.CollisionFidelity.Box` (its box), `Hull` (the default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build.",
-    ),
-    (
         ClassName::MeshPart,
         "CastShadow",
         "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
@@ -2261,6 +2266,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "CanCollide",
         "If false, other parts pass through it. It still fires Touched.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CollisionFidelity",
+        "What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.",
     ),
     (
         ClassName::MeshPart,
@@ -5308,7 +5318,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside a GraphicsVolume: the exposure while the camera is in the volume, in place of Lighting's Exposure."
         }
         ClassName::FogEffect => {
-            "Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog. With a Density above 0, dust or mist filling the volume's box instead, seen from anywhere and lit by the sun (shafts of light through windows and gaps)."
+            "Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog. With a Density above 0, dust or mist filling the volume's box instead, seen from anywhere and lit by the sun (shafts of light through windows and gaps); with Interior on, the volume clears the outdoor fog inside it."
         }
         ClassName::BloomEffect => {
             "Inside a GraphicsVolume: how bright light blooms while the camera is in the volume, in place of Lighting's BloomIntensity and BloomThreshold."

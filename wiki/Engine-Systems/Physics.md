@@ -30,7 +30,7 @@ flowchart LR
 - **Layers** (cohesion pass CW6.1): backend (rapier, inside the crate) → engine-facing API (`physics::api` and the crate root, `core` types only; a test keeps rapier out of `api.rs`) → simulation (`Physics::step`) → editor properties (`core` class defaults, Properties' Physics group) → Lua (`script/src/physical.rs`). No backend trait: a second backend isn't planned. Details: `docs/architecture/physics.md`, "Layers".
 - **Drag** (CW6.2, `drag.rs`): per-part `LinearDrag`, `AngularDrag` (0.5 default, the old global spin slowing) and `RollingFriction` (extra spin drag only in steps with an active contact) on the assembly's root; scripts get `ApplyForce`/`ApplyTorque(…, seconds?)` and `AssemblyLinearMomentum`.
 - **Bodies**: anchored → fixed collider; unanchored → dynamic body. An assembly (WeldConstraint union-find) is one body at its root part with offset colliders; it's rebuilt, not edited in place, when its parts or poses change.
-- **Shapes**: built-ins; MeshParts as the convex hull of their model (kept by model and size, `shapes::hull`); already-convex small models as their own triangles; UnionOperations by `CollisionFidelity`; terrain heightfields; colliding foliage.
+- **Shapes**: built-ins; MeshParts by `CollisionFidelity` (R15.2): Default is the model's own `_COL` collision pieces when it has any (`shapes::own_pieces`), else the convex hull of their model (kept by model and size, `shapes::hull`); already-convex small models as their own triangles; UnionOperations by `CollisionFidelity`; terrain heightfields; colliding foliage.
 - **Touches**: a pair with a solver contact after a step, newly, is queued; it ends after 3 steps apart. Resting contacts at the start aren't reported. Two anchored parts never touch.
 - **Characters are not bodies** ([ADR-0007](../Architecture/Architecture-Decisions/ADR-0007-Fixed-Step-Physics-And-Kinematic-Characters.md)): the host holds their parts kinematic before each step.
 - **Determinism**: body order is deterministic (`BTreeMap`), the step is fixed; cross-machine determinism is not a goal ([ADR-0014](../Architecture/Architecture-Decisions/ADR-0014-Determinism-Not-Required.md)).
@@ -78,7 +78,7 @@ rapier keeps its defaults (4 iterations, a stabilization pass): fewer made stack
 ## Limitations
 
 - Setting `Position` stops a part (Roblox keeps its speed) (decided in Phase 6).
-- MeshParts collide as convex hulls: hollows are filled.
+- A MeshPart whose model has no `_COL` pieces collides as its convex hull by default: hollows are filled unless it's set to `PreciseConvexDecomposition` (decomposed when first needed, slow for big models) or the model gets pieces (R15.2).
 - Ragdolls can push a joint past its limit for a few frames on a hard landing.
 - Lag compensation (Phase 81) not built.
 - One friction coefficient (no separate static friction); acceleration isn't a property (CP6).

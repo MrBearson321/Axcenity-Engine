@@ -479,6 +479,8 @@ pub struct AudioEngine<B: Backend = DefaultBackend> {
     monitor: Monitor,
     /// The walls in front of each spatial Sound ([`GameAudio::set_walls`]).
     walls: HashMap<InstanceId, u32>,
+    /// A file heard on its own, from no Sound ([`AudioEngine::play_file`]).
+    file: Option<StaticSoundHandle>,
 }
 
 impl AudioEngine {
@@ -541,7 +543,36 @@ where
             },
             monitor: Monitor::default(),
             walls: HashMap::new(),
+            file: None,
         })
+    }
+
+    /// Plays a sound file's `bytes` once, on its own, from no Sound (the
+    /// Toolbox's listen button, roadmap G1), stopping the one it played
+    /// before. `name` is for errors. Nothing is kept once it stops.
+    pub fn play_file(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), AudioError> {
+        self.stop_file();
+        let data = decode_sound(name, bytes)?;
+        let handle = self.manager.play(data).map_err(|err| AudioError::Play {
+            sound_id: name.to_owned(),
+            message: err.to_string(),
+        })?;
+        self.file = Some(handle);
+        Ok(())
+    }
+
+    /// Stops the file [`AudioEngine::play_file`] is playing.
+    pub fn stop_file(&mut self) {
+        if let Some(mut handle) = self.file.take() {
+            handle.stop(Tween::default());
+        }
+    }
+
+    /// Whether the file [`AudioEngine::play_file`] started is still playing.
+    pub fn file_playing(&self) -> bool {
+        self.file
+            .as_ref()
+            .is_some_and(|handle| handle.state() != PlaybackState::Stopped)
     }
 
     /// The peak levels since the last call.

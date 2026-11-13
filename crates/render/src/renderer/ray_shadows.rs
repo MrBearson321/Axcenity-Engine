@@ -34,7 +34,19 @@ pub(super) struct RayShadowUniform {
     settings: [f32; 4],
     /// The scene's width and height in pixels.
     size: [u32; 4],
+    /// 1 to trace lamps' shadows, the light tiles' size in pixels and how
+    /// many there are across.
+    lamps: [u32; 4],
+    /// How wide a lamp's bulb is in studs (0: hard shadows), rays per lamp
+    /// for soft shadows.
+    lamp: [f32; 4],
 }
+
+/// How wide a lamp's bulb is taken to be, in studs, at the world's
+/// `ShadowSoftness` of 1: its shadows' soft edge per stud between caster and
+/// receiver, over the distance to the light. A rect light's soft shadows
+/// spread over its own rectangle instead.
+pub(super) const MAX_LAMP_SIZE: f32 = 1.0;
 
 /// How the world's shadows are ray traced this frame, if they are.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -47,6 +59,9 @@ pub(super) struct RayShadowPlan {
     pub(super) sun_size: f32,
     /// Rays per pixel: one for hard shadows.
     pub(super) rays: u32,
+    /// Whether lamps' shadows are traced too: some lamp drawn casts
+    /// shadows (LE1).
+    pub(super) lamps: bool,
 }
 
 impl RayShadowPlan {
@@ -78,12 +93,41 @@ impl RayShadowPlan {
             } else {
                 1
             },
+            lamps: list.lights.iter().any(casts_shadows),
         })
     }
 
     pub(super) fn soft(&self) -> bool {
         self.sun_size > 0.0
     }
+
+    /// What the buffers are sized for: the soft passes, and lamps.
+    pub(super) fn shape(&self) -> (bool, bool) {
+        (self.soft(), self.lamps)
+    }
+}
+
+/// Whether `light` casts shadows (a light's `Shadows`): a spot light's
+/// beam, or a point or rect light's.
+pub(super) fn casts_shadows(light: &crate::draw_list::Light) -> bool {
+    light
+        .cone
+        .map_or(light.point_shadows.is_some(), |cone| cone.shadows.is_some())
+}
+
+/// For `LightRaw::shadow`'s third number: 0 for a light that casts no
+/// shadows, otherwise 1 plus how far from it ray traced shadows start (the
+/// farthest its own part reaches, so a lamp doesn't shade its own light).
+pub(super) fn traced_start(light: &crate::draw_list::Light) -> f32 {
+    let near = match light.cone {
+        Some(cone) => cone.shadows.map(|shadows| shadows.near),
+        None => light
+            .point_shadows
+            .map(|shadows| shadows.near.into_iter().fold(0.0, f32::max)),
+    };
+    near.map_or(0.0, |near| {
+        1.0 + if near.is_finite() { near.max(0.0) } else { 0.0 }
+    })
 }
 
 /// The pass's pipelines and buffers, at one scene size.
@@ -93,20 +137,30 @@ pub(super) struct RayShadows {
     blur_across: wgpu::ComputePipeline,
     blur_down: wgpu::ComputePipeline,
     uniform: wgpu::Buffer,
-    /// The scene's size the buffers are for, and whether the soft passes'
-    /// two buffers exist.
+    /// The scene's size the buffers are for, whether the soft passes'
+    /// two buffers exist, and whether the mask has the lamps' half.
     size: (u32, u32),
     soft: bool,
-    /// What the scene reads: a u32 per pixel (see ray_shadows.wgsl).
+    lamps: bool,
+    /// What the scene reads: a u32 per pixel for the sun (see
+    /// ray_shadows.wgsl), then, from `lamp_offset` bytes, one per pixel
+    /// for its lamps.
     pub(super) mask: wgpu::Buffer,
+    lamp_offset: u64,
     /// The soft passes' rays, then rays smoothed across.
     soft_buffers: Option<[wgpu::Buffer; 2]>,
     /// Bound where a pass reads nothing.
     nothing: wgpu::Buffer,
+    /// Bound for the lamps' half while lamps aren't traced (written by
+    /// nothing; apart from `nothing`, which is bound read-only).
+    no_lamps: wgpu::Buffer,
 }
 
 impl RayShadows {
-    pub(super) fn new(device: &wgpu::Device, (size, soft): ((u32, u32), bool)) -> Self {
+    pub(super) fn new(
+        device: &wgpu::Device,
+        (size, (soft, lamps)): ((u32, u32), (bool, bool)),
+    ) -> Self {
         let texture = |binding, sample_type| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -162,6 +216,11 @@ impl RayShadows {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // Lamps (LE1): the frame's lights, their tiles, and the
+                // lamps' half of the mask.
+                buffer(10, wgpu::BufferBindingType::Storage { read_only: true }),
+                buffer(11, wgpu::BufferBindingType::Storage { read_only: true }),
+                buffer(12, wgpu::BufferBindingType::Storage { read_only: false }),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -190,6 +249,15 @@ impl RayShadows {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let pixels = u64::from(size.0.max(1)) * u64::from(size.1.max(1)) * 4;
+        // Where the lamps' half starts: storage bindings start on 256 bytes.
+        let lamp_offset = pixels.next_multiple_of(256);
+        let mask = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ray traced shadow mask"),
+            size: if lamps { lamp_offset + pixels } else { pixels },
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         Self {
             trace: pipeline("cs_trace"),
             blur_across: pipeline("cs_blur_across"),
@@ -198,7 +266,9 @@ impl RayShadows {
             uniform,
             size,
             soft,
-            mask: pixel_buffer(device, "ray traced shadow mask", size),
+            lamps,
+            mask,
+            lamp_offset,
             soft_buffers: soft.then(|| {
                 [
                     pixel_buffer(device, "ray traced shadow rays", size),
@@ -206,12 +276,35 @@ impl RayShadows {
                 ]
             }),
             nothing: stand_in(device),
+            no_lamps: stand_in(device),
         }
     }
 
-    /// Whether these buffers are for a scene of `size` drawn `soft` or not.
-    pub(super) fn fits(&self, size: (u32, u32), soft: bool) -> bool {
-        self.size == size && self.soft == soft
+    /// Whether these buffers are for a scene of `size` drawn with this
+    /// `shape` (soft or not, lamps or not).
+    pub(super) fn fits(&self, size: (u32, u32), (soft, lamps): (bool, bool)) -> bool {
+        self.size == size && self.soft == soft && self.lamps == lamps
+    }
+
+    /// The sun's half of the mask.
+    fn sun_mask(&self) -> wgpu::BindingResource<'_> {
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &self.mask,
+            offset: 0,
+            size: wgpu::BufferSize::new(
+                u64::from(self.size.0.max(1)) * u64::from(self.size.1.max(1)) * 4,
+            ),
+        })
+    }
+
+    /// Where the lamps' half of the mask starts, in u32s (for the frame's
+    /// `ray_shadows.w`), or 0 without one.
+    pub(super) fn lamp_words(&self) -> u32 {
+        if self.lamps {
+            (self.lamp_offset / 4) as u32
+        } else {
+            0
+        }
     }
 
     /// Bytes of its buffers.
@@ -230,12 +323,22 @@ impl RayShadows {
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
         (scene, prepass): (&RayScene, &OcclusionTargets),
+        (lights, tiles): (&wgpu::Buffer, &wgpu::Buffer),
         uniform: &RayShadowUniform,
     ) {
         let tlas = scene.tlas();
         let cut_outs = &scene.cut_outs;
+        let lamp_mask = if self.lamps {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &self.mask,
+                offset: self.lamp_offset,
+                size: None,
+            })
+        } else {
+            self.no_lamps.as_entire_binding()
+        };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(uniform));
-        let group = |source: &wgpu::Buffer, destination: &wgpu::Buffer| {
+        let group = |source: &wgpu::Buffer, destination: wgpu::BindingResource| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ray traced shadows"),
                 layout: &self.layout,
@@ -262,7 +365,7 @@ impl RayShadows {
                     },
                     wgpu::BindGroupEntry {
                         binding: 5,
-                        resource: destination.as_entire_binding(),
+                        resource: destination,
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
@@ -280,15 +383,27 @@ impl RayShadows {
                         binding: 9,
                         resource: wgpu::BindingResource::Sampler(&cut_outs.sampler),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: lights.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: tiles.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: lamp_mask.clone(),
+                    },
                 ],
             })
         };
         let steps: Vec<(&wgpu::ComputePipeline, wgpu::BindGroup)> = match &self.soft_buffers {
-            None => vec![(&self.trace, group(&self.nothing, &self.mask))],
+            None => vec![(&self.trace, group(&self.nothing, self.sun_mask()))],
             Some([rays, across]) => vec![
-                (&self.trace, group(&self.nothing, rays)),
-                (&self.blur_across, group(rays, across)),
-                (&self.blur_down, group(across, &self.mask)),
+                (&self.trace, group(&self.nothing, rays.as_entire_binding())),
+                (&self.blur_across, group(rays, across.as_entire_binding())),
+                (&self.blur_down, group(across, self.sun_mask())),
             ],
         };
         let groups = (self.size.0.div_ceil(8), self.size.1.div_ceil(8));
@@ -306,12 +421,13 @@ impl RayShadows {
 
 /// What the pass reads this frame: `plan` for `list`, drawn through
 /// `inv_view_proj` (the prepass's, with TAA's jitter) from `view`, at
-/// `size`. `turn` changes each frame under TAA (0 without).
+/// `size`, its lamps tiled in `lamps` (tile size, tiles across). `turn`
+/// changes each frame under TAA (0 without).
 pub(super) fn ray_shadow_uniform(
     list: &DrawList,
     plan: &RayShadowPlan,
     (inv_view_proj, view): (Mat4, Mat4),
-    size: (u32, u32),
+    (size, lamps): ((u32, u32), (u32, u32)),
     turn: f32,
 ) -> RayShadowUniform {
     let sun = list.sun.direction.normalize_or(Vec3::Y);
@@ -328,6 +444,18 @@ pub(super) fn ray_shadow_uniform(
             0.0,
         ],
         size: [size.0, size.1, 0, 0],
+        lamps: [
+            u32::from(plan.lamps && lamps.1 > 0),
+            lamps.0.max(1),
+            lamps.1,
+            0,
+        ],
+        lamp: [
+            plan.sun_size / MAX_SUN_SIZE * MAX_LAMP_SIZE,
+            plan.rays as f32,
+            0.0,
+            0.0,
+        ],
     }
 }
 

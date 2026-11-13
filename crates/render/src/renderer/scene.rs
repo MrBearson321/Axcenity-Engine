@@ -849,15 +849,19 @@ impl ScenePipeline {
                 if !self
                     .ray_shadows
                     .as_ref()
-                    .is_some_and(|shadows| shadows.fits(size, plan.soft()))
+                    .is_some_and(|shadows| shadows.fits(size, plan.shape()))
                 {
                     self.ray_shadows = Some(Box::new(ray_shadows::RayShadows::new(
                         &self.device,
-                        (size, plan.soft()),
+                        (size, plan.shape()),
                     )));
                     self.bind_frame();
                 }
-                frame_uniform.ray_shadows = [1.0, size.0 as f32, plan.reach, 0.0];
+                let lamp_words = self
+                    .ray_shadows
+                    .as_ref()
+                    .map_or(0, |shadows| shadows.lamp_words());
+                frame_uniform.ray_shadows = [1.0, size.0 as f32, plan.reach, lamp_words as f32];
                 // Under TAA the rays turn each frame, and TAA averages them.
                 let taa = self
                     .frame_targets
@@ -872,7 +876,14 @@ impl ScenePipeline {
                         drawn_view_proj.inverse(),
                         glam::Mat4::from_cols_array_2d(&frame_uniform.view),
                     ),
-                    size,
+                    (
+                        size,
+                        if planned_lights.lights.is_empty() {
+                            (planned_lights.tile_size, 0)
+                        } else {
+                            (planned_lights.tile_size, planned_lights.tiles_across)
+                        },
+                    ),
                     turn,
                 ))
             }
@@ -1502,6 +1513,7 @@ impl ScenePipeline {
                 (&self.device, &self.queue),
                 &mut encoder,
                 (rays, prepass),
+                (&self.light_buffer, &self.tile_buffer),
                 uniform,
             );
             true
