@@ -184,6 +184,8 @@ pub(super) enum Command {
     SavedLayout(String),
     SaveLayout,
     LightCones,
+    /// Stream While Editing (roadmap R16.3).
+    StreamEditing,
     ViewCube,
     Grid,
     MovementGuide,
@@ -773,6 +775,14 @@ impl EditorApp {
             Ok(()),
         );
         add(
+            Command::StreamEditing,
+            "Stream While Editing",
+            "Viewport",
+            &["Streaming", "Large worlds", "Editor performance"],
+            None,
+            Ok(()),
+        );
+        add(
             Command::ViewCube,
             "View Cube",
             "Viewport",
@@ -1220,6 +1230,9 @@ impl EditorApp {
             Command::SavedLayout(name) => self.use_saved_layout(&name),
             Command::SaveLayout => self.layout_name = Some(Default::default()),
             Command::LightCones => self.light_cones = !self.light_cones,
+            Command::StreamEditing => {
+                self.overlays.stream_editing = !self.overlays.stream_editing;
+            }
             Command::ViewCube => self.view_cube = !self.view_cube,
             Command::Grid => self.grid = !self.grid,
             Command::MovementGuide => self.move_guide = !self.move_guide,

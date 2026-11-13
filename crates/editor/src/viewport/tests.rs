@@ -376,3 +376,41 @@ fn a_spline_point_drags_onto_the_surface_under_the_mouse_and_alt_drag_adds_one()
     }
     assert!(released);
 }
+
+#[test]
+fn streaming_while_editing_hides_what_is_far_but_never_the_selection() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    world
+        .set_property(workspace, "StreamingEnabled", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(workspace, "StreamingTargetRadius", Value::Number(200.0))
+        .unwrap();
+    let mut part_at = |x: f32| {
+        let part = world.create(ClassName::Part).unwrap();
+        world
+            .set_property(
+                part,
+                "Position",
+                Value::Vector3(axcenity_core::Vector3::new(x, 0.0, 0.0)),
+            )
+            .unwrap();
+        world.set_parent(part, Some(workspace)).unwrap();
+        part
+    };
+    let near = part_at(0.0);
+    let far = part_at(900.0);
+    let selected = part_at(1500.0);
+    let mut streaming = axcenity_scene::Streaming::default();
+
+    stream_editing(&mut streaming, &world, true, Vec3::ZERO, 1.0, &[selected]);
+    assert!(!streaming.is_hidden(near));
+    assert!(streaming.is_hidden(far), "out of range isn't drawn");
+    assert!(!streaming.is_hidden(selected), "the selection always shows");
+
+    // Off, editing shows everything again.
+    stream_editing(&mut streaming, &world, false, Vec3::ZERO, 1.0, &[]);
+    assert!(!streaming.is_hidden(far));
+    assert!(streaming.settings().is_none());
+}
