@@ -160,6 +160,14 @@ UserGameSettings.Sharpen: boolean
 
 Whether a SharpenEffect is drawn. Off at Low, on above.
 
+#### SunRays
+
+```luau
+UserGameSettings.SunRays: boolean
+```
+
+Whether a SunRaysEffect is drawn. Off at Low, on above.
+
 #### MotionBlur
 
 ```luau

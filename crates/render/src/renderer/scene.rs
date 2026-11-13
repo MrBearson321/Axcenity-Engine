@@ -283,6 +283,8 @@ impl ScenePipeline {
             edge_pipeline,
             edges: false,
             decals: false,
+            sun_rays: false,
+            sun_rays_pass: None,
             depth_of_field: false,
             motion_blur: false,
             temporal,
@@ -513,7 +515,7 @@ impl ScenePipeline {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
         let used = targets_used(
             &self.graphics,
-            self.edges || self.decals,
+            self.edges || self.decals || self.sun_rays,
             self.depth_of_field,
             self.motion_blur,
         );
@@ -571,11 +573,15 @@ impl ScenePipeline {
             // while it's read.
             self.bind_frame();
         }
+        // And sun rays, which tell sky from solid by its depth.
+        let sun_rays = sun_rays::wanted(list, &self.graphics);
         if self.edges != list.edges.is_some()
+            || self.sun_rays != sun_rays
             || self.depth_of_field != depth_of_field
             || self.motion_blur != motion_blur
         {
             self.edges = list.edges.is_some();
+            self.sun_rays = sun_rays;
             self.depth_of_field = depth_of_field;
             self.motion_blur = motion_blur;
             self.fit_targets();
@@ -1614,6 +1620,22 @@ impl ScenePipeline {
                 &self.device,
                 &mut encoder,
                 frame_bind_group,
+                &self.frame_targets.hdr_view,
+                &occlusion.depth_view,
+            );
+        }
+        // Sun rays streaming from the sky's gaps, added to the scene.
+        if let (Some(rays), Some(occlusion)) = (
+            sun_rays::uniform(list, &self.graphics, aspect),
+            &self.frame_targets.occlusion,
+        ) {
+            let pass = self
+                .sun_rays_pass
+                .get_or_insert_with(|| Box::new(sun_rays::SunRaysPass::new(&self.device)));
+            pass.draw(
+                &self.device,
+                &mut encoder,
+                &rays,
                 &self.frame_targets.hdr_view,
                 &occlusion.depth_view,
             );

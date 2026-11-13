@@ -1,10 +1,10 @@
 //! Lens effects (graphics Phase 34): Lighting's first enabled
 //! `DepthOfFieldEffect`, `VignetteEffect`, `FilmGrainEffect`,
-//! `ChromaticAberrationEffect`, `SharpenEffect` and (graphics Phase 35)
-//! `MotionBlurEffect`. Without one of a kind there is none of it.
+//! `ChromaticAberrationEffect`, `SharpenEffect`, (graphics Phase 35)
+//! `MotionBlurEffect` and `SunRaysEffect`. Without one of a kind there is none of it.
 
 use axcenity_core::{ClassName, Instance, Value, World};
-use axcenity_render::{DepthOfField, FilmGrain, LensEffects, Vignette};
+use axcenity_render::{DepthOfField, FilmGrain, LensEffects, SunRays, Vignette};
 
 /// The lens effects inside Lighting.
 pub(crate) fn lens_of(world: &World) -> LensEffects {
@@ -45,6 +45,10 @@ pub(crate) fn lens_of(world: &World) -> LensEffects {
         sharpen: first(ClassName::SharpenEffect).map(|effect| number(effect, "Intensity", 0.5)),
         motion_blur: first(ClassName::MotionBlurEffect)
             .map(|effect| number(effect, "Intensity", 0.5)),
+        sun_rays: first(ClassName::SunRaysEffect).map(|effect| SunRays {
+            intensity: number(effect, "Intensity", 0.25).clamp(0.0, 1.0),
+            spread: number(effect, "Spread", 0.5).clamp(0.0, 1.0),
+        }),
     }
 }
 
@@ -87,6 +91,7 @@ mod tests {
         add(&mut world, ClassName::FilmGrainEffect);
         add(&mut world, ClassName::ChromaticAberrationEffect);
         add(&mut world, ClassName::SharpenEffect);
+        add(&mut world, ClassName::SunRaysEffect);
         let streak = add(&mut world, ClassName::MotionBlurEffect);
         assert_eq!(
             lens_of(&world),
@@ -109,6 +114,10 @@ mod tests {
                 chromatic_aberration: Some(0.5),
                 sharpen: Some(0.5),
                 motion_blur: Some(0.5),
+                sun_rays: Some(SunRays {
+                    intensity: 0.25,
+                    spread: 0.5,
+                }),
             },
             "each class's defaults"
         );

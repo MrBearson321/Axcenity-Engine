@@ -239,6 +239,9 @@ pub enum ClassName {
     ChromaticAberrationEffect,
     /// Inside Lighting: makes the edges between colors crisper.
     SharpenEffect,
+    /// Inside Lighting: shafts of light streaming from the sun past what's
+    /// in front of it (bright sky between leaves, a window), on screen.
+    SunRaysEffect,
     /// Inside Lighting: streaks what moves across the view, as a camera's
     /// shutter open while it moves does.
     MotionBlurEffect,
@@ -443,7 +446,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 132] = [
+    pub const ALL: [ClassName; 133] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -512,6 +515,7 @@ impl ClassName {
         ClassName::FilmGrainEffect,
         ClassName::ChromaticAberrationEffect,
         ClassName::SharpenEffect,
+        ClassName::SunRaysEffect,
         ClassName::MotionBlurEffect,
         ClassName::GraphicsVolume,
         ClassName::ExposureEffect,
@@ -652,6 +656,7 @@ impl ClassName {
             ClassName::FilmGrainEffect => "FilmGrainEffect",
             ClassName::ChromaticAberrationEffect => "ChromaticAberrationEffect",
             ClassName::SharpenEffect => "SharpenEffect",
+            ClassName::SunRaysEffect => "SunRaysEffect",
             ClassName::MotionBlurEffect => "MotionBlurEffect",
             ClassName::GraphicsVolume => "GraphicsVolume",
             ClassName::ExposureEffect => "ExposureEffect",
@@ -822,6 +827,7 @@ impl ClassName {
                 | ClassName::FilmGrainEffect
                 | ClassName::ChromaticAberrationEffect
                 | ClassName::SharpenEffect
+                | ClassName::SunRaysEffect
                 | ClassName::MotionBlurEffect
         )
     }
@@ -1364,6 +1370,14 @@ impl ClassName {
                 ("Enabled", Value::Bool(true)),
                 // 0 changes nothing, 1 is strong.
                 ("Intensity", Value::Number(0.5)),
+            ],
+            ClassName::SunRaysEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // How bright the shafts are, 0 to 1.
+                ("Intensity", Value::Number(0.25)),
+                // How far they reach from the sun, 0 to 1 (1 is the whole
+                // way across the picture).
+                ("Spread", Value::Number(0.5)),
             ],
             ClassName::MotionBlurEffect => vec![
                 ("Enabled", Value::Bool(true)),
@@ -2917,6 +2931,7 @@ impl ClassName {
             | ClassName::FilmGrainEffect
             | ClassName::ChromaticAberrationEffect
             | ClassName::SharpenEffect
+            | ClassName::SunRaysEffect
             | ClassName::MotionBlurEffect
             | ClassName::ExposureEffect
             | ClassName::FogEffect

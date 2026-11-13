@@ -35,6 +35,7 @@ fn lens_off() -> GraphicsSettings {
         film_grain: Some(false),
         chromatic_aberration: Some(false),
         sharpen: Some(false),
+        sun_rays: Some(false),
         ..settings()
     }
 }
@@ -427,6 +428,10 @@ fn lens_effects_cost_nothing_while_absent_or_turned_off() {
             chromatic_aberration: Some(0.5),
             sharpen: Some(0.5),
             motion_blur: None,
+            sun_rays: Some(crate::SunRays {
+                intensity: 0.5,
+                spread: 0.5,
+            }),
         },
     );
     assert_ne!(draw(&mut renderer, &everything), plain);

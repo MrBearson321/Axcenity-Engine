@@ -141,7 +141,7 @@ fn whole_gib(video_memory: u64) -> u64 {
 /// person's own overrides for what the benchmark doesn't weigh. That's
 /// real-time GI (off at every preset, and the test worlds have no light
 /// probe volumes), the lens effects (depth of field, vignette, film grain,
-/// chromatic aberration, sharpen, motion blur: a world's effects, which
+/// chromatic aberration, sharpen, sun rays, motion blur: a world's effects, which
 /// the test worlds don't have), and a texture memory budget that fits the
 /// card (at most half its memory, or any when its memory isn't known).
 pub fn apply_to(current: &GraphicsSettings, report: &Report) -> GraphicsSettings {
@@ -152,6 +152,7 @@ pub fn apply_to(current: &GraphicsSettings, report: &Report) -> GraphicsSettings
     settings.film_grain = current.film_grain;
     settings.chromatic_aberration = current.chromatic_aberration;
     settings.sharpen = current.sharpen;
+    settings.sun_rays = current.sun_rays;
     settings.motion_blur = current.motion_blur;
     if let Some(budget) = current.texture_budget {
         let fits = report

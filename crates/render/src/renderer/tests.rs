@@ -33,6 +33,7 @@ mod shading;
 mod shadows;
 mod skinning;
 mod streaming;
+mod sun_rays;
 mod surface_shaders;
 mod temporal;
 mod texture_budget;
@@ -2312,6 +2313,10 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
         chromatic_aberration: Some(0.5),
         sharpen: Some(0.5),
         motion_blur: Some(0.5),
+        sun_rays: Some(crate::SunRays {
+            intensity: 0.5,
+            spread: 0.5,
+        }),
     };
     let settings = every_setting_and_value();
     // What a renderer holds: its caches and its targets.
@@ -2383,7 +2388,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             );
             assert_eq!(targets, 1, "{context}");
             // The prepass is drawn for ambient occlusion, contact shadows,
-            // volumetric fog or depth of field.
+            // volumetric fog, depth of field or sun rays.
             let blurred = used.depth_of_field != crate::DepthOfFieldQuality::Off;
             assert_eq!(depth_of_field, usize::from(blurred), "{context}");
             // TAA and motion blur keep the motion targets, each with its own.
@@ -2397,7 +2402,8 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 || used.volumetric_fog
                 || blurred
                 || jittered
-                || streaked;
+                || streaked
+                || used.sun_rays;
             assert_eq!(occlusion, usize::from(prepass), "{context}");
             assert_eq!(
                 msaa,

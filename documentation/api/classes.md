@@ -77,6 +77,7 @@ Instance classes: everything that can be in the tree.
 | [FilmGrainEffect](classes/FilmGrainEffect.md) | Inside Lighting: moving noise over the picture, as on film, changing every frame. |
 | [ChromaticAberrationEffect](classes/ChromaticAberrationEffect.md) | Inside Lighting: red and blue drift apart toward the picture's edges, as through a cheap lens. |
 | [SharpenEffect](classes/SharpenEffect.md) | Inside Lighting: makes the edges between colors crisper (useful with a render scale below 100%). |
+| [SunRaysEffect](classes/SunRaysEffect.md) | Inside Lighting: shafts of light streaming from the sun past whatever is in front of it, such as bright sky between leaves or a window, worked out on screen from what's drawn (so they show only while the sun is in or near the view). |
 | [MotionBlurEffect](classes/MotionBlurEffect.md) | Inside Lighting: streaks what moves across the view along its motion, as a camera's shutter does: parts that move, posed characters, and everything when the camera moves. |
 | [GraphicsVolume](classes/GraphicsVolume.md) | A Part that changes the look while the camera is inside it, fading in over BlendDistance studs outside it and out again on leaving. |
 | [ExposureEffect](classes/ExposureEffect.md) | Inside a GraphicsVolume: the exposure while the camera is in the volume, in place of Lighting's Exposure. |
