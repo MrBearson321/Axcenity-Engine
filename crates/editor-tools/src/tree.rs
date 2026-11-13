@@ -71,6 +71,13 @@ pub enum Insertable {
     LensEffect(ClassName),
     /// An invisible box that changes the look while the camera is in it.
     GraphicsVolume,
+    /// A big GraphicsVolume of haze: a FogEffect with a Density in it, lit
+    /// by the sun (shafts) and lamps (LE2).
+    FogVolume,
+    /// A room-sized GraphicsVolume that's an interior: a FogEffect marked
+    /// Interior clears the outdoor fog inside it, with a little dust of its
+    /// own for light to show in.
+    InteriorVolume,
     /// A GraphicsVolume's exposure, fog and bloom, in the selected volume
     /// or a new one.
     ExposureEffect,
@@ -246,7 +253,9 @@ impl Insertable {
 
     /// Ribbon ▸ Lighting ▸ Volumes: a GraphicsVolume, and the effects only
     /// a volume holds.
-    pub const VOLUMES: [Insertable; 4] = [
+    pub const VOLUMES: [Insertable; 6] = [
+        Insertable::FogVolume,
+        Insertable::InteriorVolume,
         Insertable::GraphicsVolume,
         Insertable::ExposureEffect,
         Insertable::FogEffect,
@@ -398,6 +407,8 @@ impl Insertable {
             Insertable::LensEffect(ClassName::SunRaysEffect) => "Sun Rays",
             Insertable::LensEffect(class) => class.as_str(),
             Insertable::GraphicsVolume => "Graphics Volume",
+            Insertable::FogVolume => "Fog Volume",
+            Insertable::InteriorVolume => "Interior",
             Insertable::ExposureEffect => "Exposure",
             Insertable::FogEffect => "Fog",
             Insertable::BloomEffect => "Bloom",
@@ -477,7 +488,9 @@ impl Insertable {
             Insertable::OutlineEffect => ClassName::OutlineEffect,
             Insertable::ColorCorrectionEffect => ClassName::ColorCorrectionEffect,
             Insertable::LensEffect(class) => class,
-            Insertable::GraphicsVolume => ClassName::GraphicsVolume,
+            Insertable::GraphicsVolume | Insertable::FogVolume | Insertable::InteriorVolume => {
+                ClassName::GraphicsVolume
+            }
             Insertable::ExposureEffect => ClassName::ExposureEffect,
             Insertable::FogEffect => ClassName::FogEffect,
             Insertable::BloomEffect => ClassName::BloomEffect,
@@ -641,6 +654,25 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Position", Value::Vector3(position)),
         ],
         // A room to walk into, with its bottom on the ground.
+        // Sizeable haze over a stretch of the world, its bottom a little
+        // below the ground so hills and hollows fill too.
+        Insertable::FogVolume => vec![
+            ("Size", Value::Vector3(Vector3::new(200.0, 60.0, 200.0))),
+            (
+                "Position",
+                Value::Vector3(Vector3::new(position.x, position.y + 26.0, position.z)),
+            ),
+            ("BlendDistance", Value::Number(20.0)),
+        ],
+        // A room's air, its faces sharp-ish so it ends at the walls.
+        Insertable::InteriorVolume => vec![
+            (
+                "Position",
+                Value::Vector3(Vector3::new(position.x, position.y + 6.0, position.z)),
+            ),
+            ("BlendDistance", Value::Number(1.0)),
+            ("Priority", Value::Number(1.0)),
+        ],
         Insertable::ReverbZone | Insertable::GraphicsVolume => vec![(
             "Position",
             Value::Vector3(Vector3::new(position.x, position.y + 6.0, position.z)),

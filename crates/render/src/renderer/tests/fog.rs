@@ -290,6 +290,7 @@ fn dust_box(x0: f32, x1: f32) -> crate::Dust {
         to_box: Mat4::from_translation(-middle),
         half_size: Vec3::new((x1 - x0) * 0.5, 30.0, 29.0),
         edge: 0.5,
+        ..crate::Dust::default()
     }
 }
 
@@ -306,7 +307,7 @@ fn dust_glows_only_inside_its_box_with_or_without_volumetric_fog() {
     let mut list = list_of(vec![wall]);
     list.sun.direction = Vec3::new(0.0, 1.0, -0.3);
     list.fog = Fog {
-        dust: Some(dust_box(-60.0, -2.0)),
+        dust: crate::DustBoxes::one(dust_box(-60.0, -2.0)),
         ..Fog::default()
     };
     let (inside, outside) = (Vec3::new(-20.0, 0.0, -80.0), Vec3::new(20.0, 0.0, -80.0));
@@ -343,7 +344,7 @@ fn dust_in_a_walls_shadow_loses_the_suns_light_at_ultra() {
     // here filled with dust (and no fog) all the way across.
     let (mut list, shadowed, open) = shafts();
     list.fog = Fog {
-        dust: Some(dust_box(-60.0, 60.0)),
+        dust: crate::DustBoxes::one(dust_box(-60.0, 60.0)),
         ..Fog::default()
     };
     let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
@@ -357,4 +358,90 @@ fn dust_in_a_walls_shadow_loses_the_suns_light_at_ultra() {
         dark + 30 < lit,
         "the wall's shadow in the dust: {dark} vs {lit}"
     );
+}
+
+#[test]
+fn several_boxes_of_dust_glow_at_once() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut wall = red_block(Vec3::new(0.0, 0.0, -80.0), Vec3::new(200.0, 100.0, 1.0));
+    wall.material.emissive = [0.0; 3];
+    let mut list = list_of(vec![wall]);
+    list.sun.direction = Vec3::new(0.0, 1.0, -0.3);
+    list.fog = Fog {
+        // Narrow, so the rays to the wall's left and right cross them.
+        dust: [dust_box(-20.0, -8.0), dust_box(8.0, 20.0)]
+            .into_iter()
+            .collect(),
+        ..Fog::default()
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    for volumetric in [true, false] {
+        renderer.set_graphics(&ultra(volumetric));
+        renderer.render(&list).unwrap();
+        let pixels = renderer.read_pixels();
+        let left = pixel_at(&pixels, screen_of(&list, Vec3::new(-25.0, 0.0, -80.0)));
+        let right = pixel_at(&pixels, screen_of(&list, Vec3::new(25.0, 0.0, -80.0)));
+        let middle = pixel_at(&pixels, screen_of(&list, Vec3::new(0.0, 0.0, -80.0)));
+        assert!(
+            left[0] > 40 && right[0] > 40,
+            "both glow (volumetric {volumetric}): {left:?} {right:?}"
+        );
+        assert!(middle[0] < 12, "none between: {middle:?}");
+    }
+}
+
+#[test]
+fn an_interior_clears_the_worlds_fog_inside_it_and_keeps_its_own_dust() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // Thick grey height fog everywhere, and an interior over the left half
+    // of the way to a black wall.
+    let mut wall = red_block(Vec3::new(0.0, 0.0, -80.0), Vec3::new(200.0, 100.0, 1.0));
+    wall.material.emissive = [0.0; 3];
+    let mut list = list_of(vec![wall]);
+    list.sun.direction = Vec3::new(0.0, 1.0, -0.3);
+    // Up to just short of the wall, so little fog is left on the way.
+    let interior = crate::Dust {
+        interior: true,
+        density: 0.0,
+        to_box: Mat4::from_translation(-Vec3::new(-31.0, 0.0, -40.0)),
+        half_size: Vec3::new(29.0, 30.0, 38.0),
+        ..dust_box(-60.0, -2.0)
+    };
+    list.fog = Fog {
+        color: Some([0.8; 3]),
+        density: 0.04,
+        height: 100.0,
+        falloff: 50.0,
+        dust: crate::DustBoxes::one(interior),
+        ..Fog::default()
+    };
+    let (inside, outside) = (Vec3::new(-20.0, 0.0, -80.0), Vec3::new(20.0, 0.0, -80.0));
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    for volumetric in [true, false] {
+        renderer.set_graphics(&ultra(volumetric));
+        renderer.render(&list).unwrap();
+        let pixels = renderer.read_pixels();
+        let cleared = pixel_at(&pixels, screen_of(&list, inside));
+        let foggy = pixel_at(&pixels, screen_of(&list, outside));
+        assert!(
+            cleared[1] + 30 < foggy[1],
+            "less fog through the interior (volumetric {volumetric}): {cleared:?} vs {foggy:?}"
+        );
+    }
+    // Its own dust fills it again.
+    list.fog.dust = crate::DustBoxes::one(crate::Dust {
+        density: 0.04,
+        ..interior
+    });
+    renderer.set_graphics(&ultra(false));
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    let dusty = pixel_at(&pixels, screen_of(&list, inside));
+    assert!(dusty[0] > 40, "the interior's own dust glows: {dusty:?}");
 }

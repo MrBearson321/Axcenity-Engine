@@ -1072,9 +1072,70 @@ pub struct Fog {
     /// around it).
     pub sun_scattering: f32,
     pub forward_scattering: f32,
-    /// Dust or mist filling a box (a GraphicsVolume's FogEffect with a
-    /// Density), on top of the fog above, or `None`.
-    pub dust: Option<Dust>,
+    /// Dust, mist or haze filling boxes (GraphicsVolumes' FogEffects with
+    /// a Density, or marked Interior), on top of the fog above: up to
+    /// [`MAX_DUST_BOXES`], lowest priority first.
+    pub dust: DustBoxes,
+}
+
+/// The most boxes of dust drawn at once. Must match `MAX_DUST` in fog.wgsl.
+pub const MAX_DUST_BOXES: usize = 8;
+
+/// Up to [`MAX_DUST_BOXES`] boxes of dust, in the order they apply (lowest
+/// priority first: an interior clears the outdoor air and the boxes before
+/// it). A fixed array, so [`Fog`] stays `Copy`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DustBoxes {
+    boxes: [Dust; MAX_DUST_BOXES],
+    count: usize,
+}
+
+impl DustBoxes {
+    /// One box of dust.
+    pub fn one(dust: Dust) -> Self {
+        let mut boxes = Self::default();
+        boxes.push(dust);
+        boxes
+    }
+
+    /// Adds `dust` after the others, if there's room: `false` if not.
+    pub fn push(&mut self, dust: Dust) -> bool {
+        if self.count == MAX_DUST_BOXES {
+            return false;
+        }
+        self.boxes[self.count] = dust;
+        self.count += 1;
+        true
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Dust> {
+        self.boxes[..self.count].iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    pub fn first(&self) -> Option<&Dust> {
+        self.iter().next()
+    }
+}
+
+impl FromIterator<Dust> for DustBoxes {
+    /// The first [`MAX_DUST_BOXES`] of them.
+    fn from_iter<I: IntoIterator<Item = Dust>>(iter: I) -> Self {
+        let mut boxes = Self::default();
+        for dust in iter {
+            if !boxes.push(dust) {
+                break;
+            }
+        }
+        boxes
+    }
 }
 
 /// Dust or mist filling a box, such as the air of a room: light passing
@@ -1082,6 +1143,9 @@ pub struct Fog {
 /// scattered, lit by the sun and its shadows (shafts of light, through the
 /// volumetric fog), lamps and the light around it. It thins to nothing
 /// over `edge` studs at the box's faces (half outside them, half inside).
+/// An `interior` box clears the air outside it from inside it (the
+/// world's height fog and the boxes before it), so a room keeps its own
+/// air, `density` of it (0 for clear air).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dust {
     pub density: f32,
@@ -1095,13 +1159,35 @@ pub struct Dust {
     pub to_box: Mat4,
     pub half_size: Vec3,
     pub edge: f32,
+    /// Studs above the box's bottom over which it thins by `e` (haze lying
+    /// low), or 0 for the same all the way up.
+    pub falloff: f32,
+    /// Whether it clears the air outside it from inside it (an interior).
+    pub interior: bool,
+}
+
+impl Default for Dust {
+    /// No dust: a box of nothing at the world's middle.
+    fn default() -> Self {
+        Self {
+            density: 0.0,
+            color: [0.75; 3],
+            forward_scattering: 0.6,
+            to_box: Mat4::IDENTITY,
+            half_size: Vec3::ONE,
+            edge: 0.0,
+            falloff: 0.0,
+            interior: false,
+        }
+    }
 }
 
 impl Dust {
-    /// Whether it takes away any light.
+    /// Whether it changes anything: it takes away light, or it's an
+    /// interior clearing the air outside.
     pub fn is_drawn(&self) -> bool {
         self.density.is_finite()
-            && self.density > 0.0
+            && (self.density > 0.0 || self.interior)
             && self.half_size.is_finite()
             && self.half_size.min_element() > 0.0
             && self.to_box.is_finite()
@@ -1119,7 +1205,7 @@ impl Fog {
     }
 
     pub fn has_dust(&self) -> bool {
-        self.dust.is_some_and(|dust| dust.is_drawn())
+        self.dust.iter().any(Dust::is_drawn)
     }
 
     pub fn has_distance_fog(&self) -> bool {
@@ -1146,7 +1232,7 @@ impl Default for Fog {
             falloff: 50.0,
             sun_scattering: 0.0,
             forward_scattering: 0.0,
-            dust: None,
+            dust: DustBoxes::default(),
         }
     }
 }
