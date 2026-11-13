@@ -491,6 +491,13 @@ impl EditorApp {
         found(ui, &row, "Show bodies");
         let row = ui
             .checkbox(
+                &mut self.overlays.streaming,
+                theme::with_icon(icons::BROADCAST, "Show streaming"),
+            )
+            .on_hover_text("What streams around the camera, with Workspace streaming on.");
+        found(ui, &row, "Show streaming");
+        let row = ui
+            .checkbox(
                 &mut self.overlays.culling,
                 theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
             )

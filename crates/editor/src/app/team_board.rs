@@ -381,7 +381,8 @@ impl EditorApp {
             text.push_str(&format!(" · {late} overdue"));
         }
         let mut show = false;
-        ui.horizontal(|ui| {
+        // Wraps in a narrow panel, so the buttons go under the counts.
+        ui.horizontal_wrapped(|ui| {
             ui.label(crate::theme::with_icon(
                 crate::theme::icons::KANBAN,
                 "Team Board",
