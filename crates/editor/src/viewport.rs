@@ -69,6 +69,7 @@ mod move_overlay;
 mod overlays;
 mod plugin_drawings;
 mod plugin_handles;
+mod probe_overlay;
 mod ray_badge;
 mod streaming_overlay;
 pub use plugin_handles::HandleMove;
@@ -383,6 +384,9 @@ pub struct ViewportScene<'a> {
     /// The path each NavigationAgent is walking during Play, from its feet,
     /// for the Agent Paths overlay.
     pub agent_paths: &'a [(InstanceId, Vec<axcenity_core::Vector3>)],
+    /// The LightProbeVolumes whose bake was made from a different world,
+    /// for the Light Probes overlay.
+    pub stale_light_probes: &'a [InstanceId],
     /// The simulation's contacts and bodies during Play, for the Contacts
     /// and Bodies overlays; `None` outside Play or with both off.
     pub physics: Option<&'a axcenity_physics::DebugView>,
@@ -449,6 +453,9 @@ pub struct OverlayToggles {
     /// With Workspace streaming on, what streams around the camera, while
     /// editing too (roadmap R16).
     pub streaming: bool,
+    /// Every light probe volume's probes, filled with their baked light,
+    /// and whether each volume's bake is there and up to date (roadmap R18.1).
+    pub light_probes: bool,
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
@@ -466,6 +473,7 @@ impl OverlayToggles {
             || self.contacts
             || self.bodies
             || self.streaming
+            || self.light_probes
             || self.culling
     }
 }
@@ -1061,6 +1069,7 @@ impl Viewport {
             debug_rays,
             nav_mesh,
             agent_paths,
+            stale_light_probes,
             physics,
             poses,
             blends,
@@ -1585,6 +1594,9 @@ impl Viewport {
             if game_playing && let Some(settings) = self.terrain.streaming.settings() {
                 paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
             }
+        }
+        if overlays.light_probes {
+            probe_overlay::paint(ui, rect, &screen, world, assets, stale_light_probes, eye);
         }
         if legend::paint(ui, rect, view_mode, &render.stats, self.overdraw.as_ref()) {
             self.measure_overdraw = true;

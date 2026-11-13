@@ -498,6 +498,15 @@ impl EditorApp {
         found(ui, &row, "Show streaming");
         let row = ui
             .checkbox(
+                &mut self.overlays.light_probes,
+                theme::with_icon(icons::LIGHTBULB, "Show light probes"),
+            )
+            .on_hover_text(
+                "Each light probe volume's probes, filled with their baked light, and which bakes are missing or out of date.",
+            );
+        found(ui, &row, "Show light probes");
+        let row = ui
+            .checkbox(
                 &mut self.overlays.culling,
                 theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
             )

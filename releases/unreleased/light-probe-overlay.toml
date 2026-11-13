@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "A Light Probes overlay shows every probe, its baked light and which bakes need redoing"
+details = "Test > Overlays > Light Probes (also in Settings and the command palette) draws each LightProbeVolume's probes as discs filled with the light their bake gives a surface facing you, so dark or leaking probes stand out. Volumes are outlined green when baked, orange when the world has changed since the bake, grey before their first bake and red when the bake file is missing; a legend counts them and the probes the renderer keeps (roadmap R18.1)."
+features = ["renderer.global-illumination"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

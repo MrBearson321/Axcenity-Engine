@@ -822,7 +822,7 @@ impl EditorApp {
     /// bar's Viewport menu.
     pub(in crate::app) fn overlay_items(&mut self, ui: &mut egui::Ui) {
         let overlays = &mut self.overlays;
-        let items: [(&mut bool, &'static str, &'static str, &'static str); 11] = [
+        let items: [(&mut bool, &'static str, &'static str, &'static str); 12] = [
             (
                 &mut overlays.colliders,
                 icons::CUBE,
@@ -882,6 +882,12 @@ impl EditorApp {
                 icons::BROADCAST,
                 "Streaming",
                 "With Workspace.StreamingEnabled on, show what streams around the camera, while editing too: each unit's box (green there at once, blue loading, grey kept if loaded), what's always there in orange, both radii, and how much a player standing here has.",
+            ),
+            (
+                &mut overlays.light_probes,
+                icons::LIGHTBULB,
+                "Light Probes",
+                "Show every light probe volume's probes as discs filled with the light their bake gives a surface facing you, so dark or leaking probes stand out. Volumes are outlined green when baked, orange when the world has changed since, grey before their first bake and red when the bake file is missing.",
             ),
             (
                 &mut overlays.culling,

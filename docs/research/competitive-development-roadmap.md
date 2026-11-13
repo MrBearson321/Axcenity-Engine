@@ -1103,7 +1103,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | GPU-driven drawing | Deferred | Nanite | — | — | GPU Resident Drawer | L5, gap analysis P4 | Medium | M12 | Defer until a benchmark needs it |
 | Occlusion culling | Deferred (measured ≤ 1.9 ms) | HZB | Occluders | PVS | Umbra | `docs/rendering/performance.md` | Low | — | Defer |
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
-| Global illumination | Partial: baked probes, optional real-time probes | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
+| Global illumination | Partial: baked probes, optional real-time probes, Light Probes overlay (R18.1) | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
 | Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
 | Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; Streaming overlay in the editor (R16) | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |

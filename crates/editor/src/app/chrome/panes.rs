@@ -997,6 +997,11 @@ impl EditorApp {
         // The game's particles and streaming, which its frame moves on, are
         // drawn in the viewport while it shows Play; swapped back below.
         self.swap_play_effects();
+        let stale_light_probes = if self.overlays.light_probes {
+            self.stale_light_probe_volumes()
+        } else {
+            Vec::new()
+        };
         // The Sequencer's preview, outside Play (Phase 51): its own copy
         // of the world, posed and seen from its camera cut.
         let sequence = (!self.playing() && self.layout.is_open(Pane::Sequencer))
@@ -1112,6 +1117,7 @@ impl EditorApp {
                             move_guide: self.move_guide,
                             grid_strength: self.grid_strength,
                             overlays: self.overlays,
+                            stale_light_probes: &stale_light_probes,
                             view_mode: self.view_mode,
                             playing: self.play.is_some(),
                             debug_rays: &debug_rays,
