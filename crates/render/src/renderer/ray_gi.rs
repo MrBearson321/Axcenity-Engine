@@ -68,12 +68,19 @@ pub(super) struct RayGlobalIllumination {
     pub(super) probes_traced: u64,
 }
 
+/// The frame's bindings the pass reads: its uniform, its lamps, its sky
+/// and the light probes. Only these: with all of the frame's storage
+/// buffers, the pass's own and the cut-outs' would pass the default limit
+/// of eight a stage.
+pub(super) const FRAME_BINDINGS: [u32; 6] = [0, 3, 10, 11, 12, 16];
+
 impl RayGlobalIllumination {
-    /// `frame_entries` are the frame's bindings, made visible to the
-    /// compute pass here.
+    /// `frame_entries` are the frame's bindings; those the pass reads
+    /// ([`FRAME_BINDINGS`]) are made visible to it here.
     pub(super) fn new(device: &wgpu::Device, frame_entries: &[wgpu::BindGroupLayoutEntry]) -> Self {
         let compute_entries: Vec<_> = frame_entries
             .iter()
+            .filter(|entry| FRAME_BINDINGS.contains(&entry.binding))
             .map(|entry| wgpu::BindGroupLayoutEntry {
                 visibility: entry.visibility | wgpu::ShaderStages::COMPUTE,
                 ..*entry
@@ -112,17 +119,7 @@ impl RayGlobalIllumination {
                         min_binding_size: NonZeroU64::new(size_of::<RayGiUniform>() as u64),
                     },
                 ),
-                // Uniform, not storage: with the frame's four storage
-                // buffers and the cut-outs' two, a ninth would pass the
-                // default limit of eight a stage.
-                entry(
-                    2,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(16 * u64::from(MOST_PROBES)),
-                    },
-                ),
+                entry(2, storage(true)),
                 entry(3, storage(true)),
                 entry(4, storage(false)),
                 // Cut-outs' holes (LE7).
@@ -168,7 +165,7 @@ impl RayGlobalIllumination {
             batch: buffer(
                 "ray traced GI batch",
                 16 * u64::from(MOST_PROBES),
-                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             ),
             traced: buffer(
                 "ray traced GI probes",

@@ -52,9 +52,7 @@ struct RayGi {
 @group(1) @binding(1) var<uniform> gi: RayGi;
 // xyz: where each probe of the batch stands, w: its place in
 // `light_probes` (the bits of a u32).
-// The most probes in a batch. Must match `MOST_PROBES` in renderer/ray_gi.rs.
-const GI_MOST_PROBES: u32 = 512u;
-@group(1) @binding(2) var<uniform> gi_batch: array<vec4<f32>, GI_MOST_PROBES>;
+@group(1) @binding(2) var<storage, read> gi_batch: array<vec4<f32>>;
 // Two a TLAS slot (renderer/ray_tracing.rs `SurfaceRaw`): rgb its color
 // (with its texture's average) and w 1 for a cut-out, then rgb its glow,
 // both linear.
