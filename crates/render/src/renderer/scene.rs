@@ -1269,8 +1269,13 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        // Water reflecting the screen traces rays too, with the GPU (LE5).
+        let water_rays = water_mode.traces_rays(&self.graphics);
         let traces_rays = self.traces_rays(
-            ray_shadow_uniform.is_some() || ray_ao_uniform.is_some() || ray_gi_batch.is_some(),
+            ray_shadow_uniform.is_some()
+                || ray_ao_uniform.is_some()
+                || ray_gi_batch.is_some()
+                || water_rays,
         );
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
@@ -1297,9 +1302,30 @@ impl ScenePipeline {
                 self.frame,
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
-                ray_gi_batch.is_some(),
+                ray_gi_batch.is_some() || water_rays,
             ),
             &draws,
+        );
+        let water_scene = self
+            .ray_scene
+            .as_deref()
+            .filter(|_| water_rays)
+            .and_then(|rays| {
+                let surfaces = rays.surfaces.as_ref()?;
+                Some((
+                    rays.tlas(),
+                    &surfaces.buffer,
+                    self.graphics.ray_tracing_distance,
+                ))
+            });
+        self.water.trace(
+            (&self.device, &self.queue),
+            [
+                &self.frame_layout,
+                &self.material_layout,
+                &self.skinning.layout,
+            ],
+            water_scene,
         );
         mark(&mut encoder, FramePass::Shadows);
         let mut counts = FrameCounts {
@@ -1929,11 +1955,12 @@ impl ScenePipeline {
             pass.set_bind_group(1, group, &[]);
         } else {
             let surface = batch.shader.and_then(|key| self.surface_shaders.get(key));
+            let traced_water = self.water.traced().filter(|_| self.water.copy.is_some());
             let water = &self.water.pipelines;
-            let water = if self.water.copy.is_some() {
-                &water.refracted
-            } else {
-                &water.blended
+            let water = match traced_water {
+                Some((pipeline, _)) => pipeline,
+                None if self.water.copy.is_some() => &water.refracted,
+                None => &water.blended,
             };
             let side = usize::from(batch.double_sided);
             let pipeline = match (prepass, batch.double_sided, surface) {
@@ -1955,6 +1982,12 @@ impl ScenePipeline {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(1, &material.bind_group, &[]);
             pass.set_bind_group(2, self.skin_group(mesh), &[]);
+            if batch.water
+                && kind != BatchPass::DepthFill
+                && let Some((_, rays)) = traced_water
+            {
+                pass.set_bind_group(3, rays, &[]);
+            }
         }
         pass.set_vertex_buffer(0, mesh.vertices.slice(..));
         pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);

@@ -50,6 +50,10 @@ Glass and other see-through items under water aren't in the copy, and water writ
 
 **Render graph** (the Audit in `plans/axcenity-engine-graphics.md` reopens it here): still not built. Water adds one optional copy between two halves of the scene pass, decided once per frame by `WaterMode`, and the copy is owned like volumetric fog's grid (made and freed by use). The frame stays one readable function with a fixed order. TAA (Phase 35), the first feature that keeps last frame's image, reopened it and kept the same answer ([temporal.md](temporal.md)).
 
+## Ray traced reflections (LE5)
+
+With hardware ray tracing on (the device has ray queries: Settings > Graphics > Hardware ray tracing), water reflecting the screen (High and Ultra) also traces one ray per pixel along the reflected way wherever the screen's reflection isn't sure of its hit (`traced_reflection`, `water_rays.wgsl`): so what's above or behind the view, or hidden on screen, shows in the water. The screen's reflection still wins where it finds something (it has each surface's full shading); the ray's hit is lit the way ray traced GI lights its hits: the item's color (its texture's average) and glow, the sun with a shadow ray, the first 8 lamps with theirs, the ambient light and the light probes, facing back along the ray (rays don't give the triangle's normal), then fogged on its way back. Rays that find nothing within the ray tracing distance leave the sky's reflection. Water draws through its own pipeline (`TracedWater`, the shader with `enable wgpu_ray_query;` and `water_rays.wgsl` in `water_no_rays.wgsl`'s place) whose fourth bind group is the TLAS, the surfaces' buffer (kept while water traces, as for GI) and a small uniform; without ray queries nothing changes. See-through items (glass, other water) aren't seen by the rays, and cut-outs are seen as solid cards.
+
 ## Cost
 
 Nothing without water: no target, pass or pipeline is used. From Medium up, with water: one target at the scene's size (8 bytes a pixel), one full-screen pass, and the scene pass split in two. The water grid is 8,192 triangles per water part.
@@ -60,3 +64,4 @@ Nothing without water: no target, pass or pipeline is used. From Medium up, with
 - `render/src/renderer/water.rs`: water's values reach the uniform, never match a plain material, and broken numbers are made finite. `render/src/water.rs`: the grid is the top of the unit box, every triangle facing up.
 - `assets/src/material.rs`: `water` round-trips, an instance changes its base's waves value by value, and `{}` is the defaults. `scene/src/material.rs`: a part with a water material draws as water on the grid.
 - `player` `every_example_renders` draws `hello-water`.
+- `render/src/renderer/tests/water.rs` `ray_traced_water_reflects_what_is_off_the_screen` (ray queries only): a glowing block above the frame shows in the water at High with rays, not without ray queries, and not at Medium, which traces nothing.
