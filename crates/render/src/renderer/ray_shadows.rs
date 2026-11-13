@@ -16,6 +16,7 @@ use crate::draw_list::DrawList;
 use crate::graphics::{EffectiveGraphics, RayTracedShadows};
 
 use super::MAX_SUN_SIZE;
+use super::ray_tracing::RayScene;
 use super::types::OcclusionTargets;
 
 /// Must match `RayShadows` in ray_shadows.wgsl.
@@ -142,6 +143,25 @@ impl RayShadows {
                 buffer(3, wgpu::BufferBindingType::Uniform),
                 buffer(4, wgpu::BufferBindingType::Storage { read_only: true }),
                 buffer(5, wgpu::BufferBindingType::Storage { read_only: false }),
+                // Cut-outs' holes (ray_cut_outs.rs).
+                buffer(6, wgpu::BufferBindingType::Storage { read_only: true }),
+                buffer(7, wgpu::BufferBindingType::Storage { read_only: true }),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -203,15 +223,17 @@ impl RayShadows {
                 .map_or(0, |[a, b]| a.size() + b.size())
     }
 
-    /// Records the pass: rays from what `prepass` drew through `tlas`, as
-    /// `uniform` says, into the mask.
+    /// Records the pass: rays from what `prepass` drew through `scene`'s
+    /// TLAS (and its cut-outs' holes), as `uniform` says, into the mask.
     pub(super) fn draw(
         &self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (tlas, prepass): (&wgpu::Tlas, &OcclusionTargets),
+        (scene, prepass): (&RayScene, &OcclusionTargets),
         uniform: &RayShadowUniform,
     ) {
+        let tlas = scene.tlas();
+        let cut_outs = &scene.cut_outs;
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(uniform));
         let group = |source: &wgpu::Buffer, destination: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -241,6 +263,22 @@ impl RayShadows {
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: destination.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: cut_outs.info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: cut_outs.uvs.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::TextureView(&cut_outs.alpha_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Sampler(&cut_outs.sampler),
                     },
                 ],
             })

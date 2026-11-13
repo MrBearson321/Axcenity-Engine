@@ -157,7 +157,7 @@ fn the_pass_is_told_where_the_sun_is() {
         // The preset's own choice: on at High, off at Low.
         let graphics = GraphicsSettings::preset(quality).effective(&Default::default());
         let list = scene(Vec::new(), toward_sun, effect);
-        super::super::sun_rays::uniform(&list, &graphics, 1.0).map(|uniform| uniform.rays)
+        super::super::sun_rays::uniform(&list, &graphics, 1.0, 0.0).map(|uniform| uniform.rays)
     };
     let half = Some(SunRays {
         intensity: 0.5,

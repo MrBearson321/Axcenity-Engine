@@ -38,13 +38,30 @@ struct RayShadows {
 @group(0) @binding(4) var<storage, read> source: array<u32>;
 @group(0) @binding(5) var<storage, read_write> destination: array<u32>;
 
+// Cut-outs' holes (renderer/ray_cut_outs.rs). Must match `CutOutRaw`.
+struct CutOut {
+    // x: its mesh's first triangle in `cut_out_uvs`, y: its alpha's layer
+    // plus 1 (0: no holes), z: the alpha cutoff's bits.
+    mesh: vec4<u32>,
+    // The columns of the material's texture coordinate matrix.
+    uv_matrix: vec4<f32>,
+    // xy: the material's texture coordinate offset.
+    uv_offset: vec4<f32>,
+}
+// One a TLAS slot, by the instance's custom data.
+@group(0) @binding(6) var<storage, read> cut_outs: array<CutOut>;
+// Three a triangle, from each cut-out mesh's first.
+@group(0) @binding(7) var<storage, read> cut_out_uvs: array<vec2<f32>>;
+@group(0) @binding(8) var cut_out_alpha: texture_2d_array<f32>;
+@group(0) @binding(9) var cut_out_sampler: sampler;
+
 // Instance masks of what casts shadows (renderer/ray_tracing.rs): solid
 // items, and cut-outs.
 const MASK_SOLID: u32 = 1u;
 const MASK_CUT_OUT: u32 = 2u;
-// Cut-outs are traced as solid cards (their holes aren't looked up), so
-// one nearer than this to the surface isn't counted: leaves lying on the
-// ground, or a grass clump, would shade the ground in card-shaped blotches.
+// A cut-out nearer than this to the surface isn't counted: a leaf card
+// lying on the ground, or a grass clump's foot, would shade the ground it
+// stands in, and its own card can graze the point the ray starts from.
 const CUT_OUT_NEAR: f32 = 0.35;
 // The widest a soft edge is smoothed, in pixels each way.
 const MAX_BLUR: i32 = 12;
@@ -85,14 +102,37 @@ fn pack_soft(visible: f32, blocker: f32) -> u32 {
     return pack2x16float(vec2<f32>(visible, blocker));
 }
 
+// Whether a ray's candidate hit on a cut-out's triangle lands where its
+// texture isn't cut out: its texture coordinates there (the triangle's
+// three, by where it was hit, through the material's own scale, turn and
+// offset), and the alpha at them against the cutoff.
+fn cut_out_covers(hit: RayIntersection) -> bool {
+    let cut = cut_outs[hit.instance_custom_data];
+    if cut.mesh.y == 0u {
+        return true;
+    }
+    let corner = (cut.mesh.x + hit.primitive_index) * 3u;
+    let b = hit.barycentrics;
+    let uv = cut_out_uvs[corner] * (1.0 - b.x - b.y) + cut_out_uvs[corner + 1u] * b.x
+        + cut_out_uvs[corner + 2u] * b.y;
+    let placed = mat2x2<f32>(cut.uv_matrix.xy, cut.uv_matrix.zw) * uv + cut.uv_offset.xy;
+    let alpha = textureSampleLevel(cut_out_alpha, cut_out_sampler, placed, i32(cut.mesh.y - 1u), 0.0).r;
+    return alpha >= bitcast<f32>(cut.mesh.z);
+}
+
 // How far along the ray from `origin` an item of `mask` blocks it, from
-// `near` on, or 0 for nothing.
+// `near` on, or 0 for nothing. Cut-outs' triangles come as candidates
+// (their BLAS isn't opaque) and block only where they aren't cut out.
 fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32) -> f32 {
     var query: ray_query;
     rayQueryInitialize(&query, scene, RayDesc(
-        RAY_FLAG_TERMINATE_ON_FIRST_HIT | RAY_FLAG_FORCE_OPAQUE, mask, near,
-        rays.camera.w * 2.0, origin, direction));
-    rayQueryProceed(&query);
+        RAY_FLAG_TERMINATE_ON_FIRST_HIT, mask, near, rays.camera.w * 2.0, origin, direction));
+    while rayQueryProceed(&query) {
+        let candidate = rayQueryGetCandidateIntersection(&query);
+        if candidate.kind == RAY_QUERY_INTERSECTION_TRIANGLE && cut_out_covers(candidate) {
+            rayQueryConfirmIntersection(&query);
+        }
+    }
     let hit = rayQueryGetCommittedIntersection(&query);
     if hit.kind == RAY_QUERY_INTERSECTION_NONE {
         return 0.0;

@@ -13,7 +13,9 @@ struct Fog {
     color: vec4<f32>,
     // x: where distance fog starts, y: where it's whole, in studs (y is
     // huge without it), z: how much of the lamps' light height fog
-    // scatters (the share of the sun's in `sun`).
+    // scatters (the share of the sun's in `sun`), w: 1 while the volumetric
+    // fog scatters height fog's own light within its reach, by how open the
+    // air is there, in place of this.
     distance: vec4<f32>,
     // x: how much light height fog takes away per stud at and below its
     // height (0 without it), y: that height, z: how many studs above it the
@@ -25,6 +27,62 @@ struct Fog {
     sun: vec4<f32>,
     // xyz: toward the sun.
     sun_direction: vec4<f32>,
+    // Dust or mist filling a box (a FogEffect with a Density). x: how much
+    // light it takes away per stud inside (0 without it), y: how much of
+    // its light goes forward (g), z: the studs over which it thins to none
+    // across the box's faces.
+    dust: vec4<f32>,
+    // rgb: how much of the light it takes away it scatters.
+    dust_color: vec4<f32>,
+    // rgb: the sun's light it scatters.
+    dust_sun: vec4<f32>,
+    // rgb: the sky's light it scatters with nothing in the way, for while
+    // the volumetric fog (which lights it by the light around it) is off.
+    dust_ambient: vec4<f32>,
+    // The rows of the world to the box's own space (studs, its middle at
+    // 0), and xyz: half its size.
+    dust_x: vec4<f32>,
+    dust_y: vec4<f32>,
+    dust_z: vec4<f32>,
+    dust_extent: vec4<f32>,
+}
+
+fn dust_local(fog: Fog, p: vec3<f32>) -> vec3<f32> {
+    let q = vec4<f32>(p, 1.0);
+    return vec3<f32>(dot(fog.dust_x, q), dot(fog.dust_y, q), dot(fog.dust_z, q));
+}
+
+// How much light the dust takes away per stud at `p`: all of its density
+// inside the box, thinning to none across its faces (half the edge outside
+// them, half inside, so the box's own size is right on average).
+fn dust_density(fog: Fog, p: vec3<f32>) -> f32 {
+    if fog.dust.x <= 0.0 {
+        return 0.0;
+    }
+    let local = dust_local(fog, p);
+    let half_size = fog.dust_extent.xyz;
+    let inside = min(min(half_size.x - abs(local.x), half_size.y - abs(local.y)), half_size.z - abs(local.z));
+    if fog.dust.z <= 0.0 {
+        return select(0.0, fog.dust.x, inside > 0.0);
+    }
+    return fog.dust.x * saturate(inside / fog.dust.z + 0.5);
+}
+
+// How many studs of the way from `eye` along `dir` (normalized), up to
+// `distance`, are inside the dust's box.
+fn dust_span(fog: Fog, eye: vec3<f32>, dir: vec3<f32>, distance: f32) -> f32 {
+    if fog.dust.x <= 0.0 {
+        return 0.0;
+    }
+    let start = dust_local(fog, eye);
+    let way = vec3<f32>(dot(fog.dust_x.xyz, dir), dot(fog.dust_y.xyz, dir), dot(fog.dust_z.xyz, dir));
+    // A way along a face's plane would divide by 0: nudge it off.
+    let safe = select(way, vec3<f32>(1e-6), abs(way) < vec3<f32>(1e-6));
+    let a = (-fog.dust_extent.xyz - start) / safe;
+    let b = (fog.dust_extent.xyz - start) / safe;
+    let enter = max(max(min(a.x, b.x), min(a.y, b.y)), min(a.z, b.z));
+    let leave = min(min(max(a.x, b.x), max(a.y, b.y)), max(a.z, b.z));
+    return max(min(leave, distance) - max(enter, 0.0), 0.0);
 }
 
 // How much of the light arriving along `toward_light` is scattered toward
@@ -72,9 +130,11 @@ fn fog_transmittance(fog: Fog, eye: vec3<f32>, dir: vec3<f32>, distance: f32) ->
 }
 
 // The light reaching `eye` from a surface at `position` that gives `color`:
-// some of it lost to the fog on the way, with the fog's own light and the
-// sun's scattered in its place. The sun's is left out within the volumetric
-// fog's reach, which scatters it there with its shadows.
+// some of it lost to the fog and dust on the way, with the fog's own light,
+// the sun's and the dust's scattered in its place. Within the volumetric
+// fog's reach, its grid scatters the sun's light there (with its shadows),
+// height fog's own light (by how open the air is) and the dust's, so those
+// are left out here.
 fn fogged(fog: Fog, eye: vec3<f32>, position: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
     if fog.color.w == 0.0 {
         return color;
@@ -91,11 +151,24 @@ fn fogged_along(fog: Fog, eye: vec3<f32>, dir: vec3<f32>, distance: f32, color: 
         return color;
     }
     let through = fog_transmittance(fog, eye, dir, distance);
-    var light = fog.color.rgb * (1.0 - through);
+    let reach = min(fog.height.w, distance);
+    let near = select(1.0, fog_transmittance(fog, eye, dir, reach), reach > 0.0);
+    var light = fog.color.rgb * max(select(1.0, near, fog.distance.w > 0.5) - through, 0.0);
     if any(fog.sun.rgb > vec3<f32>(0.0)) {
-        let reach = min(fog.height.w, distance);
-        let near = select(1.0, fog_transmittance(fog, eye, dir, reach), reach > 0.0);
         light += fog.sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.sun.w) * max(near - through, 0.0);
     }
-    return color * through + light;
+    var seen = color * through + light;
+    // The dust, taken as nearer than the rest of the fog (a room's air,
+    // around the camera, in front of the world outside).
+    if fog.dust.x > 0.0 {
+        let dust_through = exp(-fog.dust.x * dust_span(fog, eye, dir, distance));
+        seen *= dust_through;
+        // Without the volumetric fog, its light is flat: the open sky's and
+        // the sun's with nothing in the way.
+        if fog.height.w <= 0.0 {
+            let sun = fog.dust_sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.dust.y);
+            seen += (fog.dust_ambient.rgb + sun) * (1.0 - dust_through);
+        }
+    }
+    return seen;
 }

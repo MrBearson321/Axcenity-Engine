@@ -13,6 +13,8 @@ struct SunRays {
     rays: vec4<f32>,
     // rgb: the sun's light, w: the screen's aspect (width over height).
     light: vec4<f32>,
+    // x: a number that changes each frame under TAA (0 without).
+    noise: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> sun_rays: SunRays;
@@ -50,7 +52,9 @@ fn fs_sun_rays(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32>
     // Sky counts at full strength at the sun and less away from it, none
     // past this far (in screen heights).
     let around_sun = 0.2 + 0.4 * reach;
-    var at = uv + step * pixel_noise(position.xy);
+    // Under TAA the start turns each frame, so the noise averages away
+    // instead of leaving a fixed dither over the picture.
+    var at = uv + step * fract(pixel_noise(position.xy) + sun_rays.noise.x * 0.618034);
     var sum = 0.0;
     for (var i = 0u; i < SAMPLES; i++) {
         let texel = clamp(vec2<i32>(at * size), vec2<i32>(0), last);

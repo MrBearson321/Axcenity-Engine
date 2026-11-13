@@ -893,8 +893,13 @@ fn shoot_project() {
     let out = PathBuf::from(out);
     std::fs::create_dir_all(&out).unwrap();
     let loading = Instant::now();
-    let world = axcenity_project::load(&folder).unwrap().world;
+    let project = axcenity_project::load(&folder).unwrap();
     println!("world read in {:.2} s", loading.elapsed().as_secs_f64());
+    // A world that doesn't read leaves an empty Workspace: say why.
+    for problem in &project.problems {
+        eprintln!("load problem: {problem}");
+    }
+    let world = project.world;
     let assets = Assets::new(&folder);
     let vector_of = |text: &str| {
         let numbers: Vec<f32> = text.split(',').map(|n| n.trim().parse().unwrap()).collect();
@@ -905,6 +910,22 @@ fn shoot_project() {
     let mut settings = GraphicsSettings::preset(quality);
     if std::env::var_os("AXCENITY_SHOT_NOAA").is_some() {
         settings.anti_aliasing = Some(axcenity_render::AntiAliasing::Off);
+    }
+    if std::env::var_os("AXCENITY_SHOT_TAA").is_some() {
+        settings.anti_aliasing = Some(axcenity_render::AntiAliasing::Taa);
+    }
+    // `AXCENITY_SHOT_RAY_TRACED`: `full` is every ray traced effect at High;
+    // otherwise a list of the effects to turn on at High (`shadows`, `ao`,
+    // `gi`), with the rest of the editor's one-click ray traced look.
+    if let Ok(effects) = std::env::var("AXCENITY_SHOT_RAY_TRACED") {
+        let on = |name: &str| effects == "full" || effects.split(',').any(|e| e.trim() == name);
+        settings = settings.ray_traced();
+        settings.ray_traced_shadows =
+            on("shadows").then_some(axcenity_render::RayTracedShadows::High);
+        settings.ray_traced_ambient_occlusion =
+            on("ao").then_some(axcenity_render::RayTracedAmbientOcclusion::High);
+        settings.ray_traced_global_illumination =
+            on("gi").then_some(axcenity_render::RayTracedGlobalIllumination::High);
     }
     // The player's own graphics.json can reach farther than the preset (the
     // world's Lighting.ShadowDistance is capped by it), so shots can match.
@@ -923,19 +944,48 @@ fn shoot_project() {
             look_at: vector_of(parts[2]),
             fov_y_degrees: parts.get(3).map_or(70.0, |fov| fov.parse().unwrap()),
         };
-        let build = |cache: &mut TerrainCache| {
-            axcenity_scene::build_draw_list_posed(
+        // `AXCENITY_SHOT_MOVE` (`dx,dy,dz` studs a frame) moves the camera
+        // through the 60 measured frames, so what TAA and the other kept
+        // history leave behind a moving view can be seen; the picture is then
+        // saved twice: as drawn while moving, and as `<name>_still.png`, the
+        // same view after 60 still frames.
+        let moving = std::env::var("AXCENITY_SHOT_MOVE")
+            .ok()
+            .map(|step| vector_of(&step));
+        // Frames are 1/60 s apart, so wind, water and particles move. The
+        // world's particle emitters run as the player runs them, filled for
+        // 10 seconds first.
+        let mut frame_number = 0u32;
+        let mut particles = axcenity_scene::Particles::new();
+        for _ in 0..40 {
+            particles.update(&world, 0.25);
+        }
+        let mut build = |cache: &mut TerrainCache, camera: Camera| {
+            let mut list = axcenity_scene::build_draw_list_posed(
                 &world,
                 &assets,
                 camera,
                 &Default::default(),
                 cache,
-            )
+            );
+            list.time = frame_number as f32 / 60.0;
+            frame_number += 1;
+            particles.update(&world, 1.0 / 60.0);
+            particles.draw(&mut list, &world, &assets);
+            list
+        };
+        let moved = |i: u32| match moving {
+            Some(step) => Camera {
+                position: camera.position + step * i as f32,
+                look_at: camera.look_at + step * i as f32,
+                ..camera
+            },
+            None => camera,
         };
         // The first frames read models and fill the caches.
         let first = Instant::now();
         for _ in 0..24 {
-            let list = build(&mut cache);
+            let list = build(&mut cache, camera);
             renderer.render(&list).unwrap();
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
@@ -945,9 +995,9 @@ fn shoot_project() {
             first.elapsed().as_secs_f64()
         );
         let (mut built, mut drawn, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
-        for _ in 0..60 {
+        for i in 0..60 {
             let start = Instant::now();
-            let list = build(&mut cache);
+            let list = build(&mut cache, moved(i));
             built.push(start.elapsed());
             let start = Instant::now();
             renderer.render(&list).unwrap();
@@ -994,19 +1044,28 @@ fn shoot_project() {
                 "rough" => DebugView::Roughness,
                 _ => DebugView::Unlit,
             }));
-            let list = build(&mut cache);
+            let list = build(&mut cache, moved(59));
             renderer.render(&list).unwrap();
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
-        let pixels = renderer.read_pixels();
-        let name = out.join(format!("{}.png", parts[0]));
-        let file = std::io::BufWriter::new(std::fs::File::create(&name).unwrap());
-        let mut encoder = png::Encoder::new(file, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer.write_image_data(&pixels).unwrap();
-        writer.finish().unwrap();
+        let save = |pixels: Vec<u8>, name: String| {
+            let file = std::io::BufWriter::new(std::fs::File::create(out.join(name)).unwrap());
+            let mut encoder = png::Encoder::new(file, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&pixels).unwrap();
+            writer.finish().unwrap();
+        };
+        save(renderer.read_pixels(), format!("{}.png", parts[0]));
+        if moving.is_some() {
+            for _ in 0..60 {
+                let list = build(&mut cache, moved(59));
+                renderer.render(&list).unwrap();
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            }
+            save(renderer.read_pixels(), format!("{}_still.png", parts[0]));
+        }
     }
     for error in assets.take_errors() {
         eprintln!("asset error: {error}");
