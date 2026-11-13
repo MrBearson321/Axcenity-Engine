@@ -12,6 +12,7 @@ axcenity-core.workspace = true
 axcenity-editor-kit.workspace = true
 axcenity-editor-tools.workspace = true
 axcenity-mesh-edit.workspace = true
+axcenity-physics.workspace = true
 axcenity-render.workspace = true
 axcenity-scene.workspace = true
 eframe.workspace = true

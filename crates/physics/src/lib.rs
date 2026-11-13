@@ -60,6 +60,7 @@ mod blend;
 mod debug;
 mod drag;
 mod fracture;
+mod hulls;
 pub mod joints;
 mod mass;
 mod material;
@@ -76,6 +77,7 @@ mod vehicles;
 pub use api::{GRAVITY, STEP_SECONDS, SyncStats, WIND_DRAG, gravity};
 pub use blend::{Blend, interpolates};
 pub use debug::{DebugBody, DebugContact, DebugView, MAX_DEBUG_CONTACTS};
+pub use hulls::{ConvexMesh, MAX_PIECES, convex_hull_mesh, convex_pieces};
 pub use mass::Mass;
 pub use query::{
     CastShape, ColliderOutline, Column, PastPose, QueryParams, RayHit, Solid, cast_ray,
