@@ -208,9 +208,12 @@ fn cs_trace_probes(
             let fresh = gi_sums[0][k] * scale * band;
             let old = light_probes[place + k];
             // The first's w: a probe baked inside a solid (1, R18.2) stays
-            // so; otherwise 2 while its rays find it inside something.
+            // so; otherwise 2 while its rays find it inside something. The
+            // second's w marks it traced, so its sky light kept apart isn't
+            // added again (R18.3).
             let flag = select(select(0.0, 2.0, inside), 1.0, baked_inside);
-            gi_traced[4u * group.x + k] = vec4<f32>(mix(fresh, old.rgb, keep), select(0.0, flag, k == 0u));
+            let flags = select(select(0.0, 1.0, k == 1u), flag, k == 0u);
+            gi_traced[4u * group.x + k] = vec4<f32>(mix(fresh, old.rgb, keep), flags);
         }
     }
 }

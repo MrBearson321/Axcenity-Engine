@@ -26,7 +26,7 @@ pub use draw_list::{
     DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Flipbook, FlipbookFrame, FlipbookMode, Fog,
     GridPlane, GridTint, ItemChunk, LensEffects, Light, LightProbeGrid, LightProbeVolume,
     MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline, ParticleCurves, ParticleEmitter,
-    ParticleLook, PointShadows, PostProcessing, ProbeImage, RectArea, ReflectionProbe,
+    ParticleLook, PointShadows, PostProcessing, ProbeImage, ProbeSky, RectArea, ReflectionProbe,
     SURFACE_PARAMETERS, Shading, Shadows, Shape, ShapeInOut, Skin, Sky, SkyImage, SpawnKind,
     SpawnShape, SpotShadows, Sprite, Sun, Sway, TerrainLayer, TerrainLayers, TerrainSurface,
     TerrainView, TextAlign, TextShadow, TextSpan, TextStroke, TextureMaps, TextureSource, Toon,
@@ -46,8 +46,8 @@ pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, lay
 #[cfg(feature = "debug-views")]
 pub use renderer::DebugView;
 pub use renderer::{
-    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES, LightProbeBaker,
-    MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RayTracingStats, RenderStats, Renderer,
+    BakedProbe, CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES,
+    LightProbeBaker, MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RayTracingStats, RenderStats, Renderer,
     SHADOW_CASCADE_COUNT, ShaderError, SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;

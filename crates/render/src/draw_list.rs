@@ -160,6 +160,24 @@ pub struct LightProbeGrid {
     /// The probes that stood inside a solid when baked, by their place in
     /// `probes`: surfaces leave them out of their blend (roadmap R18.2).
     pub invalid: Arc<Vec<u32>>,
+    /// The share of each probe's light that came from the sky, kept apart
+    /// so it can follow the sky drawn now (roadmap R18.3). `None` keeps all
+    /// the light as baked.
+    pub sky: Option<ProbeSky>,
+}
+
+/// The sky's share of a light probe grid's light, and the sky it came
+/// from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeSky {
+    /// The sky's average light when baked, linear red, green and blue, as
+    /// the renderer measures it ([`TextureRenderer::sky_band0`]): the
+    /// sky's share is scaled by the sky drawn now over this, per channel.
+    ///
+    /// [`TextureRenderer::sky_band0`]: crate::TextureRenderer::sky_band0
+    pub band0: [f32; 3],
+    /// Each probe's light from the sky, as [`LightProbeGrid::probes`].
+    pub probes: Arc<Vec<[[f32; 3]; 4]>>,
 }
 
 impl fmt::Debug for LightProbeGrid {
