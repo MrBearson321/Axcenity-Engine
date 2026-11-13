@@ -669,7 +669,25 @@ impl ScenePipeline {
         } else {
             0.0
         };
-        frame_uniform.night = [stars, f32::from(u8::from(sky.scattered)), 0.0, 0.0];
+        // A creator's sky picture dims at night as the colors do; an
+        // atmosphere's works out its own light.
+        let picture_light =
+            if sky.image.is_some() && !sky.scattered && list.sky.daylight.is_finite() {
+                list.sky.daylight.clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+        for coefficient in &mut frame_uniform.sky_light {
+            for channel in &mut coefficient[..3] {
+                *channel *= picture_light;
+            }
+        }
+        frame_uniform.night = [
+            stars,
+            f32::from(u8::from(sky.scattered)),
+            picture_light,
+            0.0,
+        ];
         // Volumetric fog needs the prepass's depth, which its setting keeps.
         let volumetric = fog::volumetric_drawn(&list.fog, &self.graphics)
             && self.frame_targets.occlusion.is_some();
