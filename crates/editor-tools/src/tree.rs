@@ -488,9 +488,9 @@ impl Insertable {
             Insertable::OutlineEffect => ClassName::OutlineEffect,
             Insertable::ColorCorrectionEffect => ClassName::ColorCorrectionEffect,
             Insertable::LensEffect(class) => class,
-            Insertable::GraphicsVolume
-            | Insertable::FogVolume
-            | Insertable::InteriorVolume => ClassName::GraphicsVolume,
+            Insertable::GraphicsVolume | Insertable::FogVolume | Insertable::InteriorVolume => {
+                ClassName::GraphicsVolume
+            }
             Insertable::ExposureEffect => ClassName::ExposureEffect,
             Insertable::FogEffect => ClassName::FogEffect,
             Insertable::BloomEffect => ClassName::BloomEffect,

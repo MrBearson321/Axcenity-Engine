@@ -436,7 +436,8 @@ fn several_boxes_of_dust_glow_at_once() {
     let mut list = list_of(vec![wall]);
     list.sun.direction = Vec3::new(0.0, 1.0, -0.3);
     list.fog = Fog {
-        dust: [dust_box(-60.0, -30.0), dust_box(30.0, 60.0)]
+        // Narrow, so the rays to the wall's left and right cross them.
+        dust: [dust_box(-20.0, -8.0), dust_box(8.0, 20.0)]
             .into_iter()
             .collect(),
         ..Fog::default()
@@ -469,9 +470,12 @@ fn an_interior_clears_the_worlds_fog_inside_it_and_keeps_its_own_dust() {
     wall.material.emissive = [0.0; 3];
     let mut list = list_of(vec![wall]);
     list.sun.direction = Vec3::new(0.0, 1.0, -0.3);
+    // Up to just short of the wall, so little fog is left on the way.
     let interior = crate::Dust {
         interior: true,
         density: 0.0,
+        to_box: Mat4::from_translation(-Vec3::new(-31.0, 0.0, -40.0)),
+        half_size: Vec3::new(29.0, 30.0, 38.0),
         ..dust_box(-60.0, -2.0)
     };
     list.fog = Fog {

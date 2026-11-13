@@ -178,20 +178,14 @@ impl EditorApp {
                     ("Density", Value::Number(0.02)),
                     ("Glare", Value::Number(2.0)),
                     ("HeightFalloff", Value::Number(20.0)),
-                    (
-                        "Color",
-                        Value::Color3(Color3::new(0.85, 0.88, 0.92)),
-                    ),
+                    ("Color", Value::Color3(Color3::new(0.85, 0.88, 0.92))),
                 ]
             } else {
                 vec![
                     ("Interior", Value::Bool(true)),
                     ("Density", Value::Number(0.015)),
                     ("Glare", Value::Number(3.0)),
-                    (
-                        "Color",
-                        Value::Color3(Color3::new(0.95, 0.9, 0.82)),
-                    ),
+                    ("Color", Value::Color3(Color3::new(0.95, 0.9, 0.82))),
                 ]
             };
             self.insert_named(Insertable::FogEffect, volume, "Fog", fog);
