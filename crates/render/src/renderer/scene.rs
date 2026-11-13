@@ -306,6 +306,7 @@ impl ScenePipeline {
             cloud_drift: Default::default(),
             frame_entries,
             sun_disc: true,
+            sky_band0: glam::Vec3::ZERO,
             no_occlusion_view,
             occlusion_sampler,
             targets_alive,
@@ -710,6 +711,7 @@ impl ScenePipeline {
                 *channel *= picture_light;
             }
         }
+        self.sky_band0 = self.environment.sky_band0(sky.colors, picture_light);
         frame_uniform.night = [
             stars,
             f32::from(u8::from(sky.scattered)),
@@ -757,7 +759,7 @@ impl ScenePipeline {
         {
             self.bind_frame();
         }
-        let (volumes, volume_count) = self.light_probes.uniform();
+        let (volumes, volume_count) = self.light_probes.uniform(self.sky_band0);
         frame_uniform.volumes = volumes;
         frame_uniform.light_probes = [volume_count, u32::from(!self.sun_disc), 0, 0];
         let (scene_width, scene_height) = self.frame_targets.size;

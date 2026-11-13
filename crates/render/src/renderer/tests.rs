@@ -2290,6 +2290,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 counts: [2, 1, 2],
                 probes: Arc::new(vec![[[0.5; 3]; 4]; 4]),
                 invalid: Arc::default(),
+                sky: None,
             },
         });
     // Every lens effect, for their settings to turn on and off.

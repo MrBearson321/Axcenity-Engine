@@ -950,6 +950,9 @@ pub(super) struct ScenePipeline {
     /// Whether the sky draws the sun's disc: false only while baking light
     /// probes.
     pub(super) sun_disc: bool,
+    /// The sky's average light in the last frame drawn
+    /// (`Environment::sky_band0`, roadmap R18.3).
+    pub(super) sky_band0: Vec3,
     /// A 1×1 white texture, bound in place of the ambient occlusion while
     /// it's off, and the sampler the scene pass reads occlusion with.
     pub(super) no_occlusion_view: wgpu::TextureView,

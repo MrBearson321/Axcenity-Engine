@@ -374,6 +374,11 @@ mod tests {
         let first = axcenity_assets::read_light_probes(&folder, &path).unwrap();
         // 16 × 10 × 16 studs, a probe about every 4.
         assert_eq!(first.counts, [4, 3, 4]);
+        // R18.3: the sky's share is kept apart, one for each probe, with
+        // the sky it came from.
+        let sky = first.sky.as_ref().expect("the sky's share kept apart");
+        assert_eq!(sky.probes.len(), first.probes.len());
+        assert!(sky.band0.iter().all(|&c| c > 0.0), "{:?}", sky.band0);
         assert!(app.assets.light_probes(&path).is_some());
         assert!(!flagged(&mut app, volume), "just baked");
 

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Baked light probes follow a sky that dims or changes color"
+details = "Bake Probes now keeps the sky's share of each light probe's light apart from the sun's, lamps' and ambient light's. While the sky is drawn darker or a different color than when baked (time of day, weather, a new sky), surfaces in the volume take that much more or less of the sky's share, without baking again or turning on real-time GI. A sky as baked draws exactly as before. Bakes from before keep their light as baked until probes are baked again; the Light Probes overlay counts them."
+features = ["renderer.global-illumination"]
+fixes = []
+introduces_issues = []
+prs = [305]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

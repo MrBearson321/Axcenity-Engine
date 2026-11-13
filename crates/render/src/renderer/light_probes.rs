@@ -8,7 +8,14 @@
 //! (`surrounding_diffuse` in lighting.wgsl). The buffer is rewritten only
 //! when the volumes drawn change, and shrinks back to one blank probe while
 //! there are none. With real-time GI on (Phase 20), `realtime_gi.rs`
-//! writes freshly traced probes over the baked ones in place.
+//! writes freshly traced probes over the baked ones in place, marking each
+//! (the second coefficient's `w` is 1) so its sky light isn't added again.
+//!
+//! A bake that keeps its sky light apart (roadmap R18.3) has a second set
+//! of four coefficients a probe after all the volumes' probes. Surfaces add
+//! that set times the sky drawn now over the sky it was baked with, minus
+//! one, per channel, so a sky that dims or changes color relights the
+//! volume. While the sky is as baked, nothing is added.
 //!
 //! With ray traced GI on (`ray_gi.rs`), the camera brings probes of its own
 //! too: a fine grid around it, first in the buffer and first to be read,
@@ -60,6 +67,11 @@ pub(super) struct VolumeRaw {
     /// How many probes stand along the box's own X, Y and Z, then where its
     /// first probe is in the buffer.
     grid: [u32; 4],
+    /// xyz: how much of its sky light to add, per channel (the sky drawn
+    /// now over the one it was baked with, minus one), w: 1 to add it.
+    sky: [f32; 4],
+    /// x: where its first probe's sky light is in the buffer.
+    sky_first: [u32; 4],
 }
 
 /// Where a drawn volume's probes stand, to trace them again.
@@ -167,6 +179,9 @@ pub(super) struct LightProbes {
     drawn: Vec<VolumeRaw>,
     /// Where their probes stand, in the same order.
     grids: Vec<ProbeGrid>,
+    /// The sky each was baked with, if it keeps its sky light apart, in
+    /// the same order.
+    baked_skies: Vec<Option<Vec3>>,
     /// How many times the buffer has been written, for tests.
     pub(super) uploads: u32,
     /// How many times the camera's probes have been copied along, for
@@ -182,6 +197,7 @@ impl LightProbes {
             camera: None,
             drawn: Vec::new(),
             grids: Vec::new(),
+            baked_skies: Vec::new(),
             uploads: 0,
             moves: 0,
         }
@@ -235,13 +251,21 @@ impl LightProbes {
             let untraced = (0..camera_probe_count())
                 .filter(|_| camera_probes)
                 .map(|_| UNTRACED);
-            let texels: Vec<ProbeTexels> = untraced
+            let mut texels: Vec<ProbeTexels> = untraced
                 .chain(
                     chosen
                         .iter()
                         .flat_map(|volume| probe_texels(&volume.probes)),
                 )
                 .collect();
+            // Then the sky light of those that keep it apart.
+            texels.extend(
+                chosen
+                    .iter()
+                    .filter_map(|volume| volume.probes.sky.as_ref())
+                    .flat_map(|sky| sky.probes.iter())
+                    .map(|probe| probe.map(|[r, g, b]| [r, g, b, 0.0])),
+            );
             let count = texels.len().max(1);
             if self.buffer.size() != buffer_size(count) {
                 self.buffer = probe_buffer(device, count);
@@ -256,6 +280,7 @@ impl LightProbes {
         // The boxes may have moved although their bakes haven't.
         self.drawn.clear();
         self.grids.clear();
+        self.baked_skies.clear();
         let mut first = 0;
         if let Some(probes) = &self.camera {
             let (center, half_size) = probes.volume();
@@ -270,9 +295,17 @@ impl LightProbes {
                 to_box: to_box_rows(center, Quat::IDENTITY),
                 extent: half_size.extend(CAMERA_BLEND).to_array(),
                 grid: [x, y, z, 0],
+                sky: [0.0; 4],
+                sky_first: [0; 4],
             });
+            self.baked_skies.push(None);
             first = x * y * z;
         }
+        let mut sky_first: u32 = first
+            + chosen
+                .iter()
+                .map(|volume| volume.probes.counts.iter().product::<u32>())
+                .sum::<u32>();
         for volume in chosen {
             let [x, y, z] = volume.probes.counts;
             self.grids.push(ProbeGrid {
@@ -285,8 +318,15 @@ impl LightProbes {
                 to_box: to_box_rows(volume.center, volume.rotation),
                 extent: volume.half_size.extend(volume.blend_distance).to_array(),
                 grid: [x, y, z, first],
+                sky: [0.0; 4],
+                sky_first: [sky_first, 0, 0, 0],
             });
             first += x * y * z;
+            let baked_sky = volume.probes.sky.as_ref().map(|sky| Vec3::from(sky.band0));
+            if baked_sky.is_some() {
+                sky_first += x * y * z;
+            }
+            self.baked_skies.push(baked_sky);
         }
         rebind
     }
@@ -321,10 +361,16 @@ impl LightProbes {
         self.moves += 1;
     }
 
-    /// The frame uniform's volumes, and how many there are.
-    pub(super) fn uniform(&self) -> ([VolumeRaw; MAX_VOLUMES], u32) {
+    /// The frame uniform's volumes, and how many there are, with `sky` the
+    /// sky's average light drawn now (`Environment::sky_band0`).
+    pub(super) fn uniform(&self, sky: Vec3) -> ([VolumeRaw; MAX_VOLUMES], u32) {
         let mut volumes = [VolumeRaw::default(); MAX_VOLUMES];
         volumes[..self.drawn.len()].copy_from_slice(&self.drawn);
+        for (volume, baked) in volumes.iter_mut().zip(&self.baked_skies) {
+            if let Some(added) = baked.and_then(|baked| sky_added(baked, sky)) {
+                volume.sky = added.extend(1.0).to_array();
+            }
+        }
         (volumes, self.drawn.len() as u32)
     }
 
@@ -364,6 +410,26 @@ impl LightProbes {
     pub(super) fn restore_bakes(&mut self) {
         self.held.clear();
     }
+}
+
+/// How much of a volume's sky light to add, per channel, with the sky
+/// `baked` with and `now` drawn: now over baked, minus one, or `None` while
+/// that's nothing. A channel the baked sky had none of can't be scaled, so
+/// it stays as baked.
+fn sky_added(baked: Vec3, now: Vec3) -> Option<Vec3> {
+    let channel = |baked: f32, now: f32| {
+        if baked > 1e-6 && now.is_finite() {
+            (now / baked - 1.0).max(-1.0)
+        } else {
+            0.0
+        }
+    };
+    let added = Vec3::new(
+        channel(baked.x, now.x),
+        channel(baked.y, now.y),
+        channel(baked.z, now.z),
+    );
+    (added.abs().max_element() > 1e-3).then_some(added)
 }
 
 fn buffer_size(probes: usize) -> u64 {
@@ -406,6 +472,11 @@ fn usable(volume: &LightProbeVolume) -> bool {
     total > 0
         && total <= MAX_PROBES_PER_VOLUME
         && volume.probes.probes.len() == total
+        && volume
+            .probes
+            .sky
+            .as_ref()
+            .is_none_or(|sky| sky.probes.len() == total && sky.band0.iter().all(|c| c.is_finite()))
         && volume.half_size.cmpgt(Vec3::ZERO).all()
         && volume.half_size.is_finite()
         && volume.center.is_finite()
@@ -432,6 +503,7 @@ mod tests {
                 counts,
                 probes: Arc::new(vec![[[0.0; 3]; 4]; probes]),
                 invalid: Arc::default(),
+                sky: None,
             },
         }
     }
@@ -467,6 +539,36 @@ mod tests {
             "the big box's one probe"
         );
         assert_eq!(probes.point(7), None);
+    }
+
+    /// R18.3: the sky's share is scaled by the sky now over the baked one,
+    /// per channel; nothing is added while they match, a channel the baked
+    /// sky had none of stays as baked, and the share never goes below none.
+    #[test]
+    fn the_sky_share_added_follows_the_sky_drawn_now() {
+        let baked = Vec3::new(1.0, 0.5, 0.0);
+        assert_eq!(sky_added(baked, baked), None);
+        assert_eq!(
+            sky_added(baked, baked * 1.0005),
+            None,
+            "too little to matter"
+        );
+        let added = sky_added(baked, Vec3::new(0.5, 1.0, 3.0)).unwrap();
+        assert!(
+            added.abs_diff_eq(Vec3::new(-0.5, 1.0, 0.0), 1e-6),
+            "{added}"
+        );
+        assert_eq!(
+            sky_added(baked, Vec3::new(-1.0, 0.5, 0.0)),
+            Some(Vec3::new(-1.0, 0.0, 0.0)),
+            "never below none"
+        );
+        let mut sky = volume([1, 1, 1], 1);
+        sky.probes.sky = Some(crate::ProbeSky {
+            band0: [1.0; 3],
+            probes: Arc::new(vec![]),
+        });
+        assert!(!usable(&sky), "a sky share for each probe");
     }
 
     #[test]
