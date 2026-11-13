@@ -27,6 +27,15 @@ impl EditorApp {
     /// The Toolbox tab.
     pub(in crate::app) fn toolbox_pane(&mut self, ui: &mut egui::Ui) {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
+        // A preview that ended (or a player that's gone: Play started, no
+        // audio output) shows the listen button again.
+        if !self
+            .sound_preview
+            .as_ref()
+            .is_some_and(|engine| engine.file_playing())
+        {
+            self.toolbox.sound_ended();
+        }
         let actions = self.toolbox.show(ui, folder.as_deref(), !self.playing());
         for action in actions {
             self.toolbox_action(action);
@@ -131,6 +140,35 @@ impl EditorApp {
                 }
                 self.layout.open(Pane::Plugins);
             }
+            ToolboxAction::PlaySound { name, bytes } => self.listen_to_sound(&name, bytes),
+            ToolboxAction::StopSound => {
+                if let Some(engine) = &mut self.sound_preview {
+                    engine.stop_file();
+                }
+            }
+        }
+    }
+
+    /// Plays a Toolbox sound's preview on its own, on the editor's preview
+    /// player (the one Properties' Sound preview uses), G1. Not in Play,
+    /// where the game's audio plays.
+    fn listen_to_sound(&mut self, name: &str, bytes: Vec<u8>) {
+        if self.playing() {
+            return;
+        }
+        if self.sound_preview.is_none() {
+            match axcenity_audio::AudioEngine::new() {
+                Ok(engine) => self.sound_preview = Some(engine),
+                Err(err) => {
+                    self.output.error(format!("Audio is unavailable: {err}"));
+                    return;
+                }
+            }
+        }
+        if let Some(engine) = &mut self.sound_preview
+            && let Err(err) = engine.play_file(name, bytes)
+        {
+            self.output.error(format!("Could not play {name}: {err}"));
         }
     }
 
