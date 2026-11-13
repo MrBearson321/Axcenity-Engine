@@ -433,6 +433,15 @@ impl ScenePipeline {
             // The probes traced while it was on give way to their bakes.
             self.light_probes.restore_bakes();
         }
+        // A new tier (roadmap R18.4) is made afresh, keeping what the old
+        // one traced until it's traced again.
+        if self
+            .realtime_gi
+            .as_ref()
+            .is_some_and(|gi| gi.tier != self.graphics.realtime_gi_tier)
+        {
+            self.realtime_gi = None;
+        }
         if !ray_gi::traced(&self.graphics, 1) && self.ray_gi.take().is_some() {
             self.light_probes.restore_bakes();
         }

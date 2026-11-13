@@ -65,6 +65,7 @@ mod people_history;
 mod plugins;
 mod prefabs;
 mod probe_bake;
+mod probe_fill;
 mod probes;
 mod project_upgrade;
 mod save_template;
@@ -553,6 +554,8 @@ struct RibbonClicks {
     constraint: Option<Option<ClassName>>,
     /// Bake Probes, beside Reflection Probe.
     bake_probes: bool,
+    /// Fill with Probes, below Bake Probes (roadmap R18.4).
+    fill_probes: bool,
     check_assets: bool,
     play: bool,
     /// Run without a player (roadmap G14).

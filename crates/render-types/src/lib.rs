@@ -12,6 +12,7 @@ pub use graphics::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DecalLimits, DepthOfFieldQuality,
     EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, MotionBlurQuality, POINT_SHADOW_FACES,
     PointShadowMapSize, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE,
-    RayTracedAmbientOcclusion, RayTracedGlobalIllumination, RayTracedShadows, ReflectionQuality,
+    RayTracedAmbientOcclusion, RayTracedGlobalIllumination, RayTracedShadows, RealtimeGiTier,
+    ReflectionQuality,
     ShadowMapSize, ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
