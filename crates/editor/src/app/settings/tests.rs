@@ -142,6 +142,7 @@ fn graphics_settings_survive_a_restart() {
         ray_tracing_distance: Some(300.0),
         ray_traced_shadows: Some(RayTracedShadows::Medium),
         ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Low),
+        ray_traced_global_illumination: Some(axcenity_render::RayTracedGlobalIllumination::High),
         ray_tracing: Some(true),
     };
     let mut storage = MemoryStorage::default();

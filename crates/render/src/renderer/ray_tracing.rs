@@ -393,12 +393,6 @@ impl Surfaces {
         }
         self.written = raw;
     }
-
-    /// How many base color textures' averages are kept, for tests.
-    #[cfg(test)]
-    pub(super) fn textures_averaged(&self) -> usize {
-        self.texture_colors.len()
-    }
 }
 
 fn surface_buffer(device: &wgpu::Device, slots: usize) -> wgpu::Buffer {

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Ray traced global illumination (optional)"
+details = "On a GPU that can ray trace, Settings > Graphics > Ray traced GI lights light probe volumes' probes with rays each frame, so bounced light follows a moving sun, lamps and moved walls. Low, Medium and High trace 32, 64 or 128 probes a frame. It's off by default, takes Real-time GI's place while on, and scripts set it through UserGameSettings.RayTracedGlobalIllumination."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
