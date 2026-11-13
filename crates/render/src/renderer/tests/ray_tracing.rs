@@ -507,3 +507,114 @@ mod ambient_occlusion {
         assert_eq!(renderer.read_pixels(), before);
     }
 }
+
+mod global_illumination {
+    use super::super::realtime_gi::{
+        PROBES, SUN_BEHIND_WALL, SUN_ON_WALL, bake, difference, probes_held, with_volume, yard,
+    };
+    use super::*;
+    use crate::RayTracedGlobalIllumination;
+
+    fn traced(gi: RayTracedGlobalIllumination) -> crate::GraphicsSettings {
+        crate::GraphicsSettings {
+            shadow_quality: Some(crate::ShadowQuality::Medium),
+            ray_traced_global_illumination: Some(gi),
+            ..crate::GraphicsSettings::default()
+        }
+    }
+
+    #[test]
+    fn a_moving_sun_relights_the_probes_with_rays_toward_a_fresh_bake() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let lit = yard(SUN_ON_WALL);
+        let moved = yard(SUN_BEHIND_WALL);
+        let (before, after) = (bake(&device, &queue, &lit), bake(&device, &queue, &moved));
+        let change = difference(&before, &after);
+        // The world still holds the bake from before the sun moved.
+        let world = with_volume(&moved, before.clone());
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
+        // Medium traces all 8 probes each frame; a second's worth settles.
+        for _ in 0..60 {
+            renderer.render(&world).unwrap();
+        }
+        assert_eq!(
+            renderer.scene.probes_ray_traced(),
+            Some(60 * u64::from(PROBES))
+        );
+        assert_eq!(renderer.scene.probes_traced(), None, "no faces drawn");
+        let held = probes_held(&renderer);
+        let to_after = difference(&held, &after);
+        let to_before = difference(&held, &before);
+        assert!(
+            to_after < 0.2 * change && to_after < to_before,
+            "near the fresh bake ({to_after}), not the old one ({to_before}); the sun \
+             moved {change}"
+        );
+
+        // Turning it off frees it and brings the bake back.
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Off));
+        renderer.render(&world).unwrap();
+        assert_eq!(renderer.scene.probes_ray_traced(), None);
+        assert_eq!(probes_held(&renderer), before);
+        assert!(renderer.stats().pass_time(FramePass::RayTracedGi).is_none());
+    }
+
+    #[test]
+    fn the_red_wall_bounces_red_light_toward_the_probes_beside_it() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let lit = yard(SUN_ON_WALL);
+        // Starting from nothing, not a bake.
+        let world = with_volume(&lit, vec![[[0.0; 3]; 4]; PROBES as usize]);
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+        for _ in 0..40 {
+            renderer.render(&world).unwrap();
+        }
+        let held = probes_held(&renderer);
+        for probe in &held {
+            let [c0, _, _, c3] = *probe;
+            assert!(
+                c0.iter().all(|&c| c > 0.05),
+                "lit from all around: {probe:?}"
+            );
+            // Band 1's X coefficient: more light from +X (the sunlit red
+            // wall) than -X, and redder than it is green.
+            assert!(c3[0] > 0.0 && c3[0] > c3[1], "red from the wall: {probe:?}");
+        }
+    }
+
+    #[test]
+    fn without_light_probe_volumes_or_ray_queries_nothing_is_traced() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+        renderer.render(&yard(SUN_ON_WALL)).unwrap();
+        assert_eq!(renderer.scene.probes_ray_traced(), None);
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default(),
+            "no volumes: no ray traced scene either"
+        );
+        if let Some((device, queue)) = test_device() {
+            let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+            renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+            let world = with_volume(&yard(SUN_ON_WALL), vec![[[0.0; 3]; 4]; PROBES as usize]);
+            renderer.render(&world).unwrap();
+            assert_eq!(renderer.scene.probes_ray_traced(), None);
+            assert!(
+                renderer
+                    .graphics()
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("GI is off"))
+            );
+        }
+    }
+}

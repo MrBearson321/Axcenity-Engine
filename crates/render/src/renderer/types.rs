@@ -1074,6 +1074,8 @@ pub(super) struct ScenePipeline {
     /// Ray traced ambient occlusion's pass, while drawn
     /// (renderer/ray_ao.rs).
     pub(super) ray_ao: Option<Box<super::ray_ao::RayAmbientOcclusion>>,
+    /// Ray traced GI's pass, while it's drawn (renderer/ray_gi.rs).
+    pub(super) ray_gi: Option<Box<super::ray_gi::RayGlobalIllumination>>,
     /// The editor's debug view, while one is shown (renderer/debug_views.rs).
     #[cfg(feature = "debug-views")]
     pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,

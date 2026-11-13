@@ -226,19 +226,20 @@ fn ray_traced_shadows_are_a_setting_for_local_scripts() {
         &mut world,
         "scripts/rays.client.lua",
         "local s = game:GetService('UserGameSettings')
-        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion)
+        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion, s.RayTracedGlobalIllumination)
         s.RayTracedShadows = Enum.RayTracedShadows.Medium
         s.RayTracedAmbientOcclusion = Enum.RayTracedAmbientOcclusion.High
-        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion)
+        s.RayTracedGlobalIllumination = Enum.RayTracedGlobalIllumination.Low
+        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion, s.RayTracedGlobalIllumination)
         print(pcall(function() s.RayTracedShadows = Enum.MotionBlur.Low end))",
     );
     assert_eq!(
         printed[0],
-        "Enum.RayTracedShadows.Off\tEnum.RayTracedAmbientOcclusion.Off"
+        "Enum.RayTracedShadows.Off\tEnum.RayTracedAmbientOcclusion.Off\tEnum.RayTracedGlobalIllumination.Off"
     );
     assert_eq!(
         printed[1],
-        "Enum.RayTracedShadows.Medium\tEnum.RayTracedAmbientOcclusion.High"
+        "Enum.RayTracedShadows.Medium\tEnum.RayTracedAmbientOcclusion.High\tEnum.RayTracedGlobalIllumination.Low"
     );
     assert!(printed[2].starts_with("false\t"), "{printed:?}");
     let change = runtime.take_graphics_change().unwrap();
@@ -248,6 +249,9 @@ fn ray_traced_shadows_are_a_setting_for_local_scripts() {
             ray_traced_shadows: Some(axcenity_render_types::RayTracedShadows::Medium),
             ray_traced_ambient_occlusion: Some(
                 axcenity_render_types::RayTracedAmbientOcclusion::High
+            ),
+            ray_traced_global_illumination: Some(
+                axcenity_render_types::RayTracedGlobalIllumination::Low
             ),
             ..GraphicsSettings::preset(Quality::High)
         }

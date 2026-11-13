@@ -546,10 +546,11 @@ pub enum EnumType {
     StreamingState,
     RayTracedShadows,
     RayTracedAmbientOcclusion,
+    RayTracedGlobalIllumination,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 44] = [
+    pub const ALL: [EnumType; 45] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -594,6 +595,7 @@ impl EnumType {
         EnumType::StreamingState,
         EnumType::RayTracedShadows,
         EnumType::RayTracedAmbientOcclusion,
+        EnumType::RayTracedGlobalIllumination,
     ];
 
     pub fn name(self) -> &'static str {
@@ -618,6 +620,7 @@ impl EnumType {
             EnumType::MotionBlur => "MotionBlur",
             EnumType::RayTracedShadows => "RayTracedShadows",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
+            EnumType::RayTracedGlobalIllumination => "RayTracedGlobalIllumination",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::AssetFetchStatus => "AssetFetchStatus",
@@ -669,6 +672,9 @@ impl EnumType {
             EnumType::RayTracedShadows => user_settings::ray_traced_shadows_names(),
             EnumType::RayTracedAmbientOcclusion => {
                 user_settings::ray_traced_ambient_occlusion_names()
+            }
+            EnumType::RayTracedGlobalIllumination => {
+                user_settings::ray_traced_global_illumination_names()
             }
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
@@ -826,6 +832,7 @@ impl LuaEnumItem {
             | EnumType::MotionBlur
             | EnumType::RayTracedShadows
             | EnumType::RayTracedAmbientOcclusion
+            | EnumType::RayTracedGlobalIllumination
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::AssetFetchStatus

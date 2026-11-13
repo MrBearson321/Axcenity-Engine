@@ -374,6 +374,7 @@ impl ScenePipeline {
             ray_shadows: None,
             no_ray_shadows,
             ray_ao: None,
+            ray_gi: None,
             #[cfg(feature = "debug-views")]
             debug_views: None,
             texture_bytes,
@@ -428,6 +429,9 @@ impl ScenePipeline {
         self.graphics = settings.effective(&self.capabilities);
         if !self.graphics.realtime_gi && self.realtime_gi.take().is_some() {
             // The probes traced while it was on give way to their bakes.
+            self.light_probes.restore_bakes();
+        }
+        if !ray_gi::traced(&self.graphics, 1) && self.ray_gi.take().is_some() {
             self.light_probes.restore_bakes();
         }
         if !self.graphics.volumetric_fog {
@@ -613,8 +617,29 @@ impl ScenePipeline {
         ) {
             self.bind_frame();
         }
-        // With real-time GI, a few of their probes are traced again first.
-        if self.graphics.realtime_gi && self.light_probes.count() > 0 {
+        // With ray traced GI (renderer/ray_gi.rs), a batch of their probes
+        // is traced with rays this frame, once the ray traced scene is up
+        // to date; its pass needs the frame's bindings.
+        let ray_gi = ray_gi::traced(&self.graphics, self.light_probes.count());
+        if !ray_gi {
+            if self.ray_gi.take().is_some() {
+                // The probes traced while it was on give way to their bakes.
+                self.light_probes.restore_bakes();
+            }
+        } else if self.ray_gi.is_none() {
+            self.ray_gi = Some(Box::new(ray_gi::RayGlobalIllumination::new(
+                &self.device,
+                &self.frame_entries,
+            )));
+            self.bind_frame();
+        }
+        let ray_gi_batch = match &mut self.ray_gi {
+            Some(gi) => gi.plan(&self.queue, &self.light_probes, &self.graphics),
+            None => None,
+        };
+        // Otherwise, with real-time GI, a few of their probes are traced
+        // again first by drawing what they see.
+        if !ray_gi && self.graphics.realtime_gi && self.light_probes.count() > 0 {
             let gi = self.realtime_gi.get_or_insert_with(|| {
                 Box::new(realtime_gi::RealtimeGi::new(
                     &self.device,
@@ -1147,8 +1172,9 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        let traces_rays =
-            self.traces_rays(ray_shadow_uniform.is_some() || ray_ao_uniform.is_some());
+        let traces_rays = self.traces_rays(
+            ray_shadow_uniform.is_some() || ray_ao_uniform.is_some() || ray_gi_batch.is_some(),
+        );
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
             Some(timer) if self.time_gpu => timer.collect(&self.device),
@@ -1163,13 +1189,18 @@ impl ScenePipeline {
         mark(&mut encoder, FramePass::AccelerationStructures);
         let tracing = ray_tracing::prepare_scene(
             &mut self.ray_scene,
-            (&self.device, &self.meshes, &self.custom_meshes),
+            (
+                (&self.device, &self.queue),
+                &self.meshes,
+                &self.custom_meshes,
+            ),
             &mut encoder,
             (
                 traces_rays,
                 self.frame,
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
+                ray_gi_batch.is_some(),
             ),
             &draws,
         );
@@ -1369,6 +1400,22 @@ impl ScenePipeline {
                 &mut encoder,
                 (rays.tlas(), prepass),
                 uniform,
+            );
+            true
+        } else {
+            false
+        };
+        mark(&mut encoder, FramePass::RayTracedGi);
+        let ray_gi_drawn = if let (Some(gi), Some(batch), Some(rays)) =
+            (&mut self.ray_gi, &ray_gi_batch, &self.ray_scene)
+            && let Some(surfaces) = &rays.surfaces
+        {
+            gi.trace(
+                (&self.device, &self.queue),
+                &mut encoder,
+                (rays.tlas(), &surfaces.buffer),
+                batch,
+                &self.light_probes,
             );
             true
         } else {
@@ -1657,6 +1704,7 @@ impl ScenePipeline {
                     prepass,
                     prepass && ambient_occlusion,
                     ray_shadows_drawn,
+                    ray_gi_drawn,
                     self.volumetric_fog.is_some(),
                     self.gpu_particles.is_some(),
                     true,
@@ -1859,8 +1907,15 @@ impl ScenePipeline {
             .volumetric_fog
             .as_ref()
             .map(|fog| bind(&fog.frame_layout, prepass_depth, occlusion));
+        let ray_gi_group = self
+            .ray_gi
+            .as_ref()
+            .map(|gi| bind(&gi.frame_layout, prepass_depth, occlusion));
         if let Some(fog) = &mut self.volumetric_fog {
             fog.frame_group = fog_group;
+        }
+        if let Some(gi) = &mut self.ray_gi {
+            gi.frame_group = ray_gi_group;
         }
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
@@ -1894,6 +1949,12 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn probes_traced(&self) -> Option<u32> {
         self.realtime_gi.as_ref().map(|gi| gi.traced)
+    }
+
+    /// How many probes ray traced GI has traced, while it's on.
+    #[cfg(test)]
+    pub(super) fn probes_ray_traced(&self) -> Option<u64> {
+        self.ray_gi.as_ref().map(|gi| gi.probes_traced)
     }
 
     /// How many sets of scene targets are alive: 1, unless one leaked.
@@ -2028,6 +2089,7 @@ impl ScenePipeline {
                 + self.environment.bytes()
                 + self.probes.bytes()
                 + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
+                + self.ray_gi.as_ref().map_or(0, |gi| gi.bytes())
                 + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
                 + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum::<u64>()

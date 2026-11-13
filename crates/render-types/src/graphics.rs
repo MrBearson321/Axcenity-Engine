@@ -484,6 +484,62 @@ impl RayTracedAmbientOcclusion {
     }
 }
 
+/// Hardware ray traced global illumination (`docs/rendering/ray-tracing.md`):
+/// light probe volumes' probes traced with rays each frame, in place of
+/// real-time GI's drawn faces, so bounced light follows the sun, lamps,
+/// sky and moving things within a second. Needs a GPU that can ray trace
+/// and a world with light probe volumes. Ordered from cheapest to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum RayTracedGlobalIllumination {
+    /// Light probes keep their bakes, or real-time GI's drawn faces (as its
+    /// own setting says).
+    Off,
+    /// 32 probes a frame, 64 rays each.
+    Low,
+    /// 64 probes a frame, 128 rays each.
+    Medium,
+    /// 128 probes a frame, 256 rays each.
+    High,
+}
+
+impl RayTracedGlobalIllumination {
+    pub const ALL: [RayTracedGlobalIllumination; 4] = [
+        RayTracedGlobalIllumination::Off,
+        RayTracedGlobalIllumination::Low,
+        RayTracedGlobalIllumination::Medium,
+        RayTracedGlobalIllumination::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RayTracedGlobalIllumination::Off => "Off",
+            RayTracedGlobalIllumination::Low => "Low",
+            RayTracedGlobalIllumination::Medium => "Medium",
+            RayTracedGlobalIllumination::High => "High",
+        }
+    }
+
+    /// Probes traced each frame: 0 when off.
+    pub fn probes_per_frame(self) -> u32 {
+        match self {
+            RayTracedGlobalIllumination::Off => 0,
+            RayTracedGlobalIllumination::Low => 32,
+            RayTracedGlobalIllumination::Medium => 64,
+            RayTracedGlobalIllumination::High => 128,
+        }
+    }
+
+    /// Rays traced from each probe: 0 when off.
+    pub fn rays(self) -> u32 {
+        match self {
+            RayTracedGlobalIllumination::Off => 0,
+            RayTracedGlobalIllumination::Low => 64,
+            RayTracedGlobalIllumination::Medium => 128,
+            RayTracedGlobalIllumination::High => 256,
+        }
+    }
+}
+
 /// How a `MotionBlurEffect` streaks what moves across the view. Ordered
 /// from cheapest to dearest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -649,6 +705,11 @@ pub struct GraphicsSettings {
     /// screen-space setting is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_traced_ambient_occlusion: Option<RayTracedAmbientOcclusion>,
+    /// Hardware ray traced global illumination, on a GPU that can ray
+    /// trace. Off at every preset. On, it traces light probe volumes even
+    /// while real-time GI is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_traced_global_illumination: Option<RayTracedGlobalIllumination>,
     /// Whether the GPU is opened with hardware ray tracing at the next
     /// start: off unless turned on (at every preset), since opening it
     /// changes the device even while no ray traced effect is on. Read once,
@@ -886,6 +947,13 @@ impl GraphicsSettings {
             .unwrap_or(RayTracedAmbientOcclusion::Off)
     }
 
+    /// Hardware ray traced global illumination: the override, or Off
+    /// (every preset).
+    pub fn ray_traced_global_illumination(&self) -> RayTracedGlobalIllumination {
+        self.ray_traced_global_illumination
+            .unwrap_or(RayTracedGlobalIllumination::Off)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -987,6 +1055,17 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
+        let ray_traced_global_illumination = if capabilities.ray_queries {
+            self.ray_traced_global_illumination()
+        } else {
+            RayTracedGlobalIllumination::Off
+        };
+        if ray_traced_global_illumination != self.ray_traced_global_illumination() {
+            notes.push(
+                "Ray traced GI is off: Hardware ray tracing is off or this GPU can't ray trace. Light probes keep their bakes, or real-time GI as set."
+                    .to_owned(),
+            );
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -1020,6 +1099,7 @@ impl GraphicsSettings {
             ray_tracing_distance: self.ray_tracing_distance(),
             ray_traced_shadows,
             ray_traced_ambient_occlusion,
+            ray_traced_global_illumination,
             notes,
         }
     }
@@ -1116,6 +1196,8 @@ pub struct EffectiveGraphics {
     pub ray_traced_shadows: RayTracedShadows,
     /// Ray traced ambient occlusion (Off on a GPU without ray queries).
     pub ray_traced_ambient_occlusion: RayTracedAmbientOcclusion,
+    /// Ray traced global illumination (Off on a GPU without ray queries).
+    pub ray_traced_global_illumination: RayTracedGlobalIllumination,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1541,6 +1623,7 @@ mod tests {
             ray_tracing_distance: Some(600.0),
             ray_traced_shadows: Some(RayTracedShadows::Medium),
             ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Low),
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::High),
             ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -1872,6 +1955,45 @@ mod tests {
     }
 
     #[test]
+    fn ray_traced_global_illumination_is_off_at_every_preset_and_without_ray_queries() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            assert_eq!(
+                preset.ray_traced_global_illumination(),
+                RayTracedGlobalIllumination::Off
+            );
+        }
+        let asked = GraphicsSettings {
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Medium),
+            ..GraphicsSettings::default()
+        };
+        let gpu = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        let effective = asked.effective(&gpu);
+        assert_eq!(
+            effective.ray_traced_global_illumination,
+            RayTracedGlobalIllumination::Medium
+        );
+        assert!(effective.notes.is_empty(), "{:?}", effective.notes);
+        let without = asked.effective(&Capabilities::default());
+        assert_eq!(
+            without.ray_traced_global_illumination,
+            RayTracedGlobalIllumination::Off
+        );
+        assert!(without.notes.iter().any(|note| note.contains("GI is off")));
+        assert_eq!(
+            RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::rays),
+            [0, 64, 128, 256]
+        );
+        assert_eq!(
+            RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::probes_per_frame),
+            [0, 32, 64, 128]
+        );
+    }
+
+    #[test]
     fn effective_never_raises_a_setting() {
         let capabilities = [
             Capabilities::default(),
@@ -1931,6 +2053,7 @@ mod tests {
                         ray_tracing_distance: None,
                         ray_traced_shadows: Some(RayTracedShadows::High),
                         ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Medium),
+                        ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Low),
                         ray_tracing: post,
                     };
                     for capabilities in &capabilities {
@@ -1946,6 +2069,10 @@ mod tests {
                         assert!(
                             effective.ray_traced_ambient_occlusion
                                 <= settings.ray_traced_ambient_occlusion()
+                        );
+                        assert!(
+                            effective.ray_traced_global_illumination
+                                <= settings.ray_traced_global_illumination()
                         );
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
@@ -1977,6 +2104,10 @@ mod tests {
                                 + usize::from(
                                     effective.ray_traced_ambient_occlusion
                                         != settings.ray_traced_ambient_occlusion(),
+                                )
+                                + usize::from(
+                                    effective.ray_traced_global_illumination
+                                        != settings.ray_traced_global_illumination(),
                                 );
                         assert_eq!(effective.notes.len(), lowered);
                     }
