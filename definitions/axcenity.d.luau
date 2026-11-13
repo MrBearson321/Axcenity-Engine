@@ -4203,7 +4203,7 @@ declare extern type ParticleEmitter extends Instance with
 	ShapeInOut: EnumParticleEmitterShapeInOut | "Outward" | "Inward" | "InAndOut"
 	--- How much of the part's own velocity each particle starts with, from 0 (none, the default) to 1 (all of it), so sparks from a moving car keep up with it.
 	VelocityInheritance: number
-	--- On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. Colliding emitters move their particles on the CPU, at most 4,000 each. Default false.
+	--- On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. A big emitter moving its particles on the GPU lands them only on what the camera sees. Default false.
 	Collides: boolean
 	--- How much of a colliding particle's speed into a surface it keeps, back out of it: 0 lands dead, 1 bounces as high as it fell. Speed along the surface is kept. Default 0.5.
 	Bounce: number

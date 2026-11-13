@@ -500,12 +500,17 @@ fn middle_pixel(device: &wgpu::Device, queue: &wgpu::Queue, list: &DrawList) -> 
 }
 
 fn big_block() -> DrawItem {
+    big_block_at(Vec3::new(0.0, 0.0, -5.0))
+}
+
+/// A 4-stud block at `position`.
+fn big_block_at(position: Vec3) -> DrawItem {
     DrawItem {
         shape: Shape::Block,
         transform: Mat4::from_scale_rotation_translation(
             Vec3::splat(4.0),
             glam::Quat::IDENTITY,
-            Vec3::new(0.0, 0.0, -5.0),
+            position,
         ),
         material: Material::default(),
         uv_tile: 0.0,

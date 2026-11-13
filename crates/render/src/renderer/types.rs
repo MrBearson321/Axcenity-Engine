@@ -903,6 +903,9 @@ pub(super) struct ScenePipeline {
     /// Whether the last draw list had sun rays the graphics settings draw,
     /// which read the prepass's depth.
     pub(super) sun_rays: bool,
+    /// Whether the last draw list had GPU particles that collide, which
+    /// land on the prepass's depth (roadmap R17.4b).
+    pub(super) particle_collisions: bool,
     /// Sun rays' pass, made the first time they're drawn.
     pub(super) sun_rays_pass: Option<Box<sun_rays::SunRaysPass>>,
     /// Whether the last draw list asked for depth of field, which (while
