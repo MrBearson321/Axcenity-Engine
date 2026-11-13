@@ -148,19 +148,26 @@ fn each_lens_effect_has_its_own_setting_for_local_scripts() {
         &mut world,
         "scripts/lens.client.lua",
         "local s = game:GetService('UserGameSettings')
-        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen)
+        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen, s.SunRays)
         s.DepthOfField = Enum.DepthOfField.High
         s.Vignette = true
         s.FilmGrain = true
         s.ChromaticAberration = false
         s.Sharpen = true
-        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen)
+        s.SunRays = true
+        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen, s.SunRays)
         s.DepthOfField = Enum.DepthOfField.Low
         print(s.DepthOfField)
         print(pcall(function() s.DepthOfField = Enum.CloudQuality.Low end))",
     );
-    assert_eq!(printed[0], "Enum.DepthOfField.Off	false	false	false	false");
-    assert_eq!(printed[1], "Enum.DepthOfField.High	true	true	false	true");
+    assert_eq!(
+        printed[0],
+        "Enum.DepthOfField.Off	false	false	false	false	false"
+    );
+    assert_eq!(
+        printed[1],
+        "Enum.DepthOfField.High	true	true	false	true	true"
+    );
     assert_eq!(printed[2], "Enum.DepthOfField.Low");
     assert!(printed[3].starts_with("false	"), "{printed:?}");
     let change = runtime.take_graphics_change().unwrap();
@@ -172,6 +179,7 @@ fn each_lens_effect_has_its_own_setting_for_local_scripts() {
             film_grain: Some(true),
             chromatic_aberration: Some(false),
             sharpen: Some(true),
+            sun_rays: Some(true),
             ..GraphicsSettings::preset(Quality::Low)
         }
     );
@@ -226,19 +234,20 @@ fn ray_traced_shadows_are_a_setting_for_local_scripts() {
         &mut world,
         "scripts/rays.client.lua",
         "local s = game:GetService('UserGameSettings')
-        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion)
+        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion, s.RayTracedGlobalIllumination)
         s.RayTracedShadows = Enum.RayTracedShadows.Medium
         s.RayTracedAmbientOcclusion = Enum.RayTracedAmbientOcclusion.High
-        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion)
+        s.RayTracedGlobalIllumination = Enum.RayTracedGlobalIllumination.Low
+        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion, s.RayTracedGlobalIllumination)
         print(pcall(function() s.RayTracedShadows = Enum.MotionBlur.Low end))",
     );
     assert_eq!(
         printed[0],
-        "Enum.RayTracedShadows.Off\tEnum.RayTracedAmbientOcclusion.Off"
+        "Enum.RayTracedShadows.Off\tEnum.RayTracedAmbientOcclusion.Off\tEnum.RayTracedGlobalIllumination.Off"
     );
     assert_eq!(
         printed[1],
-        "Enum.RayTracedShadows.Medium\tEnum.RayTracedAmbientOcclusion.High"
+        "Enum.RayTracedShadows.Medium\tEnum.RayTracedAmbientOcclusion.High\tEnum.RayTracedGlobalIllumination.Low"
     );
     assert!(printed[2].starts_with("false\t"), "{printed:?}");
     let change = runtime.take_graphics_change().unwrap();
@@ -248,6 +257,9 @@ fn ray_traced_shadows_are_a_setting_for_local_scripts() {
             ray_traced_shadows: Some(axcenity_render_types::RayTracedShadows::Medium),
             ray_traced_ambient_occlusion: Some(
                 axcenity_render_types::RayTracedAmbientOcclusion::High
+            ),
+            ray_traced_global_illumination: Some(
+                axcenity_render_types::RayTracedGlobalIllumination::Low
             ),
             ..GraphicsSettings::preset(Quality::High)
         }

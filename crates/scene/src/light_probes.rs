@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use axcenity_assets::{Assets, MAX_LIGHT_PROBES_PER_SIDE};
 use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
-use axcenity_render::{LightProbeGrid, LightProbeVolume};
+use axcenity_render::{LightProbeGrid, LightProbeVolume, ProbeSky};
 
 use crate::draw_list::part_placement;
 
@@ -93,6 +93,11 @@ pub(crate) fn light_probe_volume_of(
             key: probes.key(),
             counts: probes.counts,
             probes: probes.probes.clone(),
+            invalid: probes.invalid.clone(),
+            sky: probes.sky.as_ref().map(|sky| ProbeSky {
+                band0: sky.band0,
+                probes: sky.probes.clone(),
+            }),
         },
     })
 }

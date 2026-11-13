@@ -981,7 +981,7 @@ pub const ATMOSPHERE_NUMBERS: [&str; 4] = ["Density", "Offset", "Glare", "Haze"]
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 18] = [
+pub const GRAPHICS_OPTIONS: [&str; 20] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
@@ -992,6 +992,7 @@ pub const GRAPHICS_OPTIONS: [&str; 18] = [
     "MotionBlur",
     "RayTracedShadows",
     "RayTracedAmbientOcclusion",
+    "RayTracedGlobalIllumination",
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
@@ -1000,9 +1001,10 @@ pub const GRAPHICS_OPTIONS: [&str; 18] = [
     "FilmGrain",
     "ChromaticAberration",
     "Sharpen",
+    "SunRays",
 ];
 /// The [`GRAPHICS_OPTIONS`] that are on or off (booleans in Lua), not enums.
-pub const GRAPHICS_SWITCHES: [&str; 8] = [
+pub const GRAPHICS_SWITCHES: [&str; 9] = [
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
@@ -1011,6 +1013,7 @@ pub const GRAPHICS_SWITCHES: [&str; 8] = [
     "FilmGrain",
     "ChromaticAberration",
     "Sharpen",
+    "SunRays",
 ];
 /// The `UserGameSettings` overrides the graphics number block sets.
 pub const GRAPHICS_NUMBERS: [&str; 2] = ["ShadowDistance", "RenderScale"];
@@ -1027,7 +1030,7 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
         "AmbientOcclusion" | "DepthOfField" | "MotionBlur" => &["Off", "Low", "High", PRESET],
         "ReflectionQuality" | "CloudQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
-        "RayTracedShadows" | "RayTracedAmbientOcclusion" => {
+        "RayTracedShadows" | "RayTracedAmbientOcclusion" | "RayTracedGlobalIllumination" => {
             &["Off", "Low", "Medium", "High", PRESET]
         }
         "PostProcessing"
@@ -1037,7 +1040,8 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         | "Vignette"
         | "FilmGrain"
         | "ChromaticAberration"
-        | "Sharpen" => &["On", "Off", PRESET],
+        | "Sharpen"
+        | "SunRays" => &["On", "Off", PRESET],
         _ => &[],
     }
 }

@@ -42,6 +42,7 @@ mod dev_console;
 mod dialogues;
 mod documents;
 mod edits;
+mod effect_tab;
 mod engine;
 mod files;
 mod find_in_scripts;
@@ -64,6 +65,8 @@ mod open;
 mod people_history;
 mod plugins;
 mod prefabs;
+mod probe_bake;
+mod probe_fill;
 mod probes;
 mod project_upgrade;
 mod save_template;
@@ -175,12 +178,14 @@ const IMPORT_HOVER: &str = "Import models (.gltf, .glb or .fbx), images, sounds 
 /// The same cap as the player's.
 const MAX_FRAME_SECONDS: f64 = 0.1;
 /// How many frames the loading screen stays up after a project opens, at
-/// the least: then it stays while the scene's meshes and textures are
-/// still on their way to the GPU (see `app/session.rs`).
+/// the least: then it stays while the world's meshes and textures are
+/// still on their way to the GPU, and until frames come quickly (see
+/// `app/session.rs`).
 const FINISHING_FRAMES: u64 = 2;
-/// The longest the loading screen waits for the scene's meshes and
-/// textures, in seconds: what's still on its way after that arrives in
-/// the open editor (drawn white, or not yet drawn, until it does).
+/// The longest the loading screen waits for the world's meshes and
+/// textures and for frames to settle, in seconds: what's still on its way
+/// after that arrives in the open editor (drawn white, or not yet drawn,
+/// until it does).
 const FINISHING_LIMIT: f32 = 60.0;
 /// After the last input, frames keep coming at the display's rate for this
 /// long (see [`EditorApp::keep_frames_steady`]).
@@ -366,9 +371,11 @@ pub struct EditorApp {
     /// Play starts in the start level, whichever level is open (the Levels
     /// panel's Play from Start Level).
     play_from_start: bool,
-    /// Bake Probes was clicked: the probes are baked on the next frame,
-    /// which has the GPU device.
+    /// Bake Probes was clicked: the bake starts on the next frame.
     bake_probes_asked: bool,
+    /// The probe bake in progress, a little each frame
+    /// (`app/probe_bake.rs`).
+    probe_bake: Option<Box<probe_bake::ProbeBake>>,
     /// The baked LightProbeVolumes out of date, as of a history revision
     /// (`app/probes.rs`).
     stale_light_probes: Option<((u64, bool), Vec<InstanceId>)>,
@@ -399,6 +406,9 @@ pub struct EditorApp {
     /// seen on their way to the GPU at once (its count's total).
     cover_started: Option<Instant>,
     cover_uploads: usize,
+    /// Whether frames have come quickly since: the cover stays until they
+    /// do, so the editor answers as soon as it's gone.
+    cover_settling: loading::Settling,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
     /// The script tabs closed last in each project, for the welcome page.
@@ -451,6 +461,8 @@ pub struct EditorApp {
     /// Boxed: two worlds of its own would make every `EditorApp` on the
     /// stack much bigger.
     object_viewer: Box<axcenity_editor_tools::object_viewer::ObjectViewer>,
+    /// The Effect tab (roadmap R17.3).
+    effect_editor: Box<crate::effect_editor::EffectEditor>,
     /// The block script whose tab is under the mouse, set as it's drawn:
     /// Ctrl+Z and Ctrl+Y are its then, and the world's keys aren't taken.
     block_tab_pointer: Option<String>,
@@ -545,6 +557,8 @@ struct RibbonClicks {
     constraint: Option<Option<ClassName>>,
     /// Bake Probes, beside Reflection Probe.
     bake_probes: bool,
+    /// Fill with Probes, below Bake Probes (roadmap R18.4).
+    fill_probes: bool,
     check_assets: bool,
     play: bool,
     /// Run without a player (roadmap G14).
@@ -596,6 +610,7 @@ impl DockViewer<'_> {
                     .object_viewer
                     .ui(ui, self.render_state, &self.app.assets)
             }
+            Pane::Effect => self.app.effect_pane(ui, self.render_state),
             Pane::Toolbox => self.app.toolbox_pane(ui),
             Pane::Inventory => self.app.inventory_pane(ui),
             Pane::VersionExplorer => self
@@ -1009,6 +1024,7 @@ impl EditorApp {
             play_from_start: false,
             stale_light_probes: None,
             bake_probes_asked: false,
+            probe_bake: None,
             constraint_tool: None,
             importing: None,
             import_queue: VecDeque::new(),
@@ -1023,6 +1039,7 @@ impl EditorApp {
             cover_shown: false,
             cover_started: None,
             cover_uploads: 0,
+            cover_settling: loading::Settling::default(),
             recent: Vec::new(),
             recent_tabs: welcome::RecentTabs::default(),
             start: StartScreen::default(),
@@ -1047,6 +1064,7 @@ impl EditorApp {
             sequencer: Default::default(),
             model_studio: Default::default(),
             object_viewer: Default::default(),
+            effect_editor: Default::default(),
             block_tab_pointer: None,
             scene_drawn_pass: None,
             ui_designer: UiDesigner::default(),
@@ -1513,11 +1531,18 @@ impl EditorApp {
             .input(|input| f64::from(input.stable_dt))
             .min(MAX_FRAME_SECONDS);
         self.plugins_frame(seconds);
-        if self.bake_probes_asked
+        if self.bake_probes_asked {
+            self.bake_probes_asked = false;
+            self.start_probe_bake();
+        }
+        if self.probe_bake.is_some()
             && let Some(render_state) = render_state
         {
-            self.bake_probes_asked = false;
-            self.bake_probes(&render_state.device, &render_state.queue);
+            self.step_probe_bake(
+                &render_state.device,
+                &render_state.queue,
+                probe_bake::FRAME_BUDGET,
+            );
         }
         self.finish_thumbnail(ctx);
         // Taken from the input before the viewport sees it, so the S doesn't
@@ -1877,6 +1902,7 @@ impl EditorApp {
         }
         self.input_window(ctx);
         self.collision_groups_window(ctx);
+        self.probe_bake_window(ctx);
         self.custom_material_window(ctx);
         self.save_layout_dialog(ctx);
         self.references_window(ctx);

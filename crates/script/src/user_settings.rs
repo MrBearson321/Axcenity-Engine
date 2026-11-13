@@ -16,7 +16,8 @@
 use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
     GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, RayTracedAmbientOcclusion,
-    RayTracedShadows, ReflectionQuality, ShadowQuality, TextureQuality,
+    RayTracedGlobalIllumination, RayTracedShadows, ReflectionQuality, ShadowQuality,
+    TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -90,6 +91,12 @@ pub(crate) fn ray_traced_shadows_names() -> Vec<&'static str> {
 pub(crate) fn ray_traced_ambient_occlusion_names() -> Vec<&'static str> {
     RayTracedAmbientOcclusion::ALL
         .map(RayTracedAmbientOcclusion::label)
+        .to_vec()
+}
+
+pub(crate) fn ray_traced_global_illumination_names() -> Vec<&'static str> {
+    RayTracedGlobalIllumination::ALL
+        .map(RayTracedGlobalIllumination::label)
         .to_vec()
 }
 
@@ -431,6 +438,13 @@ impl UserData for LuaUserGameSettings {
             Ok(())
         });
 
+        fields.add_field_method_get("SunRays", |lua, _| Ok(settings(lua).sun_rays()));
+        fields.add_field_method_set("SunRays", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "SunRays", value)?;
+            change(lua, |settings, _| settings.sun_rays = chosen);
+            Ok(())
+        });
+
         fields.add_field_method_get("MotionBlur", |lua, _| {
             let name = settings(lua).motion_blur().label();
             Ok(item(EnumType::MotionBlur, name))
@@ -483,6 +497,28 @@ impl UserData for LuaUserGameSettings {
             });
             Ok(())
         });
+
+        fields.add_field_method_get("RayTracedGlobalIllumination", |lua, _| {
+            let name = settings(lua).ray_traced_global_illumination().label();
+            Ok(item(EnumType::RayTracedGlobalIllumination, name))
+        });
+        fields.add_field_method_set(
+            "RayTracedGlobalIllumination",
+            |lua, _, value: mlua::Value| {
+                let chosen = enum_choice(
+                    lua,
+                    "RayTracedGlobalIllumination",
+                    EnumType::RayTracedGlobalIllumination,
+                    &RayTracedGlobalIllumination::ALL,
+                    RayTracedGlobalIllumination::label,
+                    value,
+                )?;
+                change(lua, |settings, _| {
+                    settings.ray_traced_global_illumination = chosen
+                });
+                Ok(())
+            },
+        );
 
         fields.add_field_method_get("MasterVolume", |lua, _| Ok(world(lua)?.master_volume()));
         fields.add_field_method_set("MasterVolume", |lua, _, value: mlua::Value| {

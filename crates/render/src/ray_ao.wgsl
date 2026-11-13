@@ -33,10 +33,15 @@ struct RayAo {
 @group(1) @binding(0) var scene: acceleration_structure;
 @group(1) @binding(1) var<uniform> rays: RayAo;
 
-// Instance masks (renderer/ray_tracing.rs): solid items, cut-outs and
-// items that don't cast shadows, but not see-through ones, as the prepass
-// draws them.
-const MASK_OCCLUDERS: u32 = 11u;
+// Instance masks (renderer/ray_tracing.rs): solid items and cut-outs,
+// casting shadows or not, but not see-through ones, as the prepass draws
+// them.
+const MASK_SOLID: u32 = 9u;
+const MASK_CUT_OUTS: u32 = 18u;
+// Cut-outs are traced as solid cards (their holes aren't looked up), so
+// one nearer than this isn't counted: leaves lying on the ground would
+// darken it in card-shaped blotches (ray_shadows.wgsl's CUT_OUT_NEAR).
+const CUT_OUT_NEAR: f32 = 0.35;
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -64,15 +69,24 @@ fn view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 // How near what the ray from `origin` along `direction` hits is, as a
 // share of `radius` (1 touching, 0 at the radius or nothing hit).
 fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32) -> f32 {
+    let nearest = min(
+        nearest_hit(origin, direction, MASK_SOLID, 0.0, radius),
+        nearest_hit(origin, direction, MASK_CUT_OUTS, min(CUT_OUT_NEAR, radius), radius));
+    return 1.0 - nearest / radius;
+}
+
+// How far along the ray from `origin` the nearest item of `mask` is,
+// between `near` and `radius` (`radius` for nothing).
+fn nearest_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32, radius: f32) -> f32 {
     var query: ray_query;
     rayQueryInitialize(&query, scene, RayDesc(
-        RAY_FLAG_FORCE_OPAQUE, MASK_OCCLUDERS, 0.0, radius, origin, direction));
+        RAY_FLAG_FORCE_OPAQUE, mask, near, radius, origin, direction));
     while rayQueryProceed(&query) {}
     let hit = rayQueryGetCommittedIntersection(&query);
     if hit.kind == RAY_QUERY_INTERSECTION_NONE {
-        return 0.0;
+        return radius;
     }
-    return 1.0 - hit.t / radius;
+    return hit.t;
 }
 
 // rgb: how open the pixel is (1 nothing hidden), a: how much the rays

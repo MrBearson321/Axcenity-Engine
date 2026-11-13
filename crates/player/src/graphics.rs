@@ -125,10 +125,12 @@ mod tests {
             film_grain: Some(true),
             chromatic_aberration: Some(false),
             sharpen: None,
+            sun_rays: Some(false),
             motion_blur: Some(MotionBlurQuality::High),
             ray_tracing_distance: Some(1000.0),
             ray_traced_shadows: Some(RayTracedShadows::High),
             ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Medium),
+            ray_traced_global_illumination: Some(axcenity_render::RayTracedGlobalIllumination::Low),
             ray_tracing: Some(true),
         };
         save(&folder, &settings).unwrap();

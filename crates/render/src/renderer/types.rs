@@ -90,6 +90,10 @@ pub(super) const FAR_PLANE: f32 = 5000.0;
 /// A caller's mesh or texture not drawn for this many frames is taken off
 /// the GPU (about 10 seconds at 60 fps). Drawn again, it's uploaded again.
 pub(super) const KEEP_UNDRAWN_FRAMES: u64 = 600;
+/// ... and for at least this many seconds, however many frames that is: at
+/// 144 fps, 600 frames is only four seconds, and what was turned away from
+/// that long ago would be uploaded again, stalling a frame, on turning back.
+pub(super) const KEEP_UNDRAWN_SECONDS: f32 = 10.0;
 
 /// Per-frame values for the shader. Must match `Frame` in shader.wgsl.
 /// Every field is 16 bytes or a multiple, which is what uniform buffers need.
@@ -896,6 +900,11 @@ pub(super) struct ScenePipeline {
     /// Whether the last draw list had projected decals the graphics
     /// settings draw, which keep the prepass's targets alive too.
     pub(super) decals: bool,
+    /// Whether the last draw list had sun rays the graphics settings draw,
+    /// which read the prepass's depth.
+    pub(super) sun_rays: bool,
+    /// Sun rays' pass, made the first time they're drawn.
+    pub(super) sun_rays_pass: Option<Box<sun_rays::SunRaysPass>>,
     /// Whether the last draw list asked for depth of field, which (while
     /// its setting allows it) keeps the prepass's targets and its own alive.
     pub(super) depth_of_field: bool,
@@ -946,6 +955,9 @@ pub(super) struct ScenePipeline {
     /// Whether the sky draws the sun's disc: false only while baking light
     /// probes.
     pub(super) sun_disc: bool,
+    /// The sky's average light in the last frame drawn
+    /// (`Environment::sky_band0`, roadmap R18.3).
+    pub(super) sky_band0: Vec3,
     /// A 1×1 white texture, bound in place of the ambient occlusion while
     /// it's off, and the sampler the scene pass reads occlusion with.
     pub(super) no_occlusion_view: wgpu::TextureView,
@@ -1075,6 +1087,8 @@ pub(super) struct ScenePipeline {
     /// Ray traced ambient occlusion's pass, while drawn
     /// (renderer/ray_ao.rs).
     pub(super) ray_ao: Option<Box<super::ray_ao::RayAmbientOcclusion>>,
+    /// Ray traced GI's pass, while it's drawn (renderer/ray_gi.rs).
+    pub(super) ray_gi: Option<Box<super::ray_gi::RayGlobalIllumination>>,
     /// The editor's debug view, while one is shown (renderer/debug_views.rs).
     #[cfg(feature = "debug-views")]
     pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,
@@ -1083,6 +1097,10 @@ pub(super) struct ScenePipeline {
     pub(super) mesh_bytes: GpuBytes,
     /// While streaming: the thread that uploads what comes into range.
     pub(super) uploader: Option<super::uploads::Uploader>,
+    /// When the last few seconds' frames started, oldest first, so what
+    /// was drawn lately is kept for [`KEEP_UNDRAWN_SECONDS`] however fast
+    /// frames come.
+    pub(super) frame_clock: std::collections::VecDeque<(u64, std::time::Instant)>,
 }
 
 /// What a frame drew, for [`RenderStats`].

@@ -239,6 +239,9 @@ pub enum ClassName {
     ChromaticAberrationEffect,
     /// Inside Lighting: makes the edges between colors crisper.
     SharpenEffect,
+    /// Inside Lighting: shafts of light streaming from the sun past what's
+    /// in front of it (bright sky between leaves, a window), on screen.
+    SunRaysEffect,
     /// Inside Lighting: streaks what moves across the view, as a camera's
     /// shutter open while it moves does.
     MotionBlurEffect,
@@ -443,7 +446,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 132] = [
+    pub const ALL: [ClassName; 133] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -512,6 +515,7 @@ impl ClassName {
         ClassName::FilmGrainEffect,
         ClassName::ChromaticAberrationEffect,
         ClassName::SharpenEffect,
+        ClassName::SunRaysEffect,
         ClassName::MotionBlurEffect,
         ClassName::GraphicsVolume,
         ClassName::ExposureEffect,
@@ -652,6 +656,7 @@ impl ClassName {
             ClassName::FilmGrainEffect => "FilmGrainEffect",
             ClassName::ChromaticAberrationEffect => "ChromaticAberrationEffect",
             ClassName::SharpenEffect => "SharpenEffect",
+            ClassName::SunRaysEffect => "SunRaysEffect",
             ClassName::MotionBlurEffect => "MotionBlurEffect",
             ClassName::GraphicsVolume => "GraphicsVolume",
             ClassName::ExposureEffect => "ExposureEffect",
@@ -822,6 +827,7 @@ impl ClassName {
                 | ClassName::FilmGrainEffect
                 | ClassName::ChromaticAberrationEffect
                 | ClassName::SharpenEffect
+                | ClassName::SunRaysEffect
                 | ClassName::MotionBlurEffect
         )
     }
@@ -1365,6 +1371,14 @@ impl ClassName {
                 // 0 changes nothing, 1 is strong.
                 ("Intensity", Value::Number(0.5)),
             ],
+            ClassName::SunRaysEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // How bright the shafts are, 0 to 1.
+                ("Intensity", Value::Number(0.25)),
+                // How far they reach from the sun, 0 to 1 (1 is the whole
+                // way across the picture).
+                ("Spread", Value::Number(0.5)),
+            ],
             ClassName::MotionBlurEffect => vec![
                 ("Enabled", Value::Bool(true)),
                 // How much of the way something moved in a frame it streaks
@@ -1454,9 +1468,49 @@ impl ClassName {
                         "ShapeStyle",
                         enum_item("ParticleEmitterShapeStyle", "Volume"),
                     ),
+                    // Which way they head from the Shape: Outward (along
+                    // Direction for a Box, away from the middle for the
+                    // round shapes), Inward, or InAndOut (roadmap R17.2b).
+                    (
+                        "ShapeInOut",
+                        enum_item("ParticleEmitterShapeInOut", "Outward"),
+                    ),
+                    // How much of the part's own velocity particles start
+                    // with, 0 to 1 (roadmap R17.2b).
+                    ("VelocityInheritance", Value::Number(0.0)),
+                    // On, particles bounce off parts with CanCollide on and
+                    // the ground, keeping Bounce (0 to 1) of their speed
+                    // into the surface and losing LifetimeLoss (0 to 1) of
+                    // their life each time they land (roadmap R17.4).
+                    ("Collides", Value::Bool(false)),
+                    ("Bounce", Value::Number(0.5)),
+                    ("LifetimeLoss", Value::Number(0.0)),
+                    // Inside another ParticleEmitter, Birth, Death or
+                    // Collision makes this one a sub-emitter: it gives off
+                    // EmitCount particles where each of that emitter's
+                    // particles is born, dies or lands, and nothing by its
+                    // Rate. Always gives off as any emitter does (R17.4).
+                    ("EmitOn", enum_item("ParticleEmitterEmitOn", "Always")),
+                    ("EmitCount", Value::Number(10.0)),
+                    // Bursts: each keypoint gives off Value (± Envelope)
+                    // particles at its Time of each Duration seconds while
+                    // Enabled, over and over (roadmap R17.2b). Empty is none.
+                    ("Bursts", Value::NumberSequence(NumberSequence::default())),
+                    ("Duration", Value::Number(1.0)),
                     // Starting turn, in degrees, and degrees a second.
                     ("Rotation", Value::Number(0.0)),
                     ("RotSpeed", Value::Number(0.0)),
+                    // The Texture cut into a grid of frames, shown one at a
+                    // time: Loop, OneShot (over each life), PingPong or
+                    // Random, at FlipbookFramerate frames a second
+                    // (roadmap R17.2c). None shows the whole Texture.
+                    (
+                        "FlipbookLayout",
+                        enum_item("ParticleFlipbookLayout", "None"),
+                    ),
+                    ("FlipbookMode", enum_item("ParticleFlipbookMode", "Loop")),
+                    ("FlipbookFramerate", Value::Number(1.0)),
+                    ("FlipbookStartRandom", Value::Bool(false)),
                     // 0 paints over what's behind; 1 adds light (fire, sparks).
                     ("LightEmission", Value::Number(0.0)),
                     // Above 1 glows (and blooms).
@@ -2902,6 +2956,7 @@ impl ClassName {
             | ClassName::FilmGrainEffect
             | ClassName::ChromaticAberrationEffect
             | ClassName::SharpenEffect
+            | ClassName::SunRaysEffect
             | ClassName::MotionBlurEffect
             | ClassName::ExposureEffect
             | ClassName::FogEffect

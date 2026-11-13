@@ -484,6 +484,62 @@ impl RayTracedAmbientOcclusion {
     }
 }
 
+/// Hardware ray traced global illumination (`docs/rendering/ray-tracing.md`):
+/// light probe volumes' probes traced with rays each frame, in place of
+/// real-time GI's drawn faces, so bounced light follows the sun, lamps,
+/// sky and moving things within a second. Needs a GPU that can ray trace
+/// and a world with light probe volumes. Ordered from cheapest to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum RayTracedGlobalIllumination {
+    /// Light probes keep their bakes, or real-time GI's drawn faces (as its
+    /// own setting says).
+    Off,
+    /// 128 probes a frame, 64 rays each.
+    Low,
+    /// 256 probes a frame, 128 rays each.
+    Medium,
+    /// 512 probes a frame, 256 rays each.
+    High,
+}
+
+impl RayTracedGlobalIllumination {
+    pub const ALL: [RayTracedGlobalIllumination; 4] = [
+        RayTracedGlobalIllumination::Off,
+        RayTracedGlobalIllumination::Low,
+        RayTracedGlobalIllumination::Medium,
+        RayTracedGlobalIllumination::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RayTracedGlobalIllumination::Off => "Off",
+            RayTracedGlobalIllumination::Low => "Low",
+            RayTracedGlobalIllumination::Medium => "Medium",
+            RayTracedGlobalIllumination::High => "High",
+        }
+    }
+
+    /// Probes traced each frame: 0 when off.
+    pub fn probes_per_frame(self) -> u32 {
+        match self {
+            RayTracedGlobalIllumination::Off => 0,
+            RayTracedGlobalIllumination::Low => 128,
+            RayTracedGlobalIllumination::Medium => 256,
+            RayTracedGlobalIllumination::High => 512,
+        }
+    }
+
+    /// Rays traced from each probe: 0 when off.
+    pub fn rays(self) -> u32 {
+        match self {
+            RayTracedGlobalIllumination::Off => 0,
+            RayTracedGlobalIllumination::Low => 64,
+            RayTracedGlobalIllumination::Medium => 128,
+            RayTracedGlobalIllumination::High => 256,
+        }
+    }
+}
+
 /// How a `MotionBlurEffect` streaks what moves across the view. Ordered
 /// from cheapest to dearest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -562,6 +618,36 @@ pub struct PointShadowMapSize {
 /// along each way of each axis.
 pub const POINT_SHADOW_FACES: u32 = 6;
 
+/// How much real-time GI traces each frame (roadmap R18.4): how many light
+/// probes, and the size of each of a probe's six faces in texels per side.
+/// It follows the preset while real-time GI is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RealtimeGiTier {
+    pub probes_per_frame: u32,
+    pub face_size: u32,
+}
+
+impl RealtimeGiTier {
+    /// The most probes any tier traces in a frame.
+    pub const MAX_PROBES_PER_FRAME: u32 = 4;
+
+    /// The tier of `quality`: Low traces one probe a frame at 8² a face,
+    /// Medium two at 8², High two at 16² (a bake's size, what real-time GI
+    /// always did before tiers) and Ultra four at 16².
+    pub fn of(quality: Quality) -> Self {
+        let (probes_per_frame, face_size) = match quality {
+            Quality::Low => (1, 8),
+            Quality::Medium => (2, 8),
+            Quality::High => (2, 16),
+            Quality::Ultra => (4, 16),
+        };
+        Self {
+            probes_per_frame,
+            face_size,
+        }
+    }
+}
+
 /// The sky's environment maps: each cubemap face's size in texels per
 /// side, and how many directions each texel of a rough reflection averages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -621,7 +707,8 @@ pub struct GraphicsSettings {
     pub cloud_quality: Option<CloudQuality>,
     /// The lens effects a world can ask for (`DepthOfFieldEffect`,
     /// `VignetteEffect`, `FilmGrainEffect`, `ChromaticAberrationEffect`,
-    /// `SharpenEffect`), each drawn only if its setting allows it.
+    /// `SharpenEffect`, `SunRaysEffect`), each drawn only if its setting
+    /// allows it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth_of_field: Option<DepthOfFieldQuality>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -632,6 +719,8 @@ pub struct GraphicsSettings {
     pub chromatic_aberration: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sharpen: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sun_rays: Option<bool>,
     /// How a world's `MotionBlurEffect` is drawn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub motion_blur: Option<MotionBlurQuality>,
@@ -649,6 +738,11 @@ pub struct GraphicsSettings {
     /// screen-space setting is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_traced_ambient_occlusion: Option<RayTracedAmbientOcclusion>,
+    /// Hardware ray traced global illumination, on a GPU that can ray
+    /// trace. Off at every preset. On, it traces light probe volumes even
+    /// while real-time GI is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_traced_global_illumination: Option<RayTracedGlobalIllumination>,
     /// Whether the GPU is opened with hardware ray tracing at the next
     /// start: off unless turned on (at every preset), since opening it
     /// changes the device even while no ray traced effect is on. Read once,
@@ -792,6 +886,12 @@ impl GraphicsSettings {
         self.realtime_gi.unwrap_or(false)
     }
 
+    /// How much real-time GI traces each frame while it's on: the preset's
+    /// tier.
+    pub fn realtime_gi_tier(&self) -> RealtimeGiTier {
+        RealtimeGiTier::of(self.quality)
+    }
+
     /// Whether fog is drawn volumetric: the override, or the preset's (on
     /// at Ultra).
     pub fn volumetric_fog(&self) -> bool {
@@ -836,6 +936,10 @@ impl GraphicsSettings {
 
     pub fn sharpen(&self) -> bool {
         self.sharpen.unwrap_or(self.quality != Quality::Low)
+    }
+
+    pub fn sun_rays(&self) -> bool {
+        self.sun_rays.unwrap_or(self.quality != Quality::Low)
     }
 
     /// How motion blur is drawn: the override, or the preset's (off at Low,
@@ -906,6 +1010,7 @@ impl GraphicsSettings {
         GraphicsSettings {
             ray_traced_shadows: None,
             ray_traced_ambient_occlusion: None,
+            ray_traced_global_illumination: None,
             ..self.clone()
         }
     }
@@ -915,6 +1020,13 @@ impl GraphicsSettings {
     pub fn ray_traced_ambient_occlusion(&self) -> RayTracedAmbientOcclusion {
         self.ray_traced_ambient_occlusion
             .unwrap_or(RayTracedAmbientOcclusion::Off)
+    }
+
+    /// Hardware ray traced global illumination: the override, or Off
+    /// (every preset).
+    pub fn ray_traced_global_illumination(&self) -> RayTracedGlobalIllumination {
+        self.ray_traced_global_illumination
+            .unwrap_or(RayTracedGlobalIllumination::Off)
     }
 
     /// The values the renderer uses: these settings, lowered where the GPU
@@ -1018,6 +1130,17 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
+        let ray_traced_global_illumination = if capabilities.ray_queries {
+            self.ray_traced_global_illumination()
+        } else {
+            RayTracedGlobalIllumination::Off
+        };
+        if ray_traced_global_illumination != self.ray_traced_global_illumination() {
+            notes.push(
+                "Ray traced GI is off: Hardware ray tracing is off or this GPU can't ray trace. Light probes keep their bakes, or real-time GI as set."
+                    .to_owned(),
+            );
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -1032,6 +1155,7 @@ impl GraphicsSettings {
             // Like ambient occlusion, it reads only the prepass.
             contact_shadows: self.contact_shadows(),
             realtime_gi,
+            realtime_gi_tier: self.realtime_gi_tier(),
             volumetric_fog,
             // Every GPU can draw it: it's worked out in the sky's pixels.
             cloud_quality: self.cloud_quality(),
@@ -1042,6 +1166,7 @@ impl GraphicsSettings {
             film_grain: self.film_grain(),
             chromatic_aberration: self.chromatic_aberration(),
             sharpen: self.sharpen(),
+            sun_rays: self.sun_rays(),
             // Like depth of field: full-screen passes over the prepass's
             // depth and the motion it finds.
             motion_blur: self.motion_blur(),
@@ -1051,6 +1176,7 @@ impl GraphicsSettings {
             ray_tracing_distance: self.ray_tracing_distance(),
             ray_traced_shadows,
             ray_traced_ambient_occlusion,
+            ray_traced_global_illumination,
             notes,
         }
     }
@@ -1123,6 +1249,8 @@ pub struct EffectiveGraphics {
     pub contact_shadows: bool,
     /// Whether light probe volumes are traced again as the light changes.
     pub realtime_gi: bool,
+    /// How much real-time GI traces each frame while it's on.
+    pub realtime_gi_tier: RealtimeGiTier,
     /// Whether fog shows the sun's shadows and lamps' light (needs the
     /// prepass's depth).
     pub volumetric_fog: bool,
@@ -1133,6 +1261,7 @@ pub struct EffectiveGraphics {
     pub film_grain: bool,
     pub chromatic_aberration: bool,
     pub sharpen: bool,
+    pub sun_rays: bool,
     /// Motion blur's samples (needs the prepass's depth and motion vectors).
     pub motion_blur: MotionBlurQuality,
     /// The projected decals drawn (they need the prepass's depth and
@@ -1147,6 +1276,8 @@ pub struct EffectiveGraphics {
     pub ray_traced_shadows: RayTracedShadows,
     /// Ray traced ambient occlusion (Off on a GPU without ray queries).
     pub ray_traced_ambient_occlusion: RayTracedAmbientOcclusion,
+    /// Ray traced global illumination (Off on a GPU without ray queries).
+    pub ray_traced_global_illumination: RayTracedGlobalIllumination,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1428,16 +1559,17 @@ mod tests {
                     settings.film_grain(),
                     settings.chromatic_aberration(),
                     settings.sharpen(),
+                    settings.sun_rays(),
                 ],
             )
         });
         assert_eq!(
             presets,
             [
-                (Dof::Off, [false; 4]),
-                (Dof::Low, [true; 4]),
-                (Dof::High, [true; 4]),
-                (Dof::High, [true; 4]),
+                (Dof::Off, [false; 5]),
+                (Dof::Low, [true; 5]),
+                (Dof::High, [true; 5]),
+                (Dof::High, [true; 5]),
             ]
         );
         assert_eq!(Dof::ALL.map(Dof::samples), [0, 16, 32]);
@@ -1449,6 +1581,7 @@ mod tests {
                     settings.film_grain(),
                     settings.chromatic_aberration(),
                     settings.sharpen(),
+                    settings.sun_rays(),
                 ]
             };
             let blur = GraphicsSettings {
@@ -1459,14 +1592,15 @@ mod tests {
             assert_eq!(switches(&blur), switches(&preset));
             assert_eq!(blur.post_processing(), preset.post_processing());
             // Each switch turns only itself over.
-            for which in 0..4 {
+            for which in 0..5 {
                 let mut one = preset.clone();
                 let flipped = Some(!switches(&preset)[which]);
                 match which {
                     0 => one.vignette = flipped,
                     1 => one.film_grain = flipped,
                     2 => one.chromatic_aberration = flipped,
-                    _ => one.sharpen = flipped,
+                    3 => one.sharpen = flipped,
+                    _ => one.sun_rays = flipped,
                 }
                 let mut expected = switches(&preset);
                 expected[which] = !expected[which];
@@ -1479,6 +1613,7 @@ mod tests {
                         effective.film_grain,
                         effective.chromatic_aberration,
                         effective.sharpen,
+                        effective.sun_rays,
                     ],
                     expected
                 );
@@ -1495,6 +1630,7 @@ mod tests {
         let ultra = GraphicsSettings::preset(Quality::Ultra).effective(&tiny);
         assert_eq!(ultra.depth_of_field, Dof::High);
         assert!(ultra.vignette && ultra.film_grain && ultra.chromatic_aberration && ultra.sharpen);
+        assert!(ultra.sun_rays);
     }
 
     #[test]
@@ -1568,10 +1704,12 @@ mod tests {
             film_grain: Some(true),
             chromatic_aberration: Some(false),
             sharpen: Some(true),
+            sun_rays: Some(false),
             motion_blur: Some(MotionBlurQuality::Low),
             ray_tracing_distance: Some(600.0),
             ray_traced_shadows: Some(RayTracedShadows::Medium),
             ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Low),
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::High),
             ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -1765,6 +1903,34 @@ mod tests {
         assert!(!off.realtime_gi && off.notes.is_empty());
     }
 
+    /// R18.4: real-time GI's tier follows the preset, and High's is what it
+    /// traced before tiers (two probes a frame, faces a bake's size).
+    #[test]
+    fn realtime_gi_tiers_follow_the_preset() {
+        let tier = |quality| {
+            let settings = GraphicsSettings {
+                realtime_gi: Some(true),
+                ..GraphicsSettings::preset(quality)
+            };
+            let tier = settings
+                .effective(&Capabilities::default())
+                .realtime_gi_tier;
+            (tier.probes_per_frame, tier.face_size)
+        };
+        assert_eq!(tier(Quality::Low), (1, 8));
+        assert_eq!(tier(Quality::Medium), (2, 8));
+        assert_eq!(tier(Quality::High), (2, 16));
+        assert_eq!(tier(Quality::Ultra), (4, 16));
+        let mut last = 0;
+        for quality in Quality::ALL {
+            let tier = RealtimeGiTier::of(quality);
+            let work = tier.probes_per_frame * tier.face_size * tier.face_size;
+            assert!(work > last, "each tier traces more than the one below");
+            assert!(tier.probes_per_frame <= RealtimeGiTier::MAX_PROBES_PER_FRAME);
+            last = work;
+        }
+    }
+
     #[test]
     fn volumetric_fog_is_on_only_at_ultra_and_off_with_a_note_without_compute_shaders() {
         for quality in Quality::ALL {
@@ -1903,6 +2069,45 @@ mod tests {
     }
 
     #[test]
+    fn ray_traced_global_illumination_is_off_at_every_preset_and_without_ray_queries() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            assert_eq!(
+                preset.ray_traced_global_illumination(),
+                RayTracedGlobalIllumination::Off
+            );
+        }
+        let asked = GraphicsSettings {
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Medium),
+            ..GraphicsSettings::default()
+        };
+        let gpu = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        let effective = asked.effective(&gpu);
+        assert_eq!(
+            effective.ray_traced_global_illumination,
+            RayTracedGlobalIllumination::Medium
+        );
+        assert!(effective.notes.is_empty(), "{:?}", effective.notes);
+        let without = asked.effective(&Capabilities::default());
+        assert_eq!(
+            without.ray_traced_global_illumination,
+            RayTracedGlobalIllumination::Off
+        );
+        assert!(without.notes.iter().any(|note| note.contains("GI is off")));
+        assert_eq!(
+            RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::rays),
+            [0, 64, 128, 256]
+        );
+        assert_eq!(
+            RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::probes_per_frame),
+            [0, 128, 256, 512]
+        );
+    }
+
+    #[test]
     fn the_ray_traced_look_turns_on_what_it_needs_and_keeps_the_rest() {
         let mine = GraphicsSettings {
             shadow_quality: Some(ShadowQuality::Ultra),
@@ -1940,6 +2145,16 @@ mod tests {
         assert_eq!(
             off.ray_traced_ambient_occlusion(),
             RayTracedAmbientOcclusion::Off
+        );
+        let with_gi = GraphicsSettings {
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::High),
+            ..look.clone()
+        };
+        assert_eq!(
+            with_gi
+                .without_ray_traced_effects()
+                .ray_traced_global_illumination(),
+            RayTracedGlobalIllumination::Off
         );
         assert!(off.ray_tracing(), "turning the device off takes a restart");
         assert_eq!(off.shadow_quality(), ShadowQuality::Ultra);
@@ -2001,10 +2216,12 @@ mod tests {
                         film_grain: post,
                         chromatic_aberration: post,
                         sharpen: post,
+                        sun_rays: post,
                         motion_blur: Some(MotionBlurQuality::Low),
                         ray_tracing_distance: None,
                         ray_traced_shadows: Some(RayTracedShadows::High),
                         ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Medium),
+                        ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Low),
                         ray_tracing: post,
                     };
                     for capabilities in &capabilities {
@@ -2021,6 +2238,10 @@ mod tests {
                             effective.ray_traced_ambient_occlusion
                                 <= settings.ray_traced_ambient_occlusion()
                         );
+                        assert!(
+                            effective.ray_traced_global_illumination
+                                <= settings.ray_traced_global_illumination()
+                        );
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
@@ -2035,6 +2256,7 @@ mod tests {
                             settings.chromatic_aberration()
                         );
                         assert_eq!(effective.sharpen, settings.sharpen());
+                        assert_eq!(effective.sun_rays, settings.sun_rays());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())
@@ -2051,6 +2273,10 @@ mod tests {
                                 + usize::from(
                                     effective.ray_traced_ambient_occlusion
                                         != settings.ray_traced_ambient_occlusion(),
+                                )
+                                + usize::from(
+                                    effective.ray_traced_global_illumination
+                                        != settings.ray_traced_global_illumination(),
                                 );
                         assert_eq!(effective.notes.len(), lowered);
                     }

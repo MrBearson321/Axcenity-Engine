@@ -92,9 +92,11 @@ impl EditorApp {
                 self.cover_shown = loading.shown();
                 self.cover_started = Some(std::time::Instant::now());
                 self.cover_uploads = 0;
-                // Behind the cover, the scene's meshes and textures go to
-                // the GPU on a thread, a few each frame, so the window
-                // keeps answering however many there are.
+                self.cover_settling = loading::Settling::default();
+                // Behind the cover, every mesh and texture in the world
+                // goes to the GPU on a thread, in view or not, so the
+                // window keeps answering and looking around later doesn't
+                // wait for them.
                 self.viewport.opening = true;
                 self.follow_pending_handoff(true);
                 self.start_pending_team();
@@ -153,9 +155,10 @@ impl EditorApp {
         theme::paint_crossfade(ctx);
     }
     /// After a project opens, the loading screen stays over the window for
-    /// a frame or two while its scene first draws, then as long as its
-    /// meshes and textures are on their way to the GPU (up to
-    /// [`FINISHING_LIMIT`]), counting them down.
+    /// a frame or two while its scene first draws, then as long as the
+    /// world's meshes and textures are on their way to the GPU, counting
+    /// them down, and until frames come quickly ([`loading::Settling`]):
+    /// up to [`FINISHING_LIMIT`].
     pub(super) fn cover_while_finishing(&mut self, ctx: &egui::Context) {
         let Some(until) = self.cover_until else {
             return;
@@ -165,7 +168,11 @@ impl EditorApp {
         let waited = self
             .cover_started
             .map_or(0.0, |started| started.elapsed().as_secs_f32());
-        if ctx.cumulative_frame_nr() >= until && (pending == 0 || waited >= FINISHING_LIMIT) {
+        let settled = self
+            .cover_settling
+            .frame(ctx.cumulative_frame_nr(), std::time::Instant::now());
+        let ready = pending == 0 && settled;
+        if ctx.cumulative_frame_nr() >= until && (ready || waited >= FINISHING_LIMIT) {
             self.cover_until = None;
             self.cover_started = None;
             self.viewport.opening = false;

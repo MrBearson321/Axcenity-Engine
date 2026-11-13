@@ -547,11 +547,16 @@ pub enum EnumType {
     RayTracedShadows,
     ParticleEmitterShape,
     ParticleEmitterShapeStyle,
+    ParticleEmitterShapeInOut,
+    ParticleEmitterEmitOn,
+    ParticleFlipbookLayout,
+    ParticleFlipbookMode,
     RayTracedAmbientOcclusion,
+    RayTracedGlobalIllumination,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 46] = [
+    pub const ALL: [EnumType; 51] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -597,7 +602,12 @@ impl EnumType {
         EnumType::RayTracedShadows,
         EnumType::ParticleEmitterShape,
         EnumType::ParticleEmitterShapeStyle,
+        EnumType::ParticleEmitterShapeInOut,
+        EnumType::ParticleEmitterEmitOn,
+        EnumType::ParticleFlipbookLayout,
+        EnumType::ParticleFlipbookMode,
         EnumType::RayTracedAmbientOcclusion,
+        EnumType::RayTracedGlobalIllumination,
     ];
 
     pub fn name(self) -> &'static str {
@@ -623,7 +633,12 @@ impl EnumType {
             EnumType::RayTracedShadows => "RayTracedShadows",
             EnumType::ParticleEmitterShape => "ParticleEmitterShape",
             EnumType::ParticleEmitterShapeStyle => "ParticleEmitterShapeStyle",
+            EnumType::ParticleEmitterShapeInOut => "ParticleEmitterShapeInOut",
+            EnumType::ParticleEmitterEmitOn => "ParticleEmitterEmitOn",
+            EnumType::ParticleFlipbookLayout => "ParticleFlipbookLayout",
+            EnumType::ParticleFlipbookMode => "ParticleFlipbookMode",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
+            EnumType::RayTracedGlobalIllumination => "RayTracedGlobalIllumination",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::AssetFetchStatus => "AssetFetchStatus",
@@ -676,6 +691,9 @@ impl EnumType {
             EnumType::RayTracedAmbientOcclusion => {
                 user_settings::ray_traced_ambient_occlusion_names()
             }
+            EnumType::RayTracedGlobalIllumination => {
+                user_settings::ray_traced_global_illumination_names()
+            }
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             // How a file went, for `ContentProvider:PreloadAsync`'s callback.
@@ -716,6 +734,13 @@ impl EnumType {
             // Where a ParticleEmitter's particles are born (roadmap R17.2).
             EnumType::ParticleEmitterShape => vec!["Box", "Sphere", "Cylinder", "Disc"],
             EnumType::ParticleEmitterShapeStyle => vec!["Volume", "Surface"],
+            // Which way they head from it (roadmap R17.2b).
+            EnumType::ParticleEmitterShapeInOut => vec!["Outward", "Inward", "InAndOut"],
+            // When a sub-emitter gives off particles (roadmap R17.4).
+            EnumType::ParticleEmitterEmitOn => vec!["Always", "Birth", "Death", "Collision"],
+            // A particle texture's frames (roadmap R17.2c).
+            EnumType::ParticleFlipbookLayout => vec!["None", "Grid2x2", "Grid4x4", "Grid8x8"],
+            EnumType::ParticleFlipbookMode => vec!["Loop", "OneShot", "PingPong", "Random"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -835,6 +860,7 @@ impl LuaEnumItem {
             | EnumType::MotionBlur
             | EnumType::RayTracedShadows
             | EnumType::RayTracedAmbientOcclusion
+            | EnumType::RayTracedGlobalIllumination
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::AssetFetchStatus
@@ -860,7 +886,11 @@ impl LuaEnumItem {
             | EnumType::ModelStreamingMode
             | EnumType::StreamingState
             | EnumType::ParticleEmitterShape
-            | EnumType::ParticleEmitterShapeStyle => None,
+            | EnumType::ParticleEmitterShapeStyle
+            | EnumType::ParticleEmitterShapeInOut
+            | EnumType::ParticleEmitterEmitOn
+            | EnumType::ParticleFlipbookLayout
+            | EnumType::ParticleFlipbookMode => None,
         }
     }
 }

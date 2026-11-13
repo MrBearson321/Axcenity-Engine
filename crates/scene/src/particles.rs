@@ -31,12 +31,20 @@ use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    CURVE_ENTRIES, DrawList, MAX_GPU_PARTICLES, ParticleCurves, ParticleEmitter, ParticleLook,
-    SpawnKind, SpawnShape, Sprite, TextureSource, curve_at,
+    CURVE_ENTRIES, DrawList, Flipbook, FlipbookFrame, FlipbookMode, MAX_GPU_PARTICLES,
+    ParticleCurves, ParticleEmitter, ParticleLook, ShapeInOut, SpawnKind, SpawnShape, Sprite,
+    TextureSource, curve_at,
 };
 
 use crate::draw_list::image_texture;
 use crate::weather::WeatherState;
+
+#[cfg(test)]
+mod collision_tests;
+mod collisions;
+
+use collisions::{EmitOn, Event, Landing, Sub, events_on, is_sub, subs_of};
+pub use collisions::{MAX_SURFACE_RAYS, SurfaceHit, Surfaces};
 
 /// The most particles one emitter keeps; past this, no more are born
 /// until some die.
@@ -44,6 +52,8 @@ pub const MAX_PER_EMITTER: usize = 4000;
 /// The most particles one frame gives birth to per emitter, so a huge
 /// Rate (or a long pause) can't freeze the game.
 const MAX_BIRTHS_PER_FRAME: usize = 1000;
+/// The shortest loop of Bursts, in seconds (`Duration`).
+const MIN_BURST_DURATION: f32 = 0.05;
 /// The built-in pictures' size in pixels.
 const PICTURE: u32 = 64;
 /// An emitter whose Rate × Lifetime (the particles it keeps out) reaches
@@ -61,6 +71,10 @@ struct Particle {
     velocity: Vec3,
     age: f32,
     life: f32,
+    /// Seconds since it last met a surface, for an emitter that Collides:
+    /// a landing counts (Collision sub-emitters, LifetimeLoss) only after
+    /// a moment off them, so resting or skidding on one isn't landing.
+    off_surface: f32,
 }
 
 #[derive(Debug, Default)]
@@ -68,6 +82,12 @@ struct Emitter {
     particles: Vec<Particle>,
     /// Births owed from earlier frames' fractions of a particle.
     owed: f32,
+    /// Seconds into the current loop of its Bursts (roadmap R17.2b).
+    cycle: f32,
+    /// Where its part was at the last update, and so how fast it moves,
+    /// for VelocityInheritance.
+    last_position: Option<Vec3>,
+    velocity: Vec3,
     /// Its particles on the GPU, while it has some there or gives them off
     /// there. It can have some on the CPU too, while those die out.
     gpu: Option<GpuEmitter>,
@@ -112,6 +132,8 @@ impl GpuEmitter {
                 drag: 0.0,
                 air: Vec3::ZERO,
                 shape: SpawnShape::default(),
+                in_out: ShapeInOut::default(),
+                inherit: Vec3::ZERO,
                 look: ParticleLook::default(),
             },
             pending: 0,
@@ -151,6 +173,20 @@ struct Settings {
     shape: SpawnShape,
     /// `SpeedOverLife` as the curve table both paths read, if it's set.
     speed_curve: Option<[f32; CURVE_ENTRIES]>,
+    /// Which way they head from the shape (`ShapeInOut`).
+    in_out: ShapeInOut,
+    /// How much of the part's velocity they start with, 0 to 1.
+    inheritance: f32,
+    /// Each burst's time (0 up to 1 of `duration`), count and envelope.
+    bursts: Vec<(f32, f32, f32)>,
+    /// Seconds a loop of bursts takes.
+    duration: f32,
+    /// True if its particles land on surfaces (`Collides`), and how.
+    collides: bool,
+    landing: Landing,
+    /// True if its particles must stay on the CPU, where they can collide
+    /// and set off sub-emitters (roadmap R17.4); set by the caller.
+    cpu_only: bool,
 }
 
 impl Settings {
@@ -182,12 +218,111 @@ impl Settings {
                 == Some(true),
             shape: spawn_shape(instance),
             speed_curve: speed_curve(instance),
+            in_out: match instance.property("ShapeInOut") {
+                Some(Value::EnumItem(item)) if item.item == "Inward" => ShapeInOut::Inward,
+                Some(Value::EnumItem(item)) if item.item == "InAndOut" => ShapeInOut::InAndOut,
+                _ => ShapeInOut::Outward,
+            },
+            inheritance: number("VelocityInheritance", 0.0).clamp(0.0, 1.0),
+            bursts: instance
+                .property("Bursts")
+                .and_then(Value::as_number_sequence)
+                .map(|sequence| {
+                    sequence
+                        .keypoints()
+                        .iter()
+                        // Time 1 is the next loop's start.
+                        .filter(|key| key.time < 1.0)
+                        .map(|key| (key.time, key.value, key.envelope))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            duration: number("Duration", 1.0).max(MIN_BURST_DURATION),
+            collides: instance.property("Collides").and_then(Value::as_bool) == Some(true),
+            landing: Landing {
+                bounce: number("Bounce", 0.5).clamp(0.0, 1.0),
+                lifetime_loss: number("LifetimeLoss", 0.0).clamp(0.0, 1.0),
+            },
+            cpu_only: false,
         }
+    }
+
+    /// How many particles the bursts give off over the `seconds` after
+    /// `cycle` seconds into a loop, moving `cycle` on (roadmap R17.2b). A
+    /// burst fires when its time is reached: at or after the step's start
+    /// and before its end.
+    fn bursts_between(&self, cycle: &mut f32, seconds: f32, random: &mut Random) -> u32 {
+        if self.bursts.is_empty() {
+            *cycle = 0.0;
+            return 0;
+        }
+        let mut count = 0.0_f32;
+        let mut from = cycle.clamp(0.0, self.duration);
+        let mut left = seconds.max(0.0);
+        // A step is at most a quarter of a second and a loop at least
+        // 0.05, so this ends within a few turns.
+        loop {
+            let to = from + left;
+            let end = to.min(self.duration);
+            for &(time, value, envelope) in &self.bursts {
+                let at = time * self.duration;
+                if at >= from && at < end {
+                    let spread = envelope * (random.next() * 2.0 - 1.0);
+                    count += (value + spread).round().max(0.0);
+                }
+            }
+            if to < self.duration {
+                *cycle = to;
+                break;
+            }
+            left = to - self.duration;
+            from = 0.0;
+            if left <= 0.0 {
+                *cycle = 0.0;
+                break;
+            }
+        }
+        count.min(u32::MAX as f32) as u32
     }
 }
 
 /// An emitter's `Shape` and `ShapeStyle` (roadmap R17.2): a Box filled by
 /// default, as before they existed.
+/// An emitter's flipbook (roadmap R17.2c), or `None` while its
+/// FlipbookLayout is None.
+fn flipbook(instance: &Instance) -> Option<Flipbook> {
+    let item = |name| match instance.property(name) {
+        Some(Value::EnumItem(item)) => item.item.clone(),
+        _ => String::new(),
+    };
+    let grid = match item("FlipbookLayout").as_str() {
+        "Grid2x2" => 2,
+        "Grid4x4" => 4,
+        "Grid8x8" => 8,
+        _ => return None,
+    };
+    let mode = match item("FlipbookMode").as_str() {
+        "OneShot" => FlipbookMode::OneShot,
+        "PingPong" => FlipbookMode::PingPong,
+        "Random" => FlipbookMode::Random,
+        _ => FlipbookMode::Loop,
+    };
+    let framerate = instance
+        .property("FlipbookFramerate")
+        .and_then(Value::as_number)
+        .map_or(1.0, |n| n as f32);
+    let start_random = instance
+        .property("FlipbookStartRandom")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Some(Flipbook {
+        grid,
+        mode,
+        framerate,
+        start_random,
+    })
+}
+
 fn spawn_shape(instance: &Instance) -> SpawnShape {
     let item = |name| match instance.property(name) {
         Some(Value::EnumItem(item)) => item.item.clone(),
@@ -314,24 +449,61 @@ impl Particles {
         if instance.class() != ClassName::ParticleEmitter {
             return;
         }
-        let settings = Settings::read(instance);
+        let subs = subs_of(world, instance);
+        let mut settings = Settings::read(instance);
+        settings.cpu_only = cpu_only(world, instance, &settings, &subs);
         let Some(transform) = parent_transform(world, instance) else {
             return;
         };
         let mut state = self.emitters.remove(&emitter).unwrap_or_default();
+        let mut events = Vec::new();
         // A big burst goes to the GPU, as do births of an emitter already
         // there. They're born at its next step.
-        let burst = count as f32 >= GPU_PARTICLE_THRESHOLD;
+        let burst = count as f32 >= GPU_PARTICLE_THRESHOLD && !settings.cpu_only;
         if self.gpu && (burst || self.on_gpu(&state, &settings)) {
             let gpu = self.gpu_state(&mut state);
             gpu.pending = gpu.pending.saturating_add(count).min(MAX_GPU_PARTICLES);
         } else {
             let count = (count as usize).min(MAX_BIRTHS_PER_FRAME);
+            let inherit = state.velocity * settings.inheritance;
             for _ in 0..count {
-                self.birth(&mut state, &settings, transform);
+                self.birth_with(
+                    &mut state,
+                    &settings,
+                    transform,
+                    inherit,
+                    &subs,
+                    &mut events,
+                );
             }
         }
         self.emitters.insert(emitter, state);
+        collisions::fire(self, world, events);
+    }
+
+    /// Gives off `event`'s particles from its sub-emitter, at the event's
+    /// place, heading along the sub-emitter's own Direction turned by its
+    /// Orientation, adding to `next` the events their births set off.
+    fn give_off_at(&mut self, world: &World, event: Event, next: &mut Vec<Event>) {
+        let Some(instance) = world.get(event.emitter) else {
+            return;
+        };
+        let Some(mount) = crate::mount_of(world, instance) else {
+            return;
+        };
+        let settings = Settings::read(instance);
+        let subs = subs_of(world, instance);
+        let transform = Mat4::from_scale_rotation_translation(
+            Vec3::splat(FREE_EMITTER_SIZE),
+            mount.rotation(),
+            event.position,
+        );
+        let inherit = event.velocity * settings.inheritance;
+        let mut state = self.emitters.remove(&event.emitter).unwrap_or_default();
+        for _ in 0..(event.count as usize).min(MAX_BIRTHS_PER_FRAME) {
+            self.birth_with(&mut state, &settings, transform, inherit, &subs, next);
+        }
+        self.emitters.insert(event.emitter, state);
     }
 
     /// True if `state`'s births belong on the GPU: it's allowed, and the
@@ -343,7 +515,7 @@ impl Particles {
         } else {
             GPU_PARTICLE_THRESHOLD
         };
-        self.gpu && out >= threshold
+        self.gpu && !settings.cpu_only && out >= threshold
     }
 
     /// `state`'s GPU particles, made if it has none yet.
@@ -359,25 +531,48 @@ impl Particles {
     /// off new ones from each Enabled emitter by its Rate. The weather
     /// eases on and its rain or snow falls.
     pub fn update(&mut self, world: &World, seconds: f32) {
+        self.update_against(world, seconds, &mut |_, paths| vec![None; paths.len()]);
+    }
+
+    /// [`update`](Self::update), with the particles of emitters that
+    /// Collide landing on what `surfaces` finds (roadmap R17.4).
+    pub fn update_against(&mut self, world: &World, seconds: f32, surfaces: &mut Surfaces) {
         let seconds = if seconds.is_finite() {
             seconds.clamp(0.0, 0.25)
         } else {
             0.0
         };
         self.weather.update(world, seconds, &mut self.random);
-        let live: Vec<(InstanceId, Settings, Option<Mat4>)> = emitters(world)
+        let live: Vec<Live> = emitters(world)
             .map(|(id, instance)| {
-                (
+                let subs = subs_of(world, instance);
+                let mut settings = Settings::read(instance);
+                settings.cpu_only = cpu_only(world, instance, &settings, &subs);
+                let mount = crate::mount_of(world, instance);
+                Live {
                     id,
-                    Settings::read(instance),
-                    parent_transform(world, instance),
-                )
+                    settings,
+                    transform: parent_transform(world, instance),
+                    own_part: mount.and_then(|mount| mount.part()),
+                    sub: is_sub(world, instance),
+                    subs,
+                }
             })
             .collect();
         self.emitters
-            .retain(|id, _| live.iter().any(|(live, _, _)| live == id));
+            .retain(|id, _| live.iter().any(|live| live.id == *id));
         let wind = global_wind(world);
-        for (id, settings, transform) in live {
+        let mut rays = MAX_SURFACE_RAYS;
+        let mut events = Vec::new();
+        for Live {
+            id,
+            settings,
+            transform,
+            own_part,
+            sub,
+            subs,
+        } in live
+        {
             let mut state = self.emitters.remove(&id).unwrap_or_default();
             // Older particles first: move them, and let them die.
             // Drag slows particles toward the air's speed: still air, or
@@ -388,6 +583,7 @@ impl Particles {
             } else {
                 Vec3::ZERO
             };
+            let mut steps = Vec::new();
             for particle in &mut state.particles {
                 let velocity = particle.velocity + settings.acceleration * seconds;
                 particle.velocity = air + (velocity - air) * slow;
@@ -396,30 +592,93 @@ impl Particles {
                 let speed = settings.speed_curve.as_ref().map_or(1.0, |table| {
                     curve_at(table, particle.age / particle.life.max(1e-6))
                 });
-                particle.position += particle.velocity * seconds * speed;
+                let step = particle.velocity * seconds * speed;
+                if settings.collides {
+                    steps.push(step);
+                } else {
+                    particle.position += step;
+                }
+            }
+            if settings.collides {
+                collisions::move_colliding(
+                    &mut state.particles,
+                    &steps,
+                    seconds,
+                    settings.landing,
+                    own_part,
+                    surfaces,
+                    &mut rays,
+                    &subs,
+                    &mut events,
+                );
+            }
+            for particle in &mut state.particles {
                 particle.age += seconds;
+                if particle.age >= particle.life {
+                    events_on(
+                        &subs,
+                        EmitOn::Death,
+                        particle.position,
+                        particle.velocity,
+                        &mut events,
+                    );
+                }
             }
             state.particles.retain(|p| p.age < p.life);
-            let on_gpu = self.on_gpu(&state, &settings);
+            // How fast the part moves, from where it was at the last update
+            // (VelocityInheritance, roadmap R17.2b).
+            let at = transform.map(|transform| transform.w_axis.truncate());
+            state.velocity = match (at, state.last_position) {
+                (Some(now), Some(then)) if seconds > 0.0 => (now - then) / seconds,
+                (Some(_), Some(_)) => state.velocity,
+                _ => Vec3::ZERO,
+            };
+            state.last_position = at;
+            let inherit = state.velocity * settings.inheritance;
+            let mut on_gpu = self.on_gpu(&state, &settings);
             let mut gpu_births = 0;
-            match (settings.enabled, transform) {
+            // A sub-emitter gives off only at its parent's events.
+            match (settings.enabled && !sub, transform) {
                 (true, Some(transform)) => {
                     state.owed += settings.rate * seconds;
                     let owed = state.owed.floor();
                     state.owed -= owed;
+                    let burst =
+                        settings.bursts_between(&mut state.cycle, seconds, &mut self.random);
+                    // A big burst goes to the GPU, as a big Emit does.
+                    if self.gpu && burst as f32 >= GPU_PARTICLE_THRESHOLD {
+                        on_gpu = true;
+                    }
+                    let births = (owed as u32).saturating_add(burst);
                     if on_gpu {
-                        gpu_births = (owed as u32).min(MAX_GPU_PARTICLES);
+                        gpu_births = births.min(MAX_GPU_PARTICLES);
                     } else {
-                        for _ in 0..(owed as usize).min(MAX_BIRTHS_PER_FRAME) {
-                            self.birth(&mut state, &settings, transform);
+                        for _ in 0..(births as usize).min(MAX_BIRTHS_PER_FRAME) {
+                            self.birth_with(
+                                &mut state,
+                                &settings,
+                                transform,
+                                inherit,
+                                &subs,
+                                &mut events,
+                            );
                         }
                     }
                 }
-                _ => state.owed = 0.0,
+                _ => {
+                    state.owed = 0.0;
+                    state.cycle = 0.0;
+                }
             }
             if on_gpu || state.gpu.is_some() {
                 let gpu = self.gpu_state(&mut state);
-                step_gpu(gpu, &settings, (transform, air), seconds, gpu_births);
+                step_gpu(
+                    gpu,
+                    &settings,
+                    (transform, air, inherit),
+                    seconds,
+                    gpu_births,
+                );
                 // Off the GPU once its last particles there have died, unless
                 // it's still giving them off there.
                 let giving = on_gpu && settings.enabled && transform.is_some();
@@ -431,6 +690,7 @@ impl Particles {
                 self.emitters.insert(id, state);
             }
         }
+        collisions::fire(self, world, events);
     }
 
     /// Puts every particle into `list` (built from the same world): those
@@ -454,6 +714,7 @@ impl Particles {
                     light_emission: look.light_emission,
                     texture: look.texture,
                     curves: look.curves,
+                    flipbook: look.flipbook,
                 },
                 ..gpu.draw.clone()
             });
@@ -496,31 +757,77 @@ impl Particles {
                     brightness: look.brightness,
                     light_emission: look.light_emission,
                     texture: look.texture.clone(),
+                    // The same frame as on the GPU, from the same kind of
+                    // seed (its life; the GPU mixes in its slot).
+                    frame: look.flipbook.map(|book| FlipbookFrame {
+                        grid: book.grid,
+                        frame: book.frame(particle.age, particle.life, particle.life.to_bits()),
+                    }),
                 });
             }
         }
         sprites
     }
 
+    /// [`birth`](Self::birth), adding the events it sets off for the
+    /// emitter's Birth sub-emitters (`subs`) to `events`.
+    fn birth_with(
+        &mut self,
+        state: &mut Emitter,
+        settings: &Settings,
+        transform: Mat4,
+        inherit: Vec3,
+        subs: &[Sub],
+        events: &mut Vec<Event>,
+    ) {
+        if let Some(born) = self.birth(state, settings, transform, inherit) {
+            events_on(subs, EmitOn::Birth, born.position, born.velocity, events);
+        }
+    }
+
     /// Adds one particle to `state`, somewhere in the part's spawn shape,
-    /// heading out along the emitter's direction within its spread.
-    fn birth(&mut self, state: &mut Emitter, settings: &Settings, transform: Mat4) {
+    /// heading out along the emitter's direction within its spread, and
+    /// returns it; `None` if the emitter is full.
+    fn birth(
+        &mut self,
+        state: &mut Emitter,
+        settings: &Settings,
+        transform: Mat4,
+        inherit: Vec3,
+    ) -> Option<Particle> {
         if state.particles.len() >= MAX_PER_EMITTER {
-            return;
+            return None;
         }
         let random = [self.random.next(), self.random.next(), self.random.next()];
         let (scale, rotation, _) = transform.to_scale_rotation_translation();
         let inside = settings.shape.point(random, scale.abs());
         let position = transform.transform_point3(inside);
-        let forward = (rotation * settings.direction).normalize_or(Vec3::Y);
+        // A round shape heads away from its middle (R17.2b), a box along
+        // the direction; the same sum as particles.wgsl's `born`.
+        let forward = settings
+            .shape
+            .outward(inside)
+            .map(|out| transform.transform_vector3(out))
+            .filter(|out| out.length_squared() > 0.0)
+            .unwrap_or(rotation * settings.direction)
+            .normalize_or(Vec3::Y);
         let heading = self.within_cone(forward, settings.spread.to_radians() / 2.0);
         let life = settings.lifetime * (0.8 + 0.4 * self.random.next());
-        state.particles.push(Particle {
+        let flip = match settings.in_out {
+            ShapeInOut::Outward => 1.0,
+            ShapeInOut::Inward => -1.0,
+            ShapeInOut::InAndOut if self.random.next() < 0.5 => -1.0,
+            ShapeInOut::InAndOut => 1.0,
+        };
+        let particle = Particle {
             position,
-            velocity: heading * settings.speed,
+            velocity: heading * flip * settings.speed + inherit,
             age: 0.0,
             life,
-        });
+            off_surface: f32::MAX,
+        };
+        state.particles.push(particle);
+        Some(particle)
     }
 
     /// A random direction at most `half_angle` radians from `forward`.
@@ -618,6 +925,8 @@ struct Look {
     texture: Option<Arc<dyn TextureSource>>,
     /// While any of the OverLife sequences is set (roadmap R17.1).
     curves: Option<Arc<ParticleCurves>>,
+    /// While FlipbookLayout cuts a Texture into frames (roadmap R17.2c).
+    flipbook: Option<Flipbook>,
 }
 
 impl Look {
@@ -640,16 +949,16 @@ impl Look {
             .unwrap_or_default();
         // A texture that can't be loaded is reported once by `Assets`, and
         // the built-in picture shows instead.
-        let texture = assets
-            .texture(path)
-            .map(|image| image_texture(&image))
-            .or_else(|| {
-                let kind = instance
-                    .property("ParticleType")
-                    .and_then(Value::as_particle_type)
-                    .unwrap_or(ParticleType::Circle);
-                Some(built_in(kind))
-            });
+        let loaded = assets.texture(path).map(|image| image_texture(&image));
+        // Only a Texture has frames: the built-in pictures are whole.
+        let flipbook = loaded.as_ref().and_then(|_| flipbook(instance));
+        let texture = loaded.or_else(|| {
+            let kind = instance
+                .property("ParticleType")
+                .and_then(Value::as_particle_type)
+                .unwrap_or(ParticleType::Circle);
+            Some(built_in(kind))
+        });
         let size = (number("Size", 1.0), number("SizeEnd", 1.0));
         let colors = (color("Color"), color("ColorEnd"));
         let transparency = (number("Transparency", 0.0), number("TransparencyEnd", 1.0));
@@ -664,6 +973,7 @@ impl Look {
             light_emission: number("LightEmission", 0.0).clamp(0.0, 1.0),
             brightness: number("Brightness", 1.0).max(0.0),
             texture,
+            flipbook,
         }
     }
 }
@@ -687,7 +997,7 @@ pub(crate) fn global_wind(world: &World) -> Vec3 {
 fn step_gpu(
     gpu: &mut GpuEmitter,
     settings: &Settings,
-    (transform, air): (Option<Mat4>, Vec3),
+    (transform, air, inherit): (Option<Mat4>, Vec3, Vec3),
     seconds: f32,
     births: u32,
 ) {
@@ -734,6 +1044,8 @@ fn step_gpu(
     draw.drag = settings.drag;
     draw.air = air;
     draw.shape = settings.shape;
+    draw.in_out = settings.in_out;
+    draw.inherit = inherit;
 }
 
 fn rgb(color: Color3) -> [f32; 3] {
@@ -755,6 +1067,25 @@ fn emitters(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
         .into_iter()
         .filter(move |&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(move |id| Some((id, world.get(id)?)))
+}
+
+/// An emitter in the Workspace, as an update reads it.
+struct Live {
+    id: InstanceId,
+    settings: Settings,
+    transform: Option<Mat4>,
+    /// The part it's in, which its colliding particles pass by.
+    own_part: Option<InstanceId>,
+    /// True if it's a sub-emitter, giving off only at its parent's events.
+    sub: bool,
+    /// Its own sub-emitters.
+    subs: Vec<Sub>,
+}
+
+/// True if `instance`'s particles must stay on the CPU: it Collides, has
+/// sub-emitters or is one (roadmap R17.4).
+fn cpu_only(world: &World, instance: &Instance, settings: &Settings, subs: &[Sub]) -> bool {
+    settings.collides || !subs.is_empty() || is_sub(world, instance)
 }
 
 /// How far across the box a free-standing emitter gives off particles
@@ -975,6 +1306,82 @@ mod tests {
     /// R17.1: set, the OverLife sequences shape particles in place of the
     /// start and end values; an envelope spreads particles apart, each
     /// keeping its own place in it; cleared, the pairs come back.
+    /// R17.2c: with FlipbookLayout set and a Texture, each sprite shows a
+    /// frame for its age (here OneShot: a quarter of its life each); the
+    /// built-in pictures and None show the whole picture.
+    #[test]
+    fn particles_show_their_flipbook_frame_of_a_texture() {
+        const IMAGE: &str = "assets/textures/flip.png";
+        let folder = std::env::temp_dir().join(format!("axcenity-flipbook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/textures")).unwrap();
+        image::RgbaImage::new(4, 4)
+            .save(folder.join(IMAGE))
+            .unwrap();
+        let assets = Assets::new(&folder);
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let set = |world: &mut World, name: &str, value: Value| {
+            world.set_property(emitter, name, value).unwrap();
+        };
+        let item = |enum_name: &str, item: &str| {
+            Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: enum_name.to_owned(),
+                item: item.to_owned(),
+            })
+        };
+        set(&mut world, "Lifetime", Value::Number(1.0));
+        set(
+            &mut world,
+            "FlipbookLayout",
+            item("ParticleFlipbookLayout", "Grid2x2"),
+        );
+        set(
+            &mut world,
+            "FlipbookMode",
+            item("ParticleFlipbookMode", "OneShot"),
+        );
+        let mut particles = Particles::new();
+        particles.emit(&world, emitter, 20);
+        let frames = |particles: &Particles, world: &World| -> Vec<Option<FlipbookFrame>> {
+            particles
+                .sprites(world, &assets)
+                .iter()
+                .map(|sprite| sprite.frame)
+                .collect()
+        };
+        // Without a Texture, the built-in picture is whole.
+        assert!(frames(&particles, &world).iter().all(Option::is_none));
+        set(&mut world, "Texture", Value::String(IMAGE.into()));
+        let born = frames(&particles, &world);
+        assert!(
+            born.iter()
+                .all(|frame| *frame == Some(FlipbookFrame { grid: 2, frame: 0 })),
+            "{born:?}"
+        );
+        // Lives are 0.8 to 1.2 seconds: at 0.5 s, 42% to 63% of the way,
+        // the second or third frame.
+        particles.update(&world, 0.25);
+        particles.update(&world, 0.25);
+        let later = frames(&particles, &world);
+        assert!(
+            later.iter().all(|frame| matches!(
+                frame,
+                Some(FlipbookFrame {
+                    grid: 2,
+                    frame: 1 | 2
+                })
+            )),
+            "{later:?}"
+        );
+        set(
+            &mut world,
+            "FlipbookLayout",
+            item("ParticleFlipbookLayout", "None"),
+        );
+        assert!(frames(&particles, &world).iter().all(Option::is_none));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     #[test]
     fn particles_follow_their_curves_over_life_and_the_pairs_when_unset() {
         use axcenity_core::{ColorSequence, NumberKeypoint, NumberSequence};
@@ -1109,9 +1516,164 @@ mod tests {
         }
         particles.update(&world, 0.1);
         let later = particles.sprites(&world, &Assets::default());
-        let rise: f32 = later.iter().map(|s| s.position.y).sum::<f32>() / 50.0
-            - start.iter().map(|s| s.position.y).sum::<f32>() / 50.0;
-        assert!((rise - 0.5).abs() < 1e-3, "{rise}");
+        // Out from the middle (R17.2b) at half of 10 studs a second.
+        for (from, to) in start.iter().zip(&later) {
+            let moved = from.position.distance(to.position);
+            assert!((moved - 0.5).abs() < 1e-3, "{moved}");
+        }
+    }
+
+    fn enum_value(enum_name: &str, item: &str) -> Value {
+        Value::EnumItem(axcenity_core::EnumItem {
+            enum_name: enum_name.to_owned(),
+            item: item.to_owned(),
+        })
+    }
+
+    /// R17.2b: bursts fire at their times of each loop of Duration, again
+    /// every loop, and start over when the emitter is enabled again.
+    #[test]
+    fn bursts_fire_at_their_times_once_a_loop() {
+        use axcenity_core::{NumberKeypoint, NumberSequence};
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let bursts = NumberSequence::new(vec![
+            NumberKeypoint::new(0.0, 10.0, 0.0),
+            NumberKeypoint::new(0.5, 5.0, 0.0),
+            NumberKeypoint::new(1.0, 99.0, 0.0),
+        ])
+        .unwrap();
+        world
+            .set_property(emitter, "Bursts", Value::NumberSequence(bursts))
+            .unwrap();
+        world
+            .set_property(emitter, "Lifetime", Value::Number(100.0))
+            .unwrap();
+        let mut particles = Particles::new();
+        let step = 1.0 / 16.0;
+        particles.update(&world, step);
+        assert_eq!(particles.count(), 10, "the burst at the start");
+        for _ in 1..8 {
+            particles.update(&world, step);
+        }
+        assert_eq!(particles.count(), 10, "nothing until half way");
+        particles.update(&world, step);
+        assert_eq!(particles.count(), 15);
+        // Time 1 is the next loop's start: its 99 never fire.
+        for _ in 9..32 {
+            particles.update(&world, step);
+        }
+        assert_eq!(particles.count(), 30, "two whole loops");
+        particles.update(&world, step);
+        assert_eq!(particles.count(), 40, "the third begins");
+        // Off and on again: the loop starts over.
+        world
+            .set_property(emitter, "Enabled", Value::Bool(false))
+            .unwrap();
+        particles.update(&world, step);
+        world
+            .set_property(emitter, "Enabled", Value::Bool(true))
+            .unwrap();
+        particles.update(&world, step);
+        assert_eq!(particles.count(), 50);
+    }
+
+    /// R17.2b: a sphere's particles head away from its middle (Outward),
+    /// toward it (Inward) or either way (InAndOut).
+    #[test]
+    fn round_shapes_head_out_from_their_middle_in_or_both() {
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let mut set = |name: &str, value: Value| {
+            world.set_property(emitter, name, value).unwrap();
+        };
+        set("SpreadAngle", Value::Number(0.0));
+        set("Speed", Value::Number(10.0));
+        set("Shape", enum_value("ParticleEmitterShape", "Sphere"));
+        set(
+            "ShapeStyle",
+            enum_value("ParticleEmitterShapeStyle", "Surface"),
+        );
+        let middle = Vec3::new(0.0, 10.0, 0.0);
+        let headings = |world: &World| -> Vec<f32> {
+            let mut particles = Particles::new();
+            particles.emit(world, emitter, 40);
+            particles.emitters[&emitter]
+                .particles
+                .iter()
+                .map(|p| {
+                    assert!((p.velocity.length() - 10.0).abs() < 1e-3);
+                    p.velocity
+                        .normalize()
+                        .dot((p.position - middle).normalize())
+                })
+                .collect()
+        };
+        assert!(headings(&world).iter().all(|&cos| cos > 0.999), "outward");
+        world
+            .set_property(
+                emitter,
+                "ShapeInOut",
+                enum_value("ParticleEmitterShapeInOut", "Inward"),
+            )
+            .unwrap();
+        assert!(headings(&world).iter().all(|&cos| cos < -0.999), "inward");
+        world
+            .set_property(
+                emitter,
+                "ShapeInOut",
+                enum_value("ParticleEmitterShapeInOut", "InAndOut"),
+            )
+            .unwrap();
+        let both = headings(&world);
+        assert!(both.iter().all(|cos| cos.abs() > 0.999));
+        assert!(both.iter().any(|&cos| cos > 0.0) && both.iter().any(|&cos| cos < 0.0));
+    }
+
+    /// R17.2b: with VelocityInheritance, particles start with that share
+    /// of their moving part's velocity.
+    #[test]
+    fn particles_inherit_their_moving_parts_velocity() {
+        let (mut world, part, emitter) = world_with_emitter(100.0);
+        for (name, value) in [
+            ("Speed", 0.0),
+            ("VelocityInheritance", 0.5),
+            ("Lifetime", 10.0),
+        ] {
+            world
+                .set_property(emitter, name, Value::Number(value))
+                .unwrap();
+        }
+        let mut particles = Particles::new();
+        particles.update(&world, 0.1);
+        let still = particles.emitters[&emitter].particles.len();
+        assert!(still > 0);
+        assert!(
+            particles.emitters[&emitter]
+                .particles
+                .iter()
+                .all(|p| p.velocity == Vec3::ZERO),
+            "standing still"
+        );
+        // Moved 2 studs along X in 0.1 s: 20 studs a second, half kept.
+        world
+            .set_property(
+                part,
+                "Position",
+                Value::Vector3(Vector3::new(2.0, 10.0, 0.0)),
+            )
+            .unwrap();
+        particles.update(&world, 0.1);
+        let state = &particles.emitters[&emitter];
+        let born: Vec<Vec3> = state.particles[still..]
+            .iter()
+            .map(|p| p.velocity)
+            .collect();
+        assert!(!born.is_empty());
+        for velocity in born {
+            assert!(
+                (velocity - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-3,
+                "{velocity}"
+            );
+        }
     }
 
     #[test]

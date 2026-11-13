@@ -109,7 +109,11 @@ impl HostIo for App {
         for (emitter, count) in self.sim.scripts.take_particle_emits() {
             self.particles.emit(&self.sim.world, emitter, count);
         }
-        self.particles.update(&self.sim.world, seconds as f32);
+        let (world, assets) = (&self.sim.world, &self.sim.assets);
+        self.particles
+            .update_against(world, seconds as f32, &mut |skip, paths| {
+                particle_surfaces(world, assets, skip, paths)
+            });
     }
 
     fn animator_error(&mut self, error: String) {
@@ -331,4 +335,23 @@ impl HostIo for App {
             }
         }
     }
+}
+
+/// Where colliding particles' paths meet solid surfaces (roadmap R17.4):
+/// physics' `surface_hits` for [`axcenity_scene::Particles::update_against`].
+fn particle_surfaces(
+    world: &axcenity_core::World,
+    assets: &axcenity_assets::Assets,
+    skip: Option<axcenity_core::InstanceId>,
+    paths: &[(axcenity_core::Vector3, axcenity_core::Vector3)],
+) -> Vec<Option<axcenity_scene::SurfaceHit>> {
+    axcenity_physics::surface_hits(world, assets, skip, paths)
+        .into_iter()
+        .map(|hit| {
+            hit.map(|hit| axcenity_scene::SurfaceHit {
+                position: hit.position,
+                normal: hit.normal,
+            })
+        })
+        .collect()
 }

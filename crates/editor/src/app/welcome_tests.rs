@@ -137,3 +137,127 @@ fn ribbon_captions_share_one_baseline() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Settings > Appearance > Menu icons places the icons of the ribbon's
+/// tick boxes (Snapping's Move, Surfaces, …) as it does in menus: Centered
+/// moves the icon to the middle of its column, and the label stays put.
+#[test]
+fn ribbon_tick_box_icons_follow_the_menu_icons_setting() {
+    let folder = copy_of_example("hello-touched", "ribbon-menu-icons");
+    let mut app = EditorApp::new(Some(&folder));
+    let ctx = theme::test_context();
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1440.0, 900.0),
+        )),
+        ..Default::default()
+    };
+    // Where Snapping's Move icon's middle and its label's start are drawn.
+    let mut placed = |place: theme::MenuIcons| {
+        app.appearance.menu_icons = place;
+        // As Settings does when a choice changes.
+        theme::apply(&ctx, &app.appearance);
+        let mut output = None;
+        for _ in 0..4 {
+            output = Some(crate::theme::run(&ctx, input(), |ui| app.frame(ui, None)));
+        }
+        let texts: Vec<(String, egui::Rect)> = output
+            .unwrap()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.pos.y < 200.0 => {
+                    Some((text.galley.text().to_owned(), text.visual_bounding_rect()))
+                }
+                _ => None,
+            })
+            .collect();
+        let icon = texts
+            .iter()
+            .find(|(text, _)| text == icons::GRID_FOUR)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{place:?}: no Move icon in the ribbon"));
+        let label = texts
+            .iter()
+            .filter(|(text, rect)| text == "Move" && rect.left() > icon.left())
+            .map(|(_, rect)| rect.left())
+            .fold(f32::MAX, f32::min);
+        (icon.center().x, label)
+    };
+    let (left_icon, left_label) = placed(theme::MenuIcons::Left);
+    let (centered_icon, centered_label) = placed(theme::MenuIcons::Centered);
+    assert!(
+        centered_icon > left_icon + 2.0,
+        "Centered icon at {centered_icon}, Left at {left_icon}"
+    );
+    assert!(
+        (centered_label - left_label).abs() < 0.5,
+        "label moved from {left_label} to {centered_label}"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Settings > Appearance > Ribbon: Centered puts the ribbon's groups in the
+/// middle of the window, with as much room left of them as right of them;
+/// Left starts them at the window's left edge.
+#[test]
+fn the_ribbon_centres_its_groups_when_asked() {
+    let folder = copy_of_example("hello-touched", "ribbon-centered");
+    let mut app = EditorApp::new(Some(&folder));
+    let ctx = theme::test_context();
+    const WIDTH: f32 = 2400.0;
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(WIDTH, 900.0),
+        )),
+        ..Default::default()
+    };
+    // The left and right ends of the Home tab's groups, from the Play
+    // button's label down to the group captions.
+    let mut ends = |place: theme::RibbonAlign| {
+        app.appearance.ribbon = place;
+        let mut output = None;
+        for _ in 0..4 {
+            output = Some(crate::theme::run(&ctx, input(), |ui| app.frame(ui, None)));
+        }
+        let texts: Vec<(String, egui::Rect)> = output
+            .unwrap()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    Some((text.galley.text().to_owned(), text.visual_bounding_rect()))
+                }
+                _ => None,
+            })
+            .collect();
+        let at = |name: &str| {
+            texts
+                .iter()
+                .filter(|(text, rect)| text == name && rect.top() < 200.0)
+                .map(|(_, rect)| *rect)
+                .next()
+                .unwrap_or_else(|| panic!("{place:?}: no {name} in the ribbon"))
+        };
+        let (play, caption) = (at("Play"), at("Game"));
+        let band = play.top() - 1.0..=caption.bottom() + 1.0;
+        texts
+            .iter()
+            .filter(|(_, rect)| band.contains(&rect.top()) && band.contains(&rect.bottom()))
+            .fold((f32::MAX, f32::MIN), |(left, right), (_, rect)| {
+                (left.min(rect.left()), right.max(rect.right()))
+            })
+    };
+    let (left, _) = ends(theme::RibbonAlign::Left);
+    assert!(left < 40.0, "Left: the groups start at {left}");
+    let (left, right) = ends(theme::RibbonAlign::Centered);
+    let room_after = WIDTH - right;
+    assert!(left > 200.0, "Centered: the groups start at {left}");
+    assert!(
+        (left - room_after).abs() < 30.0,
+        "Centered: {left} before the groups, {room_after} after"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

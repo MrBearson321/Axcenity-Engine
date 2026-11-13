@@ -85,6 +85,20 @@ impl Canvas {
             .image(target.texture_id, rect, whole, egui::Color32::WHITE);
     }
 
+    /// What the last frame cost, once one is drawn (the Effect tab's cost
+    /// readout; GPU passes are timed only on a device with timestamps).
+    pub fn stats(&self) -> Option<axcenity_render::RenderStats> {
+        self.target.as_ref().map(|target| target.renderer.stats())
+    }
+
+    /// Whether its renderer can run compute shaders (GPU particles), once
+    /// it's made.
+    pub fn compute_shaders(&self) -> Option<bool> {
+        self.target
+            .as_ref()
+            .map(|target| target.renderer.capabilities().compute_shaders)
+    }
+
     /// Shows the picture drawn last in `rect` again, without drawing:
     /// false if there's none of that size.
     pub fn show_last(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {

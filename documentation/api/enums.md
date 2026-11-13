@@ -276,9 +276,39 @@ The choices of `Enum.ParticleEmitterShapeStyle`.
 
 Items: `Volume`, `Surface`
 
+## Enum.ParticleEmitterShapeInOut
+
+The choices of `Enum.ParticleEmitterShapeInOut`.
+
+Items: `Outward`, `Inward`, `InAndOut`
+
+## Enum.ParticleEmitterEmitOn
+
+The choices of `Enum.ParticleEmitterEmitOn`.
+
+Items: `Always`, `Birth`, `Death`, `Collision`
+
+## Enum.ParticleFlipbookLayout
+
+The choices of `Enum.ParticleFlipbookLayout`.
+
+Items: `None`, `Grid2x2`, `Grid4x4`, `Grid8x8`
+
+## Enum.ParticleFlipbookMode
+
+The choices of `Enum.ParticleFlipbookMode`.
+
+Items: `Loop`, `OneShot`, `PingPong`, `Random`
+
 ## Enum.RayTracedAmbientOcclusion
 
 The choices of `Enum.RayTracedAmbientOcclusion`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+
+## Enum.RayTracedGlobalIllumination
+
+The choices of `Enum.RayTracedGlobalIllumination`.
 
 Items: `Off`, `Low`, `Medium`, `High`
 

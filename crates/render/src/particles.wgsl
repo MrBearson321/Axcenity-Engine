@@ -30,8 +30,14 @@ struct Emitter {
     // while the curves below are used instead of the start and end values.
     look: vec4<f32>,
     // The spawn shape (0 box, 1 sphere, 2 cylinder, 3 disc), 1 for only
-    // its surface, and two unused (`SpawnShape`).
+    // its surface, which way they head (0 out, 1 in, 2 either at random,
+    // `ShapeInOut`), and the flipbook: frames along each side (0 for none)
+    // plus its mode (`FlipbookMode::code`) times 256 plus 65536 when each
+    // starts on a random frame.
     spawn_shape: vec4<u32>,
+    // The velocity each starts with besides its heading (the emitter's,
+    // times VelocityInheritance), and the flipbook's frames a second.
+    inherit: vec4<f32>,
     // Size, its envelope, transparency and its envelope over life, and
     // sRGB colors with the speed multiplier in w, at 32 even times from
     // birth to death (`ParticleCurves`).
@@ -152,6 +158,36 @@ fn speed_at(t: f32) -> f32 {
     return mix(emitter.colors[index].w, emitter.colors[next].w, x - f32(index));
 }
 
+// The flipbook frame a particle `age` seconds into its `life` shows, with
+// `seed` the same over its life: as `Flipbook::frame` on the CPU.
+fn flipbook_frame(age: f32, life: f32, seed: u32) -> u32 {
+    let packed = emitter.spawn_shape.w;
+    let grid = clamp(packed & 255u, 1u, 8u);
+    let mode = (packed >> 8u) & 255u;
+    let frames = grid * grid;
+    var start = 0u;
+    if (packed & 65536u) != 0u {
+        start = pcg(seed ^ 0x68e31da4u) % frames;
+    }
+    let steps = u32(min(floor(max(age, 0.0) * max(emitter.inherit.w, 0.0)), 16777216.0));
+    if mode == 1u {
+        let t = clamp(age / max(life, 1e-4), 0.0, 1.0);
+        return min(u32(floor(t * f32(frames))), frames - 1u);
+    }
+    if mode == 2u {
+        if frames == 1u {
+            return 0u;
+        }
+        let round = 2u * frames - 2u;
+        let k = (start + steps) % round;
+        return select(round - k, k, k < frames);
+    }
+    if mode == 3u {
+        return pcg(seed ^ pcg(steps)) % frames;
+    }
+    return (start + steps) % frames;
+}
+
 // A particle born now, number `index` of the emitter's births: somewhere
 // in its spawn shape, heading out within the spread.
 fn born(index: u32) -> Particle {
@@ -161,7 +197,19 @@ fn born(index: u32) -> Particle {
     let third = random(&seed);
     let inside = spawn_point(first, second, third);
     let position = (emitter.spawn * vec4<f32>(inside, 1.0)).xyz;
-    let forward = emitter.direction.xyz;
+    // A round shape's particles head away from its middle (a cylinder's
+    // and disc's upright axis), as `SpawnShape::outward` on the CPU.
+    var forward = emitter.direction.xyz;
+    if emitter.spawn_shape.x != 0u {
+        var radial = inside;
+        if emitter.spawn_shape.x >= 2u {
+            radial.y = 0.0;
+        }
+        let out = (emitter.spawn * vec4<f32>(radial, 0.0)).xyz;
+        if dot(radial, radial) > 1e-12 && dot(out, out) > 0.0 {
+            forward = normalize(out);
+        }
+    }
     let z = 1.0 - random(&seed) * (1.0 - emitter.direction.w);
     let around = random(&seed) * TAU;
     let across = sqrt(max(1.0 - z * z, 0.0));
@@ -173,9 +221,14 @@ fn born(index: u32) -> Particle {
     let v = vec3<f32>(b, sign + forward.y * forward.y * a, -forward.y);
     let heading = forward * z + (u * cos(around) + v * sin(around)) * across;
     let life = emitter.life_size.x * (0.8 + 0.4 * random(&seed));
+    // Inward turns them round; InAndOut does for about half.
+    var flip = 1.0;
+    if emitter.spawn_shape.z == 1u || (emitter.spawn_shape.z == 2u && random(&seed) < 0.5) {
+        flip = -1.0;
+    }
     var particle: Particle;
     particle.position_age = vec4<f32>(position, 0.0);
-    particle.velocity_life = vec4<f32>(heading * emitter.air.w, life);
+    particle.velocity_life = vec4<f32>(heading * flip * emitter.air.w + emitter.inherit.xyz, life);
     return particle;
 }
 
@@ -280,11 +333,17 @@ fn write(@builtin(global_invocation_id) id: vec3<u32>) {
             let color = linear(srgb) * max(emitter.look.y, 0.0) * opacity;
             out.center_size = vec4<f32>(particle.position_age.xyz, size);
             out.color = vec4<f32>(color, opacity);
+            var frame = 0.0;
+            var grid = 0.0;
+            if (emitter.spawn_shape.w & 255u) != 0u {
+                frame = f32(flipbook_frame(age, life, keys[k].index ^ bitcast<u32>(life)));
+                grid = f32(clamp(emitter.spawn_shape.w & 255u, 1u, 8u));
+            }
             out.params = vec4<f32>(
                 emitter.life_size.w + emitter.look.x * age,
                 clamp(emitter.look.z, 0.0, 1.0),
-                0.0,
-                0.0,
+                frame,
+                grid,
             );
         }
     }

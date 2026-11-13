@@ -53,12 +53,113 @@ impl TextureRenderer {
         size: u32,
         settings: &GraphicsSettings,
     ) -> Result<Vec<[[f32; 3]; 4]>> {
-        let mut camera = ProbeCamera::new(device, queue, list, size, settings);
-        camera.light_only();
+        let mut baker = LightProbeBaker::new(device, queue, list, size, settings);
         centers
             .iter()
-            .map(|&center| Ok(cube_light(camera.size, &camera.faces(center)?)))
+            .map(|&center| Ok(baker.bake(center)?.light))
             .collect()
+    }
+}
+
+/// Bakes light probes one at a time, as [`TextureRenderer::bake_light_probes`]
+/// does, keeping its renderer (and its copy of the scene) between them, so
+/// a host can spread a big bake over many frames and stop it part way.
+pub struct LightProbeBaker {
+    camera: ProbeCamera,
+    /// The scene without its sky, drawn too while keeping the sky's share
+    /// of the light apart (roadmap R18.3).
+    skyless: Option<ProbeCamera>,
+}
+
+/// One light probe's bake: the light reaching it, as four spherical
+/// harmonics coefficients, and, while keeping it apart, the share of that
+/// which came from the sky.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BakedProbe {
+    pub light: [[f32; 3]; 4],
+    pub sky: Option<[[f32; 3]; 4]>,
+}
+
+impl LightProbeBaker {
+    /// Uploads the scene in `list` once, for probes drawn at `size` with
+    /// `settings`.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        size: u32,
+        settings: &GraphicsSettings,
+    ) -> Self {
+        let mut camera = ProbeCamera::new(device, queue, list, size, settings);
+        camera.light_only();
+        Self {
+            camera,
+            skyless: None,
+        }
+    }
+
+    /// As [`LightProbeBaker::new`], also keeping the sky's share of each
+    /// probe's light apart (roadmap R18.3): each probe is drawn a second
+    /// time with the sky black and lighting nothing, at half the size
+    /// (sky light changes slowly from way to way), and the sky's share is
+    /// the difference. That share follows the sky's own light, so it takes
+    /// in sky light bounced off surfaces too, while the sun, lamps,
+    /// ambient light and glowing surfaces stay fixed.
+    pub fn keeping_sky_apart(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        size: u32,
+        settings: &GraphicsSettings,
+    ) -> Self {
+        let mut baker = Self::new(device, queue, list, size, settings);
+        let skyless_list = DrawList {
+            sky: skyless(&list.sky),
+            ..list.clone()
+        };
+        let mut camera =
+            ProbeCamera::new(device, queue, &skyless_list, (size / 2).max(1), settings);
+        camera.light_only();
+        baker.skyless = Some(camera);
+        baker
+    }
+
+    /// The light reaching a probe at `center`.
+    pub fn bake(&mut self, center: Vec3) -> Result<BakedProbe> {
+        let faces = self.camera.faces(center)?;
+        let light = cube_light(self.camera.size, &faces);
+        let sky = match &mut self.skyless {
+            Some(camera) => {
+                let faces = camera.faces(center)?;
+                let without = cube_light(camera.size, &faces);
+                Some(std::array::from_fn(|k| {
+                    std::array::from_fn(|c| light[k][c] - without[k][c])
+                }))
+            }
+            None => None,
+        };
+        Ok(BakedProbe { light, sky })
+    }
+
+    /// The sky's average light the probes are baked with, as
+    /// [`TextureRenderer::sky_band0`] measures it: known once a probe has
+    /// been baked.
+    pub fn baked_sky(&self) -> [f32; 3] {
+        self.camera.renderer.sky_band0()
+    }
+}
+
+/// `sky` drawn black and lighting nothing: what a probe sees without it.
+fn skyless(sky: &crate::Sky) -> crate::Sky {
+    crate::Sky {
+        top_color: [0.0; 3],
+        horizon_color: [0.0; 3],
+        ground_color: [0.0; 3],
+        environment_intensity: 0.0,
+        image: None,
+        atmosphere: None,
+        stars: 0.0,
+        ..sky.clone()
     }
 }
 

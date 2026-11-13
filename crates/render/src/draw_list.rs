@@ -157,6 +157,27 @@ pub struct LightProbeGrid {
     /// Y, Z and X), each linear red, green and blue, already blurred over a
     /// hemisphere and divided by π.
     pub probes: Arc<Vec<[[f32; 3]; 4]>>,
+    /// The probes that stood inside a solid when baked, by their place in
+    /// `probes`: surfaces leave them out of their blend (roadmap R18.2).
+    pub invalid: Arc<Vec<u32>>,
+    /// The share of each probe's light that came from the sky, kept apart
+    /// so it can follow the sky drawn now (roadmap R18.3). `None` keeps all
+    /// the light as baked.
+    pub sky: Option<ProbeSky>,
+}
+
+/// The sky's share of a light probe grid's light, and the sky it came
+/// from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeSky {
+    /// The sky's average light when baked, linear red, green and blue, as
+    /// the renderer measures it ([`TextureRenderer::sky_band0`]): the
+    /// sky's share is scaled by the sky drawn now over this, per channel.
+    ///
+    /// [`TextureRenderer::sky_band0`]: crate::TextureRenderer::sky_band0
+    pub band0: [f32; 3],
+    /// Each probe's light from the sky, as [`LightProbeGrid::probes`].
+    pub probes: Arc<Vec<[[f32; 3]; 4]>>,
 }
 
 impl fmt::Debug for LightProbeGrid {
@@ -234,7 +255,100 @@ pub struct Sprite {
     pub light_emission: f32,
     /// Its picture, whose alpha is its shape. `None` is a plain square.
     pub texture: Option<Arc<dyn TextureSource>>,
+    /// Shows one frame of the picture cut into a grid (a flipbook, roadmap
+    /// R17.2c) in place of the whole of it.
+    pub frame: Option<FlipbookFrame>,
 }
+
+/// One frame of a picture cut into `grid` × `grid` frames, counted left to
+/// right, then top to bottom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlipbookFrame {
+    pub grid: u32,
+    pub frame: u32,
+}
+
+/// Which of a flipbook's frames a particle shows as it ages (roadmap
+/// R17.2c, `ParticleEmitter.FlipbookMode`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FlipbookMode {
+    /// The frames in order at the frame rate, then again from the first.
+    #[default]
+    Loop,
+    /// Every frame once over the particle's life, whatever the frame rate.
+    OneShot,
+    /// The frames in order at the frame rate, then back again.
+    PingPong,
+    /// A frame picked at random, again at the frame rate.
+    Random,
+}
+
+impl FlipbookMode {
+    /// The number particles.wgsl's `flipbook_frame` reads.
+    pub fn code(self) -> u32 {
+        match self {
+            FlipbookMode::Loop => 0,
+            FlipbookMode::OneShot => 1,
+            FlipbookMode::PingPong => 2,
+            FlipbookMode::Random => 3,
+        }
+    }
+}
+
+/// A particle picture cut into frames, shown one at a time (roadmap
+/// R17.2c).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Flipbook {
+    /// Frames along each side: 2, 4 or 8.
+    pub grid: u32,
+    pub mode: FlipbookMode,
+    /// Frames a second (not used by `OneShot`).
+    pub framerate: f32,
+    /// Each particle starts on a frame of its own instead of the first
+    /// (`Loop` and `PingPong`).
+    pub start_random: bool,
+}
+
+impl Flipbook {
+    /// The frame a particle `age` seconds into a `life` of seconds shows,
+    /// with `seed` a number that stays the same over its life: the same
+    /// sum as particles.wgsl's `flipbook_frame`.
+    pub fn frame(&self, age: f32, life: f32, seed: u32) -> u32 {
+        let grid = self.grid.clamp(1, 8);
+        let frames = grid * grid;
+        let start = if self.start_random {
+            pcg(seed ^ FLIPBOOK_SALT) % frames
+        } else {
+            0
+        };
+        let rate = if self.framerate.is_finite() {
+            self.framerate.max(0.0)
+        } else {
+            0.0
+        };
+        let steps = (age.max(0.0) * rate).floor().min(16_777_216.0) as u32;
+        match self.mode {
+            FlipbookMode::OneShot => {
+                let t = (age / life.max(1e-4)).clamp(0.0, 1.0);
+                ((t * frames as f32).floor() as u32).min(frames - 1)
+            }
+            FlipbookMode::Loop => (start + steps) % frames,
+            FlipbookMode::PingPong => {
+                if frames == 1 {
+                    return 0;
+                }
+                let round = 2 * frames - 2;
+                let k = (start + steps) % round;
+                if k < frames { k } else { round - k }
+            }
+            FlipbookMode::Random => pcg(seed ^ pcg(steps)) % frames,
+        }
+    }
+}
+
+/// Mixed into a particle's seed for its flipbook's first frame, so it
+/// doesn't follow its curves' spreads.
+const FLIPBOOK_SALT: u32 = 0x68e3_1da4;
 
 /// A particle emitter whose particles the renderer keeps, moves and sorts
 /// on the GPU (compute shaders), for counts too large to send as
@@ -278,6 +392,11 @@ pub struct ParticleEmitter {
     pub air: Vec3,
     /// Where in the spawn box they're born (roadmap R17.2).
     pub shape: SpawnShape,
+    /// Which way they head from it (roadmap R17.2b).
+    pub in_out: ShapeInOut,
+    /// Added to every new particle's velocity: the emitter's own velocity
+    /// times its `VelocityInheritance` (roadmap R17.2b).
+    pub inherit: Vec3,
     pub look: ParticleLook,
 }
 
@@ -305,7 +424,46 @@ pub enum SpawnKind {
     Disc,
 }
 
+/// Which way particles head from their spawn shape (roadmap R17.2b,
+/// `ParticleEmitter.ShapeInOut`), within the spread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShapeInOut {
+    /// Along the direction for a box; away from the middle for a sphere,
+    /// and from the upright axis for a cylinder or disc.
+    #[default]
+    Outward,
+    /// The other way.
+    Inward,
+    /// Either, at random.
+    InAndOut,
+}
+
+impl ShapeInOut {
+    /// The number particles.wgsl's `born` reads.
+    pub fn code(self) -> u32 {
+        match self {
+            ShapeInOut::Outward => 0,
+            ShapeInOut::Inward => 1,
+            ShapeInOut::InAndOut => 2,
+        }
+    }
+}
+
 impl SpawnShape {
+    /// The way out of the shape from a point born at `inside` (in the
+    /// centered unit cube), before the spawn transform: from the middle for
+    /// a sphere, from the upright axis for a cylinder or disc, and `None`
+    /// for a box (which heads along the direction) or at the middle itself.
+    /// The same as particles.wgsl's `born`.
+    pub fn outward(self, inside: Vec3) -> Option<Vec3> {
+        let out = match self.kind {
+            SpawnKind::Box => return None,
+            SpawnKind::Sphere => inside,
+            SpawnKind::Cylinder | SpawnKind::Disc => Vec3::new(inside.x, 0.0, inside.z),
+        };
+        (out.length_squared() > 1e-12).then_some(out)
+    }
+
     /// The number particles.wgsl's `born` reads for the kind.
     pub fn code(self) -> u32 {
         match self.kind {
@@ -396,6 +554,9 @@ pub struct ParticleLook {
     /// Size, transparency and color over life (roadmap R17.1), in place of
     /// the pairs above; `None` blends the pairs.
     pub curves: Option<Arc<ParticleCurves>>,
+    /// The texture's frames, shown one at a time (roadmap R17.2c); `None`
+    /// shows the whole of it.
+    pub flipbook: Option<Flipbook>,
 }
 
 /// How many evenly spaced times over a particle's life [`ParticleCurves`]
@@ -505,6 +666,7 @@ impl Default for ParticleLook {
             light_emission: 0.0,
             texture: None,
             curves: None,
+            flipbook: None,
         }
     }
 }
@@ -1065,6 +1227,18 @@ pub struct LensEffects {
     /// it: 0 none, 1 the whole way it moved (a camera's shutter open the
     /// whole frame).
     pub motion_blur: Option<f32>,
+    /// Shafts of light streaming from the sun past what's in front of it.
+    pub sun_rays: Option<SunRays>,
+}
+
+/// Screen-space sun shafts (god rays): bright sky near the sun smeared
+/// toward it, so gaps between leaves or a window's frame cast beams.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SunRays {
+    /// How bright the shafts are, 0 to 1.
+    pub intensity: f32,
+    /// How far they reach from the sun, 0 to 1 (1 the whole picture).
+    pub spread: f32,
 }
 
 /// Blur by distance from the camera: sharp from `focus_distance -

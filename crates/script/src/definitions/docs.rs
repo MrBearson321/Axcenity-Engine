@@ -1782,6 +1782,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How much crisper the edges between colors get, from 0 (no change) to 1 (strong). 0.5 by default.",
     ),
     (
+        ClassName::SunRaysEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no SunRaysEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::SunRaysEffect,
+        "Intensity",
+        "How bright the shafts are, from 0 (none) to 1 (strong). 0.25 by default.",
+    ),
+    (
+        ClassName::SunRaysEffect,
+        "Spread",
+        "How far the shafts reach from the sun across the picture, from 0 (a glow around it) to 1 (the whole way across). 0.5 by default.",
+    ),
+    (
         ClassName::MotionBlurEffect,
         "Enabled",
         "Whether it's drawn. Off (or with no MotionBlurEffect in Lighting) it costs nothing.",
@@ -1984,7 +1999,7 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::ParticleEmitter,
         "Shape",
-        "Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). They still head along Direction within SpreadAngle.",
+        "Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). A Box's particles head along Direction within SpreadAngle; the round shapes' head away from their middle (see ShapeInOut).",
     ),
     (
         ClassName::ParticleEmitter,
@@ -1993,8 +2008,73 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ParticleEmitter,
+        "ShapeInOut",
+        "Which way particles head from the Shape, within SpreadAngle: `Enum.ParticleEmitterShapeInOut.Outward` (the default: along Direction for a Box; away from the middle for a Sphere, and from the upright axis for a Cylinder or Disc), `Inward` (the other way) or `InAndOut` (either, at random).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "VelocityInheritance",
+        "How much of the part's own velocity each particle starts with, from 0 (none, the default) to 1 (all of it), so sparks from a moving car keep up with it.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Collides",
+        "On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. Colliding emitters move their particles on the CPU, at most 4,000 each. Default false.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Bounce",
+        "How much of a colliding particle's speed into a surface it keeps, back out of it: 0 lands dead, 1 bounces as high as it fell. Speed along the surface is kept. Default 0.5.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "LifetimeLoss",
+        "How much of its life a colliding particle loses each time it lands, from 0 (none, the default) to 1 (it dies where it lands).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "EmitOn",
+        "Inside another ParticleEmitter, `Enum.ParticleEmitterEmitOn.Birth`, `Death` or `Collision` makes this one a sub-emitter: while Enabled it gives off EmitCount particles where each of its parent's particles is born, dies or lands, heading out along its own Direction (turned by its Orientation), and nothing by its Rate. `Always` (the default) gives off as any emitter does.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "EmitCount",
+        "How many particles a sub-emitter (EmitOn Birth, Death or Collision) gives off at each of its parent's events. Default 10.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Bursts",
+        "A NumberSequence of bursts while Enabled: each keypoint gives off Value particles (give or take Envelope) at its Time of every Duration seconds, over and over. Rate still adds its steady flow. A keypoint at time 1 is the next loop's start, so it gives off nothing: put that count at time 0. nil (the default) is no bursts.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Duration",
+        "How long one loop of Bursts takes, in seconds (default 1, at least 0.05).",
+    ),
+    (
+        ClassName::ParticleEmitter,
         "Rotation",
         "How far each particle is turned when it's born, in degrees.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookLayout",
+        "Cuts the Texture into a grid of frames that each particle shows one at a time, read left to right, then top to bottom: `Enum.ParticleFlipbookLayout.Grid2x2`, `Grid4x4` or `Grid8x8` (4, 16 or 64 frames). `None` (the default) shows the whole Texture. The built-in ParticleType pictures have no frames, so it needs a Texture.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookMode",
+        "Which frame a particle shows as it ages: `Enum.ParticleFlipbookMode.Loop` (the default: in order at FlipbookFramerate, then from the first again), `OneShot` (every frame once over its life, whatever the frame rate), `PingPong` (in order, then back) or `Random` (a frame at random, again at the frame rate).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookFramerate",
+        "How many flipbook frames a second each particle moves on (default 1). OneShot ignores it.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "FlipbookStartRandom",
+        "When true, each particle starts on a frame of its own instead of the first (Loop and PingPong), so a puff of smoke doesn't animate in step.",
     ),
     (
         ClassName::ParticleEmitter,
@@ -5392,6 +5472,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SharpenEffect => {
             "Inside Lighting: makes the edges between colors crisper (useful with a render scale below 100%). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Sharpen)."
+        }
+        ClassName::SunRaysEffect => {
+            "Inside Lighting: shafts of light streaming from the sun past whatever is in front of it, such as bright sky between leaves or a window, worked out on screen from what's drawn (so they show only while the sun is in or near the view). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.SunRays)."
         }
         ClassName::MotionBlurEffect => {
             "Inside Lighting: streaks what moves across the view along its motion, as a camera's shutter does: parts that move, posed characters, and everything when the camera moves. What moves with the camera stays sharp. The first enabled one in Lighting is used. The player's graphics settings choose how finely it's drawn (UserGameSettings.MotionBlur); it's off at Low."

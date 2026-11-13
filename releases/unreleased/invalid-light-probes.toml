@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Light probes baked inside walls or the ground no longer leak light into rooms"
+details = "Bake Probes now marks each light probe that stands inside a colliding part or under the terrain's ground as invalid. Surfaces leave those probes out and blend the ones around them instead, so a bright probe stuck in a wall no longer lights the next room. The Light Probes overlay shows them as magenta crosses and counts them. Bake again to get this; older bakes light as before."
+features = ["renderer.global-illumination"]
+fixes = []
+introduces_issues = []
+prs = [301]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

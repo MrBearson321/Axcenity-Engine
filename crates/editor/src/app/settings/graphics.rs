@@ -266,7 +266,14 @@ pub(super) fn graphics_page(
                     for choice in [None, Some(true), Some(false)] {
                         ui.selectable_value(&mut settings.realtime_gi, choice, label(choice));
                     }
-                });
+                })
+                .response
+                .on_hover_text(
+                    "Light probe volumes traced again while the world's light changes, \
+                     instead of keeping their bakes. Off at every preset. On, the preset sets \
+                     how much it traces: Low one probe a frame at 8² a face, Medium two at \
+                     8², High two at 16² (a bake's size) and Ultra four at 16².",
+                );
             ui.end_row();
 
             found_label(ui, "Volumetric fog");
@@ -320,6 +327,7 @@ pub(super) fn graphics_page(
                     &mut settings.chromatic_aberration,
                 ),
                 ("Sharpen", preset.sharpen(), &mut settings.sharpen),
+                ("Sun rays", preset.sun_rays(), &mut settings.sun_rays),
             ];
             for (name, preset_on, value) in switches {
                 found_label(ui, name);
@@ -397,9 +405,9 @@ pub(super) fn graphics_page(
         "Contact shadows: off"
     });
     ui.label(if effective.realtime_gi {
-        "Real-time GI: on (light probe volumes traced again, two probes a frame)"
+        realtime_gi_in_use(effective.realtime_gi_tier)
     } else {
-        "Real-time GI: off (light probe volumes keep their bakes)"
+        "Real-time GI: off (light probe volumes keep their bakes)".to_owned()
     });
     ui.label(ray_tracing_in_use(&effective));
     ui.label(match effective.cloud_quality.steps() {
@@ -435,6 +443,7 @@ pub(super) fn graphics_page(
         (effective.film_grain, "film grain"),
         (effective.chromatic_aberration, "chromatic aberration"),
         (effective.sharpen, "sharpening"),
+        (effective.sun_rays, "sun rays"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))
@@ -646,8 +655,57 @@ fn ray_tracing_section(
                     );
             });
             ui.end_row();
+
+            found_label(ui, "Ray traced GI");
+            let label = |gi: Option<RayTracedGlobalIllumination>| match gi {
+                Some(gi) => gi.label().to_owned(),
+                None => format!(
+                    "Preset ({})",
+                    preset.ray_traced_global_illumination().label()
+                ),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced global illumination")
+                    .selected_text(label(settings.ray_traced_global_illumination))
+                    .show_ui(ui, |ui| {
+                        for choice in
+                            std::iter::once(None).chain(RayTracedGlobalIllumination::ALL.map(Some))
+                        {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_global_illumination,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Bounced light that follows the world as it changes: light probes \
+                         are lit by rays each frame instead of a bake, so a moved wall or a \
+                         lamp turned on colors the light around it, and a room gets the light \
+                         its windows let in. The camera brings its own probes, 3 studs apart, \
+                         so no light probe volume is needed; any in the world are lit too. \
+                         Low, Medium and High update 128, 256 or 512 probes a frame with 64, \
+                         128 or 256 rays each. Needs Hardware ray tracing on; it replaces \
+                         Real-time GI while on.",
+                    );
+            });
+            ui.end_row();
         });
     restart
+}
+
+/// What real-time GI traces at `tier` (roadmap R18.4), for the "In use"
+/// list.
+fn realtime_gi_in_use(tier: axcenity_render::RealtimeGiTier) -> String {
+    let probes = match tier.probes_per_frame {
+        1 => "one probe".to_owned(),
+        count => format!("{count} probes"),
+    };
+    format!(
+        "Real-time GI: on (light probe volumes traced again, {probes} a frame at {size}² a face)",
+        size = tier.face_size
+    )
 }
 
 /// Whether the GPU must be opened again for Hardware ray tracing to be as
@@ -698,6 +756,14 @@ pub(super) fn ray_tracing_in_use(effective: &EffectiveGraphics) -> String {
             "ambient occlusion {} ({} rays a pixel)",
             effective.ray_traced_ambient_occlusion.label(),
             effective.ray_traced_ambient_occlusion.rays()
+        ));
+    }
+    if effective.ray_traced_global_illumination != RayTracedGlobalIllumination::Off {
+        effects.push(format!(
+            "GI {} ({} probes a frame, {} rays each)",
+            effective.ray_traced_global_illumination.label(),
+            effective.ray_traced_global_illumination.probes_per_frame(),
+            effective.ray_traced_global_illumination.rays()
         ));
     }
     let reach = effective.ray_tracing_distance.round();

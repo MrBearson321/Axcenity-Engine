@@ -381,14 +381,18 @@ impl RibbonTabs {
                 }
                 response.context_menu(|ui| {
                     if ui
-                        .button(theme::with_icon(icons::PENCIL_SIMPLE, "Edit Tab…"))
+                        .button(theme::menu_item(
+                            ui.ctx(),
+                            icons::PENCIL_SIMPLE,
+                            "Edit Tab…",
+                        ))
                         .clicked()
                     {
                         self.edit(Some(index));
                         ui.close();
                     }
                     if ui
-                        .button(theme::with_icon(icons::TRASH, "Delete Tab"))
+                        .button(theme::menu_item(ui.ctx(), icons::TRASH, "Delete Tab"))
                         .clicked()
                     {
                         remove = Some(index);

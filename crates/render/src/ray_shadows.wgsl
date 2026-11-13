@@ -39,8 +39,13 @@ struct RayShadows {
 @group(0) @binding(5) var<storage, read_write> destination: array<u32>;
 
 // Instance masks of what casts shadows (renderer/ray_tracing.rs): solid
-// items and cut-outs.
-const MASK_CASTERS: u32 = 3u;
+// items, and cut-outs.
+const MASK_SOLID: u32 = 1u;
+const MASK_CUT_OUT: u32 = 2u;
+// Cut-outs are traced as solid cards (their holes aren't looked up), so
+// one nearer than this to the surface isn't counted: leaves lying on the
+// ground, or a grass clump, would shade the ground in card-shaped blotches.
+const CUT_OUT_NEAR: f32 = 0.35;
 // The widest a soft edge is smoothed, in pixels each way.
 const MAX_BLUR: i32 = 12;
 // Marks a pixel the soft passes have nothing for (sky, or past the reach).
@@ -80,11 +85,12 @@ fn pack_soft(visible: f32, blocker: f32) -> u32 {
     return pack2x16float(vec2<f32>(visible, blocker));
 }
 
-// One ray from `origin` along `direction`: how far to what blocks it, or 0.
-fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+// How far along the ray from `origin` an item of `mask` blocks it, from
+// `near` on, or 0 for nothing.
+fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32) -> f32 {
     var query: ray_query;
     rayQueryInitialize(&query, scene, RayDesc(
-        RAY_FLAG_TERMINATE_ON_FIRST_HIT | RAY_FLAG_FORCE_OPAQUE, MASK_CASTERS, 0.0,
+        RAY_FLAG_TERMINATE_ON_FIRST_HIT | RAY_FLAG_FORCE_OPAQUE, mask, near,
         rays.camera.w * 2.0, origin, direction));
     rayQueryProceed(&query);
     let hit = rayQueryGetCommittedIntersection(&query);
@@ -92,6 +98,15 @@ fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
         return 0.0;
     }
     return max(hit.t, 1e-3);
+}
+
+// One ray from `origin` along `direction`: how far to what blocks it, or 0.
+fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+    let solid = first_hit(origin, direction, MASK_SOLID, 0.0);
+    if solid > 0.0 {
+        return solid;
+    }
+    return first_hit(origin, direction, MASK_CUT_OUT, CUT_OUT_NEAR);
 }
 
 @compute @workgroup_size(8, 8)

@@ -31,7 +31,9 @@ struct SpriteRaw {
     center_size: [f32; 4],
     /// Linear color times brightness and opacity, and the opacity.
     color: [f32; 4],
-    /// The turn in radians, the light emission, then unused.
+    /// The turn in radians, the light emission, then the flipbook frame
+    /// shown and how many frames along each side (0 or 1: the whole
+    /// picture; roadmap R17.2c).
     params: [f32; 4],
 }
 
@@ -232,8 +234,10 @@ impl SpritePass {
                 params: [
                     sprite.rotation_degrees.to_radians(),
                     sprite.light_emission.clamp(0.0, 1.0),
-                    0.0,
-                    0.0,
+                    sprite.frame.map_or(0.0, |frame| frame.frame as f32),
+                    sprite
+                        .frame
+                        .map_or(0.0, |frame| frame.grid.clamp(1, 8) as f32),
                 ],
             });
             match draws.last_mut() {

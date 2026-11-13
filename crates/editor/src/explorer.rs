@@ -1479,10 +1479,13 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
 }
 
 /// An Insert menu item: the icon, in its class's colour, then the name.
-pub(crate) fn insert_item(ui: &egui::Ui, what: Insertable) -> (egui::RichText, &'static str) {
-    let icon = egui::RichText::new(theme::insert_icon(what))
-        .color(theme::class_color(what.class(), ui.visuals()));
-    (icon, what.label())
+pub(crate) fn insert_item(ui: &egui::Ui, what: Insertable) -> egui::Atoms<'static> {
+    theme::menu_item_tinted(
+        ui.ctx(),
+        theme::insert_icon(what),
+        theme::class_color(what.class(), ui.visuals()),
+        what.label(),
+    )
 }
 
 #[cfg(test)]
@@ -1541,6 +1544,10 @@ pub fn insert_hint(what: Insertable) -> String {
         Insertable::LensEffect(ClassName::MotionBlurEffect) => {
             "Insert a MotionBlurEffect into Lighting: what moves across the view streaks along \
              its motion, as through a camera's shutter."
+        }
+        Insertable::LensEffect(ClassName::SunRaysEffect) => {
+            "Insert a SunRaysEffect into Lighting: shafts of sunlight streaming past leaves, \
+             window frames and anything else in front of the sun."
         }
         Insertable::LensEffect(_) => {
             "Insert a SharpenEffect into Lighting: crisper edges between colors, useful with a \

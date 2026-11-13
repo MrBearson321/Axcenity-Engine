@@ -418,6 +418,12 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         // Where a ParticleEmitter's particles are born (roadmap R17.2).
         "ParticleEmitterShape" => vec!["Box", "Sphere", "Cylinder", "Disc"],
         "ParticleEmitterShapeStyle" => vec!["Volume", "Surface"],
+        "ParticleEmitterShapeInOut" => vec!["Outward", "Inward", "InAndOut"],
+        // When a sub-emitter gives off particles (roadmap R17.4).
+        "ParticleEmitterEmitOn" => vec!["Always", "Birth", "Death", "Collision"],
+        // A particle texture's frames (roadmap R17.2c).
+        "ParticleFlipbookLayout" => vec!["None", "Grid2x2", "Grid4x4", "Grid8x8"],
+        "ParticleFlipbookMode" => vec!["Loop", "OneShot", "PingPong", "Random"],
         // A mover's axes and an align's target (Phase 37).
         "ActuatorRelativeTo" => vec!["Attachment0", "Attachment1", "World"],
         "PositionAlignmentMode" | "OrientationAlignmentMode" => {

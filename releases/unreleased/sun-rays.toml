@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Sun Rays effect: beams of sunlight through leaves and windows (optional)"
+details = "Insert > Lighting > Lens > Sun Rays puts a SunRaysEffect in Lighting. While the sun is in or near the view, bright sky showing through gaps in leaves, a window frame or anything else in front of the sun streams into beams. Intensity (0.25) sets how bright they are and Spread (0.5) how far they reach. They're worked out on screen, so they fade as the sun leaves the view, and they need no ray tracing. Settings > Graphics > Sun rays turns them off (off at Low). LocalScripts can set UserGameSettings.SunRays, and blocks have it under set graphics option."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

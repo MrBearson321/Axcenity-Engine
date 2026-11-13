@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "renderer"
+title = "With TAA on, a render scale below 100% upscales inside TAA for a sharper picture"
+details = "Below 100% render scale with TAA on, TAA gathers the jittered scene samples into an output-sized history and result, so the picture is rebuilt over several frames instead of stretched; only the sharpening pass runs after it. Motion blur and depth of field run before TAA while it upscales. Without TAA, the render scale upscales as before."
+features = ["renderer.temporal"]
+fixes = []
+introduces_issues = []
+prs = [277]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

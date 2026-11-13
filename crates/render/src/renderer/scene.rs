@@ -283,6 +283,8 @@ impl ScenePipeline {
             edge_pipeline,
             edges: false,
             decals: false,
+            sun_rays: false,
+            sun_rays_pass: None,
             depth_of_field: false,
             motion_blur: false,
             temporal,
@@ -306,6 +308,7 @@ impl ScenePipeline {
             cloud_drift: Default::default(),
             frame_entries,
             sun_disc: true,
+            sky_band0: glam::Vec3::ZERO,
             no_occlusion_view,
             occlusion_sampler,
             targets_alive,
@@ -358,6 +361,7 @@ impl ScenePipeline {
             white_texture,
             plain_material,
             uploader: None,
+            frame_clock: std::collections::VecDeque::new(),
             custom_meshes: FxHashMap::default(),
             textures: FxHashMap::default(),
             full_textures: FxHashMap::default(),
@@ -374,6 +378,7 @@ impl ScenePipeline {
             ray_shadows: None,
             no_ray_shadows,
             ray_ao: None,
+            ray_gi: None,
             #[cfg(feature = "debug-views")]
             debug_views: None,
             texture_bytes,
@@ -428,6 +433,18 @@ impl ScenePipeline {
         self.graphics = settings.effective(&self.capabilities);
         if !self.graphics.realtime_gi && self.realtime_gi.take().is_some() {
             // The probes traced while it was on give way to their bakes.
+            self.light_probes.restore_bakes();
+        }
+        // A new tier (roadmap R18.4) is made afresh, keeping what the old
+        // one traced until it's traced again.
+        if self
+            .realtime_gi
+            .as_ref()
+            .is_some_and(|gi| gi.tier != self.graphics.realtime_gi_tier)
+        {
+            self.realtime_gi = None;
+        }
+        if !ray_gi::traced(&self.graphics, 1) && self.ray_gi.take().is_some() {
             self.light_probes.restore_bakes();
         }
         if !self.graphics.volumetric_fog {
@@ -508,7 +525,7 @@ impl ScenePipeline {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
         let used = targets_used(
             &self.graphics,
-            self.edges || self.decals,
+            self.edges || self.decals || self.sun_rays,
             self.depth_of_field,
             self.motion_blur,
         );
@@ -566,11 +583,15 @@ impl ScenePipeline {
             // while it's read.
             self.bind_frame();
         }
+        // And sun rays, which tell sky from solid by its depth.
+        let sun_rays = sun_rays::wanted(list, &self.graphics);
         if self.edges != list.edges.is_some()
+            || self.sun_rays != sun_rays
             || self.depth_of_field != depth_of_field
             || self.motion_blur != motion_blur
         {
             self.edges = list.edges.is_some();
+            self.sun_rays = sun_rays;
             self.depth_of_field = depth_of_field;
             self.motion_blur = motion_blur;
             self.fit_targets();
@@ -605,16 +626,39 @@ impl ScenePipeline {
         ) {
             self.bind_frame();
         }
-        // And the light probe volumes, each only when it's new.
+        // And the light probe volumes, each only when it's new, with the
+        // camera's own probes while ray traced GI is on.
         if self.light_probes.prepare(
             (&self.device, &self.queue),
             &list.light_probe_volumes,
             list.camera.position,
+            ray_gi::wanted(&self.graphics),
         ) {
             self.bind_frame();
         }
-        // With real-time GI, a few of their probes are traced again first.
-        if self.graphics.realtime_gi && self.light_probes.count() > 0 {
+        // With ray traced GI (renderer/ray_gi.rs), a batch of their probes
+        // is traced with rays this frame, once the ray traced scene is up
+        // to date; its pass needs the frame's bindings.
+        let ray_gi = ray_gi::traced(&self.graphics, self.light_probes.count());
+        if !ray_gi {
+            if self.ray_gi.take().is_some() {
+                // The probes traced while it was on give way to their bakes.
+                self.light_probes.restore_bakes();
+            }
+        } else if self.ray_gi.is_none() {
+            self.ray_gi = Some(Box::new(ray_gi::RayGlobalIllumination::new(
+                &self.device,
+                &self.frame_entries,
+            )));
+            self.bind_frame();
+        }
+        let ray_gi_batch = match &mut self.ray_gi {
+            Some(gi) => gi.plan(&self.queue, &self.light_probes, &self.graphics),
+            None => None,
+        };
+        // Otherwise, with real-time GI, a few of their probes are traced
+        // again first by drawing what they see.
+        if !ray_gi && self.graphics.realtime_gi && self.light_probes.count() > 0 {
             let gi = self.realtime_gi.get_or_insert_with(|| {
                 Box::new(realtime_gi::RealtimeGi::new(
                     &self.device,
@@ -682,6 +726,7 @@ impl ScenePipeline {
                 *channel *= picture_light;
             }
         }
+        self.sky_band0 = self.environment.sky_band0(sky.colors, picture_light);
         frame_uniform.night = [
             stars,
             f32::from(u8::from(sky.scattered)),
@@ -729,7 +774,7 @@ impl ScenePipeline {
         {
             self.bind_frame();
         }
-        let (volumes, volume_count) = self.light_probes.uniform();
+        let (volumes, volume_count) = self.light_probes.uniform(self.sky_band0);
         frame_uniform.volumes = volumes;
         frame_uniform.light_probes = [volume_count, u32::from(!self.sun_disc), 0, 0];
         let (scene_width, scene_height) = self.frame_targets.size;
@@ -1184,8 +1229,9 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        let traces_rays =
-            self.traces_rays(ray_shadow_uniform.is_some() || ray_ao_uniform.is_some());
+        let traces_rays = self.traces_rays(
+            ray_shadow_uniform.is_some() || ray_ao_uniform.is_some() || ray_gi_batch.is_some(),
+        );
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
             Some(timer) if self.time_gpu => timer.collect(&self.device),
@@ -1200,13 +1246,18 @@ impl ScenePipeline {
         mark(&mut encoder, FramePass::AccelerationStructures);
         let tracing = ray_tracing::prepare_scene(
             &mut self.ray_scene,
-            (&self.device, &self.meshes, &self.custom_meshes),
+            (
+                (&self.device, &self.queue),
+                &self.meshes,
+                &self.custom_meshes,
+            ),
             &mut encoder,
             (
                 traces_rays,
                 self.frame,
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
+                ray_gi_batch.is_some(),
             ),
             &draws,
         );
@@ -1411,6 +1462,24 @@ impl ScenePipeline {
         } else {
             false
         };
+        mark(&mut encoder, FramePass::RayTracedGi);
+        // The camera's probes move along with it first.
+        self.light_probes.follow_camera(&mut encoder);
+        let ray_gi_drawn = if let (Some(gi), Some(batch), Some(rays)) =
+            (&mut self.ray_gi, &ray_gi_batch, &self.ray_scene)
+            && let Some(surfaces) = &rays.surfaces
+        {
+            gi.trace(
+                (&self.device, &self.queue),
+                &mut encoder,
+                (rays.tlas(), &surfaces.buffer),
+                batch,
+                &self.light_probes,
+            );
+            true
+        } else {
+            false
+        };
         mark(&mut encoder, FramePass::VolumetricFog);
         if let Some(fog) = &self.volumetric_fog {
             fog.scatter(&mut encoder);
@@ -1570,6 +1639,22 @@ impl ScenePipeline {
                 &occlusion.depth_view,
             );
         }
+        // Sun rays streaming from the sky's gaps, added to the scene.
+        if let (Some(rays), Some(occlusion)) = (
+            sun_rays::uniform(list, &self.graphics, aspect),
+            &self.frame_targets.occlusion,
+        ) {
+            let pass = self
+                .sun_rays_pass
+                .get_or_insert_with(|| Box::new(sun_rays::SunRaysPass::new(&self.device)));
+            pass.draw(
+                &self.device,
+                &mut encoder,
+                &rays,
+                &self.frame_targets.hdr_view,
+                &occlusion.depth_view,
+            );
+        }
         mark(&mut encoder, FramePass::PostProcessing);
 
         // TAA, then motion blur, each copied over the scene, then depth of
@@ -1705,6 +1790,7 @@ impl ScenePipeline {
                     prepass,
                     prepass && ambient_occlusion,
                     ray_shadows_drawn,
+                    ray_gi_drawn,
                     self.volumetric_fog.is_some(),
                     self.gpu_particles.is_some(),
                     true,
@@ -1907,8 +1993,15 @@ impl ScenePipeline {
             .volumetric_fog
             .as_ref()
             .map(|fog| bind(&fog.frame_layout, prepass_depth, occlusion));
+        let ray_gi_group = self
+            .ray_gi
+            .as_ref()
+            .map(|gi| bind(&gi.frame_layout, prepass_depth, occlusion));
         if let Some(fog) = &mut self.volumetric_fog {
             fog.frame_group = fog_group;
+        }
+        if let Some(gi) = &mut self.ray_gi {
+            gi.frame_group = ray_gi_group;
         }
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
@@ -1942,6 +2035,12 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn probes_traced(&self) -> Option<u32> {
         self.realtime_gi.as_ref().map(|gi| gi.traced)
+    }
+
+    /// How many probes ray traced GI has traced, while it's on.
+    #[cfg(test)]
+    pub(super) fn probes_ray_traced(&self) -> Option<u64> {
+        self.ray_gi.as_ref().map(|gi| gi.probes_traced)
     }
 
     /// How many sets of scene targets are alive: 1, unless one leaked.
@@ -2076,6 +2175,7 @@ impl ScenePipeline {
                 + self.environment.bytes()
                 + self.probes.bytes()
                 + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
+                + self.ray_gi.as_ref().map_or(0, |gi| gi.bytes())
                 + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
                 + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum::<u64>()
@@ -2542,6 +2642,36 @@ impl ScenePipeline {
         }
     }
 
+    /// Asks the upload thread for every mesh (with its levels of detail)
+    /// and color texture of `list`'s items, drawn this frame or not, so
+    /// turning the camera later finds them on the GPU. Only while
+    /// background uploads are on.
+    pub(super) fn preload(&mut self, list: &DrawList) {
+        if self.uploader.is_none() {
+            return;
+        }
+        let frame = self.frame;
+        let chunked = list.chunks.iter().flat_map(|chunk| chunk.items.iter());
+        for item in list.items.iter().chain(chunked) {
+            if item.material.terrain.is_some() {
+                continue;
+            }
+            if let Shape::Mesh(source) = &item.shape {
+                let levels = (1..=source.lod_count()).filter_map(|level| source.lod(level));
+                for mesh in std::iter::once(source).chain(levels) {
+                    if !self.custom_meshes.contains_key(&mesh.key())
+                        && let Some(uploader) = &mut self.uploader
+                    {
+                        uploader.mesh(mesh);
+                    }
+                }
+            }
+            for source in material_textures(item).into_iter().flatten() {
+                self.note_texture(source, frame, false);
+            }
+        }
+    }
+
     /// How many background uploads are still on their way.
     pub(super) fn pending_uploads(&self) -> usize {
         self.uploader
@@ -2584,7 +2714,19 @@ impl ScenePipeline {
     /// drawn lately.
     pub(super) fn forget_undrawn(&mut self) {
         let frame = self.frame;
-        let recent = |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES;
+        // The first frame of the last `KEEP_UNDRAWN_SECONDS`.
+        let now = std::time::Instant::now();
+        self.frame_clock.push_back((frame, now));
+        while self
+            .frame_clock
+            .front()
+            .is_some_and(|&(_, at)| now.duration_since(at).as_secs_f32() > KEEP_UNDRAWN_SECONDS)
+        {
+            self.frame_clock.pop_front();
+        }
+        let since = self.frame_clock.front().map_or(frame, |&(first, _)| first);
+        let recent =
+            |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES || last_drawn >= since;
         self.custom_meshes
             .retain(|_, cached| recent(cached.last_drawn));
         self.textures.retain(|_, cached| recent(cached.last_drawn));

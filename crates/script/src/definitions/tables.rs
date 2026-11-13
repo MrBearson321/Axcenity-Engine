@@ -1562,6 +1562,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 doc: "Whether a SharpenEffect is drawn. Off at Low, on above.",
             },
             Field {
+                name: "SunRays",
+                ty: "boolean",
+                doc: "Whether a SunRaysEffect is drawn. Off at Low, on above.",
+            },
+            Field {
                 name: "MotionBlur",
                 ty: "EnumMotionBlur",
                 doc: "How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.",
@@ -1575,6 +1580,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 name: "RayTracedAmbientOcclusion",
                 ty: "EnumRayTracedAmbientOcclusion",
                 doc: "Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.",
+            },
+            Field {
+                name: "RayTracedGlobalIllumination",
+                ty: "EnumRayTracedGlobalIllumination",
+                doc: "Hardware ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).",
             },
         ],
         operators: &[],

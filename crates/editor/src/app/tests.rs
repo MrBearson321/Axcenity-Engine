@@ -609,6 +609,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Plugins => app.plugins_pane(ui),
                         Pane::ModelStudio => app.model_studio_pane(ui, None),
                         Pane::ObjectViewer => app.object_viewer.ui(ui, None, &app.assets),
+                        Pane::Effect => app.effect_pane(ui, None),
                         Pane::Toolbox => app.toolbox_pane(ui),
                         Pane::Inventory => app.inventory_pane(ui),
                         Pane::VersionExplorer => app
@@ -950,9 +951,17 @@ fn a_project_opened_in_the_background_opens_once_it_is_read() {
     draw_until_loaded(&mut app, &ctx);
     assert_eq!(app.title(), "Hello Touched - Axcenity Editor");
     assert!(last_line(&app).text.starts_with("Opened \"Hello Touched\""));
-    // The loading screen stays up while the scene first draws, then goes.
+    // The loading screen stays up while the scene first draws and until
+    // frames come quickly, then goes.
     assert!(app.cover_until.is_some());
     for _ in 0..FINISHING_FRAMES {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| app.frame(ui, None));
+    }
+    assert!(app.cover_until.is_some(), "frames haven't settled yet");
+    for _ in 0..=loading::SETTLED_FRAMES {
+        if app.cover_until.is_none() {
+            break;
+        }
         let _ = crate::theme::run(&ctx, Default::default(), |ui| app.frame(ui, None));
     }
     assert_eq!(app.cover_until, None);

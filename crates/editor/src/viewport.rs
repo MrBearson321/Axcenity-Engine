@@ -690,9 +690,9 @@ pub struct Viewport {
     /// The renderer being made on a thread while a project opens (see
     /// [`Self::make_renderer_in_background`]), taken on the first frame.
     making: Option<std::sync::mpsc::Receiver<TextureRenderer>>,
-    /// While a project opens behind the loading screen, its meshes and
-    /// textures go to the GPU on the renderer's upload thread, so no frame
-    /// waits for all of them (see `app/session.rs`).
+    /// While a project opens behind the loading screen: every mesh and
+    /// texture in its world is sent to the GPU, not only what's in view
+    /// (see `app/session.rs`).
     pub opening: bool,
     /// When the flying speed last changed (egui's clock, in seconds), to
     /// show and fade the speed pop-up.
@@ -743,6 +743,9 @@ pub struct Viewport {
     /// The ray tracing badge's Restart now was clicked; the app restarts
     /// the editor (`take_restart_request`).
     restart_requested: bool,
+    /// The ray tracing badge's Compare is on: the view is drawn without its
+    /// ray traced effects, to see what they add.
+    rays_hidden: bool,
     /// The LOD inspector's preview: this item (`scene::item_id`) drawn at
     /// this level whatever its size. Only what's drawn changes.
     pub lod_preview: Option<(u64, usize)>,
@@ -820,8 +823,7 @@ impl Viewport {
         }
     }
 
-    /// How many meshes and textures are still on their way to the GPU
-    /// (only while [`Self::opening`] sends them on a thread).
+    /// How many meshes and textures are still on their way to the GPU.
     pub fn pending_uploads(&self) -> usize {
         self.target
             .as_ref()
@@ -858,6 +860,7 @@ impl Viewport {
             overdraw: None,
             measure_overdraw: false,
             restart_requested: false,
+            rays_hidden: false,
             lod_preview: None,
             swing: None,
             grid_labels: Default::default(),
@@ -1437,8 +1440,15 @@ impl Viewport {
                 texture_id,
             }
         });
-        // Does nothing unless the settings changed.
-        target.renderer.set_graphics(graphics);
+        // Does nothing unless the settings changed. While the ray tracing
+        // badge's Compare is on, the effects are left out of what's drawn.
+        if self.rays_hidden {
+            target
+                .renderer
+                .set_graphics(&graphics.without_ray_traced_effects());
+        } else {
+            target.renderer.set_graphics(graphics);
+        }
         target.renderer.set_debug_view(view_mode.debug_view());
         target.renderer.preview_lod(self.lod_preview);
         self.frozen_culling = (overlays.culling || view_mode.holds_culling())
@@ -1467,7 +1477,10 @@ impl Viewport {
             for &(emitter, count) in emits {
                 self.particles.emit(world, emitter, count);
             }
-            self.particles.update(world, seconds);
+            self.particles
+                .update_against(world, seconds, &mut |skip, paths| {
+                    crate::play::particle_surfaces(world, assets, skip, paths)
+                });
         }
         // Particles keep moving without input, so keep drawing frames.
         if self.particles.is_active(world) {
@@ -1481,9 +1494,11 @@ impl Viewport {
             // Editing shows everything, whatever Play streamed.
             self.terrain.streaming = axcenity_scene::Streaming::default();
         }
-        target
-            .renderer
-            .set_background_uploads(self.terrain.streaming.settings().is_some() || self.opening);
+        // Meshes and textures go to the GPU on the renderer's upload thread
+        // and appear a few frames later, rather than stalling the frame
+        // that first draws them: turning the camera toward what's not on
+        // the GPU yet (or not drawn lately) never freezes the editor.
+        target.renderer.set_background_uploads(true);
         let render_started = Instant::now();
         // Blueprint textures are for building by: the game never shows them.
         assets.set_blueprint(
@@ -1528,6 +1543,11 @@ impl Viewport {
         draw_list.ui.extend(console);
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
         draw_list.time = shader_time(ui, &draw_list);
+        // Behind the loading screen, everything in the world is sent, seen
+        // from here or not, so the editor is ready to look around in.
+        if self.opening {
+            target.renderer.preload(&draw_list);
+        }
         if let Err(error) = target.renderer.render(&draw_list) {
             log::error!("could not render the viewport: {error:#}");
         }
@@ -1661,10 +1681,14 @@ impl Viewport {
             graphics.ray_tracing(),
             axcenity_render::adapters::adapter_can_ray_trace(),
             axcenity_render::adapters::ray_tracing_override(),
+            self.rays_hidden,
             &render.stats.ray_tracing,
-        ) && ray_badge::paint(ui, rect, &badge)
-        {
-            self.restart_requested = true;
+        ) {
+            match ray_badge::paint(ui, rect, &badge) {
+                Some(ray_badge::Click::Restart) => self.restart_requested = true,
+                Some(ray_badge::Click::Compare) => self.rays_hidden = !self.rays_hidden,
+                None => {}
+            }
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(
@@ -1875,10 +1899,18 @@ pub fn shader_time(ui: &egui::Ui, list: &axcenity_render::DrawList) -> f32 {
             .iter()
             .any(|item| item.material.surface_shader.is_some() || (windy && item.sway.is_some()));
     if moving {
-        ui.ctx().request_repaint();
+        // Swaying plants and drifting clouds don't need every frame the
+        // display can show: while nobody touches the editor they're drawn
+        // at `SCENERY_FPS`, sparing the GPU. Input brings full-rate frames
+        // back (`EditorApp::keep_frames_steady`).
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f32(1.0 / SCENERY_FPS));
     }
     ui.input(|input| input.time) as f32
 }
+
+/// Frames a second for scenery that moves on its own in an idle editor.
+const SCENERY_FPS: f32 = 30.0;
 
 /// How far a part must be from how it started to count as changed.
 const CHANGED: f32 = 0.0005;

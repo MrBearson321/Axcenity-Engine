@@ -357,6 +357,29 @@ impl MenuIcons {
     }
 }
 
+/// Where the ribbon's buttons sit across the window (Settings > Appearance >
+/// Ribbon): from the left edge, or in the middle under the centred tabs.
+/// When they don't fit, they start at the left and scroll either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RibbonAlign {
+    /// From the left edge, as in Visual Studio.
+    Left,
+    /// In the middle of the window, under the tabs.
+    #[default]
+    Centered,
+}
+
+impl RibbonAlign {
+    pub const ALL: [RibbonAlign; 2] = [RibbonAlign::Left, RibbonAlign::Centered];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RibbonAlign::Left => "Left",
+            RibbonAlign::Centered => "Centered",
+        }
+    }
+}
+
 /// Everything about the editor's look that people can change in Settings.
 /// Saved between runs as JSON; fields missing from an older save keep
 /// their defaults.
@@ -384,6 +407,8 @@ pub struct Appearance {
     pub steady_hz: u32,
     /// Where icons sit in menus.
     pub menu_icons: MenuIcons,
+    /// Where the ribbon's buttons sit across the window.
+    pub ribbon: RibbonAlign,
 }
 
 impl Default for Appearance {
@@ -399,6 +424,7 @@ impl Default for Appearance {
             hold_refresh: false,
             steady_hz: 60,
             menu_icons: MenuIcons::Left,
+            ribbon: RibbonAlign::Centered,
         }
     }
 }
@@ -771,15 +797,54 @@ pub fn menu_entry(
     icon: Option<&str>,
     text: impl Into<String>,
 ) -> egui::Atoms<'static> {
+    menu_entry_tinted(ctx, icon, None, text)
+}
+
+/// [`menu_item`] with the icon drawn in `color`, such as an Insert menu's
+/// class colours.
+pub fn menu_item_tinted(
+    ctx: &egui::Context,
+    icon: &str,
+    color: Color32,
+    text: impl Into<String>,
+) -> egui::Atoms<'static> {
+    menu_entry_tinted(ctx, Some(icon), Some(color), text)
+}
+
+fn menu_entry_tinted(
+    ctx: &egui::Context,
+    icon: Option<&str>,
+    color: Option<Color32>,
+    text: impl Into<String>,
+) -> egui::Atoms<'static> {
     use egui::{AtomExt as _, IntoAtoms as _};
-    let align = match menu_icons(ctx) {
-        MenuIcons::Left => egui::Align2::LEFT_CENTER,
-        MenuIcons::Centered => egui::Align2::CENTER_CENTER,
+    let icon = icon.unwrap_or("");
+    let font = egui::FontId::proportional(size::ICON_MEDIUM);
+    // egui paints a sized atom's text at the atom's left edge whatever its
+    // `atom_align` says (the atom's cell is exactly its size), so the
+    // column's left room is put in front of the glyph as leading space.
+    let indent = match menu_icons(ctx) {
+        MenuIcons::Left => 0.0,
+        MenuIcons::Centered if icon.is_empty() => 0.0,
+        MenuIcons::Centered => {
+            let width = ctx.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(icon.to_owned(), font.clone(), Color32::PLACEHOLDER)
+                    .rect
+                    .width()
+            });
+            ((MENU_ICON_COLUMN - width) / 2.0).max(0.0)
+        }
     };
-    let icon = egui::RichText::new(icon.unwrap_or("").to_owned())
-        .size(size::ICON_MEDIUM)
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        icon,
+        indent,
+        egui::TextFormat::simple(font, color.unwrap_or(Color32::PLACEHOLDER)),
+    );
+    let icon = egui::WidgetText::from(job)
         .atom_size(egui::vec2(MENU_ICON_COLUMN, size::ICON_MEDIUM))
-        .atom_align(align);
+        .atom_align(egui::Align2::LEFT_CENTER);
     let label: String = text.into();
     (icon, label).into_atoms()
 }
@@ -1333,6 +1398,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::FilmGrainEffect => icons::FILM_STRIP,
         ClassName::ChromaticAberrationEffect => icons::RAINBOW,
         ClassName::SharpenEffect => icons::DIAMOND,
+        ClassName::SunRaysEffect => icons::SUN,
         ClassName::MotionBlurEffect => icons::WIND,
         ClassName::ParticleEmitter => icons::SPARKLE,
         ClassName::Animator => AnimKind::Animator.icon(),
@@ -1447,6 +1513,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::FilmGrainEffect
         | ClassName::ChromaticAberrationEffect
         | ClassName::SharpenEffect
+        | ClassName::SunRaysEffect
         | ClassName::MotionBlurEffect
         | ClassName::ExposureEffect
         | ClassName::FogEffect
@@ -1722,6 +1789,7 @@ mod tests {
 
     #[test]
     fn menu_labels_start_at_the_same_place_with_or_without_an_icon() {
+        let mut placed = Vec::new();
         for place in MenuIcons::ALL {
             let ctx = test_context();
             let appearance = Appearance {
@@ -1764,7 +1832,21 @@ mod tests {
                 );
             }
             assert_eq!(icon_centres.len(), 2, "{place:?}");
+            placed.push((icon_centres[0], save));
         }
+        // Centered moves the icons to the middle of their column (they're
+        // narrower than it), and the labels stay where they were.
+        let [(left_icon, left_label), (centered_icon, centered_label)] = placed[..] else {
+            unreachable!()
+        };
+        assert!(
+            centered_icon > left_icon + 2.0,
+            "Centered icon at {centered_icon}, Left at {left_icon}"
+        );
+        assert!(
+            (centered_label - left_label).abs() < 0.5,
+            "labels at {left_label} and {centered_label}"
+        );
     }
 
     #[test]
@@ -1780,6 +1862,7 @@ mod tests {
             hold_refresh: true,
             steady_hz: 30,
             menu_icons: MenuIcons::Centered,
+            ribbon: RibbonAlign::Left,
         };
         assert_eq!(Appearance::from_text(&appearance.to_text()), appearance);
         assert_eq!(Appearance::from_text("not json"), Appearance::default());

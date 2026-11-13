@@ -442,9 +442,6 @@ impl EditorApp {
     /// Saves the selected parts and Models (and what's inside them) as a
     /// new prefab file in `assets/prefabs`.
     pub(super) fn save_prefab(&mut self) {
-        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
-            return;
-        };
         let roots: Vec<InstanceId> = self
             .selection_roots()
             .into_iter()
@@ -455,7 +452,21 @@ impl EditorApp {
                 .error("Select parts, Models, Folders or UI in the Workspace to save as a prefab.");
             return;
         }
-        let wanted = match roots.as_slice() {
+        self.save_prefab_in(&roots, PREFABS_FOLDER, "prefab");
+    }
+
+    /// Saves `roots` (and what's inside them) as a new prefab file in
+    /// `prefab_folder`, named after the one root (or "Prefab"), and makes
+    /// them a linked copy of it. `kind` names it in messages ("prefab",
+    /// "effect"). Returns the file's path.
+    pub(super) fn save_prefab_in(
+        &mut self,
+        roots: &[InstanceId],
+        prefab_folder: &str,
+        kind: &str,
+    ) -> Option<String> {
+        let folder = self.project.as_ref().map(|p| p.folder.clone())?;
+        let wanted = match roots {
             [only] => self
                 .world
                 .get(*only)
@@ -465,23 +476,26 @@ impl EditorApp {
         };
         let stem = prefab_file_stem(&wanted);
         let path = tree::numbered_names(&stem)
-            .map(|stem| format!("{PREFABS_FOLDER}/{stem}{PREFAB_SUFFIX}"))
+            .map(|stem| format!("{prefab_folder}/{stem}{PREFAB_SUFFIX}"))
             .find(|path| !folder.join(path).exists())
             .expect("numbered names never run out");
-        let text = project::write_prefab(&self.world, &roots);
+        let text = project::write_prefab(&self.world, roots);
         match project::write_script(&folder, &path, &text) {
             Ok(()) => {
-                self.toasts.success(format!("Saved the prefab `{path}`"));
+                self.toasts.success(format!("Saved the {kind} `{path}`"));
                 self.output.info(format!(
-                    "Saved the prefab `{path}`. What you saved is now a copy of it."
+                    "Saved the {kind} `{path}`. What you saved is now a copy of it."
                 ));
                 // What was saved becomes a linked copy, in the same step.
                 let before = self.world.clone();
-                self.link_saved_prefab(&roots, &path, text, before);
+                self.link_saved_prefab(roots, &path, text, before);
+                Some(path)
             }
-            Err(err) => self
-                .output
-                .error(format!("Could not save the prefab `{path}`: {err}")),
+            Err(err) => {
+                self.output
+                    .error(format!("Could not save the {kind} `{path}`: {err}"));
+                None
+            }
         }
     }
 

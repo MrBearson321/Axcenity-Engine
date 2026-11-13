@@ -35,7 +35,7 @@ To keep the server cheap, `Replicator::frame` skips Instances whose `Instance::r
 
 A listen server or single-player device has the whole world but doesn't draw all of it. `Streaming::step` (each frame) works out what's in range of the camera, and `build_draw_list` leaves the rest out:
 
-- **Meshes and textures**: what stops being drawn leaves the GPU after `KEEP_UNDRAWN_FRAMES`. Coming back in range, `Renderer::set_background_uploads` uploads them on a thread (`renderer/uploads.rs`): the mesh shows a few frames later, and a texture draws white until it's there. Built-in shapes share one GPU mesh, so they're just left out.
+- **Meshes and textures**: what stops being drawn leaves the GPU after `KEEP_UNDRAWN_FRAMES` and `KEEP_UNDRAWN_SECONDS` (both must pass). Coming back in range, `Renderer::set_background_uploads` uploads them on a thread (`renderer/uploads.rs`): the mesh shows a few frames later, and a texture draws white until it's there. Built-in shapes share one GPU mesh, so they're just left out.
 - **Terrain chunks** out of range are dropped; in range, `TerrainCache` builds them on a thread (`ChunkWorker`) and draws them when ready. The loading screen's `prepare` builds them right away, so the first frame has ground. Foliage keeps its own distance cull.
 - **Physics** (`Physics::set_far_sleep`): dynamic bodies further than the unload radius from the camera and every joined player's character sleep, and wake when something comes near. Anchored parts and colliders stay.
 

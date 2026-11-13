@@ -599,12 +599,16 @@ declare extern type UserGameSettings with
 	ChromaticAberration: boolean
 	--- Whether a SharpenEffect is drawn. Off at Low, on above.
 	Sharpen: boolean
+	--- Whether a SunRaysEffect is drawn. Off at Low, on above.
+	SunRays: boolean
 	--- How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.
 	MotionBlur: EnumMotionBlur
 	--- Hardware ray traced sun shadows: Off, Low (1 ray per pixel), Medium (2) or High (4). Off at every preset. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the shadow maps are drawn. Lighting's ShadowSoftness still sets how soft they are.
 	RayTracedShadows: EnumRayTracedShadows
 	--- Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
+	--- Hardware ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).
+	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1312,6 +1316,53 @@ declare extern type EnumParticleEmitterShapeStyleItems with
 	Surface: EnumParticleEmitterShapeStyle
 end
 
+--- One choice of `Enum.ParticleEmitterShapeInOut`.
+declare extern type EnumParticleEmitterShapeInOut extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleEmitterShapeInOut`.
+declare extern type EnumParticleEmitterShapeInOutItems with
+	Outward: EnumParticleEmitterShapeInOut
+	Inward: EnumParticleEmitterShapeInOut
+	InAndOut: EnumParticleEmitterShapeInOut
+end
+
+--- One choice of `Enum.ParticleEmitterEmitOn`.
+declare extern type EnumParticleEmitterEmitOn extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleEmitterEmitOn`.
+declare extern type EnumParticleEmitterEmitOnItems with
+	Always: EnumParticleEmitterEmitOn
+	Birth: EnumParticleEmitterEmitOn
+	Death: EnumParticleEmitterEmitOn
+	Collision: EnumParticleEmitterEmitOn
+end
+
+--- One choice of `Enum.ParticleFlipbookLayout`.
+declare extern type EnumParticleFlipbookLayout extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleFlipbookLayout`.
+declare extern type EnumParticleFlipbookLayoutItems with
+	None: EnumParticleFlipbookLayout
+	Grid2x2: EnumParticleFlipbookLayout
+	Grid4x4: EnumParticleFlipbookLayout
+	Grid8x8: EnumParticleFlipbookLayout
+end
+
+--- One choice of `Enum.ParticleFlipbookMode`.
+declare extern type EnumParticleFlipbookMode extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleFlipbookMode`.
+declare extern type EnumParticleFlipbookModeItems with
+	Loop: EnumParticleFlipbookMode
+	OneShot: EnumParticleFlipbookMode
+	PingPong: EnumParticleFlipbookMode
+	Random: EnumParticleFlipbookMode
+end
+
 --- One choice of `Enum.RayTracedAmbientOcclusion`.
 declare extern type EnumRayTracedAmbientOcclusion extends EnumItem with
 end
@@ -1322,6 +1373,18 @@ declare extern type EnumRayTracedAmbientOcclusionItems with
 	Low: EnumRayTracedAmbientOcclusion
 	Medium: EnumRayTracedAmbientOcclusion
 	High: EnumRayTracedAmbientOcclusion
+end
+
+--- One choice of `Enum.RayTracedGlobalIllumination`.
+declare extern type EnumRayTracedGlobalIllumination extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedGlobalIllumination`.
+declare extern type EnumRayTracedGlobalIlluminationItems with
+	Off: EnumRayTracedGlobalIllumination
+	Low: EnumRayTracedGlobalIllumination
+	Medium: EnumRayTracedGlobalIllumination
+	High: EnumRayTracedGlobalIllumination
 end
 
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
@@ -1371,7 +1434,12 @@ declare extern type EnumLibrary with
 	RayTracedShadows: EnumRayTracedShadowsItems
 	ParticleEmitterShape: EnumParticleEmitterShapeItems
 	ParticleEmitterShapeStyle: EnumParticleEmitterShapeStyleItems
+	ParticleEmitterShapeInOut: EnumParticleEmitterShapeInOutItems
+	ParticleEmitterEmitOn: EnumParticleEmitterEmitOnItems
+	ParticleFlipbookLayout: EnumParticleFlipbookLayoutItems
+	ParticleFlipbookMode: EnumParticleFlipbookModeItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
+	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -3913,6 +3981,17 @@ declare extern type SharpenEffect extends Instance with
 	[string]: any
 end
 
+--- Inside Lighting: shafts of light streaming from the sun past whatever is in front of it, such as bright sky between leaves or a window, worked out on screen from what's drawn (so they show only while the sun is in or near the view). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.SunRays).
+declare extern type SunRaysEffect extends Instance with
+	--- Whether it's drawn. Off (or with no SunRaysEffect in Lighting) it costs nothing.
+	Enabled: boolean
+	--- How bright the shafts are, from 0 (none) to 1 (strong). 0.25 by default.
+	Intensity: number
+	--- How far the shafts reach from the sun across the picture, from 0 (a glow around it) to 1 (the whole way across). 0.5 by default.
+	Spread: number
+	[string]: any
+end
+
 --- Inside Lighting: streaks what moves across the view along its motion, as a camera's shutter does: parts that move, posed characters, and everything when the camera moves. What moves with the camera stays sharp. The first enabled one in Lighting is used. The player's graphics settings choose how finely it's drawn (UserGameSettings.MotionBlur); it's off at Low.
 declare extern type MotionBlurEffect extends Instance with
 	--- Whether it's drawn. Off (or with no MotionBlurEffect in Lighting) it costs nothing.
@@ -4116,14 +4195,40 @@ declare extern type ParticleEmitter extends Instance with
 	TransparencyOverLife: NumberSequence?
 	--- A NumberSequence that multiplies Speed over each particle's life, from birth (0) to death (1): how far it moves each moment, with Acceleration and Drag still acting on its velocity. Envelopes aren't used. nil (the default) keeps Speed.
 	SpeedOverLife: NumberSequence?
-	--- Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). They still head along Direction within SpreadAngle.
+	--- Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). A Box's particles head along Direction within SpreadAngle; the round shapes' head away from their middle (see ShapeInOut).
 	Shape: EnumParticleEmitterShape | "Box" | "Sphere" | "Cylinder" | "Disc"
 	--- `Enum.ParticleEmitterShapeStyle.Volume` (the default) gives off particles anywhere inside the Shape; `Surface` only on it: a box's faces, the sphere, a cylinder's round side or a disc's rim.
 	ShapeStyle: EnumParticleEmitterShapeStyle | "Volume" | "Surface"
+	--- Which way particles head from the Shape, within SpreadAngle: `Enum.ParticleEmitterShapeInOut.Outward` (the default: along Direction for a Box; away from the middle for a Sphere, and from the upright axis for a Cylinder or Disc), `Inward` (the other way) or `InAndOut` (either, at random).
+	ShapeInOut: EnumParticleEmitterShapeInOut | "Outward" | "Inward" | "InAndOut"
+	--- How much of the part's own velocity each particle starts with, from 0 (none, the default) to 1 (all of it), so sparks from a moving car keep up with it.
+	VelocityInheritance: number
+	--- On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. Colliding emitters move their particles on the CPU, at most 4,000 each. Default false.
+	Collides: boolean
+	--- How much of a colliding particle's speed into a surface it keeps, back out of it: 0 lands dead, 1 bounces as high as it fell. Speed along the surface is kept. Default 0.5.
+	Bounce: number
+	--- How much of its life a colliding particle loses each time it lands, from 0 (none, the default) to 1 (it dies where it lands).
+	LifetimeLoss: number
+	--- Inside another ParticleEmitter, `Enum.ParticleEmitterEmitOn.Birth`, `Death` or `Collision` makes this one a sub-emitter: while Enabled it gives off EmitCount particles where each of its parent's particles is born, dies or lands, heading out along its own Direction (turned by its Orientation), and nothing by its Rate. `Always` (the default) gives off as any emitter does.
+	EmitOn: EnumParticleEmitterEmitOn | "Always" | "Birth" | "Death" | "Collision"
+	--- How many particles a sub-emitter (EmitOn Birth, Death or Collision) gives off at each of its parent's events. Default 10.
+	EmitCount: number
+	--- A NumberSequence of bursts while Enabled: each keypoint gives off Value particles (give or take Envelope) at its Time of every Duration seconds, over and over. Rate still adds its steady flow. A keypoint at time 1 is the next loop's start, so it gives off nothing: put that count at time 0. nil (the default) is no bursts.
+	Bursts: NumberSequence?
+	--- How long one loop of Bursts takes, in seconds (default 1, at least 0.05).
+	Duration: number
 	--- How far each particle is turned when it's born, in degrees.
 	Rotation: number
 	--- How fast particles spin, in degrees a second.
 	RotSpeed: number
+	--- Cuts the Texture into a grid of frames that each particle shows one at a time, read left to right, then top to bottom: `Enum.ParticleFlipbookLayout.Grid2x2`, `Grid4x4` or `Grid8x8` (4, 16 or 64 frames). `None` (the default) shows the whole Texture. The built-in ParticleType pictures have no frames, so it needs a Texture.
+	FlipbookLayout: EnumParticleFlipbookLayout | "None" | "Grid2x2" | "Grid4x4" | "Grid8x8"
+	--- Which frame a particle shows as it ages: `Enum.ParticleFlipbookMode.Loop` (the default: in order at FlipbookFramerate, then from the first again), `OneShot` (every frame once over its life, whatever the frame rate), `PingPong` (in order, then back) or `Random` (a frame at random, again at the frame rate).
+	FlipbookMode: EnumParticleFlipbookMode | "Loop" | "OneShot" | "PingPong" | "Random"
+	--- How many flipbook frames a second each particle moves on (default 1). OneShot ignores it.
+	FlipbookFramerate: number
+	--- When true, each particle starts on a frame of its own instead of the first (Loop and PingPong), so a puff of smoke doesn't animate in step.
+	FlipbookStartRandom: boolean
 	--- From 0 (particles paint over what's behind them, like smoke) to 1 (they add their light, like fire and sparks).
 	LightEmission: number
 	--- How brightly particles glow: 1 is their color as it is; higher values bloom.
@@ -5527,7 +5632,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "SunRaysEffect") -> SunRaysEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.
