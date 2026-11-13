@@ -89,9 +89,9 @@ pub use import_presets::{
     sidecar_with_preset,
 };
 pub use light_probes::{
-    LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, decode_light_probes,
-    encode_light_probes, is_light_probes_file, light_probes_path, read_light_probes,
-    write_light_probes,
+    LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, SkyLight,
+    decode_light_probes, encode_light_probes, is_light_probes_file, light_probes_path,
+    read_light_probes, write_light_probes,
 };
 pub use loading::{LoadStatus, LoadTicket, Slot};
 pub use material::{

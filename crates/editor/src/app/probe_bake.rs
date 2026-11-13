@@ -43,6 +43,8 @@ struct VolumeBake {
     points: Vec<Vec3>,
     path: String,
     light: Vec<[[f32; 3]; 4]>,
+    /// The sky's share of each probe's light, kept apart (roadmap R18.3).
+    sky: Vec<[[f32; 3]; 4]>,
     /// The probes inside a solid as the bake started (roadmap R18.2).
     invalid: Vec<u32>,
 }
@@ -64,6 +66,9 @@ pub(super) struct ProbeBake {
     reflections: VecDeque<ReflectionBake>,
     /// Kept between the light probes, so the scene is uploaded once.
     baker: Option<LightProbeBaker>,
+    /// The sky's average light the light probes were drawn with (roadmap
+    /// R18.3), once one has been.
+    baked_sky: Option<[f32; 3]>,
     /// The `Bake` each finished probe gets, applied as one undo step.
     bakes: Vec<(InstanceId, String)>,
     volume_count: usize,
@@ -209,6 +214,7 @@ impl EditorApp {
                     probe,
                     counts: grid.counts,
                     light: Vec::with_capacity(grid.points.len()),
+                    sky: Vec::with_capacity(grid.points.len()),
                     points: grid.points,
                     path,
                 })
@@ -258,6 +264,7 @@ impl EditorApp {
             volumes,
             reflections,
             baker: None,
+            baked_sky: None,
             bakes: Vec::new(),
             volumes_baked: 0,
             light_total,
@@ -308,7 +315,7 @@ impl EditorApp {
     fn bake_next(&mut self, bake: &mut ProbeBake, device: &wgpu::Device, queue: &wgpu::Queue) {
         if let Some(volume) = bake.volumes.front_mut() {
             let baker = bake.baker.get_or_insert_with(|| {
-                LightProbeBaker::new(
+                LightProbeBaker::keeping_sky_apart(
                     device,
                     queue,
                     &bake.list,
@@ -320,6 +327,7 @@ impl EditorApp {
             // A probe inside a solid is left out anyway: no need to draw it.
             if volume.invalid.binary_search(&(index as u32)).is_ok() {
                 volume.light.push([[0.0; 3]; 4]);
+                volume.sky.push([[0.0; 3]; 4]);
                 bake.light_done += 1;
                 if volume.light.len() == volume.points.len() {
                     let volume = bake.volumes.pop_front().expect("the front volume");
@@ -334,8 +342,10 @@ impl EditorApp {
             let started = Instant::now();
             let point = volume.points[index];
             match baker.bake(point) {
-                Ok(light) => {
-                    volume.light.push(light);
+                Ok(baked) => {
+                    volume.light.push(baked.light);
+                    volume.sky.push(baked.sky.unwrap_or_default());
+                    bake.baked_sky = Some(baker.baked_sky());
                     bake.light_done += 1;
                     bake.light_seconds += started.elapsed().as_secs_f64();
                 }
@@ -404,6 +414,15 @@ impl EditorApp {
         let Some(probes) =
             axcenity_assets::LightProbes::new(volume.counts, bake.fingerprint, volume.light)
                 .and_then(|probes| probes.with_invalid(volume.invalid))
+                .and_then(|probes| match bake.baked_sky {
+                    // Only once a probe was drawn is the sky known; a
+                    // volume of nothing but invalid probes keeps it fixed.
+                    Some(band0) => probes.with_sky(axcenity_assets::SkyLight {
+                        band0,
+                        probes: std::sync::Arc::new(volume.sky),
+                    }),
+                    None => Some(probes),
+                })
         else {
             self.output.error(format!(
                 "Could not bake the light probes in {part_name}: the light came back \

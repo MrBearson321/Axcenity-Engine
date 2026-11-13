@@ -40,7 +40,16 @@ Click **Compare** on the badge to see the view without the ray traced effects, a
 
 - **Ray traced ambient occlusion** darkens corners, gaps and the ground under objects. Lighting's **AmbientOcclusion** still sets how strong that is.
 - **The sky.** A sky picture (**Lighting > SkyImage**, such as the default sky) looks real but keeps its own colours. Changing ClockTime moves the sun and darkens the picture toward night, but sunsets stay the picture's. For a sky that turns orange at sunset and dark at night, click **Follow time of day** under the SkyImage row. It adds an **Atmosphere**.
-- **Bounced light.** Light Probes give bounced light. Bake them with **Bake Probes** on the World tab. With **Ray traced GI** (Settings > Graphics > Ray tracing) on, rays keep relighting them as things move and the sun goes down, so a red wall throws red light and a room darkens when its door closes. Start at Low: it costs more the more probes your world has. Reflection Probes still give reflections; bake them after big changes.
+- **Bounced light.** Turn on **Ray traced GI** (Settings > Graphics > Ray tracing). Rays light a grid of light probes around the camera every frame, so a red wall throws red light, a room darkens when its door closes and light follows the sun as it goes down. Nothing needs placing or baking. Light Probes parts you've baked are kept up to date too. Reflection Probes still give reflections; bake them after big changes.
+
+## Light a room
+
+Light gets into a room through its windows and doors.
+
+- **Let the sun in.** A low sun (**Lighting > ClockTime** around 8 or 17) shines through the windows onto the floor. Thick clouds (**Clouds > Cover** near 1) hide the sun, so the room gets only soft sky light.
+- **Turn on Ray traced GI.** The sunny patch on the floor then lights the rest of the room, warm off a wooden floor, and corners away from the windows stay darker. Without it, a room gets the sky's light as if it had no walls, so it looks flat and bluish.
+- **Light shafts.** Beams in the air need something in the air to show in. Give **Lighting** an **Atmosphere** and raise its **Density** and **Haze**. **Volumetric fog** (Settings > Graphics, on at Ultra) draws the beams.
+- **Without a ray tracing card**, put a **Light Probes** part around the room's inside with a small **Spacing** (2 to 3 studs), and click **Bake Probes**.
 
 ## What it costs
 

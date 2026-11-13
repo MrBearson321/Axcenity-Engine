@@ -45,7 +45,7 @@ use glyphon::{
 };
 pub use gpu_particles::MAX_GPU_PARTICLES;
 pub use gpu_timer::FramePass;
-pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, LightProbeBaker, PROBE_BAKE_SIZE};
+pub use probe_bake::{BakedProbe, LIGHT_PROBE_BAKE_SIZE, LightProbeBaker, PROBE_BAKE_SIZE};
 pub use ray_tracing::RayTracingStats;
 pub use surface_shaders::{ShaderError, SurfaceShader};
 
@@ -553,6 +553,13 @@ impl TextureRenderer {
     /// What the GPU can do, which the graphics settings are lowered to fit.
     pub fn capabilities(&self) -> &Capabilities {
         &self.scene.capabilities
+    }
+
+    /// The sky's average light in the last frame drawn (linear red, green
+    /// and blue; the first of its spherical harmonics): what a light probe
+    /// bake's [`ProbeSky::band0`](crate::ProbeSky::band0) is measured as.
+    pub fn sky_band0(&self) -> [f32; 3] {
+        self.scene.sky_band0.to_array()
     }
 
     /// Uses `settings` from the next frame (see [`GraphicsSettings::effective`]).

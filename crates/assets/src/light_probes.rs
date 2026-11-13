@@ -20,7 +20,11 @@
 //! out of date. `invalid`, if there, lists the probes (by their place in
 //! `probes`) that stood inside a solid part or under the ground when baked;
 //! surfaces leave them out of their blend (roadmap R18.2). Bakes from before
-//! it have none.
+//! it have none. `sky`, if there, keeps apart the share of each probe's
+//! light that came from the sky (`probes`, as above) and how bright the sky
+//! was when baked (`band0`, the average of its light, red, green and blue),
+//! so surfaces can follow a sky that dims or changes color without baking
+//! again (roadmap R18.3). Bakes from before it keep all their light fixed.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -66,6 +70,18 @@ pub struct LightProbes {
     /// The probes inside a solid when baked, by their place in `probes`, in
     /// order (roadmap R18.2).
     pub invalid: Arc<Vec<u32>>,
+    /// The sky's share of each probe's light, kept apart (roadmap R18.3).
+    pub sky: Option<SkyLight>,
+}
+
+/// The share of a bake's light that came from the sky, and the sky it came
+/// from (see the module's documentation).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkyLight {
+    /// The average of the sky's light when baked, red, green and blue.
+    pub band0: [f32; 3],
+    /// Each probe's light from the sky, in the same order as the bake's.
+    pub probes: Arc<Vec<ProbeLight>>,
 }
 
 impl LightProbes {
@@ -84,7 +100,25 @@ impl LightProbes {
             fingerprint,
             probes: Arc::new(probes),
             invalid: Arc::new(Vec::new()),
+            sky: None,
         })
+    }
+
+    /// The bake with `sky` as its sky's share of the light, or `None` if
+    /// that has a different number of probes or a value isn't a number.
+    pub fn with_sky(mut self, sky: SkyLight) -> Option<Self> {
+        let finite = sky
+            .probes
+            .iter()
+            .flatten()
+            .flatten()
+            .chain(&sky.band0)
+            .all(|c| c.is_finite());
+        if !finite || sky.probes.len() != self.probes.len() {
+            return None;
+        }
+        self.sky = Some(sky);
+        Some(self)
     }
 
     /// The bake with the probes at `invalid` (places in `probes`, in any
@@ -123,6 +157,15 @@ struct File {
     probes: Vec<ProbeLight>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     invalid: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sky: Option<SkyFile>,
+}
+
+/// A bake file's `sky`.
+#[derive(Serialize, Deserialize)]
+struct SkyFile {
+    band0: [f32; 3],
+    probes: Vec<ProbeLight>,
 }
 
 /// Reads the bake at `path` inside `folder`, or explains why it can't. Not
@@ -154,9 +197,20 @@ pub fn decode_light_probes(text: &str) -> Result<LightProbes, String> {
              {MAX_LIGHT_PROBES_PER_SIDE}), or a value that isn't a number"
         )
     })?;
-    probes
+    let probes = probes
         .with_invalid(file.invalid)
-        .ok_or_else(|| format!("it lists an invalid probe past its {count} probes"))
+        .ok_or_else(|| format!("it lists an invalid probe past its {count} probes"))?;
+    match file.sky {
+        Some(sky) => probes
+            .with_sky(SkyLight {
+                band0: sky.band0,
+                probes: Arc::new(sky.probes),
+            })
+            .ok_or_else(|| {
+                format!("its sky light isn't one for each of its {count} probes, or isn't a number")
+            }),
+        None => Ok(probes),
+    }
 }
 
 /// `probes` as a bake file's text.
@@ -166,6 +220,10 @@ pub fn encode_light_probes(probes: &LightProbes) -> String {
         fingerprint: format!("{:016x}", probes.fingerprint),
         probes: probes.probes.as_ref().clone(),
         invalid: probes.invalid.as_ref().clone(),
+        sky: probes.sky.as_ref().map(|sky| SkyFile {
+            band0: sky.band0,
+            probes: sky.probes.as_ref().clone(),
+        }),
     };
     serde_json::to_string(&file).expect("plain numbers always encode")
 }
@@ -263,6 +321,37 @@ mod tests {
             r#"{"counts":[1,1,1],"fingerprint":"0","probes":[[[0,0,0],[0,0,0],[0,0,0],[0,0,0]]]}"#;
         let read = decode_light_probes(old).unwrap();
         assert!(read.invalid.is_empty());
-        assert!(!encode_light_probes(&read).contains("invalid"));
+        assert!(read.sky.is_none(), "all its light stays fixed");
+        let text = encode_light_probes(&read);
+        assert!(!text.contains("invalid") && !text.contains("sky"));
+    }
+
+    /// R18.3: the sky's share of the light and the sky it came from round
+    /// trip, and must be one for each probe.
+    #[test]
+    fn a_bakes_sky_light_round_trips_and_must_match_its_probes() {
+        let sky = SkyLight {
+            band0: [0.5, 0.75, 1.25],
+            probes: Arc::new((0..2).map(|i| probe(i + 3)).collect()),
+        };
+        let baked = LightProbes::new([2, 1, 1], 0, (0..2).map(probe).collect())
+            .unwrap()
+            .with_sky(sky.clone())
+            .unwrap();
+        let read = decode_light_probes(&encode_light_probes(&baked)).unwrap();
+        assert_eq!(read.sky, Some(sky.clone()));
+        let one = LightProbes::new([1, 1, 1], 0, vec![probe(0)]).unwrap();
+        assert!(one.clone().with_sky(sky).is_none(), "two for one probe");
+        let broken = SkyLight {
+            band0: [f32::NAN, 0.0, 0.0],
+            probes: Arc::new(vec![probe(0)]),
+        };
+        assert!(one.with_sky(broken).is_none());
+        let short = r#"{"counts":[1,1,1],"fingerprint":"0","probes":[[[0,0,0],[0,0,0],[0,0,0],[0,0,0]]],"sky":{"band0":[1,1,1],"probes":[]}}"#;
+        assert!(
+            decode_light_probes(short)
+                .unwrap_err()
+                .contains("sky light")
+        );
     }
 }

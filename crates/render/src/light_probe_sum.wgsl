@@ -87,7 +87,9 @@ fn sum_probe(
         // Its w (1 for a probe baked inside a solid, R18.2) stays.
         light_probes[first] = vec4<f32>(sums[0][0].rgb * scale, light_probes[first].w);
         for (var k = 1u; k < 4u; k++) {
-            light_probes[first + k] = vec4<f32>(sums[0][k].rgb * scale * (2.0 / 3.0), 0.0);
+            // The second's w marks it traced now, so its sky light isn't
+            // added again (lighting.wgsl, roadmap R18.3).
+            light_probes[first + k] = vec4<f32>(sums[0][k].rgb * scale * (2.0 / 3.0), select(0.0, 1.0, k == 1u));
         }
     }
 }

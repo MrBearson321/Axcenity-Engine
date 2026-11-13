@@ -494,11 +494,11 @@ pub enum RayTracedGlobalIllumination {
     /// Light probes keep their bakes, or real-time GI's drawn faces (as its
     /// own setting says).
     Off,
-    /// 32 probes a frame, 64 rays each.
+    /// 128 probes a frame, 64 rays each.
     Low,
-    /// 64 probes a frame, 128 rays each.
+    /// 256 probes a frame, 128 rays each.
     Medium,
-    /// 128 probes a frame, 256 rays each.
+    /// 512 probes a frame, 256 rays each.
     High,
 }
 
@@ -523,9 +523,9 @@ impl RayTracedGlobalIllumination {
     pub fn probes_per_frame(self) -> u32 {
         match self {
             RayTracedGlobalIllumination::Off => 0,
-            RayTracedGlobalIllumination::Low => 32,
-            RayTracedGlobalIllumination::Medium => 64,
-            RayTracedGlobalIllumination::High => 128,
+            RayTracedGlobalIllumination::Low => 128,
+            RayTracedGlobalIllumination::Medium => 256,
+            RayTracedGlobalIllumination::High => 512,
         }
     }
 
@@ -2036,7 +2036,7 @@ mod tests {
         );
         assert_eq!(
             RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::probes_per_frame),
-            [0, 32, 64, 128]
+            [0, 128, 256, 512]
         );
     }
 

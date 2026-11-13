@@ -103,6 +103,12 @@ struct Volume {
     // xyz: how many probes stand along the box's own axes, each in the
     // middle of its cell, w: its first probe in `light_probes`.
     grid: vec4<u32>,
+    // xyz: how much of its probes' sky light to add, per channel (the sky
+    // drawn now over the one it was baked with, minus one), w: 1 to add it
+    // (roadmap R18.3).
+    sky: vec4<f32>,
+    // x: where its first probe's sky light is in `light_probes`.
+    sky_first: vec4<u32>,
 }
 
 // The most reflection probes drawn at once. Must match `MAX_PROBES` in
@@ -677,7 +683,10 @@ fn sky_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
 // probes around it (blended by how near each is), fading in over the
 // volume's blend distance from its faces. Smaller boxes come first, and
 // the bigger ones and then the sky (times the environment intensity) fill
-// what they leave.
+// what they leave. A probe marked unusable (the w of its first coefficient
+// over a half: 1 when baked inside a solid, 2 when ray traced GI found it
+// inside something or hasn't traced it yet; ray_gi.wgsl) is left out and
+// the others share its part; where all eight are, the volume gives way.
 fn surrounding_diffuse(position: vec3<f32>, n: vec3<f32>, environment: f32) -> vec3<f32> {
     var color = vec3<f32>(0.0);
     var left = 1.0;
@@ -691,7 +700,6 @@ fn surrounding_diffuse(position: vec3<f32>, n: vec3<f32>, environment: f32) -> v
         if inside <= 0.0 {
             continue;
         }
-        let weight = left * smoothstep(0.0, 1.0, inside / max(volume.extent.w, 0.001));
         // Where it is in the grid, in probes: between the two probes nearest
         // it along each axis, held at the outermost ones near the faces.
         let counts = vec3<f32>(volume.grid.xyz);
@@ -703,26 +711,40 @@ fn surrounding_diffuse(position: vec3<f32>, n: vec3<f32>, environment: f32) -> v
         var c1 = vec3<f32>(0.0);
         var c2 = vec3<f32>(0.0);
         var c3 = vec3<f32>(0.0);
-        // A probe baked inside a solid (its first w is 1, R18.2) is left
-        // out and the others' shares made up to the whole again.
+        // A probe left out (its first w over a half: 1 for one baked
+        // inside a solid, R18.2; 2 for one inside something by ray traced
+        // GI's rays, or not traced yet) gives its share to the others.
         var valid = 0.0;
         for (var corner = 0u; corner < 8u; corner++) {
             let far = vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u);
             let at = select(low, high, far);
             let shares = select(1.0 - t, t, far);
-            let probe = 4u * (volume.grid.w + at.x + volume.grid.x * (at.y + volume.grid.y * at.z));
+            let index = at.x + volume.grid.x * (at.y + volume.grid.y * at.z);
+            let probe = 4u * (volume.grid.w + index);
             let first = light_probes[probe];
-            let share = shares.x * shares.y * shares.z * (1.0 - first.w);
+            let second = light_probes[probe + 1u];
+            let share = shares.x * shares.y * shares.z * select(1.0, 0.0, first.w > 0.5);
             valid += share;
             c0 += share * first.rgb;
-            c1 += share * light_probes[probe + 1u].rgb;
+            c1 += share * second.rgb;
             c2 += share * light_probes[probe + 2u].rgb;
             c3 += share * light_probes[probe + 3u].rgb;
+            // The sky's share follows the sky drawn now, unless real-time
+            // or ray traced GI traced the probe again (its second w is 1).
+            if volume.sky.w > 0.5 && second.w < 0.5 {
+                let sky = 4u * (volume.sky_first.x + index);
+                let scaled = share * volume.sky.xyz;
+                c0 += scaled * light_probes[sky].rgb;
+                c1 += scaled * light_probes[sky + 1u].rgb;
+                c2 += scaled * light_probes[sky + 2u].rgb;
+                c3 += scaled * light_probes[sky + 3u].rgb;
+            }
         }
-        // All eight inside solids: what's around the volume lights it.
+        // All eight left out: what's around the volume lights it.
         if valid <= 0.0001 {
             continue;
         }
+        let weight = left * smoothstep(0.0, 1.0, inside / max(volume.extent.w, 0.001));
         let light = (c0 * 0.282095 + (c1 * n.y + c2 * n.z + c3 * n.x) * 0.488603) / valid;
         color += weight * max(light, vec3<f32>(0.0));
         left -= weight;
