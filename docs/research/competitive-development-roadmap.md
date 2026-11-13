@@ -607,7 +607,7 @@ Develop a unified authoring experience around existing CPU and GPU particle syst
 ## 6.5 Advanced world creation
 
 **Priority:** Medium-High
-**Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Streaming diagnostics in the editor are built: the Streaming overlay (R16) shows each unit by where it stands from the camera, what's always there, both radii, what a player standing there has and units too big to stream well, while editing too. Missing: region management and data layers.
+**Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Streaming diagnostics in the editor are built: the Streaming overlay (R16) shows each unit by where it stands from the camera, what's always there, both radii, what a player standing there has and units too big to stream well, while editing too. Missing: region management and data layers; their plan is [world-regions-r16.md](world-regions-r16.md) (data layers as tags listed as layers, regions set aside in the editor, streaming while editing, `DataLayerService`; stages R16.2–R16.4).
 
 Improve large-world authoring and environmental systems.
 
