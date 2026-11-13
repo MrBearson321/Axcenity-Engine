@@ -245,7 +245,7 @@ impl EditorApp {
                  a volume's Spacing."
             ));
         }
-        self.probe_bake = Some(ProbeBake {
+        self.probe_bake = Some(Box::new(ProbeBake {
             folder,
             list: self.bake_scene(),
             fingerprint: axcenity_scene::light_bake_fingerprint(&self.world),
@@ -264,7 +264,7 @@ impl EditorApp {
             reflection_seconds: 0.0,
             cancel: false,
             window_open: true,
-        });
+        }));
     }
 
     /// Bakes for about `budget` (at least one probe), and finishes the bake
@@ -402,7 +402,7 @@ impl EditorApp {
 
     /// Names the finished bakes in their probes' `Bake`, one undo step, and
     /// says what was baked.
-    fn finish_probe_bake(&mut self, bake: ProbeBake) {
+    fn finish_probe_bake(&mut self, bake: Box<ProbeBake>) {
         self.history.seal();
         for (id, path) in &bake.bakes {
             let current = self

@@ -371,7 +371,7 @@ pub struct EditorApp {
     bake_probes_asked: bool,
     /// The probe bake in progress, a little each frame
     /// (`app/probe_bake.rs`).
-    probe_bake: Option<probe_bake::ProbeBake>,
+    probe_bake: Option<Box<probe_bake::ProbeBake>>,
     /// The baked LightProbeVolumes out of date, as of a history revision
     /// (`app/probes.rs`).
     stale_light_probes: Option<((u64, bool), Vec<InstanceId>)>,
