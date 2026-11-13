@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Ray traced light shafts in volumetric fog"
+details = "With volumetric fog and ray traced shadows both on, the sunlight in the fog near the camera is traced by rays instead of read from the shadow maps, so shafts through windows, between leaves and through gaps are sharp, have no shadow-map leaks and show even with shadow quality Off. Glass lets the light through. Past the ray tracing distance the shadow maps take over smoothly."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

@@ -123,6 +123,37 @@ const CELL_POINTS = array<vec3<f32>, 8>(
 // made shafts step from cell to cell, and the steps crawled as the view
 // moved.
 fn cell_sun_visibility(id: vec3<u32>) -> f32 {
+    // Traced by rays (LE3), fading into the cascades toward the reach.
+    let traced = traced_air(id);
+    let near = slice_distance(f32(id.z));
+    if traced >= 0.0 {
+        let reach = frame.ray_shadows.z;
+        let weight = 1.0 - smoothstep(reach * 0.85, reach, near);
+        if weight >= 1.0 {
+            return traced;
+        }
+        return mix(cell_cascade_sun(id), traced, weight);
+    }
+    return cell_cascade_sun(id);
+}
+
+// How much sunlight reaches cell `id`'s air by ray_shadows.wgsl's
+// `cs_air`, or -1 where it isn't traced (ray traced shadows off, or past
+// their reach).
+fn traced_air(id: vec3<u32>) -> f32 {
+    let start = frame.fog.dust_count.y;
+    if start == 0u {
+        return -1.0;
+    }
+    let word = ray_shadow_mask[start + id.x + GRID.x * (id.y + GRID.y * id.z)];
+    if word == 0xffffffffu {
+        return -1.0;
+    }
+    return f32(word) / 65535.0;
+}
+
+// The same from the sun's shadow maps.
+fn cell_cascade_sun(id: vec3<u32>) -> f32 {
     if frame.shadow.x == 0.0 {
         return 1.0;
     }

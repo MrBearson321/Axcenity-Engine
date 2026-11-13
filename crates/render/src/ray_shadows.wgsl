@@ -24,7 +24,8 @@ struct RayShadows {
     sun: vec4<f32>,
     // x: rays per pixel, y: a number that changes each frame (0 without
     // TAA, so a still picture keeps still), z: the size of a pixel per
-    // stud away from the camera, w: unused.
+    // stud away from the camera, w: how far the volumetric fog's grid
+    // reaches while its air is traced (`cs_air`), 0 while not.
     settings: vec4<f32>,
     // xy: the scene's width and height in pixels.
     size: vec4<u32>,
@@ -82,6 +83,11 @@ const TRACED_LAMPS: u32 = 8u;
 // Each pixel's lamps' shadows: 4 bits a lamp (0 in shadow, 15 lit), in the
 // order its tile lists the lamps that cast shadows.
 @group(0) @binding(12) var<storage, read_write> lamp_mask: array<u32>;
+// The volumetric fog's air (LE3): how much sunlight reaches each cell of
+// its grid, 0 to 65535, or AIR_UNTRACED past the reach, where the fog
+// looks up the shadow maps' cascades (volumetric_fog.wgsl's
+// `cell_sun_visibility`).
+@group(0) @binding(13) var<storage, read_write> air_mask: array<u32>;
 
 // Instance masks of what casts shadows (renderer/ray_tracing.rs): solid
 // items, and cut-outs.
@@ -409,4 +415,65 @@ fn cs_blur_down(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let distance = length(world_at(pixel).xyz - rays.camera.xyz);
     destination[index_of(pixel)] = pack_mask(distance, smoothed.x);
+}
+
+// The volumetric fog's grid, as volumetric_fog.wgsl lays it out: must match
+// its `GRID` and `NEAR_SLICE` (and renderer/fog.rs's `GRID`).
+const AIR_GRID: vec3<u32> = vec3<u32>(160u, 90u, 64u);
+const AIR_NEAR_SLICE: f32 = 2.0;
+// A cell past the reach: the fog uses the shadow maps there.
+const AIR_UNTRACED: u32 = 0xffffffffu;
+// Rays a cell, toward the sun from points spread through it: the first of
+// volumetric_fog.wgsl's `CELL_POINTS` (the Halton (2, 3, 5) sequence), so a
+// shaft's edge crossing a cell counts by how much of it is lit.
+const AIR_SAMPLES: u32 = 4u;
+const AIR_POINTS = array<vec3<f32>, 4>(
+    vec3<f32>(0.5, 0.333333, 0.2),
+    vec3<f32>(0.25, 0.666667, 0.4),
+    vec3<f32>(0.75, 0.111111, 0.6),
+    vec3<f32>(0.125, 0.444444, 0.8),
+);
+
+// How far along its ray slice `s` ends (volumetric_fog.wgsl's
+// `slice_distance`, for the grid reaching `reach`).
+fn air_slice_distance(s: f32, reach: f32) -> f32 {
+    return AIR_NEAR_SLICE * (pow(1.0 + reach / AIR_NEAR_SLICE, s / f32(AIR_GRID.z)) - 1.0);
+}
+
+// The way from the camera through the screen at `uv` (0 to 1, from the
+// top left).
+fn air_view_ray(uv: vec2<f32>) -> vec3<f32> {
+    let far = rays.inv_view_proj * vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
+    return normalize(far.xyz / far.w - rays.camera.xyz);
+}
+
+// Ray traced sun shafts (LE3): how much sunlight reaches each cell of the
+// volumetric fog's grid within the reach, by rays toward the sun through
+// the ray traced scene. Glass lets it through (see-through items aren't
+// traced, as they cast no shadow), and cut-outs' holes do too, so light
+// comes through windows, leaves and grilles as it would on the ground.
+@compute @workgroup_size(4, 4, 4)
+fn cs_air(@builtin(global_invocation_id) id: vec3<u32>) {
+    let fog_reach = rays.settings.w;
+    if any(id >= AIR_GRID) || fog_reach <= 0.0 {
+        return;
+    }
+    let index = id.x + AIR_GRID.x * (id.y + AIR_GRID.y * id.z);
+    let near = air_slice_distance(f32(id.z), fog_reach);
+    if near >= rays.camera.w {
+        air_mask[index] = AIR_UNTRACED;
+        return;
+    }
+    let far = air_slice_distance(f32(id.z) + 1.0, fog_reach);
+    let sun = rays.sun.xyz;
+    var lit = 0.0;
+    for (var k = 0u; k < AIR_SAMPLES; k++) {
+        let point = AIR_POINTS[k];
+        let uv = (vec2<f32>(id.xy) + point.xy) / vec2<f32>(AIR_GRID.xy);
+        let position = rays.camera.xyz + air_view_ray(uv) * mix(near, far, point.z);
+        if blocked_at(position, sun) == 0.0 {
+            lit += 1.0;
+        }
+    }
+    air_mask[index] = u32(round(lit / f32(AIR_SAMPLES) * 65535.0));
 }
