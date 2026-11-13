@@ -276,6 +276,12 @@ The choices of `Enum.ParticleEmitterShapeStyle`.
 
 Items: `Volume`, `Surface`
 
+## Enum.ParticleEmitterShapeInOut
+
+The choices of `Enum.ParticleEmitterShapeInOut`.
+
+Items: `Outward`, `Inward`, `InAndOut`
+
 ## Enum.RayTracedAmbientOcclusion
 
 The choices of `Enum.RayTracedAmbientOcclusion`.

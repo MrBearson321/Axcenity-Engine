@@ -27,7 +27,7 @@ pub use draw_list::{
     LensEffects, Light, LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource,
     NormalMap, Outline, ParticleCurves, ParticleEmitter, ParticleLook, PointShadows,
     PostProcessing, ProbeImage, RectArea, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows,
-    Shape, Skin, Sky, SkyImage, SpawnKind, SpawnShape, SpotShadows, Sprite, Sun, Sway,
+    Shape, ShapeInOut, Skin, Sky, SkyImage, SpawnKind, SpawnShape, SpotShadows, Sprite, Sun, Sway,
     TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan,
     TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem, UiImage,
     UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Vignette, Weather, curve_at, is_turned,

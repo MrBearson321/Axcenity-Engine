@@ -30,6 +30,8 @@ fn emitter(at: Vec3, spread_out: f32, births: u32, capacity: u32) -> ParticleEmi
         drag: 0.0,
         air: Vec3::ZERO,
         shape: SpawnShape::default(),
+        in_out: crate::ShapeInOut::Outward,
+        inherit: Vec3::ZERO,
         look: ParticleLook {
             color: [[1.0, 0.0, 0.0]; 2],
             transparency: [0.0; 2],
@@ -421,6 +423,71 @@ fn gpu_particles_move_at_their_speed_curve() {
         Vec3::new(-1.5, 0.0, -8.0)
     )));
     assert!(!red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(0.0, 0.0, -8.0)
+    )));
+    assert!(!red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(-3.0, 0.0, -8.0)
+    )));
+}
+
+/// R17.2b: born on a disc's rim heading Inward, GPU particles meet in its
+/// middle; a Box emitter's particles take the inherited velocity.
+#[test]
+fn gpu_particles_head_inward_and_inherit_velocity() {
+    let Some(mut renderer) = renderer() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let at = Vec3::new(0.0, 0.0, -10.0);
+    let mut inward = emitter(at, 0.0, 2000, 4096);
+    // A disc 5 studs across, turned to face the camera.
+    inward.spawn = Mat4::from_scale_rotation_translation(
+        Vec3::splat(5.0),
+        glam::Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+        at,
+    );
+    inward.shape = SpawnShape {
+        kind: crate::SpawnKind::Disc,
+        surface: true,
+    };
+    inward.in_out = crate::ShapeInOut::Inward;
+    inward.speed = 2.5 / 0.3;
+    inward.look.size = [0.4; 2];
+    let mut list = list_of(Vec::new());
+    list.particle_emitters = vec![inward.clone()];
+    let red = |pixel: [u8; 4]| pixel[0] > 100;
+    assert!(!red(pixel_at(&mut renderer, &list, at)), "a ring");
+    assert!(red(pixel_at(&mut renderer, &list, at + Vec3::X * 2.5)));
+    // A third of a second later, at 2.5 studs in that time: in the middle.
+    inward.step = 2;
+    inward.born = 2000;
+    inward.births = 0;
+    inward.seconds = 0.3;
+    list.particle_emitters = vec![inward];
+    assert!(red(pixel_at(&mut renderer, &list, at)), "met in the middle");
+    assert!(!red(pixel_at(&mut renderer, &list, at + Vec3::X * 2.5)));
+
+    // Still, but given 10 studs a second along X by the emitter.
+    let mut carried = emitter(Vec3::new(-3.0, 0.0, -8.0), 0.0, 20, 1024);
+    carried.key = 9;
+    carried.inherit = Vec3::new(10.0, 0.0, 0.0);
+    let mut list = list_of(Vec::new());
+    list.particle_emitters = vec![carried.clone()];
+    assert!(red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(-3.0, 0.0, -8.0)
+    )));
+    carried.step = 2;
+    carried.born = 20;
+    carried.births = 0;
+    carried.seconds = 0.3;
+    list.particle_emitters = vec![carried];
+    assert!(red(pixel_at(
         &mut renderer,
         &list,
         Vec3::new(0.0, 0.0, -8.0)

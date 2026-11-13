@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Particles can come out in timed bursts, keep their part's speed and head out from (or into) round shapes"
+details = "A ParticleEmitter's new Bursts (a NumberSequence of times and counts) gives off bursts over a loop of Duration seconds, VelocityInheritance adds a share of the moving part's velocity to new particles, and ShapeInOut (Outward, Inward, InAndOut) picks which way they head. Sphere, Cylinder and Disc shapes now send particles away from their middle instead of along Direction; a Box still heads along Direction. CPU and GPU particles behave the same."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = [302]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
