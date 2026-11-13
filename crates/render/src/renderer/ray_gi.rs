@@ -224,11 +224,7 @@ impl RayGlobalIllumination {
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (tlas, surfaces, cut_outs): (
-            &wgpu::Tlas,
-            &wgpu::Buffer,
-            &super::ray_cut_outs::CutOuts,
-        ),
+        (tlas, surfaces, cut_outs): (&wgpu::Tlas, &wgpu::Buffer, &super::ray_cut_outs::CutOuts),
         batch: &Batch,
         probes: &LightProbes,
     ) {

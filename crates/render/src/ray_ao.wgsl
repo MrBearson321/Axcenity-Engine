@@ -30,7 +30,7 @@ struct RayAo {
 @group(0) @binding(0) var depth_texture: texture_depth_2d;
 @group(0) @binding(1) var normal_texture: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> occlusion: Occlusion;
-@group(1) @binding(0) var scene: acceleration_structure;
+@group(1) @binding(0) var ray_scene: acceleration_structure;
 @group(1) @binding(1) var<uniform> rays: RayAo;
 // Cut-outs' holes (LE7, ray_cut_outs.wgsl).
 @group(1) @binding(2) var<storage, read> cut_outs: array<CutOut>;
@@ -84,10 +84,7 @@ fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32) -> f32 {
 // How far along the ray from `origin` the nearest item of `mask` is,
 // between `near` and `radius` (`radius` for nothing).
 fn nearest_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32, radius: f32) -> f32 {
-    var query: ray_query;
-    rayQueryInitialize(&query, scene, RayDesc(0u, mask, near, radius, origin, direction));
-    proceed_through_holes(&query);
-    let hit = rayQueryGetCommittedIntersection(&query);
+    let hit = trace_through_holes(RayDesc(0u, mask, near, radius, origin, direction));
     if hit.kind == RAY_QUERY_INTERSECTION_NONE {
         return radius;
     }

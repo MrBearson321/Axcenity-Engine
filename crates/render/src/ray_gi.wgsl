@@ -48,7 +48,7 @@ struct RayGi {
     settings: vec4<f32>,
 }
 
-@group(1) @binding(0) var gi_scene: acceleration_structure;
+@group(1) @binding(0) var ray_scene: acceleration_structure;
 @group(1) @binding(1) var<uniform> gi: RayGi;
 // xyz: where each probe of the batch stands, w: its place in
 // `light_probes` (the bits of a u32).
@@ -90,11 +90,9 @@ fn gi_direction(i: u32, count: u32, turn: f32) -> vec3<f32> {
 // Whether anything casts a shadow between `origin` and `distance` along
 // `direction`.
 fn gi_blocked(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> bool {
-    var query: ray_query;
-    rayQueryInitialize(&query, gi_scene, RayDesc(
+    let hit = trace_through_holes(RayDesc(
         RAY_FLAG_TERMINATE_ON_FIRST_HIT, GI_MASK_CASTERS, 0.0, distance, origin, direction));
-    proceed_through_holes(&query);
-    return rayQueryGetCommittedIntersection(&query).kind != RAY_QUERY_INTERSECTION_NONE;
+    return hit.kind != RAY_QUERY_INTERSECTION_NONE;
 }
 
 // The light leaving a surface at `position` facing `n` of `color` (linear)
@@ -139,11 +137,8 @@ fn gi_hit_light(position: vec3<f32>, n: vec3<f32>, color: vec3<f32>) -> vec3<f32
 // What a probe at `origin` sees looking along `direction` (rgb), and (w)
 // 1 if that's the back of a solid thing.
 fn gi_ray_light(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
-    var query: ray_query;
-    rayQueryInitialize(&query, gi_scene, RayDesc(
+    let hit = trace_through_holes(RayDesc(
         0u, GI_MASK_SURFACES, 0.0, gi.settings.y, origin, direction));
-    proceed_through_holes(&query);
-    let hit = rayQueryGetCommittedIntersection(&query);
     if hit.kind == RAY_QUERY_INTERSECTION_NONE {
         // The sky as drawn, without the sun's disc (the sun lights what
         // rays hit). Not times the environment intensity: a probe's light

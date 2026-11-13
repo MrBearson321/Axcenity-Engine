@@ -1,7 +1,8 @@
 // Cut-outs' holes for rays (renderer/ray_cut_outs.rs,
 // docs/rendering/ray-tracing.md), shared by ray traced ambient occlusion
 // and GI (LE7): the shader including it binds `cut_outs`, `cut_out_uvs`,
-// `cut_out_alpha` and `cut_out_sampler` (`ray_cut_outs::layout_entries`).
+// `cut_out_alpha` and `cut_out_sampler` (`ray_cut_outs::layout_entries`),
+// and its ray traced scene as `ray_scene`.
 // ray_shadows.wgsl keeps its own copy of this: keep them matching.
 
 // Must match `CutOutRaw`.
@@ -33,13 +34,18 @@ fn cut_out_covers(hit: RayIntersection) -> bool {
     return alpha >= bitcast<f32>(cut.mesh.z);
 }
 
-// Runs `query` to its end, confirming cut-outs' candidate hits only where
-// they aren't cut out (solid items' hits are committed as they come).
-fn proceed_through_holes(query: ptr<function, ray_query>) {
-    while rayQueryProceed(query) {
-        let candidate = rayQueryGetCandidateIntersection(query);
+// The hit a ray `desc` through `ray_scene` commits to, confirming
+// cut-outs' candidate hits only where they aren't cut out (solid items'
+// hits are committed as they come). A ray query can't be passed to a
+// function, so the whole query runs here.
+fn trace_through_holes(desc: RayDesc) -> RayIntersection {
+    var query: ray_query;
+    rayQueryInitialize(&query, ray_scene, desc);
+    while rayQueryProceed(&query) {
+        let candidate = rayQueryGetCandidateIntersection(&query);
         if candidate.kind == RAY_QUERY_INTERSECTION_TRIANGLE && cut_out_covers(candidate) {
-            rayQueryConfirmIntersection(query);
+            rayQueryConfirmIntersection(&query);
         }
     }
+    return rayQueryGetCommittedIntersection(&query);
 }
