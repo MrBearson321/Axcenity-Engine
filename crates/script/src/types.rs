@@ -548,6 +548,7 @@ pub enum EnumType {
     ParticleEmitterShape,
     ParticleEmitterShapeStyle,
     ParticleEmitterShapeInOut,
+    ParticleEmitterEmitOn,
     ParticleFlipbookLayout,
     ParticleFlipbookMode,
     RayTracedAmbientOcclusion,
@@ -555,7 +556,7 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 50] = [
+    pub const ALL: [EnumType; 51] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -602,6 +603,7 @@ impl EnumType {
         EnumType::ParticleEmitterShape,
         EnumType::ParticleEmitterShapeStyle,
         EnumType::ParticleEmitterShapeInOut,
+        EnumType::ParticleEmitterEmitOn,
         EnumType::ParticleFlipbookLayout,
         EnumType::ParticleFlipbookMode,
         EnumType::RayTracedAmbientOcclusion,
@@ -632,6 +634,7 @@ impl EnumType {
             EnumType::ParticleEmitterShape => "ParticleEmitterShape",
             EnumType::ParticleEmitterShapeStyle => "ParticleEmitterShapeStyle",
             EnumType::ParticleEmitterShapeInOut => "ParticleEmitterShapeInOut",
+            EnumType::ParticleEmitterEmitOn => "ParticleEmitterEmitOn",
             EnumType::ParticleFlipbookLayout => "ParticleFlipbookLayout",
             EnumType::ParticleFlipbookMode => "ParticleFlipbookMode",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
@@ -733,6 +736,8 @@ impl EnumType {
             EnumType::ParticleEmitterShapeStyle => vec!["Volume", "Surface"],
             // Which way they head from it (roadmap R17.2b).
             EnumType::ParticleEmitterShapeInOut => vec!["Outward", "Inward", "InAndOut"],
+            // When a sub-emitter gives off particles (roadmap R17.4).
+            EnumType::ParticleEmitterEmitOn => vec!["Always", "Birth", "Death", "Collision"],
             // A particle texture's frames (roadmap R17.2c).
             EnumType::ParticleFlipbookLayout => vec!["None", "Grid2x2", "Grid4x4", "Grid8x8"],
             EnumType::ParticleFlipbookMode => vec!["Loop", "OneShot", "PingPong", "Random"],
@@ -883,6 +888,7 @@ impl LuaEnumItem {
             | EnumType::ParticleEmitterShape
             | EnumType::ParticleEmitterShapeStyle
             | EnumType::ParticleEmitterShapeInOut
+            | EnumType::ParticleEmitterEmitOn
             | EnumType::ParticleFlipbookLayout
             | EnumType::ParticleFlipbookMode => None,
         }
