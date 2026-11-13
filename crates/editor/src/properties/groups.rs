@@ -341,6 +341,11 @@ pub(super) const GROUPS: [(&str, &[&str]); 35] = [
             "Acceleration",
             "Drag",
             "WindAffectsDrag",
+            "Collides",
+            "Bounce",
+            "LifetimeLoss",
+            "EmitOn",
+            "EmitCount",
         ],
     ),
     (

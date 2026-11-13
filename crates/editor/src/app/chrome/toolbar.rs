@@ -139,6 +139,9 @@ impl EditorApp {
         if clicks.bake_probes {
             self.bake_probes_asked = true;
         }
+        if clicks.fill_probes {
+            self.fill_with_probes();
+        }
         if clicks.import {
             self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
         }
@@ -466,6 +469,21 @@ impl EditorApp {
                             .clicked()
                         {
                             clicks.bake_probes = true;
+                        }
+                        if ui
+                            .button(theme::menu_item(
+                                ui.ctx(),
+                                icons::GRID_FOUR,
+                                "Fill with Probes",
+                            ))
+                            .on_hover_text(
+                                "Put a LightProbeVolume around the selected parts or model, with \
+                             its probes spaced to fit 512. Probes inside solid parts are left \
+                             out of the bake. Then Bake Probes.",
+                            )
+                            .clicked()
+                        {
+                            clicks.fill_probes = true;
                         }
                     });
                     insert_menu(

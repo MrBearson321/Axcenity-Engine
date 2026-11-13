@@ -214,6 +214,46 @@ ParticleEmitter.VelocityInheritance: number
 
 How much of the part's own velocity each particle starts with, from 0 (none, the default) to 1 (all of it), so sparks from a moving car keep up with it.
 
+#### Collides
+
+```luau
+ParticleEmitter.Collides: boolean
+```
+
+On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. A big emitter moving its particles on the GPU lands them only on what the camera sees. Default false.
+
+#### Bounce
+
+```luau
+ParticleEmitter.Bounce: number
+```
+
+How much of a colliding particle's speed into a surface it keeps, back out of it: 0 lands dead, 1 bounces as high as it fell. Speed along the surface is kept. Default 0.5.
+
+#### LifetimeLoss
+
+```luau
+ParticleEmitter.LifetimeLoss: number
+```
+
+How much of its life a colliding particle loses each time it lands, from 0 (none, the default) to 1 (it dies where it lands).
+
+#### EmitOn
+
+```luau
+ParticleEmitter.EmitOn: EnumParticleEmitterEmitOn | "Always" | "Birth" | "Death" | "Collision"
+```
+
+Inside another ParticleEmitter, `Enum.ParticleEmitterEmitOn.Birth`, `Death` or `Collision` makes this one a sub-emitter: while Enabled it gives off EmitCount particles where each of its parent's particles is born, dies or lands, heading out along its own Direction (turned by its Orientation), and nothing by its Rate. `Always` (the default) gives off as any emitter does.
+
+#### EmitCount
+
+```luau
+ParticleEmitter.EmitCount: number
+```
+
+How many particles a sub-emitter (EmitOn Birth, Death or Collision) gives off at each of its parent's events. Default 10.
+
 #### Bursts
 
 ```luau

@@ -1485,6 +1485,20 @@ impl ClassName {
                     // How much of the part's own velocity particles start
                     // with, 0 to 1 (roadmap R17.2b).
                     ("VelocityInheritance", Value::Number(0.0)),
+                    // On, particles bounce off parts with CanCollide on and
+                    // the ground, keeping Bounce (0 to 1) of their speed
+                    // into the surface and losing LifetimeLoss (0 to 1) of
+                    // their life each time they land (roadmap R17.4).
+                    ("Collides", Value::Bool(false)),
+                    ("Bounce", Value::Number(0.5)),
+                    ("LifetimeLoss", Value::Number(0.0)),
+                    // Inside another ParticleEmitter, Birth, Death or
+                    // Collision makes this one a sub-emitter: it gives off
+                    // EmitCount particles where each of that emitter's
+                    // particles is born, dies or lands, and nothing by its
+                    // Rate. Always gives off as any emitter does (R17.4).
+                    ("EmitOn", enum_item("ParticleEmitterEmitOn", "Always")),
+                    ("EmitCount", Value::Number(10.0)),
                     // Bursts: each keypoint gives off Value (± Envelope)
                     // particles at its Time of each Duration seconds while
                     // Enabled, over and over (roadmap R17.2b). Empty is none.

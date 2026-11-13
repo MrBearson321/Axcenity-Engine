@@ -42,6 +42,7 @@ mod cooking;
 mod data_table;
 mod dialog;
 mod dialogue_editor;
+mod effect_editor;
 mod explorer;
 mod find_in_scripts;
 mod game_tests;

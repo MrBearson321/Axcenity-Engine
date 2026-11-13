@@ -502,6 +502,91 @@ pub fn raycast_rewound(
     best
 }
 
+/// For each path from its `.0` to its `.1`, the first solid surface on it
+/// (particles' collisions, roadmap R17.4): parts with `CanCollide` on and a
+/// Terrain's ground and colliding foliage, passing by `skip` and what's
+/// inside it. A path that starts inside a collider passes out of it
+/// rather than stopping there. The Workspace is walked once for all the
+/// paths, so a few thousand cost about as much as the colliders near
+/// them. Does not move anything.
+pub fn surface_hits(
+    world: &World,
+    assets: &Assets,
+    skip: Option<InstanceId>,
+    paths: &[(Vector3, Vector3)],
+) -> Vec<Option<RayHit>> {
+    let mut hits = vec![None; paths.len()];
+    let ends = || {
+        paths
+            .iter()
+            .flat_map(|&(from, to)| [to_vec3(from), to_vec3(to)])
+            .filter(|end| end.is_finite())
+    };
+    let (Some(low), Some(high)) = (ends().reduce(Vec3::min), ends().reduce(Vec3::max)) else {
+        return hits;
+    };
+    let middle = (low + high) / 2.0;
+    let reach = Reach {
+        from: middle,
+        to: middle,
+        radius: (high - low).length() / 2.0,
+    };
+    let params = QueryParams {
+        filter: skip.into_iter().collect(),
+        respect_can_collide: true,
+        ..QueryParams::default()
+    };
+    let filter = Filter::new(world, &params);
+    let mut near = Vec::new();
+    candidates(world, assets, &filter, reach, |id, _, collider, solid| {
+        if solid {
+            near.push((id, collider.clone(), collider.compute_aabb()));
+        }
+    });
+    if near.is_empty() {
+        return hits;
+    }
+    for (hit, &(from, to)) in hits.iter_mut().zip(paths) {
+        let (from, to) = (to_vec3(from), to_vec3(to));
+        let length = (to - from).length();
+        if !from.is_finite() || !length.is_finite() || length <= f32::EPSILON {
+            continue;
+        }
+        let ray = Ray::new(from, (to - from) / length);
+        let (path_low, path_high) = (from.min(to), from.max(to));
+        for (id, collider, aabb) in &near {
+            if aabb.mins.cmpgt(path_high).any() || aabb.maxs.cmplt(path_low).any() {
+                continue;
+            }
+            let Some(found) =
+                collider
+                    .shape()
+                    .cast_ray_and_get_normal(collider.position(), &ray, length, true)
+            else {
+                continue;
+            };
+            // Started inside: no surface to stop on, so it passes out.
+            if found.normal.length_squared() < 0.5 {
+                continue;
+            }
+            if hit
+                .as_ref()
+                .is_some_and(|best: &RayHit| found.time_of_impact >= best.distance)
+            {
+                continue;
+            }
+            *hit = Some(RayHit {
+                instance: *id,
+                position: to_vector3(ray.origin + ray.dir * found.time_of_impact),
+                normal: to_vector3(found.normal),
+                distance: found.time_of_impact,
+                can_collide: true,
+            });
+        }
+    }
+    hits
+}
+
 /// The shape a [`shapecast`] sweeps.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CastShape {

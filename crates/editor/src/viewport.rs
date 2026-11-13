@@ -1477,7 +1477,10 @@ impl Viewport {
             for &(emitter, count) in emits {
                 self.particles.emit(world, emitter, count);
             }
-            self.particles.update(world, seconds);
+            self.particles
+                .update_against(world, seconds, &mut |skip, paths| {
+                    crate::play::particle_surfaces(world, assets, skip, paths)
+                });
         }
         // Particles keep moving without input, so keep drawing frames.
         if self.particles.is_active(world) {

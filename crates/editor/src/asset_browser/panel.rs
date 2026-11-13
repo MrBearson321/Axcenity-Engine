@@ -82,7 +82,10 @@ impl AssetBrowser {
         let entries: Vec<AssetEntry> = self
             .entries()
             .into_iter()
-            .filter(|entry| self.category.holds(entry.kind))
+            .filter(|entry| {
+                self.category.holds(entry.kind)
+                    || (self.category == Category::Particles && is_effect(&entry.path))
+            })
             .filter(|entry| self.category != Category::Global || self.is_global(&entry.path))
             .filter(|entry| {
                 self.source_filter

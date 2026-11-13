@@ -3,9 +3,10 @@
 // into the light probes' buffer where the scene reads them. A copy of
 // `cube_light` in renderer/probe_bake.rs: keep them matching.
 
-// How many probes one dispatch sums, one workgroup each. Must match
-// `PROBES_PER_FRAME` in renderer/realtime_gi.rs.
-const SLOTS: u32 = 2u;
+// The most probes one dispatch sums, one workgroup each: the highest real-
+// time GI tier's. Must match `RealtimeGiTier::MAX_PROBES_PER_FRAME`
+// (`SLOTS` in renderer/realtime_gi.rs).
+const SLOTS: u32 = 4u;
 const THREADS: u32 = 64u;
 const PI: f32 = 3.14159265;
 

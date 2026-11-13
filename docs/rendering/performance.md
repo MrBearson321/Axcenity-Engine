@@ -173,7 +173,7 @@ What it says:
 - **On the CPU, particles cost about 0.1 ms of CPU time per 1,000**, mostly building, sorting and uploading their sprites in `ScenePipeline::draw`. On the GPU they cost a nearly fixed 0.10 to 0.13 ms (the sort's dispatches, whatever the count up to its 4,096 slots) and almost no CPU time.
 - **The GPU wins from about 3,000 particles**, so `scene::GPU_PARTICLE_THRESHOLD` is 3,000. At 2,000 the GPU path costs more GPU time than it saves on the CPU. Weaker GPUs pay more for the fixed cost, and weaker CPUs more per particle. The CPU's cap is 4,000 per emitter, so an emitter needing more than that has to be on the GPU anyway.
 - **100,000 particles take 0.23 ms to move and sort** (131,072 slots), and 1.5 ms to draw: filling overlapping squares, not moving them, is the cost there. That's the same per pixel as the CPU path would pay.
-- `RenderStats::gpu_particles` counts the slots kept, and their buffers (88 bytes a slot) count in the buffer bytes.
+- `RenderStats::gpu_particles` counts the slots kept, and their buffers (104 bytes a slot since R17.4b; 88 before) count in the buffer bytes.
 
 ## Where the frame goes (`profile_project`)
 
@@ -297,6 +297,16 @@ At 2560 × 1440 on Ultra, the GPU's frame was 40.1 ms before distance bands and 
 - **`upload_new`** looks up each mesh and each set of textures once per frame, by address, rather than once per draw.
 - **Real-time GI in the editor.** The editor was at 2 frames a second with Ultra and `realtime_gi` on: 434 of each 474 ms went to tracing probes (12 whole draws of a 36,000-item scene each frame, on one CPU thread, at 16² so the GPU had little to do). `light_state` saw the sky picture finish loading as the light changing, so all 1,472 probes were traced after every open, about six minutes. See Real-time GI in [sky.md](sky.md) for what a heavy scene does now.
 - **Distance bands (`SortKey::band`)**: solid items are drawn nearest first in about 2 bands per doubling of the distance, then by mesh and material. Looking along a forest, every pixel had 8 or more layers of leaves, each shaded; a band drawn first hides what's behind it, by depth, before the shader runs. It's a few more batches for about a quarter less GPU time there.
+
+## Light probes (`bench_light_probes`, roadmap R18)
+
+`bench_light_probes` in `render/src/renderer/tests/realtime_gi.rs` measures what light probes cost ([global-illumination.md](../research/global-illumination.md), D5):
+
+```
+cargo test -p axcenity-render --release --lib -- --ignored bench_light_probes --nocapture
+```
+
+In a yard with 576 blocks at 1920 × 1080 it prints a bake per probe (16² faces, then with the sky's share kept apart, R18.3), a frame with 8 volumes of 16³ probes against none, and each preset's real-time GI tier (R18.4) with the sun moving every frame so it never rests: the frame, what tracing added and that per probe. Times are the median wall clock of a frame waited on. The cloud container only proves it runs (a software GPU in a debug build: a bake about 120 ms a probe, 145 with the sky apart). The RX 9070 XT's numbers go here when it's run on the PC.
 
 ## Sharing the frame's planning among the CPU's threads
 

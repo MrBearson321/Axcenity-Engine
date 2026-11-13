@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 21] = [
+const TOOL_PANES: [Pane; 22] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -346,6 +346,7 @@ const TOOL_PANES: [Pane; 21] = [
     Pane::Tests,
     Pane::ModelStudio,
     Pane::ObjectViewer,
+    Pane::Effect,
     Pane::Toolbox,
     Pane::Inventory,
     Pane::VersionExplorer,
@@ -512,6 +513,9 @@ fn command_description(command: &Command) -> String {
         Command::Snap(_) => "Turn one of the Snapping group's switches on or off.",
         Command::CollisionGroups => "Which groups of parts collide with which.",
         Command::BakeProbes => "Work out the light probes' lighting again.",
+        Command::FillProbes => {
+            "Put a light probe volume around the selected parts or model, spaced to fit 512 probes."
+        }
         Command::Weld => "Join the selected parts so they move as one.",
         Command::Constraint(Some(_)) => "Pick two surfaces to join with this constraint.",
         Command::Constraint(None) => "Stop picking surfaces for a constraint.",

@@ -28,6 +28,7 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Reflection quality (environment maps, reflection probes) | Low: the gradient, no sky image or probes | Medium: 64², 32 samples | High: 128², 64 | Ultra: 256², 128 |
 | Contact shadows | off | off | on | on |
 | Real-time GI (light probe volumes traced again) | off | off | off | off |
+| Real-time GI tier while on (`RealtimeGiTier`: probes a frame, face size) | 1 at 8² | 2 at 8² | 2 at 16² | 4 at 16² |
 | Volumetric fog (sun shafts and lamp light in an Atmosphere's fog) | off | off | off | on |
 | Cloud quality (steps through the layer; steps toward the sun) | Low: a flat sheet | Medium: 16; none | High: 32 with detail; 3 | Ultra: 64 with detail; 6 |
 | Depth of field (samples per pixel) | Off | Low (16) | High (32) | High |

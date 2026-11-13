@@ -282,6 +282,12 @@ The choices of `Enum.ParticleEmitterShapeInOut`.
 
 Items: `Outward`, `Inward`, `InAndOut`
 
+## Enum.ParticleEmitterEmitOn
+
+The choices of `Enum.ParticleEmitterEmitOn`.
+
+Items: `Always`, `Birth`, `Death`, `Collision`
+
 ## Enum.ParticleFlipbookLayout
 
 The choices of `Enum.ParticleFlipbookLayout`.

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Big particle emitters can collide on the GPU, landing on what the camera sees"
+details = "A ParticleEmitter with Collides on that gives off thousands of particles now moves them on the GPU instead of staying on the CPU, landing them on the surfaces the camera sees (the depth prepass) with the same Bounce and LifetimeLoss. Surfaces off screen or hidden don't stop them there; smaller colliding emitters still land on physics surfaces on the CPU, and emitters with sub-emitters stay on the CPU."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = [312]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
