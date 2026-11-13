@@ -63,7 +63,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 
 | Item | What | Status |
 |---|---|---|
-| G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107; card drag into the scene #238). Left: drag into Assets, sound preview, Freesound |
+| G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107; card drag into the scene #238, onto the Assets panel). Left: sound preview, Freesound |
 | G2 | Scripts inside objects (`SourceFile` references, `objects/` folder) | **Done** (#91 design, #111, #114, #115, #117 on players' devices, in levels and characters, #120) |
 | G3 | Physics render interpolation | **Done** (#110) |
 | G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); Go to Definition (#239) |
