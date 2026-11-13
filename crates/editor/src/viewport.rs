@@ -70,6 +70,7 @@ mod overlays;
 mod plugin_drawings;
 mod plugin_handles;
 mod ray_badge;
+mod streaming_overlay;
 pub use plugin_handles::HandleMove;
 mod view_cube;
 mod view_mode;
@@ -445,6 +446,9 @@ pub struct OverlayToggles {
     /// During Play: each moving body's center of mass, coloured by
     /// whether it's awake or asleep (roadmap G15).
     pub bodies: bool,
+    /// With Workspace streaming on, what streams around the camera, while
+    /// editing too (roadmap R16).
+    pub streaming: bool,
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
@@ -461,6 +465,7 @@ impl OverlayToggles {
             || self.constraints
             || self.contacts
             || self.bodies
+            || self.streaming
             || self.culling
     }
 }
@@ -713,6 +718,8 @@ pub struct Viewport {
     /// Where the camera was when the culling overlay went on: culling
     /// stays there until it goes off.
     frozen_culling: Option<axcenity_render::Camera>,
+    /// The Streaming overlay's split of the world (roadmap R16).
+    streaming_overlay: streaming_overlay::StreamingOverlay,
     /// The Overdraw view's numbers, once its legend's Measure was clicked;
     /// cleared when the view changes.
     overdraw: Option<axcenity_render::OverdrawStats>,
@@ -791,6 +798,7 @@ impl Viewport {
             last_rect: egui::Rect::NOTHING,
             last_pixels: (0, 0),
             frozen_culling: None,
+            streaming_overlay: Default::default(),
             overdraw: None,
             measure_overdraw: false,
             lod_preview: None,
@@ -1570,8 +1578,13 @@ impl Viewport {
         if let Some(physics) = physics {
             paint_physics(&ui.painter_at(rect), &screen, physics, overlays);
         }
-        if game_playing && let Some(settings) = self.terrain.streaming.settings() {
-            paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
+        if overlays.streaming {
+            self.streaming_overlay.paint(ui, rect, &screen, world, eye);
+        } else {
+            self.streaming_overlay.clear();
+            if game_playing && let Some(settings) = self.terrain.streaming.settings() {
+                paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
+            }
         }
         if legend::paint(ui, rect, view_mode, &render.stats, self.overdraw.as_ref()) {
             self.measure_overdraw = true;
