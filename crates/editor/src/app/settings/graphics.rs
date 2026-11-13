@@ -671,12 +671,14 @@ fn ray_tracing_section(
                     })
                     .response
                     .on_hover_text(
-                        "Bounced light that follows the world as it changes: the light probe \
-                         volumes' probes are lit by rays each frame instead of a bake, so a \
-                         moved wall or a lamp turned on colors the light around it. Low, \
-                         Medium and High update 32, 64 or 128 probes a frame with 64, 128 or \
-                         256 rays each. Needs light probe volumes (World tab) and Hardware \
-                         ray tracing on; it replaces Real-time GI while on.",
+                        "Bounced light that follows the world as it changes: light probes \
+                         are lit by rays each frame instead of a bake, so a moved wall or a \
+                         lamp turned on colors the light around it, and a room gets the light \
+                         its windows let in. The camera brings its own probes, 3 studs apart, \
+                         so no light probe volume is needed; any in the world are lit too. \
+                         Low, Medium and High update 128, 256 or 512 probes a frame with 64, \
+                         128 or 256 rays each. Needs Hardware ray tracing on; it replaces \
+                         Real-time GI while on.",
                     );
             });
             ui.end_row();

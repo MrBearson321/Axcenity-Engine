@@ -299,6 +299,11 @@ pub struct ParticleEmitter {
     pub air: Vec3,
     /// Where in the spawn box they're born (roadmap R17.2).
     pub shape: SpawnShape,
+    /// Which way they head from it (roadmap R17.2b).
+    pub in_out: ShapeInOut,
+    /// Added to every new particle's velocity: the emitter's own velocity
+    /// times its `VelocityInheritance` (roadmap R17.2b).
+    pub inherit: Vec3,
     pub look: ParticleLook,
 }
 
@@ -326,7 +331,46 @@ pub enum SpawnKind {
     Disc,
 }
 
+/// Which way particles head from their spawn shape (roadmap R17.2b,
+/// `ParticleEmitter.ShapeInOut`), within the spread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShapeInOut {
+    /// Along the direction for a box; away from the middle for a sphere,
+    /// and from the upright axis for a cylinder or disc.
+    #[default]
+    Outward,
+    /// The other way.
+    Inward,
+    /// Either, at random.
+    InAndOut,
+}
+
+impl ShapeInOut {
+    /// The number particles.wgsl's `born` reads.
+    pub fn code(self) -> u32 {
+        match self {
+            ShapeInOut::Outward => 0,
+            ShapeInOut::Inward => 1,
+            ShapeInOut::InAndOut => 2,
+        }
+    }
+}
+
 impl SpawnShape {
+    /// The way out of the shape from a point born at `inside` (in the
+    /// centered unit cube), before the spawn transform: from the middle for
+    /// a sphere, from the upright axis for a cylinder or disc, and `None`
+    /// for a box (which heads along the direction) or at the middle itself.
+    /// The same as particles.wgsl's `born`.
+    pub fn outward(self, inside: Vec3) -> Option<Vec3> {
+        let out = match self.kind {
+            SpawnKind::Box => return None,
+            SpawnKind::Sphere => inside,
+            SpawnKind::Cylinder | SpawnKind::Disc => Vec3::new(inside.x, 0.0, inside.z),
+        };
+        (out.length_squared() > 1e-12).then_some(out)
+    }
+
     /// The number particles.wgsl's `born` reads for the kind.
     pub fn code(self) -> u32 {
         match self.kind {

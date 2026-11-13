@@ -611,11 +611,13 @@ impl ScenePipeline {
         ) {
             self.bind_frame();
         }
-        // And the light probe volumes, each only when it's new.
+        // And the light probe volumes, each only when it's new, with the
+        // camera's own probes while ray traced GI is on.
         if self.light_probes.prepare(
             (&self.device, &self.queue),
             &list.light_probe_volumes,
             list.camera.position,
+            ray_gi::wanted(&self.graphics),
         ) {
             self.bind_frame();
         }
@@ -1446,6 +1448,8 @@ impl ScenePipeline {
             false
         };
         mark(&mut encoder, FramePass::RayTracedGi);
+        // The camera's probes move along with it first.
+        self.light_probes.follow_camera(&mut encoder);
         let ray_gi_drawn = if let (Some(gi), Some(batch), Some(rays)) =
             (&mut self.ray_gi, &ray_gi_batch, &self.ray_scene)
             && let Some(surfaces) = &rays.surfaces

@@ -1454,6 +1454,21 @@ impl ClassName {
                         "ShapeStyle",
                         enum_item("ParticleEmitterShapeStyle", "Volume"),
                     ),
+                    // Which way they head from the Shape: Outward (along
+                    // Direction for a Box, away from the middle for the
+                    // round shapes), Inward, or InAndOut (roadmap R17.2b).
+                    (
+                        "ShapeInOut",
+                        enum_item("ParticleEmitterShapeInOut", "Outward"),
+                    ),
+                    // How much of the part's own velocity particles start
+                    // with, 0 to 1 (roadmap R17.2b).
+                    ("VelocityInheritance", Value::Number(0.0)),
+                    // Bursts: each keypoint gives off Value (± Envelope)
+                    // particles at its Time of each Duration seconds while
+                    // Enabled, over and over (roadmap R17.2b). Empty is none.
+                    ("Bursts", Value::NumberSequence(NumberSequence::default())),
+                    ("Duration", Value::Number(1.0)),
                     // Starting turn, in degrees, and degrees a second.
                     ("Rotation", Value::Number(0.0)),
                     ("RotSpeed", Value::Number(0.0)),
