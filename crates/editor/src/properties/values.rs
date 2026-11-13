@@ -298,6 +298,12 @@ pub(super) fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<
         // Edited with the world at hand (`object_control`), and with the
         // part's material at hand (`physical_control`).
         Value::Instance(_) | Value::PhysicalProperties(_) => None,
+        Value::NumberSequence(sequence) => {
+            super::curves::number_sequence_control(ui, name, &sequence).map(Value::NumberSequence)
+        }
+        Value::ColorSequence(sequence) => {
+            super::curves::color_sequence_control(ui, &sequence).map(Value::ColorSequence)
+        }
     }
 }
 

@@ -13,6 +13,10 @@ Values that aren't Instances, such as Vector3, CFrame and Signal.
 | [Color3](types/Color3.md) | A color, with each channel from 0 to 1. |
 | [CFrame](types/CFrame.md) | A position and a rotation together. |
 | [Random](types/Random.md) | A random number generator from `Random.new(seed)`. |
+| [NumberSequence](types/NumberSequence.md) | A number that changes over time from 0 to 1, such as a particle's size over its life: keypoints in time order, with straight lines between them. |
+| [NumberSequenceKeypoint](types/NumberSequenceKeypoint.md) | One point of a NumberSequence. |
+| [ColorSequence](types/ColorSequence.md) | A color that changes over time from 0 to 1, such as a particle's color over its life. |
+| [ColorSequenceKeypoint](types/ColorSequenceKeypoint.md) | One point of a ColorSequence. |
 | [PhysicalProperties](types/PhysicalProperties.md) | How a part weighs, grips and bounces. |
 | [UDim](types/UDim.md) | One UI axis as a scale and pixel offset. |
 | [UDim2](types/UDim2.md) | A UI position or size with scale and pixel-offset components. |

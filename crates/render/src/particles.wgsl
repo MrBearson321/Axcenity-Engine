@@ -26,8 +26,13 @@ struct Emitter {
     // sRGB colors and transparencies when born and when dying.
     color_start: vec4<f32>,
     color_end: vec4<f32>,
-    // The spin (radians a second), brightness, light emission.
+    // The spin (radians a second), brightness, light emission, and 1
+    // while the curves below are used instead of the start and end values.
     look: vec4<f32>,
+    // Size, its envelope, transparency and its envelope over life, and
+    // sRGB colors, at 32 even times from birth to death (`ParticleCurves`).
+    shape: array<vec4<f32>, 32>,
+    colors: array<vec4<f32>, 32>,
 };
 
 struct Particle {
@@ -172,12 +177,28 @@ fn write(@builtin(global_invocation_id) id: vec3<u32>) {
     let life = particle.velocity_life.w;
     if age < life {
         let t = clamp(age / max(life, 1e-4), 0.0, 1.0);
-        let transparency = clamp(mix(emitter.color_start.w, emitter.color_end.w, t), 0.0, 1.0);
+        var transparency = clamp(mix(emitter.color_start.w, emitter.color_end.w, t), 0.0, 1.0);
+        var size = max(mix(emitter.life_size.y, emitter.life_size.z, t), 0.0);
+        var srgb = mix(emitter.color_start.rgb, emitter.color_end.rgb, t);
+        if emitter.look.w > 0.5 {
+            // As `ParticleCurves::sample` and `spreads`: two spreads from
+            // -1 to 1, the same over the particle's life (its slot and life
+            // change only when a new one is born there).
+            let first = pcg(keys[k].index ^ bitcast<u32>(life));
+            let second = pcg(first);
+            let spread = vec2<f32>(f32(first >> 8u), f32(second >> 8u)) / 16777216.0 * 2.0 - 1.0;
+            let x = t * 31.0;
+            let index = min(u32(floor(x)), 31u);
+            let next = min(index + 1u, 31u);
+            let along = x - f32(index);
+            let shape = mix(emitter.shape[index], emitter.shape[next], along);
+            size = max(shape.x + shape.y * spread.x, 0.0);
+            transparency = clamp(shape.z + shape.w * spread.y, 0.0, 1.0);
+            srgb = mix(emitter.colors[index].rgb, emitter.colors[next].rgb, along);
+        }
         let opacity = 1.0 - transparency;
-        let size = max(mix(emitter.life_size.y, emitter.life_size.z, t), 0.0);
         // Hidden ones stay squares of no size, which draw nothing.
         if opacity > 0.0 && size > 0.0 {
-            let srgb = mix(emitter.color_start.rgb, emitter.color_end.rgb, t);
             let color = linear(srgb) * max(emitter.look.y, 0.0) * opacity;
             out.center_size = vec4<f32>(particle.position_age.xyz, size);
             out.color = vec4<f32>(color, opacity);

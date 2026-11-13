@@ -97,6 +97,8 @@ fn luau_type(kind: ValueKind) -> String {
         ValueKind::EnumItem => "any".to_owned(),
         ValueKind::Instance => "Instance?".to_owned(),
         ValueKind::PhysicalProperties => "PhysicalProperties?".to_owned(),
+        ValueKind::NumberSequence => "NumberSequence?".to_owned(),
+        ValueKind::ColorSequence => "ColorSequence?".to_owned(),
         // Enum properties read as items and also accept item names.
         ValueKind::Material
         | ValueKind::PartType

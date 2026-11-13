@@ -23,6 +23,7 @@ pub mod input;
 mod journal;
 pub mod memory;
 pub mod prefab;
+mod sequence;
 pub mod sound;
 pub mod spline;
 pub mod streaming;
@@ -47,6 +48,9 @@ pub use enums::{
     ToneMapping, UserInputState, UserInputType,
 };
 pub use journal::Edit;
+pub use sequence::{
+    ColorKeypoint, ColorSequence, MAX_KEYPOINTS, NumberKeypoint, NumberSequence, SequenceError,
+};
 pub use strings::StringTable;
 pub use terrain::{
     CHUNK_CELLS, DEFAULT_TERRAIN_HEIGHT, DEFAULT_TERRAIN_SAMPLES, FoliageInstance, FoliagePlant,

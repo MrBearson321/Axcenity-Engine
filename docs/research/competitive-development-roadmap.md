@@ -576,7 +576,7 @@ Do not immediately attempt a complete Lumen or SDFGI equivalent.
 ## 6.4 Visual effects editor
 
 **Priority:** Medium
-**Status:** Missing (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`); there is no node-based or curve-based effect authoring. Design and stages R17.1–R17.5: [vfx-editor.md](vfx-editor.md).
+**Status:** Partial (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`). R17.1 adds curves and gradients: `NumberSequence` and `ColorSequence` values and size, color and transparency over life on both paths, edited in Properties. There is no effect editor, effect asset or node-based authoring yet. Design and stages R17.1–R17.5: [vfx-editor.md](vfx-editor.md).
 
 Develop a unified authoring experience around existing CPU and GPU particle systems.
 
@@ -1105,7 +1105,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
 | Global illumination | Partial: baked probes, optional real-time probes | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
 | Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
-| Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
+| Particle authoring (VFX editor) | Partial (curves over life; no effect editor) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; Streaming overlay in the editor (R16) | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
 | In-editor modeling | Partial: sculpting and baking back (#271), retopology by hand left to Blender | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
@@ -1154,7 +1154,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
 | 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
-| 17 | Visual effects editor | New (R17) | Missing; design in [vfx-editor.md](vfx-editor.md) | R17.1 curves, then spawn shapes, the effect editor and asset |
+| 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1); design in [vfx-editor.md](vfx-editor.md) | R17.2 spawn shapes and bursts, then the effect editor and asset |
 | 18 | Global illumination improvements | New (R18) | Partial; options and stages in [global-illumination.md](global-illumination.md) | R18.1 probe overlay, then invalid probes and sky light apart |
 | 19 | Online services architecture | New (R19) | Missing | Design document only |
 | 20 | Platform expansion | New (R20) | Deferred | Research document only |
