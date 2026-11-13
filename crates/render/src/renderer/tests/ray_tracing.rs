@@ -603,6 +603,138 @@ mod sun_shadows {
 }
 
 /// Ray traced ambient occlusion (RT3, renderer/ray_ao.rs).
+/// Lamps' ray traced shadows (LE1): point, spot and rect lights that cast
+/// shadows are traced with the sun's, with no shadow map drawn.
+mod lamp_shadows {
+    use super::*;
+    use crate::RayTracedShadows;
+
+    fn traced() -> crate::GraphicsSettings {
+        crate::GraphicsSettings {
+            // No shadow maps, so any shadow seen is ray traced.
+            shadow_quality: Some(ShadowQuality::Off),
+            ray_traced_shadows: Some(RayTracedShadows::Low),
+            ..crate::GraphicsSettings::default()
+        }
+    }
+
+    /// `shadowed_wall` lit by `lamp` alone, from in front of the block, so
+    /// the block's shadow falls on the wall's middle.
+    fn lamp_lit_wall(lamp: Light) -> DrawList {
+        let mut list = shadowed_wall();
+        list.sun.intensity = 0.0;
+        list.ambient.intensity = 0.0;
+        list.lights.push(lamp);
+        list
+    }
+
+    fn lamps() -> Vec<(&'static str, Light)> {
+        let base = Light {
+            position: Vec3::new(8.0, 0.0, -2.0),
+            color: [1.0; 3],
+            brightness: 40.0,
+            range: 40.0,
+            cone: None,
+            rect: None,
+            point_shadows: Some(crate::PointShadows { near: [0.0; 6] }),
+        };
+        // Toward the wall's middle, through the block.
+        let toward = Vec3::new(0.0, 0.0, -9.5) - base.position;
+        vec![
+            ("point", base),
+            (
+                "spot",
+                Light {
+                    cone: Some(crate::Cone {
+                        direction: toward,
+                        angle_degrees: 90.0,
+                        shadows: Some(crate::SpotShadows { near: 0.0 }),
+                    }),
+                    point_shadows: None,
+                    ..base
+                },
+            ),
+            (
+                "rect",
+                Light {
+                    rect: Some(crate::RectArea {
+                        direction: toward,
+                        right: Vec3::Y.cross(toward),
+                        width: 0.5,
+                        height: 0.5,
+                    }),
+                    ..base
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn point_spot_and_rect_lights_cast_ray_traced_shadows_without_shadow_maps() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced());
+        for (kind, lamp) in lamps() {
+            let mut list = lamp_lit_wall(lamp);
+            let shaded = middle_of(&mut renderer, &list);
+            assert!(renderer.scene.spot_shadow_map.is_none());
+            assert!(renderer.scene.point_shadow_map.is_none());
+            list.items[1].casts_shadow = false;
+            let lit = middle_of(&mut renderer, &list);
+            assert!(
+                lit[0] > shaded[0] + 40,
+                "{kind}: shaded {shaded:?}, lit {lit:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lamp_without_shadows_traces_none_and_lights_through() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced());
+        let (_, lamp) = lamps().remove(0);
+        let mut list = lamp_lit_wall(Light {
+            point_shadows: None,
+            ..lamp
+        });
+        let through = middle_of(&mut renderer, &list);
+        list.items[1].casts_shadow = false;
+        let lit = middle_of(&mut renderer, &list);
+        assert!(through[0].abs_diff(lit[0]) <= 4, "{through:?} vs {lit:?}");
+    }
+
+    #[test]
+    fn a_lamps_own_part_does_not_shade_its_light() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced());
+        let (_, lamp) = lamps().remove(0);
+        let mut list = lamp_lit_wall(lamp);
+        list.items[1].casts_shadow = false;
+        let open = middle_of(&mut renderer, &list);
+        // A fixture around the light, reaching under 0.9 studs from it every way:
+        // its shadows start past it.
+        let mut fixture = list.items[1].clone();
+        fixture.casts_shadow = true;
+        fixture.transform = Mat4::from_scale_rotation_translation(
+            Vec3::splat(1.0),
+            glam::Quat::IDENTITY,
+            lamp.position,
+        );
+        list.items.push(fixture);
+        list.lights[0].point_shadows = Some(crate::PointShadows { near: [0.9; 6] });
+        let fixed = middle_of(&mut renderer, &list);
+        assert!(fixed[0].abs_diff(open[0]) <= 6, "{fixed:?} vs {open:?}");
+    }
+}
+
 mod ambient_occlusion {
     use super::*;
     use crate::{AmbientOcclusion, RayTracedAmbientOcclusion};

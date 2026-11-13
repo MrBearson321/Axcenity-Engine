@@ -28,6 +28,12 @@ struct RayShadows {
     settings: vec4<f32>,
     // xy: the scene's width and height in pixels.
     size: vec4<u32>,
+    // Lamps' ray traced shadows: x: 1 to trace them, y: the size of a light
+    // tile in pixels, z: how many tiles across.
+    lamps: vec4<u32>,
+    // x: how wide a lamp's bulb is taken to be, in studs (0 for hard
+    // shadows), y: rays per lamp for soft shadows.
+    lamp: vec4<f32>,
 }
 
 @group(0) @binding(0) var scene: acceleration_structure;
@@ -54,6 +60,28 @@ struct CutOut {
 @group(0) @binding(7) var<storage, read> cut_out_uvs: array<vec2<f32>>;
 @group(0) @binding(8) var cut_out_alpha: texture_2d_array<f32>;
 @group(0) @binding(9) var cut_out_sampler: sampler;
+
+// A point, spot or rect light. Must match `Light` in lighting.wgsl and
+// `LightRaw` in renderer/types.rs.
+struct Light {
+    position_range: vec4<f32>,
+    radiance_cone: vec4<f32>,
+    direction_inner: vec4<f32>,
+    // z: 0 for a lamp that casts no shadows, otherwise 1 plus how far from
+    // the light its shadows start (so the lamp's own part doesn't shade).
+    shadow: vec4<f32>,
+    rect: vec4<f32>,
+}
+// The most lights one tile lists. Must match `LIGHTS_PER_TILE`.
+const LIGHTS_PER_TILE: u32 = 64u;
+// The most lamps a pixel traces shadows for: 4 bits each in a u32. Must
+// match `TRACED_LAMPS` in lighting.wgsl.
+const TRACED_LAMPS: u32 = 8u;
+@group(0) @binding(10) var<storage, read> lights: array<Light>;
+@group(0) @binding(11) var<storage, read> tile_lights: array<u32>;
+// Each pixel's lamps' shadows: 4 bits a lamp (0 in shadow, 15 lit), in the
+// order its tile lists the lamps that cast shadows.
+@group(0) @binding(12) var<storage, read_write> lamp_mask: array<u32>;
 
 // Instance masks of what casts shadows (renderer/ray_tracing.rs): solid
 // items, and cut-outs.
@@ -123,10 +151,13 @@ fn cut_out_covers(hit: RayIntersection) -> bool {
 // How far along the ray from `origin` an item of `mask` blocks it, from
 // `near` on, or 0 for nothing. Cut-outs' triangles come as candidates
 // (their BLAS isn't opaque) and block only where they aren't cut out.
-fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32) -> f32 {
+fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32, far: f32) -> f32 {
+    if far <= near {
+        return 0.0;
+    }
     var query: ray_query;
     rayQueryInitialize(&query, scene, RayDesc(
-        RAY_FLAG_TERMINATE_ON_FIRST_HIT, mask, near, rays.camera.w * 2.0, origin, direction));
+        RAY_FLAG_TERMINATE_ON_FIRST_HIT, mask, near, far, origin, direction));
     while rayQueryProceed(&query) {
         let candidate = rayQueryGetCandidateIntersection(&query);
         if candidate.kind == RAY_QUERY_INTERSECTION_TRIANGLE && cut_out_covers(candidate) {
@@ -140,13 +171,103 @@ fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32) -> f
     return max(hit.t, 1e-3);
 }
 
-// One ray from `origin` along `direction`: how far to what blocks it, or 0.
-fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
-    let solid = first_hit(origin, direction, MASK_SOLID, 0.0);
+// One ray from `origin` along `direction` (normalized), up to `far`: how
+// far to what blocks it, or 0.
+fn blocked_within(origin: vec3<f32>, direction: vec3<f32>, far: f32) -> f32 {
+    let solid = first_hit(origin, direction, MASK_SOLID, 0.0, far);
     if solid > 0.0 {
         return solid;
     }
-    return first_hit(origin, direction, MASK_CUT_OUT, CUT_OUT_NEAR);
+    return first_hit(origin, direction, MASK_CUT_OUT, CUT_OUT_NEAR, far);
+}
+
+// One ray toward the sun: how far to what blocks it, or 0.
+fn blocked_at(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+    return blocked_within(origin, direction, rays.camera.w * 2.0);
+}
+
+// How much of `light` reaches the surface at `point` (facing `normal`): 1
+// lit, 0 in shadow. Rays go to points spread over the bulb (a disc as wide
+// as `rays.lamp.x`, facing the surface) or, for a rect light with soft
+// shadows, over its rectangle, and stop short of the light by its shadows'
+// start, so the part it sits in doesn't shade it.
+fn lamp_lit(light: Light, point: vec3<f32>, normal: vec3<f32>, distance: f32, turn: f32) -> f32 {
+    let center = light.position_range.xyz;
+    let to_center = center - point;
+    let range = light.position_range.w;
+    if dot(to_center, to_center) >= range * range {
+        return 1.0;
+    }
+    let rect = light.radiance_cone.w < -2.5;
+    let half_width = length(light.rect.xyz);
+    let right = light.rect.xyz / max(half_width, 0.0001);
+    let up = cross(light.direction_inner.xyz, right);
+    if rect && dot(-to_center, light.direction_inner.xyz) <= 0.0 {
+        return 0.0;
+    }
+    let origin = point + normal * (0.02 + distance * 0.002);
+    let start = max(light.shadow.z - 1.0, 0.0);
+    let soft = rays.lamp.x > 0.0;
+    let count = select(1u, max(u32(rays.lamp.y), 1u), soft);
+    // Square to the way to the light, for spreading over a round bulb.
+    let way = normalize(to_center);
+    let side = normalize(cross(way, select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0),
+        abs(way.y) > 0.99)));
+    let other = cross(way, side);
+    var lit = 0.0;
+    for (var i = 0u; i < count; i++) {
+        var aim = center;
+        if rect {
+            if soft {
+                // A stratified point of the rectangle, turned per pixel.
+                let k = fract((f32(i) + 0.5) / f32(count) + turn);
+                let j = fract(f32(i) * 0.618034 + turn * 1.618034);
+                aim += right * (k * 2.0 - 1.0) * half_width + up * (j * 2.0 - 1.0) * light.rect.w;
+            } else {
+                // Hard: from the nearest point, as the rect light shines.
+                let from_center = -to_center;
+                aim += right * clamp(dot(from_center, right), -half_width, half_width)
+                    + up * clamp(dot(from_center, up), -light.rect.w, light.rect.w);
+            }
+        } else if soft {
+            let k = (f32(i) + 0.5) / f32(count);
+            let angle = turn * 6.2831853 + f32(i) * 2.3999632;
+            let offset = sqrt(k) * rays.lamp.x * 0.5 * vec2<f32>(cos(angle), sin(angle));
+            aim += side * offset.x + other * offset.y;
+        }
+        let toward = aim - origin;
+        let length_to = length(toward);
+        if length_to < 1e-4 || dot(toward, normal) <= 0.0 {
+            continue;
+        }
+        let direction = toward / length_to;
+        if blocked_within(origin, direction, length_to - start) == 0.0 {
+            lit += 1.0;
+        }
+    }
+    return lit / f32(count);
+}
+
+// The lamps' shadows at `pixel` (on `point`, facing `normal`), packed 4
+// bits a lamp in the order its tile lists the lamps that cast shadows.
+fn traced_lamps(pixel: vec2<i32>, point: vec3<f32>, normal: vec3<f32>, distance: f32) -> u32 {
+    let tile = vec2<u32>(pixel) / max(rays.lamps.y, 1u);
+    let first = (tile.y * rays.lamps.z + tile.x) * (LIGHTS_PER_TILE + 1u);
+    let count = min(tile_lights[first], LIGHTS_PER_TILE);
+    let turn = fract(pixel_noise(vec2<f32>(pixel)) + rays.settings.y * 0.618034);
+    var packed = 0xFFFFFFFFu;
+    var slot = 0u;
+    for (var i = 0u; i < count && slot < TRACED_LAMPS; i++) {
+        let light = lights[tile_lights[first + 1u + i]];
+        if light.shadow.z <= 0.0 {
+            continue;
+        }
+        let lit = lamp_lit(light, point, normal, distance, turn);
+        let shade = u32(round(clamp(lit, 0.0, 1.0) * 15.0));
+        packed = (packed & ~(15u << (slot * 4u))) | (shade << (slot * 4u));
+        slot += 1u;
+    }
+    return packed;
 }
 
 @compute @workgroup_size(8, 8)
@@ -165,6 +286,9 @@ fn cs_trace(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let view_normal = textureLoad(normal_texture, pixel, 0).xyz;
     let normal = normalize((rays.view_to_world * vec4<f32>(view_normal, 0.0)).xyz);
+    if rays.lamps.x != 0u && index < arrayLength(&lamp_mask) {
+        lamp_mask[index] = traced_lamps(pixel, point.xyz, normal, distance);
+    }
     let sun = rays.sun.xyz;
     // Facing away from the sun: it shades itself.
     if dot(normal, sun) <= 0.0 {

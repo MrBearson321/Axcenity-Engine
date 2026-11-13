@@ -77,6 +77,8 @@ pub enum Edit {
     FlattenTerrainAlong,
     /// Opens the selected MeshPart's model in the Model Studio.
     OpenInModelStudio,
+    /// Opens the selected MeshPart's `.glb` in Blender (R15.4).
+    OpenInBlender,
     /// During Play, pins (true) or unpins a value edited during Play, so
     /// Stop copies it into the edit world (see `play::kept`).
     Keep(Field, bool),

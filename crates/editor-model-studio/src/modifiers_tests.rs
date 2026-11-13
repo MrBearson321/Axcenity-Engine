@@ -204,3 +204,37 @@ fn the_tab_draws_a_mirrored_smooth_head_and_its_stack() {
         },
     );
 }
+
+/// R15.3: the Levels of detail fold's edits are undo steps, and its rows
+/// count each level.
+#[test]
+fn the_lod_fold_regenerates_and_removes_as_undo_steps() {
+    let mut doc = half_head_doc();
+    assert_eq!(doc.lod_rows().len(), 1, "the object alone");
+    assert!(doc.remove_lods().is_err(), "nothing to remove");
+    let steps = doc.undo.len();
+
+    doc.lod_ratios = [0.7, 0.4];
+    doc.generate_lods().unwrap();
+    assert_eq!(doc.undo_label(), Some("Generate LODs"));
+    let rows = doc.lod_rows();
+    let levels: Vec<usize> = rows.iter().map(|row| row.level).collect();
+    assert_eq!(levels, [0, 1, 2]);
+    assert_eq!(rows[1].ratio, Some(0.7));
+    assert_eq!(rows[2].ratio, Some(0.4));
+    assert!(rows[0].triangles > rows[1].triangles && rows[1].triangles > rows[2].triangles);
+
+    doc.lod_ratios = [0.5, 0.2];
+    doc.generate_lods().unwrap();
+    assert_eq!(doc.undo_label(), Some("Regenerate LODs"));
+    assert_eq!(doc.model.objects.len(), 3);
+    assert_eq!(doc.lod_rows()[2].ratio, Some(0.2));
+
+    doc.remove_lods().unwrap();
+    assert_eq!(doc.undo_label(), Some("Remove LODs"));
+    assert_eq!(doc.model.objects.len(), 1);
+    assert_eq!(doc.lod_rows().len(), 1);
+    assert_eq!(doc.undo.len(), steps + 3);
+    assert!(doc.undo());
+    assert_eq!(doc.model.objects.len(), 3);
+}

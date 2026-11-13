@@ -11,7 +11,7 @@ use glam::Vec3;
 
 use super::lighting::linear_color;
 use super::*;
-use crate::draw_list::{Dust, Fog};
+use crate::draw_list::{Dust, Fog, MAX_DUST_BOXES};
 
 /// The volumetric fog's cells across the screen, down it and along each
 /// ray. Must match `GRID` in volumetric_fog.wgsl.
@@ -35,20 +35,57 @@ pub(super) struct FogRaw {
     pub(super) height: [f32; 4],
     pub(super) sun: [f32; 4],
     pub(super) sun_direction: [f32; 4],
-    /// The dust (`Fog::dust`): x the light it takes away per stud (0 for
-    /// none), y how much of its light goes forward, z the studs over which
-    /// it thins at the box's faces.
-    pub(super) dust: [f32; 4],
-    /// How much of the light it takes away the dust scatters (linear).
-    pub(super) dust_color: [f32; 4],
-    /// The sun's light the dust scatters (the sun's times its color).
-    pub(super) dust_sun: [f32; 4],
+    /// x: how many of `dust` are drawn.
+    pub(super) dust_count: [u32; 4],
+    /// The boxes of dust (`Fog::dust`), in the order they apply.
+    pub(super) dust: [DustRaw; MAX_DUST_BOXES],
+}
+
+/// One box of dust. Must match `DustBox` in fog.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub(super) struct DustRaw {
+    /// x the light it takes away per stud (0 for none), y how much of its
+    /// light goes forward, z the studs over which it thins at the box's
+    /// faces, w the studs above its bottom over which it thins by e (0:
+    /// even).
+    pub(super) params: [f32; 4],
+    /// How much of the light it takes away it scatters (linear), and w: 1
+    /// for an interior, which clears the air outside it.
+    pub(super) color: [f32; 4],
+    /// The sun's light it scatters (the sun's times its color).
+    pub(super) sun: [f32; 4],
     /// The sky's light it scatters with nothing in the way (the sky's
-    /// average times its color), for when the volumetric fog is off.
-    pub(super) dust_ambient: [f32; 4],
+    /// average times its color), past the volumetric fog's reach.
+    pub(super) ambient: [f32; 4],
     /// The rows of the world to the box's space, and half its size.
-    pub(super) dust_box: [[f32; 4]; 3],
-    pub(super) dust_extent: [f32; 4],
+    pub(super) rows: [[f32; 4]; 3],
+    pub(super) extent: [f32; 4],
+}
+
+impl DustRaw {
+    fn new(dust: &Dust, sky: Vec3, sun_radiance: Vec3) -> Self {
+        let color = linear_color(dust.color).max(Vec3::ZERO);
+        let finite_or = |value: f32, otherwise: f32| {
+            if value.is_finite() { value } else { otherwise }
+        };
+        let forward = finite_or(dust.forward_scattering, 0.0).clamp(-0.95, 0.95);
+        let edge = finite_or(dust.edge, 0.0).max(0.0);
+        let falloff = finite_or(dust.falloff, 0.0).max(0.0);
+        let rows = dust.to_box.transpose();
+        Self {
+            params: [dust.density.max(0.0), forward, edge, falloff],
+            color: color.extend(f32::from(u8::from(dust.interior))).to_array(),
+            sun: (sun_radiance * color).extend(0.0).to_array(),
+            ambient: (sky.max(Vec3::ZERO) * color).extend(0.0).to_array(),
+            rows: [
+                rows.x_axis.to_array(),
+                rows.y_axis.to_array(),
+                rows.z_axis.to_array(),
+            ],
+            extent: dust.half_size.extend(0.0).to_array(),
+        }
+    }
 }
 
 impl FogRaw {
@@ -68,30 +105,12 @@ impl FogRaw {
             return Self::default();
         }
         let mut raw = Self::without_dust(fog, horizon, sun_direction, sun_radiance, reach);
-        if let Some(dust) = fog.dust.filter(Dust::is_drawn) {
-            let color = linear_color(dust.color).max(Vec3::ZERO);
-            let forward = if dust.forward_scattering.is_finite() {
-                dust.forward_scattering.clamp(-0.95, 0.95)
-            } else {
-                0.0
-            };
-            let edge = if dust.edge.is_finite() {
-                dust.edge.max(0.0)
-            } else {
-                0.0
-            };
-            raw.dust = [dust.density, forward, edge, 0.0];
-            raw.dust_color = color.extend(0.0).to_array();
-            raw.dust_sun = (sun_radiance * color).extend(0.0).to_array();
-            raw.dust_ambient = (sky.max(Vec3::ZERO) * color).extend(0.0).to_array();
-            let rows = dust.to_box.transpose();
-            raw.dust_box = [
-                rows.x_axis.to_array(),
-                rows.y_axis.to_array(),
-                rows.z_axis.to_array(),
-            ];
-            raw.dust_extent = dust.half_size.extend(0.0).to_array();
+        let mut count = 0;
+        for dust in fog.dust.iter().filter(|dust| dust.is_drawn()) {
+            raw.dust[count] = DustRaw::new(dust, sky, sun_radiance);
+            count += 1;
         }
+        raw.dust_count = [count as u32, 0, 0, 0];
         raw
     }
 
@@ -524,13 +543,15 @@ mod tests {
     fn dust_packs_its_box_color_and_the_suns_light_it_scatters() {
         let middle = Vec3::new(5.0, 2.0, -10.0);
         let fog = Fog {
-            dust: Some(Dust {
+            dust: crate::DustBoxes::one(Dust {
                 density: 0.03,
                 color: [1.0, 1.0, 1.0],
                 forward_scattering: 0.7,
                 to_box: glam::Mat4::from_translation(-middle),
                 half_size: Vec3::new(4.0, 3.0, 20.0),
                 edge: 0.5,
+                falloff: 6.0,
+                interior: false,
             }),
             ..Fog::default()
         };
@@ -544,21 +565,54 @@ mod tests {
             0.0,
         );
         assert_eq!(raw.color[3], 1.0, "dust alone is fog to draw");
-        assert_eq!(raw.dust, [0.03, 0.7, 0.5, 0.0]);
-        assert_eq!(raw.dust_sun, [3.0, 3.0, 3.0, 0.0]);
-        assert_eq!(raw.dust_ambient, [0.2, 0.2, 0.2, 0.0]);
+        assert_eq!(raw.dust_count[0], 1);
+        let dust = raw.dust[0];
+        assert_eq!(dust.params, [0.03, 0.7, 0.5, 6.0]);
+        assert_eq!(dust.color[3], 0.0, "not an interior");
+        assert_eq!(dust.sun, [3.0, 3.0, 3.0, 0.0]);
+        assert_eq!(dust.ambient, [0.2, 0.2, 0.2, 0.0]);
         // The box's rows take its middle to 0.
         let row = |r: [f32; 4]| r[0] * middle.x + r[1] * middle.y + r[2] * middle.z + r[3];
-        assert_eq!(raw.dust_box.map(row), [0.0; 3]);
-        assert_eq!(raw.dust_extent, [4.0, 3.0, 20.0, 0.0]);
+        assert_eq!(dust.rows.map(row), [0.0; 3]);
+        assert_eq!(dust.extent, [4.0, 3.0, 20.0, 0.0]);
         // Without a box worth drawing, nothing.
         let empty = Fog {
-            dust: Some(Dust {
+            dust: crate::DustBoxes::one(Dust {
                 density: 0.0,
-                ..fog.dust.unwrap()
+                ..*fog.dust.first().unwrap()
             }),
             ..Fog::default()
         };
         assert!(!empty.is_drawn());
+        // An interior is drawn with no dust of its own: it clears the air.
+        let interior = Fog {
+            dust: crate::DustBoxes::one(Dust {
+                density: 0.0,
+                interior: true,
+                ..*fog.dust.first().unwrap()
+            }),
+            ..Fog::default()
+        };
+        assert!(interior.is_drawn());
+        let raw = FogRaw::new(&interior, Vec3::ZERO, Vec3::ZERO, Vec3::Y, Vec3::ONE, 0.0);
+        assert_eq!((raw.dust_count[0], raw.dust[0].color[3]), (1, 1.0));
+    }
+
+    #[test]
+    fn many_boxes_pack_in_order_up_to_the_most() {
+        let boxes: crate::DustBoxes = (0..12)
+            .map(|i| Dust {
+                density: 0.01 * (i + 1) as f32,
+                ..Dust::default()
+            })
+            .collect();
+        assert_eq!(boxes.len(), MAX_DUST_BOXES);
+        let fog = Fog {
+            dust: boxes,
+            ..Fog::default()
+        };
+        let raw = FogRaw::new(&fog, Vec3::ZERO, Vec3::ZERO, Vec3::Y, Vec3::ONE, 0.0);
+        assert_eq!(raw.dust_count[0], MAX_DUST_BOXES as u32);
+        assert_eq!(raw.dust[2].params[0], 0.03);
     }
 }

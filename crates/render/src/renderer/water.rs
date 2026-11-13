@@ -10,6 +10,11 @@
 //! shader's sampled textures stay within wgpu's default limit. At High and
 //! Ultra the water also reflects what's on the screen. At Low there's no
 //! copy: water is blended over the scene, and the scene pass isn't split.
+//!
+//! With hardware ray tracing (LE5), water reflecting the screen also traces
+//! a ray where the screen's reflection finds nothing (`water_rays.wgsl`),
+//! through its own pipeline whose fourth bind group is the ray traced
+//! scene ([`TracedWater`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -62,6 +67,13 @@ impl WaterMode {
 
     pub(super) fn copies(self) -> bool {
         self >= WaterMode::Refracted
+    }
+
+    /// Whether its reflections are traced by rays (LE5): it reflects the
+    /// screen and the GPU traces rays (Settings > Graphics > Hardware ray
+    /// tracing).
+    pub(super) fn traces_rays(self, graphics: &EffectiveGraphics) -> bool {
+        self == WaterMode::Reflected && graphics.ray_queries
     }
 }
 
@@ -122,6 +134,85 @@ pub(super) struct WaterPass {
     copy_view: wgpu::Buffer,
     /// Only while water is drawn from Medium reflection quality.
     pub(super) copy: Option<SceneCopy>,
+    /// Samples per pixel the pipelines are made for.
+    samples: u32,
+    /// Only while water's reflections are traced (LE5).
+    pub(super) traced: Option<TracedWater>,
+}
+
+/// Must match `TracedWater` in water_rays.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct TracedWaterUniform {
+    /// How far rays reach, how far a hit's shadow rays start off it.
+    settings: [f32; 4],
+}
+
+/// How far a hit's shadow rays start off it, in studs.
+const SHADOW_LIFT: f32 = 0.05;
+
+/// Water's pipeline with ray traced reflections, and its bindings to the
+/// ray traced scene, remade each frame (the TLAS and the surfaces' buffer
+/// can be replaced when they grow).
+pub(super) struct TracedWater {
+    layout: wgpu::BindGroupLayout,
+    pub(super) pipeline: wgpu::RenderPipeline,
+    uniform: wgpu::Buffer,
+    /// The frame's, once the ray traced scene is ready.
+    pub(super) group: Option<wgpu::BindGroup>,
+}
+
+impl TracedWater {
+    fn new(device: &wgpu::Device, layouts: [&wgpu::BindGroupLayout; 3], samples: u32) -> Self {
+        let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty,
+            count: None,
+        };
+        let buffer = |ty| wgpu::BindingType::Buffer {
+            ty,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ray traced water"),
+            entries: &[
+                entry(
+                    0,
+                    wgpu::BindingType::AccelerationStructure {
+                        vertex_return: false,
+                    },
+                ),
+                entry(
+                    1,
+                    buffer(wgpu::BufferBindingType::Storage { read_only: true }),
+                ),
+                entry(2, buffer(wgpu::BufferBindingType::Uniform)),
+            ],
+        });
+        let shader = gpu::shader_module(device, "ray traced water", gpu::TRACED_WATER_SHADER);
+        let [frame, material, skin] = layouts;
+        let pipeline = create_pipeline(
+            device,
+            &shader,
+            ("vs_water", "fs_water"),
+            &[frame, material, skin, &layout],
+            (HDR_FORMAT, samples),
+            (false, false),
+        );
+        Self {
+            layout,
+            pipeline,
+            uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("ray traced water"),
+                size: size_of::<TracedWaterUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            group: None,
+        }
+    }
 }
 
 impl WaterPass {
@@ -143,7 +234,57 @@ impl WaterPass {
                 mapped_at_creation: false,
             }),
             copy: None,
+            samples,
+            traced: None,
         }
+    }
+
+    /// Makes or frees what traces water's reflections (LE5): `rays` is the
+    /// ray traced scene's TLAS and surfaces, and how far rays reach, while
+    /// they're traced this frame. `layouts` as for [`WaterPass::new`].
+    pub(super) fn trace(
+        &mut self,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        layouts: [&wgpu::BindGroupLayout; 3],
+        rays: Option<(&wgpu::Tlas, &wgpu::Buffer, f32)>,
+    ) {
+        let Some((tlas, surfaces, reach)) = rays else {
+            self.traced = None;
+            return;
+        };
+        let samples = self.samples;
+        let traced = self
+            .traced
+            .get_or_insert_with(|| TracedWater::new(device, layouts, samples));
+        let uniform = TracedWaterUniform {
+            settings: [reach, SHADOW_LIFT, 0.0, 0.0],
+        };
+        queue.write_buffer(&traced.uniform, 0, bytemuck::bytes_of(&uniform));
+        traced.group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ray traced water"),
+            layout: &traced.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tlas.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: surfaces.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: traced.uniform.as_entire_binding(),
+                },
+            ],
+        }));
+    }
+
+    /// The pipeline and ray bindings water is drawn with while its
+    /// reflections are traced.
+    pub(super) fn traced(&self) -> Option<(&wgpu::RenderPipeline, &wgpu::BindGroup)> {
+        let traced = self.traced.as_ref()?;
+        Some((&traced.pipeline, traced.group.as_ref()?))
     }
 
     /// Remakes the pipelines for a new number of samples per pixel.
@@ -154,6 +295,8 @@ impl WaterPass {
         samples: u32,
     ) {
         self.pipelines = water_pipelines(device, layouts, samples);
+        self.samples = samples;
+        self.traced = None;
         self.copy_layout = copy_layout(device, samples);
         self.copy_pipeline = copy_pipeline(device, &self.copy_layout, samples);
     }

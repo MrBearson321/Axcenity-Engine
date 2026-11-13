@@ -187,6 +187,7 @@ impl ToolboxPanel {
         let source_name = provenance::source_name(&record.provider);
         let mut close = false;
         let mut get = false;
+        let mut listen = false;
         let mut toggle_favourite = false;
         let mut collect: Option<String> = None;
         let mut copy = false;
@@ -331,6 +332,15 @@ impl ToolboxPanel {
                         ),
                     };
                     get = button.clicked();
+                    if record.kind == Kind::Sound {
+                        listen = listen::button(
+                            ui,
+                            &self.listen,
+                            &key,
+                            &record.name,
+                            &record.preview_url,
+                        );
+                    }
                     let star = if drawer.favourite {
                         theme::filled_icons::STAR
                     } else {
@@ -402,6 +412,9 @@ impl ToolboxPanel {
         if close {
             self.drawer = None;
             return;
+        }
+        if listen {
+            self.listen_clicked(ui.ctx(), &key, &record.name, &record.preview_url);
         }
         if get && let Some(project) = project {
             self.start_download(ui.ctx(), project, &key);

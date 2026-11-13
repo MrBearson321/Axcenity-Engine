@@ -21,6 +21,7 @@ mod presets;
 
 mod layers;
 mod tool_settings;
+mod water;
 
 use layers::*;
 
@@ -122,6 +123,8 @@ pub enum TerrainAction {
     MoveLayer(InstanceId, bool),
     /// Change a layer's property, as an undo step.
     SetLayer(InstanceId, &'static str, Value),
+    /// Change the terrain's own property (its water), as an undo step.
+    SetTerrain(InstanceId, &'static str, Value),
     /// Pick a texture file for a layer's map.
     PickLayerTexture(InstanceId, &'static str),
     /// Fill every map of a layer from a texture set in the project.
@@ -425,6 +428,7 @@ impl TerrainStudio {
                     let Some(tool) = self.tool else {
                         hint(ui, "Pick a tool to start shaping the terrain.");
                         self.layers_section(ui, cx, terrain, false, &mut actions);
+                        self.water_section(ui, cx.world, terrain, &mut actions);
                         self.view_section(ui);
                         return;
                     };
@@ -449,6 +453,7 @@ impl TerrainStudio {
                     }
                     let painting = matches!(tool, TerrainTool::Paint | TerrainTool::Auto);
                     self.layers_section(ui, cx, terrain, painting, &mut actions);
+                    self.water_section(ui, cx.world, terrain, &mut actions);
                     self.view_section(ui);
                     self.data_section(ui, cx.world, terrain, &mut actions);
                 });

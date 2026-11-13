@@ -8,7 +8,7 @@ use axcenity_render::glam::{Mat4, Vec3};
 
 use super::tests::copy_of_example;
 use super::*;
-use crate::model_studio::{Mode, StudioDoc};
+use crate::model_studio::{Mode, StudioAction, StudioDoc};
 use crate::properties::Edit;
 
 /// A MeshPart in the Workspace using `mesh_id`.
@@ -622,4 +622,78 @@ fn a_sculpted_face_made_low_poly_and_baked_writes_maps_a_meshpart_draws_once_sav
     assert!(material.base_color_texture.is_some());
     assert_eq!(primitive.tangents.len(), primitive.positions.len());
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// R15.4: a model saved by another program (Blender's export through Edit
+/// in Blender) makes the open Studio document offer to load it again; the
+/// editor's own save doesn't. Loading it gives up the edits here.
+#[test]
+fn a_model_saved_in_blender_is_offered_again_but_the_editors_own_save_isnt() {
+    use axcenity_mesh_edit::PrimitiveShape;
+    let folder = copy_of_example("hello-touched", "studio-blender");
+    let mut app = EditorApp::new(Some(&folder));
+    app.model_studio.open(StudioDoc::new(
+        String::new(),
+        ModelDoc::primitive(&PrimitiveSettings::default()),
+        false,
+    ));
+    let path = app.save_model_studio().unwrap();
+    // The watcher reports the editor's own save too: nothing to offer.
+    app.asset_file_changed(&path);
+    assert!(!app.model_studio.offers_reload());
+
+    // "Blender" writes a cylinder over it.
+    let cylinder = ModelDoc::primitive(&PrimitiveSettings::of(PrimitiveShape::Cylinder));
+    std::fs::write(folder.join(&path), cylinder.write_glb()).unwrap();
+    app.asset_file_changed(&path);
+    assert!(app.model_studio.offers_reload());
+    // Another file changing doesn't matter to it.
+    app.model_studio_file_changed("assets/models/Other.glb");
+    assert!(app.model_studio.offers_reload());
+
+    // With edits here, loading it again gives them up.
+    app.model_studio
+        .doc
+        .as_mut()
+        .unwrap()
+        .generate_lods()
+        .unwrap();
+    assert!(app.model_studio.doc.as_ref().unwrap().unsaved());
+    app.studio_action(StudioAction::Reload(path.clone()));
+    let doc = app.model_studio.doc.as_ref().unwrap();
+    assert_eq!(doc.path, path);
+    assert!(!doc.unsaved());
+    assert_eq!(doc.model.objects[0].name, "Cylinder");
+    assert!(!app.model_studio.offers_reload());
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// R15.4: Edit in Blender from the Studio saves its edits first, and says
+/// where to set Blender when it isn't found; only a `.glb` goes.
+#[test]
+fn edit_in_blender_saves_first_and_names_the_setting_when_blender_is_missing() {
+    let folder = copy_of_example("hello-touched", "studio-blender-missing");
+    let mut app = EditorApp::new(Some(&folder));
+    app.blender_path = folder
+        .join("no-blender-here")
+        .to_string_lossy()
+        .into_owned();
+    app.model_studio.open(StudioDoc::new(
+        String::new(),
+        ModelDoc::primitive(&PrimitiveSettings::default()),
+        false,
+    ));
+    app.studio_action(StudioAction::EditInBlender);
+    assert!(
+        folder.join("assets/models/Cube.glb").is_file(),
+        "saved first"
+    );
+    assert!(!app.model_studio.doc.as_ref().unwrap().unsaved());
+    let last = &app.output.lines().last().unwrap().text;
+    assert!(last.contains("Settings > External tools"), "{last}");
+
+    app.edit_in_blender("assets/models/chair.fbx");
+    let last = &app.output.lines().last().unwrap().text;
+    assert!(last.contains("opens .glb files"), "{last}");
+    let _ = std::fs::remove_dir_all(folder);
 }

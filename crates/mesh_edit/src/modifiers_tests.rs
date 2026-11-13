@@ -6,8 +6,9 @@ use axcenity_assets::{ModelFormat, load_model};
 use glam::Vec3;
 
 use crate::{
-    Axis, DeleteKind, EditMesh, MeshOp, ModelDoc, Modifier, ModifierKind, PrimitiveSettings,
-    PrimitiveShape, Purpose, SelectMode, Selection, apply, check_manifold, clip, evaluate,
+    Axis, DeleteKind, EditMesh, MIN_LOD_RATIO, MeshOp, ModelDoc, Modifier, ModifierKind,
+    PrimitiveSettings, PrimitiveShape, Purpose, SelectMode, Selection, apply, check_manifold, clip,
+    evaluate,
 };
 
 fn cube() -> EditMesh {
@@ -168,6 +169,44 @@ fn a_sidecar_isnt_used_once_the_glb_was_changed_elsewhere() {
             .write_sidecar(&glb)
             .is_none()
     );
+}
+
+/// R15.1b: a sculpt mask needs the sidecar, comes back on the same
+/// vertices, and one that no longer fits its mesh isn't kept.
+#[test]
+fn a_sculpt_mask_is_kept_in_the_sidecar() {
+    let mut doc = doc_of("Head", half_head(), Vec::new());
+    let count = doc.objects[0].mesh.as_ref().unwrap().vertex_count();
+    let mut mask = vec![0.0; count];
+    mask[0] = 1.0;
+    mask[count / 2] = 0.25;
+    mask[count - 1] = 0.5;
+    doc.objects[0].mask = mask.clone();
+    assert_eq!(doc.objects[0].mask(), Some(mask.as_slice()));
+    let glb = doc.write_glb();
+    let sidecar = doc.write_sidecar(&glb).expect("a mask needs the sidecar");
+    let json: serde_json::Value = serde_json::from_slice(&sidecar).unwrap();
+    assert_eq!(
+        json["objects"][0]["mask"].as_array().map(Vec::len),
+        Some(3),
+        "only the masked vertices are written"
+    );
+
+    let mut reopened = ModelDoc::open(&glb, &std::env::temp_dir(), ModelFormat::Gltf).unwrap();
+    assert!(reopened.objects[0].mask.is_empty(), "a .glb has no mask");
+    assert_eq!(reopened.read_sidecar(&sidecar, &glb), Ok(1));
+    assert_eq!(reopened.objects[0].mask, mask);
+    assert_eq!(
+        reopened.objects[0].mesh.as_ref().unwrap().vertex_count(),
+        count
+    );
+
+    // A mask of nothing, or one left from other vertices, isn't saved.
+    doc.objects[0].mask = vec![0.0; count];
+    assert!(doc.write_sidecar(&glb).is_none());
+    doc.objects[0].mask = vec![1.0; count + 1];
+    assert_eq!(doc.objects[0].mask(), None);
+    assert!(doc.write_sidecar(&glb).is_none());
 }
 
 #[test]
@@ -405,6 +444,49 @@ fn generated_lods_are_the_levels_the_renderer_draws() {
         counts[1..],
         "the file's own copies, not simplified ones"
     );
+}
+
+/// R15.3: each level's copy, ratio and count; Regenerate with other
+/// ratios; Remove LODs; and Preview LOD drawing the copies.
+#[test]
+fn lods_are_counted_regenerated_with_their_ratios_previewed_and_removed() {
+    let mut settings = PrimitiveSettings::of(PrimitiveShape::UvSphere);
+    settings.segments = 32;
+    settings.rings = 16;
+    let mut doc = doc_of("Rock", settings.build(), Vec::new());
+    assert!(doc.lod_copies(0).is_empty());
+    assert_eq!(doc.drawn_at(0, 2), 0, "no copies: itself at every level");
+    let full = doc.triangles(0);
+    assert_eq!(full, triangles(&doc.objects[0].mesh.clone().unwrap()));
+
+    // One copy at a third, then a tiny ratio kept at the smallest.
+    assert_eq!(doc.generate_lods_with(0, &[0.3]), Some(0));
+    assert_eq!(doc.lod_copies(0), [1]);
+    assert_eq!(doc.lod_ratio(1), Some(0.3));
+    assert_eq!(doc.drawn_at(0, 2), 1, "past its last copy, the last");
+    assert_eq!(doc.generate_lods_with(0, &[0.6, 0.0001]), Some(0));
+    assert_eq!(doc.lod_copies(0), [1, 2]);
+    assert_eq!(doc.lod_ratio(2), Some(MIN_LOD_RATIO));
+    let (one, two) = (doc.triangles(1), doc.triangles(2));
+    assert!(full > one && one > two && two > 0, "{full} {one} {two}");
+    let share = one as f32 / full as f32;
+    assert!((share - 0.6).abs() < 0.1, "{share}");
+
+    // Preview LOD 2 draws the second copy in place of the object.
+    let (drawn, slots) = doc.to_model_at_level(2).unwrap();
+    assert_eq!(drawn.primitives[0].indices.len() / 3, two);
+    assert_eq!(slots, [(2, 0)]);
+    let (drawn, _) = doc.to_model_at_level(0).unwrap();
+    assert_eq!(drawn.primitives[0].indices.len() / 3, full);
+
+    // A group and a copy have none; Remove LODs leaves the object.
+    assert!(doc.lod_copies(1).is_empty());
+    assert_eq!(doc.remove_lods(1), None);
+    assert_eq!(doc.generate_lods_with(0, &[]), None);
+    assert_eq!(doc.remove_lods(0), Some(0));
+    let names: Vec<&str> = doc.objects.iter().map(|o| o.name.as_str()).collect();
+    assert_eq!(names, ["Rock"]);
+    assert_eq!(doc.triangles(0), full);
 }
 
 /// Phase 90: a sidecar with fields this Axcenity doesn't read (a sculpt

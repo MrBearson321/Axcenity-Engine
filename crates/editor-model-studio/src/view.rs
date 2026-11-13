@@ -132,7 +132,7 @@ pub struct View {
     assets: Assets,
     /// The revision of the meshes drawn, 0 for none, the checker's
     /// channel it was drawn with, and the object left out (sculpted).
-    shown: (u64, Option<usize>, Option<usize>),
+    shown: (u64, Option<usize>, Option<usize>, usize),
     /// The paint revision drawn, and the model drawn with the object and
     /// material slot of each primitive.
     painted: u64,
@@ -170,7 +170,7 @@ impl Default for View {
             world,
             part,
             assets: Assets::default(),
-            shown: (0, None, None),
+            shown: (0, None, None, 0),
             painted: 0,
             drawn: None,
             aspect: 1.0,
@@ -194,7 +194,7 @@ impl View {
 
     /// Points the camera at `doc`'s model, and draws it afresh.
     pub fn frame_doc(&mut self, doc: &StudioDoc) {
-        self.shown = (0, None, None);
+        self.shown = (0, None, None, 0);
         self.drag = None;
         self.moving = None;
         self.box_start = None;
@@ -259,7 +259,7 @@ impl View {
             None if self.handed.is_some() => {
                 self.handed = None;
                 // Draw the document's model afresh.
-                self.shown = (0, None, None);
+                self.shown = (0, None, None, 0);
             }
             None => {}
         }
@@ -272,7 +272,7 @@ impl View {
         if self.handed.is_some() {
             return;
         }
-        if self.shown == (doc.revision, checker, skip) {
+        if self.shown == (doc.revision, checker, skip, doc.lod_preview) {
             if self.painted == doc.paint_revision || checker.is_some() {
                 return;
             }
@@ -289,7 +289,7 @@ impl View {
             }
             return;
         }
-        self.shown = (doc.revision, checker, skip);
+        self.shown = (doc.revision, checker, skip, doc.lod_preview);
         self.painted = doc.paint_revision;
         let model = match (checker, skip) {
             (_, Some(skip)) => {
@@ -297,10 +297,13 @@ impl View {
                 doc.model.to_model_except(skip)
             }
             (Some(channel), None) => doc.model.to_model_on(channel).map(with_checker),
-            (None, None) => doc.model.to_model_slots(0).map(|(model, slots)| {
-                self.drawn = Some((model.with_materials(|_| None), slots));
-                model
-            }),
+            (None, None) => doc
+                .model
+                .to_model_at_level(doc.lod_preview)
+                .map(|(model, slots)| {
+                    self.drawn = Some((model.with_materials(|_| None), slots));
+                    model
+                }),
         };
         let Some(model) = model else {
             // A MeshPart without a mesh would draw as a box: hide it.
