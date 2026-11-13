@@ -419,6 +419,8 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         "ParticleEmitterShape" => vec!["Box", "Sphere", "Cylinder", "Disc"],
         "ParticleEmitterShapeStyle" => vec!["Volume", "Surface"],
         "ParticleEmitterShapeInOut" => vec!["Outward", "Inward", "InAndOut"],
+        // When a sub-emitter gives off particles (roadmap R17.4).
+        "ParticleEmitterEmitOn" => vec!["Always", "Birth", "Death", "Collision"],
         // A particle texture's frames (roadmap R17.2c).
         "ParticleFlipbookLayout" => vec!["None", "Grid2x2", "Grid4x4", "Grid8x8"],
         "ParticleFlipbookMode" => vec!["Loop", "OneShot", "PingPong", "Random"],

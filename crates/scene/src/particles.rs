@@ -39,6 +39,13 @@ use axcenity_render::{
 use crate::draw_list::image_texture;
 use crate::weather::WeatherState;
 
+#[cfg(test)]
+mod collision_tests;
+mod collisions;
+
+use collisions::{EmitOn, Event, Landing, Sub, events_on, is_sub, subs_of};
+pub use collisions::{MAX_SURFACE_RAYS, SurfaceHit, Surfaces};
+
 /// The most particles one emitter keeps; past this, no more are born
 /// until some die.
 pub const MAX_PER_EMITTER: usize = 4000;
@@ -64,6 +71,10 @@ struct Particle {
     velocity: Vec3,
     age: f32,
     life: f32,
+    /// Seconds since it last met a surface, for an emitter that Collides:
+    /// a landing counts (Collision sub-emitters, LifetimeLoss) only after
+    /// a moment off them, so resting or skidding on one isn't landing.
+    off_surface: f32,
 }
 
 #[derive(Debug, Default)]
@@ -170,6 +181,12 @@ struct Settings {
     bursts: Vec<(f32, f32, f32)>,
     /// Seconds a loop of bursts takes.
     duration: f32,
+    /// True if its particles land on surfaces (`Collides`), and how.
+    collides: bool,
+    landing: Landing,
+    /// True if its particles must stay on the CPU, where they can collide
+    /// and set off sub-emitters (roadmap R17.4); set by the caller.
+    cpu_only: bool,
 }
 
 impl Settings {
@@ -221,6 +238,12 @@ impl Settings {
                 })
                 .unwrap_or_default(),
             duration: number("Duration", 1.0).max(MIN_BURST_DURATION),
+            collides: instance.property("Collides").and_then(Value::as_bool) == Some(true),
+            landing: Landing {
+                bounce: number("Bounce", 0.5).clamp(0.0, 1.0),
+                lifetime_loss: number("LifetimeLoss", 0.0).clamp(0.0, 1.0),
+            },
+            cpu_only: false,
         }
     }
 
@@ -426,14 +449,17 @@ impl Particles {
         if instance.class() != ClassName::ParticleEmitter {
             return;
         }
-        let settings = Settings::read(instance);
+        let subs = subs_of(world, instance);
+        let mut settings = Settings::read(instance);
+        settings.cpu_only = cpu_only(world, instance, &settings, &subs);
         let Some(transform) = parent_transform(world, instance) else {
             return;
         };
         let mut state = self.emitters.remove(&emitter).unwrap_or_default();
+        let mut events = Vec::new();
         // A big burst goes to the GPU, as do births of an emitter already
         // there. They're born at its next step.
-        let burst = count as f32 >= GPU_PARTICLE_THRESHOLD;
+        let burst = count as f32 >= GPU_PARTICLE_THRESHOLD && !settings.cpu_only;
         if self.gpu && (burst || self.on_gpu(&state, &settings)) {
             let gpu = self.gpu_state(&mut state);
             gpu.pending = gpu.pending.saturating_add(count).min(MAX_GPU_PARTICLES);
@@ -441,10 +467,43 @@ impl Particles {
             let count = (count as usize).min(MAX_BIRTHS_PER_FRAME);
             let inherit = state.velocity * settings.inheritance;
             for _ in 0..count {
-                self.birth(&mut state, &settings, transform, inherit);
+                self.birth_with(
+                    &mut state,
+                    &settings,
+                    transform,
+                    inherit,
+                    &subs,
+                    &mut events,
+                );
             }
         }
         self.emitters.insert(emitter, state);
+        collisions::fire(self, world, events);
+    }
+
+    /// Gives off `event`'s particles from its sub-emitter, at the event's
+    /// place, heading along the sub-emitter's own Direction turned by its
+    /// Orientation, adding to `next` the events their births set off.
+    fn give_off_at(&mut self, world: &World, event: Event, next: &mut Vec<Event>) {
+        let Some(instance) = world.get(event.emitter) else {
+            return;
+        };
+        let Some(mount) = crate::mount_of(world, instance) else {
+            return;
+        };
+        let settings = Settings::read(instance);
+        let subs = subs_of(world, instance);
+        let transform = Mat4::from_scale_rotation_translation(
+            Vec3::splat(FREE_EMITTER_SIZE),
+            mount.rotation(),
+            event.position,
+        );
+        let inherit = event.velocity * settings.inheritance;
+        let mut state = self.emitters.remove(&event.emitter).unwrap_or_default();
+        for _ in 0..(event.count as usize).min(MAX_BIRTHS_PER_FRAME) {
+            self.birth_with(&mut state, &settings, transform, inherit, &subs, next);
+        }
+        self.emitters.insert(event.emitter, state);
     }
 
     /// True if `state`'s births belong on the GPU: it's allowed, and the
@@ -456,7 +515,7 @@ impl Particles {
         } else {
             GPU_PARTICLE_THRESHOLD
         };
-        self.gpu && out >= threshold
+        self.gpu && !settings.cpu_only && out >= threshold
     }
 
     /// `state`'s GPU particles, made if it has none yet.
@@ -472,25 +531,48 @@ impl Particles {
     /// off new ones from each Enabled emitter by its Rate. The weather
     /// eases on and its rain or snow falls.
     pub fn update(&mut self, world: &World, seconds: f32) {
+        self.update_against(world, seconds, &mut |_, paths| vec![None; paths.len()]);
+    }
+
+    /// [`update`](Self::update), with the particles of emitters that
+    /// Collide landing on what `surfaces` finds (roadmap R17.4).
+    pub fn update_against(&mut self, world: &World, seconds: f32, surfaces: &mut Surfaces) {
         let seconds = if seconds.is_finite() {
             seconds.clamp(0.0, 0.25)
         } else {
             0.0
         };
         self.weather.update(world, seconds, &mut self.random);
-        let live: Vec<(InstanceId, Settings, Option<Mat4>)> = emitters(world)
+        let live: Vec<Live> = emitters(world)
             .map(|(id, instance)| {
-                (
+                let subs = subs_of(world, instance);
+                let mut settings = Settings::read(instance);
+                settings.cpu_only = cpu_only(world, instance, &settings, &subs);
+                let mount = crate::mount_of(world, instance);
+                Live {
                     id,
-                    Settings::read(instance),
-                    parent_transform(world, instance),
-                )
+                    settings,
+                    transform: parent_transform(world, instance),
+                    own_part: mount.and_then(|mount| mount.part()),
+                    sub: is_sub(world, instance),
+                    subs,
+                }
             })
             .collect();
         self.emitters
-            .retain(|id, _| live.iter().any(|(live, _, _)| live == id));
+            .retain(|id, _| live.iter().any(|live| live.id == *id));
         let wind = global_wind(world);
-        for (id, settings, transform) in live {
+        let mut rays = MAX_SURFACE_RAYS;
+        let mut events = Vec::new();
+        for Live {
+            id,
+            settings,
+            transform,
+            own_part,
+            sub,
+            subs,
+        } in live
+        {
             let mut state = self.emitters.remove(&id).unwrap_or_default();
             // Older particles first: move them, and let them die.
             // Drag slows particles toward the air's speed: still air, or
@@ -501,6 +583,7 @@ impl Particles {
             } else {
                 Vec3::ZERO
             };
+            let mut steps = Vec::new();
             for particle in &mut state.particles {
                 let velocity = particle.velocity + settings.acceleration * seconds;
                 particle.velocity = air + (velocity - air) * slow;
@@ -509,8 +592,37 @@ impl Particles {
                 let speed = settings.speed_curve.as_ref().map_or(1.0, |table| {
                     curve_at(table, particle.age / particle.life.max(1e-6))
                 });
-                particle.position += particle.velocity * seconds * speed;
+                let step = particle.velocity * seconds * speed;
+                if settings.collides {
+                    steps.push(step);
+                } else {
+                    particle.position += step;
+                }
+            }
+            if settings.collides {
+                collisions::move_colliding(
+                    &mut state.particles,
+                    &steps,
+                    seconds,
+                    settings.landing,
+                    own_part,
+                    surfaces,
+                    &mut rays,
+                    &subs,
+                    &mut events,
+                );
+            }
+            for particle in &mut state.particles {
                 particle.age += seconds;
+                if particle.age >= particle.life {
+                    events_on(
+                        &subs,
+                        EmitOn::Death,
+                        particle.position,
+                        particle.velocity,
+                        &mut events,
+                    );
+                }
             }
             state.particles.retain(|p| p.age < p.life);
             // How fast the part moves, from where it was at the last update
@@ -525,7 +637,8 @@ impl Particles {
             let inherit = state.velocity * settings.inheritance;
             let mut on_gpu = self.on_gpu(&state, &settings);
             let mut gpu_births = 0;
-            match (settings.enabled, transform) {
+            // A sub-emitter gives off only at its parent's events.
+            match (settings.enabled && !sub, transform) {
                 (true, Some(transform)) => {
                     state.owed += settings.rate * seconds;
                     let owed = state.owed.floor();
@@ -541,7 +654,14 @@ impl Particles {
                         gpu_births = births.min(MAX_GPU_PARTICLES);
                     } else {
                         for _ in 0..(births as usize).min(MAX_BIRTHS_PER_FRAME) {
-                            self.birth(&mut state, &settings, transform, inherit);
+                            self.birth_with(
+                                &mut state,
+                                &settings,
+                                transform,
+                                inherit,
+                                &subs,
+                                &mut events,
+                            );
                         }
                     }
                 }
@@ -570,6 +690,7 @@ impl Particles {
                 self.emitters.insert(id, state);
             }
         }
+        collisions::fire(self, world, events);
     }
 
     /// Puts every particle into `list` (built from the same world): those
@@ -648,11 +769,34 @@ impl Particles {
         sprites
     }
 
+    /// [`birth`](Self::birth), adding the events it sets off for the
+    /// emitter's Birth sub-emitters (`subs`) to `events`.
+    fn birth_with(
+        &mut self,
+        state: &mut Emitter,
+        settings: &Settings,
+        transform: Mat4,
+        inherit: Vec3,
+        subs: &[Sub],
+        events: &mut Vec<Event>,
+    ) {
+        if let Some(born) = self.birth(state, settings, transform, inherit) {
+            events_on(subs, EmitOn::Birth, born.position, born.velocity, events);
+        }
+    }
+
     /// Adds one particle to `state`, somewhere in the part's spawn shape,
-    /// heading out along the emitter's direction within its spread.
-    fn birth(&mut self, state: &mut Emitter, settings: &Settings, transform: Mat4, inherit: Vec3) {
+    /// heading out along the emitter's direction within its spread, and
+    /// returns it; `None` if the emitter is full.
+    fn birth(
+        &mut self,
+        state: &mut Emitter,
+        settings: &Settings,
+        transform: Mat4,
+        inherit: Vec3,
+    ) -> Option<Particle> {
         if state.particles.len() >= MAX_PER_EMITTER {
-            return;
+            return None;
         }
         let random = [self.random.next(), self.random.next(), self.random.next()];
         let (scale, rotation, _) = transform.to_scale_rotation_translation();
@@ -675,12 +819,15 @@ impl Particles {
             ShapeInOut::InAndOut if self.random.next() < 0.5 => -1.0,
             ShapeInOut::InAndOut => 1.0,
         };
-        state.particles.push(Particle {
+        let particle = Particle {
             position,
             velocity: heading * flip * settings.speed + inherit,
             age: 0.0,
             life,
-        });
+            off_surface: f32::MAX,
+        };
+        state.particles.push(particle);
+        Some(particle)
     }
 
     /// A random direction at most `half_angle` radians from `forward`.
@@ -920,6 +1067,25 @@ fn emitters(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
         .into_iter()
         .filter(move |&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(move |id| Some((id, world.get(id)?)))
+}
+
+/// An emitter in the Workspace, as an update reads it.
+struct Live {
+    id: InstanceId,
+    settings: Settings,
+    transform: Option<Mat4>,
+    /// The part it's in, which its colliding particles pass by.
+    own_part: Option<InstanceId>,
+    /// True if it's a sub-emitter, giving off only at its parent's events.
+    sub: bool,
+    /// Its own sub-emitters.
+    subs: Vec<Sub>,
+}
+
+/// True if `instance`'s particles must stay on the CPU: it Collides, has
+/// sub-emitters or is one (roadmap R17.4).
+fn cpu_only(world: &World, instance: &Instance, settings: &Settings, subs: &[Sub]) -> bool {
+    settings.collides || !subs.is_empty() || is_sub(world, instance)
 }
 
 /// How far across the box a free-standing emitter gives off particles

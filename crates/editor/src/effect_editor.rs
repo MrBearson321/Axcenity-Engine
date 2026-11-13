@@ -24,7 +24,7 @@ use crate::widgets;
 
 /// The modules of an emitter's stack (D6): a title, an icon and the
 /// properties it groups, in the order a particle lives them.
-pub const MODULES: [(&str, &str, &[&str]); 4] = [
+pub const MODULES: [(&str, &str, &[&str]); 5] = [
     (
         "Spawn",
         icons::PLUS_CIRCLE,
@@ -37,6 +37,8 @@ pub const MODULES: [(&str, &str, &[&str]); 4] = [
             "Shape",
             "ShapeStyle",
             "ShapeInOut",
+            "EmitOn",
+            "EmitCount",
         ],
     ),
     (
@@ -69,6 +71,11 @@ pub const MODULES: [(&str, &str, &[&str]); 4] = [
             "Drag",
             "WindAffectsDrag",
         ],
+    ),
+    (
+        "Collision",
+        icons::ARROW_ELBOW_RIGHT_UP,
+        &["Collides", "Bounce", "LifetimeLoss"],
     ),
     (
         "Render",
@@ -170,14 +177,18 @@ impl Default for EffectEditor {
 
 /// The effect that `selected` belongs to: the selection itself if it holds
 /// a ParticleEmitter (a part, model, attachment or folder), or an emitter's
-/// part (an Attachment's part for an emitter in one). A free emitter, in
-/// the Workspace, is its own effect. `None` when there's no emitter there.
+/// part (an Attachment's part for an emitter in one), or a sub-emitter's
+/// parent's effect. A free emitter, in the Workspace, is its own effect. `None` when there's no emitter there.
 pub fn effect_root(world: &World, selected: Option<InstanceId>) -> Option<InstanceId> {
     let id = selected?;
     let instance = world.get(id)?;
     let root = if instance.class() == ClassName::ParticleEmitter {
         let parent = instance.parent().and_then(|p| world.get(p).map(|i| (p, i)));
         match parent {
+            // A sub-emitter (R17.4) belongs to its parent emitter's effect.
+            Some((parent, holder)) if holder.class() == ClassName::ParticleEmitter => {
+                return effect_root(world, Some(parent));
+            }
             Some((part, holder)) if holder.class().is_base_part() => part,
             Some((attachment, holder)) if holder.class() == ClassName::Attachment => holder
                 .parent()
@@ -363,8 +374,9 @@ impl EffectEditor {
     }
 
     /// Plays `seconds` of the effect (at the preview's speed, unless
-    /// paused), starting it again at the end of each loop.
-    pub fn step(&mut self, seconds: f32, loop_seconds: f32) {
+    /// paused), starting it again at the end of each loop. Colliding
+    /// particles land on the preview's floor.
+    pub fn step(&mut self, assets: &Assets, seconds: f32, loop_seconds: f32) {
         if self.paused || self.copied.is_none() {
             return;
         }
@@ -373,7 +385,11 @@ impl EffectEditor {
             self.restart();
         }
         let start = Instant::now();
-        self.particles.update(&self.shown, seconds);
+        let shown = &self.shown;
+        self.particles
+            .update_against(shown, seconds, &mut |skip, paths| {
+                crate::play::particle_surfaces(shown, assets, skip, paths)
+            });
         let ms = start.elapsed().as_secs_f32() * 1000.0;
         self.step_ms = if self.step_ms == 0.0 {
             ms
@@ -433,7 +449,7 @@ impl EffectEditor {
             .map_or(0.0, |last| now.duration_since(last).as_secs_f32());
         self.last_frame = Some(now);
         let looped = loop_seconds(world, root);
-        self.step(seconds, looped);
+        self.step(assets, seconds, looped);
 
         let mut action = None;
         let name = world.get(root).map_or("", |i| i.name()).to_owned();
@@ -675,6 +691,11 @@ mod tests {
         assert_eq!(effect_root(&world, Some(free)), Some(free));
         assert_eq!(effect_root(&world, Some(model)), Some(model));
         assert_eq!(emitters(&world, model), vec![in_part, in_attachment]);
+        // A sub-emitter (R17.4) is in its parent emitter's effect.
+        let sub = emitter_in(&mut world, in_part);
+        let deeper = emitter_in(&mut world, free);
+        assert_eq!(effect_root(&world, Some(sub)), Some(part));
+        assert_eq!(effect_root(&world, Some(deeper)), Some(free));
         // A part with no emitter isn't an effect.
         let plain = world.create(ClassName::Part).unwrap();
         world.set_parent(plain, Some(workspace)).unwrap();
@@ -732,7 +753,7 @@ mod tests {
         editor.follow(&world, effect_root(&world, Some(emitter)), 1);
         assert_eq!(editor.root(), Some(part));
         for _ in 0..30 {
-            editor.step(1.0 / 30.0, 10.0);
+            editor.step(&Assets::default(), 1.0 / 30.0, 10.0);
         }
         let alive = editor.particle_count();
         assert!(alive > 0, "it plays");
@@ -763,21 +784,51 @@ mod tests {
         assert_eq!(editor.root(), None);
     }
 
+    /// R17.4: a colliding emitter's particles land on the preview's floor
+    /// (its top at the part's bottom, 1.5) instead of falling through.
+    #[test]
+    fn colliding_particles_land_on_the_preview_floor() {
+        let (mut world, part, emitter) = fountain();
+        for (name, value) in [
+            ("Collides", Value::Bool(true)),
+            ("Bounce", Value::Number(0.0)),
+            ("Speed", Value::Number(0.0)),
+            ("Lifetime", Value::Number(20.0)),
+            (
+                "Acceleration",
+                Value::Vector3(Vector3::new(0.0, -50.0, 0.0)),
+            ),
+        ] {
+            world.set_property(emitter, name, value).unwrap();
+        }
+        let mut editor = EffectEditor::default();
+        editor.follow(&world, Some(part), 1);
+        for _ in 0..60 {
+            editor.step(&Assets::default(), 1.0 / 30.0, 30.0);
+        }
+        let sprites = editor.particles.sprites(&editor.shown, &Assets::default());
+        assert!(sprites.len() > 20);
+        for sprite in &sprites {
+            assert!(sprite.position.y > 1.49, "{:?}", sprite.position);
+        }
+        assert!(sprites.iter().any(|sprite| sprite.position.y < 1.6));
+    }
+
     #[test]
     fn pause_slow_motion_and_loop_steer_the_clock() {
         let (world, part, _) = fountain();
         let mut editor = EffectEditor::default();
         editor.follow(&world, Some(part), 1);
         editor.speed = 0.25;
-        editor.step(0.08, 10.0);
+        editor.step(&Assets::default(), 0.08, 10.0);
         assert!((editor.clock - 0.02).abs() < 1e-6, "{}", editor.clock);
         editor.paused = true;
-        editor.step(0.08, 10.0);
+        editor.step(&Assets::default(), 0.08, 10.0);
         assert!((editor.clock - 0.02).abs() < 1e-6, "paused");
         editor.paused = false;
         editor.speed = 1.0;
         for _ in 0..20 {
-            editor.step(0.05, 0.5);
+            editor.step(&Assets::default(), 0.05, 0.5);
         }
         assert!(editor.clock <= 0.5, "looped: {}", editor.clock);
     }

@@ -1327,6 +1327,18 @@ declare extern type EnumParticleEmitterShapeInOutItems with
 	InAndOut: EnumParticleEmitterShapeInOut
 end
 
+--- One choice of `Enum.ParticleEmitterEmitOn`.
+declare extern type EnumParticleEmitterEmitOn extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleEmitterEmitOn`.
+declare extern type EnumParticleEmitterEmitOnItems with
+	Always: EnumParticleEmitterEmitOn
+	Birth: EnumParticleEmitterEmitOn
+	Death: EnumParticleEmitterEmitOn
+	Collision: EnumParticleEmitterEmitOn
+end
+
 --- One choice of `Enum.ParticleFlipbookLayout`.
 declare extern type EnumParticleFlipbookLayout extends EnumItem with
 end
@@ -1423,6 +1435,7 @@ declare extern type EnumLibrary with
 	ParticleEmitterShape: EnumParticleEmitterShapeItems
 	ParticleEmitterShapeStyle: EnumParticleEmitterShapeStyleItems
 	ParticleEmitterShapeInOut: EnumParticleEmitterShapeInOutItems
+	ParticleEmitterEmitOn: EnumParticleEmitterEmitOnItems
 	ParticleFlipbookLayout: EnumParticleFlipbookLayoutItems
 	ParticleFlipbookMode: EnumParticleFlipbookModeItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
@@ -4190,6 +4203,16 @@ declare extern type ParticleEmitter extends Instance with
 	ShapeInOut: EnumParticleEmitterShapeInOut | "Outward" | "Inward" | "InAndOut"
 	--- How much of the part's own velocity each particle starts with, from 0 (none, the default) to 1 (all of it), so sparks from a moving car keep up with it.
 	VelocityInheritance: number
+	--- On, particles bounce off parts with CanCollide on and the ground (not off the emitter's own part, nor parts with CanCollide off), and come to rest on a floor. Colliding emitters move their particles on the CPU, at most 4,000 each. Default false.
+	Collides: boolean
+	--- How much of a colliding particle's speed into a surface it keeps, back out of it: 0 lands dead, 1 bounces as high as it fell. Speed along the surface is kept. Default 0.5.
+	Bounce: number
+	--- How much of its life a colliding particle loses each time it lands, from 0 (none, the default) to 1 (it dies where it lands).
+	LifetimeLoss: number
+	--- Inside another ParticleEmitter, `Enum.ParticleEmitterEmitOn.Birth`, `Death` or `Collision` makes this one a sub-emitter: while Enabled it gives off EmitCount particles where each of its parent's particles is born, dies or lands, heading out along its own Direction (turned by its Orientation), and nothing by its Rate. `Always` (the default) gives off as any emitter does.
+	EmitOn: EnumParticleEmitterEmitOn | "Always" | "Birth" | "Death" | "Collision"
+	--- How many particles a sub-emitter (EmitOn Birth, Death or Collision) gives off at each of its parent's events. Default 10.
+	EmitCount: number
 	--- A NumberSequence of bursts while Enabled: each keypoint gives off Value particles (give or take Envelope) at its Time of every Duration seconds, over and over. Rate still adds its steady flow. A keypoint at time 1 is the next loop's start, so it gives off nothing: put that count at time 0. nil (the default) is no bursts.
 	Bursts: NumberSequence?
 	--- How long one loop of Bursts takes, in seconds (default 1, at least 0.05).

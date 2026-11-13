@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [scene]
-source: [crates/scene/src/lib.rs, crates/scene/src/draw_list.rs, crates/scene/src/draw_list/lights.rs, crates/scene/src/draw_list/materials.rs, crates/scene/src/retained.rs, crates/scene/src/mesh_cache.rs, crates/scene/src/terrain.rs, crates/scene/src/streaming.rs, crates/scene/src/pick.rs, crates/scene/src/particles.rs, crates/scene/src/preload.rs, crates/scene/src/surfaces.rs]
+source: [crates/scene/src/lib.rs, crates/scene/src/draw_list.rs, crates/scene/src/draw_list/lights.rs, crates/scene/src/draw_list/materials.rs, crates/scene/src/retained.rs, crates/scene/src/mesh_cache.rs, crates/scene/src/terrain.rs, crates/scene/src/streaming.rs, crates/scene/src/pick.rs, crates/scene/src/particles/collisions.rs, crates/scene/src/particles.rs, crates/scene/src/preload.rs, crates/scene/src/surfaces.rs]
 docs: [docs/rendering/pipeline.md, docs/rendering/performance.md, docs/architecture/streaming.md, crates/scene/CLAUDE.md]
 verified: 2026-11-12
 verified_commit: e1eea07
@@ -46,6 +46,7 @@ flowchart LR
 
 ## Integration
 
+- **Particle collisions** (R17.4): `scene` can't depend on `physics`, so colliding particles land on what a host's `Surfaces` closure finds: `Particles::update_against` with `physics::surface_hits` (one Workspace walk per emitter for all its paths, at most `MAX_SURFACE_RAYS` a frame). Sub-emitters are child ParticleEmitters with `EmitOn`; both keep their emitters on the CPU, as GPU particles aren't read back (`particles/collisions.rs`).
 - **Player**: the `draw.scene` and `draw.ui` steps. **Editor**: the viewport, each egui frame; Play's particles and streaming belong to the `Session` and the viewport borrows them (`Session::swap_effects`).
 - `model_slot` never waits once background loading is on: a model not loaded yet draws **nothing** (M5 follow-up), then appears.
 - `preload.rs` lists the asset files a world needs (`scene::asset_files`), which the player's preload and the editor's loading screen read ahead.
