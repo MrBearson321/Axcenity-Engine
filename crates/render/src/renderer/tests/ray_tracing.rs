@@ -594,10 +594,12 @@ mod ambient_occlusion {
 
 mod global_illumination {
     use super::super::realtime_gi::{
-        PROBES, SUN_BEHIND_WALL, SUN_ON_WALL, bake, difference, probes_held, with_volume, yard,
+        PROBES, SUN_BEHIND_WALL, SUN_ON_WALL, bake, block, difference, probes_held, texels_held,
+        with_volume, yard,
     };
     use super::*;
     use crate::RayTracedGlobalIllumination;
+    use crate::renderer::light_probes::{CAMERA_PROBES, CAMERA_SPACING};
 
     fn traced(gi: RayTracedGlobalIllumination) -> crate::GraphicsSettings {
         crate::GraphicsSettings {
@@ -620,20 +622,22 @@ mod global_illumination {
         let world = with_volume(&moved, before.clone());
         let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
-        // Medium traces all 8 probes each frame; a second's worth settles.
-        for _ in 0..60 {
+        // Medium traces 256 probes a frame, through the camera's 2,048 and
+        // the volume's 8, so each comes round every 8 frames; two seconds
+        // settle them (half a second each time).
+        for _ in 0..120 {
             renderer.render(&world).unwrap();
         }
-        assert_eq!(
-            renderer.scene.probes_ray_traced(),
-            Some(60 * u64::from(PROBES))
-        );
+        assert_eq!(renderer.scene.probes_ray_traced(), Some(120 * 256));
         assert_eq!(renderer.scene.probes_traced(), None, "no faces drawn");
         let held = probes_held(&renderer);
         let to_after = difference(&held, &after);
         let to_before = difference(&held, &before);
+        // Not all the way: rays light what they hit with the camera's
+        // probes too (a further bounce off the floor and wall, which the
+        // bake leaves out), so the probes come out a little brighter.
         assert!(
-            to_after < 0.2 * change && to_after < to_before,
+            to_after < 0.35 * change && to_after < 0.5 * to_before,
             "near the fresh bake ({to_after}), not the old one ({to_before}); the sun \
              moved {change}"
         );
@@ -655,8 +659,9 @@ mod global_illumination {
         // Starting from nothing, not a bake.
         let world = with_volume(&lit, vec![[[0.0; 3]; 4]; PROBES as usize]);
         let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
-        renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
-        for _ in 0..40 {
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
+        // Six times round the camera's probes and the volume's.
+        for _ in 0..48 {
             renderer.render(&world).unwrap();
         }
         let held = probes_held(&renderer);
@@ -672,26 +677,130 @@ mod global_illumination {
         }
     }
 
+    /// The yard with no light probe volume, seen from `camera`, with a
+    /// solid block of 4 studs around `(-4.5, 4.5, 1.5)`: one of the
+    /// camera's probes from (-8, 3, 0), whose grid's middle is (-9, 3, 0).
+    fn yard_with_block(camera: Vec3) -> DrawList {
+        let mut list = yard(SUN_ON_WALL);
+        list.items.push(block(
+            Vec3::new(-4.5, 4.5, 1.5),
+            Vec3::splat(4.0),
+            [0.5, 0.5, 0.5],
+        ));
+        list.camera = Camera {
+            position: camera,
+            look_at: Vec3::new(0.0, 1.5, 0.0),
+            fov_y_degrees: 60.0,
+        };
+        list
+    }
+
+    /// Which of the camera's probes stands at `point`, for a grid whose
+    /// middle is `middle`.
+    fn camera_probe_at(middle: Vec3, point: Vec3) -> usize {
+        let [nx, ny, _] = CAMERA_PROBES.map(|count| count as usize);
+        let half = Vec3::from_array(CAMERA_PROBES.map(|count| count as f32)) * 0.5;
+        let at = ((point - middle) / CAMERA_SPACING + half - 0.5).round();
+        at.x as usize + nx * (at.y as usize + ny * at.z as usize)
+    }
+
     #[test]
-    fn without_light_probe_volumes_or_ray_queries_nothing_is_traced() {
+    fn without_a_volume_the_camera_brings_probes_and_one_inside_a_block_is_left_out() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let world = yard_with_block(Vec3::new(-8.0, 3.0, 0.0));
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
+        // Medium traces 256 a frame: every one of the 2,048 within 8.
+        for _ in 0..10 {
+            renderer.render(&world).unwrap();
+        }
+        assert_eq!(renderer.scene.probes_ray_traced(), Some(10 * 256));
+        assert!(renderer.stats().ray_tracing.instances > 0);
+        let held = texels_held(&renderer);
+        assert_eq!(held.len(), 2048, "the camera's probes and no others");
+        let middle = Vec3::new(-9.0, 3.0, 0.0);
+        let inside = held[camera_probe_at(middle, Vec3::new(-4.5, 4.5, 1.5))];
+        assert_eq!(inside[0][3], 1.0, "inside the block: left out: {inside:?}");
+        let open = held[camera_probe_at(middle, Vec3::new(-4.5, 1.5, -4.5))];
+        assert_eq!(open[0][3], 0.0, "in the open: used: {open:?}");
+        assert!(open[0][..3].iter().all(|&c| c > 0.05), "and lit: {open:?}");
+        let left_out = held.iter().filter(|probe| probe[0][3] > 0.5).count();
+        assert!(
+            left_out < 64,
+            "only the few inside things are left out: {left_out}"
+        );
+    }
+
+    #[test]
+    fn the_camera_probes_move_with_it_and_keep_their_light() {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();
         };
         let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
-        renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
-        renderer.render(&yard(SUN_ON_WALL)).unwrap();
-        assert_eq!(renderer.scene.probes_ray_traced(), None);
-        assert_eq!(
-            renderer.stats().ray_tracing,
-            crate::RayTracingStats::default(),
-            "no volumes: no ray traced scene either"
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
+        for _ in 0..10 {
+            renderer
+                .render(&yard_with_block(Vec3::new(-8.0, 3.0, 0.0)))
+                .unwrap();
+        }
+        let before = texels_held(&renderer);
+        // One spacing along +X: the grid's middle goes from -9 to -6.
+        renderer
+            .render(&yard_with_block(Vec3::new(-8.0 + CAMERA_SPACING, 3.0, 0.0)))
+            .unwrap();
+        assert_eq!(renderer.scene.light_probes.moves, 1);
+        let after = texels_held(&renderer);
+        let [nx, ny, nz] = CAMERA_PROBES.map(|count| count as usize);
+        let (mut kept, mut untraced) = (0, 0);
+        for z in 0..nz {
+            for y in 0..ny {
+                for x in 0..nx {
+                    let index = x + nx * (y + ny * z);
+                    if x + 1 < nx {
+                        // Where the probe one along stood before.
+                        kept += usize::from(after[index] == before[index + 1]);
+                    } else {
+                        untraced += usize::from(after[index][0][3] == 1.0);
+                    }
+                }
+            }
+        }
+        // This frame's batch (256 probes, two layers along Z) was traced
+        // after the move, so those differ.
+        assert!(kept >= 1920 - 256, "kept their light: {kept} of 1920");
+        assert!(
+            untraced >= 128 - 16,
+            "the new row starts untraced: {untraced} of 128"
         );
-        if let Some((device, queue)) = test_device() {
+        // Back where it was: copied along again, not started over.
+        renderer
+            .render(&yard_with_block(Vec3::new(-8.0, 3.0, 0.0)))
+            .unwrap();
+        assert_eq!(renderer.scene.light_probes.moves, 2);
+        assert_eq!(renderer.scene.light_probes.uploads, 1);
+    }
+
+    #[test]
+    fn without_ray_queries_nothing_is_traced() {
+        let Some((device, queue)) = test_device() else {
+            return skipped();
+        };
+        for world in [
+            with_volume(&yard(SUN_ON_WALL), vec![[[0.0; 3]; 4]; PROBES as usize]),
+            yard(SUN_ON_WALL),
+        ] {
             let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
             renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
-            let world = with_volume(&yard(SUN_ON_WALL), vec![[[0.0; 3]; 4]; PROBES as usize]);
             renderer.render(&world).unwrap();
             assert_eq!(renderer.scene.probes_ray_traced(), None);
+            let probes = world.light_probe_volumes.len() * PROBES as usize;
+            assert_eq!(
+                texels_held(&renderer).len(),
+                probes.max(1),
+                "no camera probes"
+            );
             assert!(
                 renderer
                     .graphics()

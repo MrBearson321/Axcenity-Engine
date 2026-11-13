@@ -71,7 +71,8 @@ struct MeshBlas {
 
 /// What a ray that hits a TLAS slot's item finds, for ray traced GI
 /// (`ray_gi.wgsl`'s `gi_surfaces`, two `vec4`s a slot): its color times its
-/// texture's average, then its glow, both linear light.
+/// texture's average, with 1 after it for a cut-out (a leaf card, lit from
+/// either side) and 0 otherwise, then its glow, both linear light.
 pub(super) type SurfaceRaw = [[f32; 4]; 2];
 
 /// The TLAS slots' [`SurfaceRaw`]s on the GPU, kept while ray traced GI
@@ -418,7 +419,15 @@ fn surface_of(material: &Material, texture_colors: &mut FxHashMap<u64, [f32; 3]>
         color *= Vec3::from(average);
     }
     let glow = super::lighting::linear_color(material.emissive);
-    [color.extend(0.0).to_array(), glow.extend(0.0).to_array()]
+    let cut_out = if material.alpha_cutoff > 0.0 {
+        1.0
+    } else {
+        0.0
+    };
+    [
+        color.extend(cut_out).to_array(),
+        glow.extend(0.0).to_array(),
+    ]
 }
 
 /// The average of sRGB `rgba` pixels in linear light, from at most about

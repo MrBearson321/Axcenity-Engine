@@ -13,7 +13,7 @@ const VOLUME_HALF: Vec3 = Vec3::new(3.0, 2.0, 3.0);
 const COUNTS: [u32; 3] = [2, 2, 2];
 pub(super) const PROBES: u32 = 8;
 
-fn block(middle: Vec3, size: Vec3, base_color: [f32; 3]) -> DrawItem {
+pub(super) fn block(middle: Vec3, size: Vec3, base_color: [f32; 3]) -> DrawItem {
     let mut block = item(Shape::Block, middle, 1.0);
     block.transform = Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, middle);
     block.material.base_color = base_color;
@@ -111,8 +111,18 @@ pub(super) fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawLi
     list
 }
 
-/// The probes in the renderer's buffer now.
+/// The volume's probes in the renderer's buffer now: its last `PROBES`
+/// (after the camera's own, with ray traced GI).
 pub(super) fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
+    let texels = texels_held(renderer);
+    texels[texels.len() - PROBES as usize..]
+        .iter()
+        .map(|probe| probe.map(|[r, g, b, _]| [r, g, b]))
+        .collect()
+}
+
+/// Every probe in the renderer's buffer now, as the shaders read them.
+pub(super) fn texels_held(renderer: &TextureRenderer) -> Vec<[[f32; 4]; 4]> {
     let scene = &renderer.scene;
     let source = scene.light_probes.buffer();
     let buffer = scene.device.create_buffer(&wgpu::BufferDescriptor {
@@ -140,7 +150,7 @@ pub(super) fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
     .to_vec();
     floats
         .chunks(16)
-        .map(|probe| std::array::from_fn(|k| [probe[k * 4], probe[k * 4 + 1], probe[k * 4 + 2]]))
+        .map(|probe| std::array::from_fn(|k| std::array::from_fn(|c| probe[k * 4 + c])))
         .collect()
 }
 
