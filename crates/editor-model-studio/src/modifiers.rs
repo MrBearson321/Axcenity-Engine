@@ -2,16 +2,16 @@
 //! the object list, and the edits it makes. Adding, removing, reordering,
 //! showing or hiding a modifier, or changing a setting, is an undo step
 //! (a drag is one step); Apply bakes one into the mesh as one step.
-//! Generate LODs adds `_LOD1` and `_LOD2` copies with a Decimate. The
-//! modifiers themselves are `mesh_edit`'s.
+//! The modifiers themselves are `mesh_edit`'s; Generate LODs is in the
+//! Levels of detail fold (`lods.rs`).
 
 use axcenity_mesh_edit::{Axis, MAX_COPIES, MAX_LEVELS, Modifier, ModifierKind, Purpose};
 use eframe::egui;
 
-use super::{Mode, StudioDoc};
+use super::StudioDoc;
 use crate::responsive;
 use crate::theme::{self, icons};
-use crate::widgets::{self, Role};
+use crate::widgets;
 
 impl StudioDoc {
     /// Puts `stack` on the active object. The first change is an undo step
@@ -58,21 +58,6 @@ impl StudioDoc {
         // The mesh's numbers changed, so what was picked means nothing.
         self.selection.clear();
         self.record(&label, before);
-        Ok(())
-    }
-
-    /// Generate LODs for the active object, as one undo step.
-    pub fn generate_lods(&mut self) -> Result<(), String> {
-        let before = self.snapshot();
-        let index = self
-            .model
-            .generate_lods(self.active)
-            .ok_or("Generate LODs needs a full object with a mesh, not a group or a copy")?;
-        self.active = index;
-        self.objects = [index].into();
-        self.mode = Mode::Object;
-        self.selection.clear();
-        self.record("Generate LODs", before);
         Ok(())
     }
 }
@@ -168,23 +153,6 @@ pub(super) fn panel(
         if let Some(index) = remove {
             change = Some(format!("Remove {}", stack[index].kind.label()));
             stack.remove(index);
-        }
-        ui.add_space(4.0);
-        if ui
-            .add(widgets::button(
-                Role::Secondary,
-                Some(icons::STACK),
-                "Generate LODs",
-                &palette,
-            ))
-            .on_hover_text(
-                "Add _LOD1 and _LOD2 copies with a Decimate, \
-                 which the game draws far away",
-            )
-            .clicked()
-            && let Err(why) = doc.generate_lods()
-        {
-            notices.push(why);
         }
     });
     if let Some(label) = change {

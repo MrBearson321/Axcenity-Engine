@@ -43,15 +43,42 @@ impl EditorApp {
             self.output.info(notice);
         }
         for action in actions {
-            match action {
-                StudioAction::Open(path) => self.open_in_model_studio(&path),
-                StudioAction::Save => {
-                    self.save_model_studio();
+            self.studio_action(action);
+        }
+    }
+
+    /// Does what the Model Studio asked for.
+    pub(in crate::app) fn studio_action(&mut self, action: StudioAction) {
+        match action {
+            StudioAction::Open(path) => self.open_in_model_studio(&path),
+            StudioAction::Save => {
+                self.save_model_studio();
+            }
+            StudioAction::BrushImage(path) => self.load_brush_image(&path),
+            StudioAction::Bake => {
+                self.bake_model_studio();
+            }
+            StudioAction::EditInBlender => {
+                let unsaved = self
+                    .model_studio
+                    .doc
+                    .as_ref()
+                    .is_some_and(|doc| doc.unsaved() || doc.path.is_empty());
+                let path = if unsaved {
+                    self.save_model_studio()
+                } else {
+                    self.model_studio.doc.as_ref().map(|doc| doc.path.clone())
+                };
+                if let Some(path) = path {
+                    self.edit_in_blender(&path);
                 }
-                StudioAction::BrushImage(path) => self.load_brush_image(&path),
-                StudioAction::Bake => {
-                    self.bake_model_studio();
+            }
+            StudioAction::Reload(path) => {
+                // Its edits were given up when the user chose to load it.
+                if let Some(doc) = &mut self.model_studio.doc {
+                    doc.mark_saved();
                 }
+                self.open_in_model_studio(&path);
             }
         }
     }
@@ -173,6 +200,9 @@ impl EditorApp {
         }
         files.extend(layer_files);
         let changes = self.write_studio_files(&folder, &files)?;
+        if let Some((_, Some(bytes))) = files.first() {
+            self.model_studio.note_written(bytes);
+        }
         // An emptied sidecar folder goes too.
         if let Some(disk) = axcenity_assets::safe_path(&layers).map(|p| folder.join(p)) {
             let _ = std::fs::remove_dir(disk);
@@ -188,6 +218,51 @@ impl EditorApp {
         self.asset_browser.refresh();
         self.output.info(format!("Saved `{path}`."));
         Some(path)
+    }
+
+    /// Edit in Blender (R15.4, `blender.rs`): opens the project model at
+    /// `mesh_id` (a path or asset ID, a pick ignored) in Blender, found
+    /// from Settings > External tools. Only a `.glb` goes: Blender writes
+    /// it back in place.
+    pub(in crate::app) fn edit_in_blender(&mut self, mesh_id: &str) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let mesh_id = &*self.assets.resolve(mesh_id);
+        let file = mesh_id.split_once('#').map_or(mesh_id, |(file, _)| file);
+        if !file.to_ascii_lowercase().ends_with(".glb") {
+            self.output.warning(format!(
+                "Edit in Blender opens .glb files. Open `{file}` in the Model Studio and save \
+                 it as a .glb first."
+            ));
+            return;
+        }
+        match crate::blender::edit_in_blender(&self.blender_path, &folder, file) {
+            Ok(blender) => self.output.info(format!(
+                "Opened `{file}` in Blender ({}). Save there (Ctrl+S) to send it back.",
+                blender.display()
+            )),
+            Err(why) => self.output.error(why),
+        }
+    }
+
+    /// The model file at `path` changed on disk: the Model Studio offers to
+    /// load it again if it's the one open (and not the editor's own save).
+    pub(in crate::app) fn model_studio_file_changed(&mut self, path: &str) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let open = self
+            .model_studio
+            .doc
+            .as_ref()
+            .is_some_and(|doc| doc.path == path);
+        if !open {
+            return;
+        }
+        let bytes =
+            axcenity_assets::safe_path(path).and_then(|p| std::fs::read(folder.join(p)).ok());
+        self.model_studio.file_changed(path, bytes.as_deref());
     }
 
     /// The project folder and the path the Studio's model saves at, which a

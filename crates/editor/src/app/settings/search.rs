@@ -142,6 +142,17 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "How often unsaved work is copied, so a crash or power cut doesn't lose it.",
         ),
         setting(
+            Tools,
+            "Blender",
+            &[
+                "Edit in Blender",
+                "Blender path",
+                "External editor",
+                "3D modeling program",
+            ],
+            "The Blender program Edit in Blender opens models in.",
+        ),
+        setting(
             Viewport,
             "Show every light's cone",
             &["Light cones", "Spotlight"],

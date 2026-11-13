@@ -844,15 +844,19 @@ impl ScenePipeline {
                 if !self
                     .ray_shadows
                     .as_ref()
-                    .is_some_and(|shadows| shadows.fits(size, plan.soft()))
+                    .is_some_and(|shadows| shadows.fits(size, plan.shape()))
                 {
                     self.ray_shadows = Some(Box::new(ray_shadows::RayShadows::new(
                         &self.device,
-                        (size, plan.soft()),
+                        (size, plan.shape()),
                     )));
                     self.bind_frame();
                 }
-                frame_uniform.ray_shadows = [1.0, size.0 as f32, plan.reach, 0.0];
+                let lamp_words = self
+                    .ray_shadows
+                    .as_ref()
+                    .map_or(0, |shadows| shadows.lamp_words());
+                frame_uniform.ray_shadows = [1.0, size.0 as f32, plan.reach, lamp_words as f32];
                 // Under TAA the rays turn each frame, and TAA averages them.
                 let taa = self
                     .frame_targets
@@ -867,7 +871,14 @@ impl ScenePipeline {
                         drawn_view_proj.inverse(),
                         glam::Mat4::from_cols_array_2d(&frame_uniform.view),
                     ),
-                    size,
+                    (
+                        size,
+                        if planned_lights.lights.is_empty() {
+                            (planned_lights.tile_size, 0)
+                        } else {
+                            (planned_lights.tile_size, planned_lights.tiles_across)
+                        },
+                    ),
                     turn,
                 ))
             }
@@ -1269,8 +1280,13 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        // Water reflecting the screen traces rays too, with the GPU (LE5).
+        let water_rays = water_mode.traces_rays(&self.graphics);
         let traces_rays = self.traces_rays(
-            ray_shadow_uniform.is_some() || ray_ao_uniform.is_some() || ray_gi_batch.is_some(),
+            ray_shadow_uniform.is_some()
+                || ray_ao_uniform.is_some()
+                || ray_gi_batch.is_some()
+                || water_rays,
         );
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
@@ -1297,9 +1313,30 @@ impl ScenePipeline {
                 self.frame,
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
-                ray_gi_batch.is_some(),
+                ray_gi_batch.is_some() || water_rays,
             ),
             &draws,
+        );
+        let water_scene = self
+            .ray_scene
+            .as_deref()
+            .filter(|_| water_rays)
+            .and_then(|rays| {
+                let surfaces = rays.surfaces.as_ref()?;
+                Some((
+                    rays.tlas(),
+                    &surfaces.buffer,
+                    self.graphics.ray_tracing_distance,
+                ))
+            });
+        self.water.trace(
+            (&self.device, &self.queue),
+            [
+                &self.frame_layout,
+                &self.material_layout,
+                &self.skinning.layout,
+            ],
+            water_scene,
         );
         mark(&mut encoder, FramePass::Shadows);
         let mut counts = FrameCounts {
@@ -1496,6 +1533,7 @@ impl ScenePipeline {
                 (&self.device, &self.queue),
                 &mut encoder,
                 (rays, prepass),
+                (&self.light_buffer, &self.tile_buffer),
                 uniform,
             );
             true
@@ -1929,11 +1967,12 @@ impl ScenePipeline {
             pass.set_bind_group(1, group, &[]);
         } else {
             let surface = batch.shader.and_then(|key| self.surface_shaders.get(key));
+            let traced_water = self.water.traced().filter(|_| self.water.copy.is_some());
             let water = &self.water.pipelines;
-            let water = if self.water.copy.is_some() {
-                &water.refracted
-            } else {
-                &water.blended
+            let water = match traced_water {
+                Some((pipeline, _)) => pipeline,
+                None if self.water.copy.is_some() => &water.refracted,
+                None => &water.blended,
             };
             let side = usize::from(batch.double_sided);
             let pipeline = match (prepass, batch.double_sided, surface) {
@@ -1955,6 +1994,12 @@ impl ScenePipeline {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(1, &material.bind_group, &[]);
             pass.set_bind_group(2, self.skin_group(mesh), &[]);
+            if batch.water
+                && kind != BatchPass::DepthFill
+                && let Some((_, rays)) = traced_water
+            {
+                pass.set_bind_group(3, rays, &[]);
+            }
         }
         pass.set_vertex_buffer(0, mesh.vertices.slice(..));
         pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);

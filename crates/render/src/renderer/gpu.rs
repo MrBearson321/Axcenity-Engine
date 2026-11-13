@@ -30,7 +30,8 @@ pub(super) const SCENE_SHADER: &str = concat!(
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl")
 );
-/// Water's shader: the scene's, then water.wgsl (see renderer/water.rs).
+/// Water's shader: the scene's, then water.wgsl, with nothing traced (see
+/// renderer/water.rs).
 pub(super) const WATER_SHADER: &str = concat!(
     include_str!("../sky.wgsl"),
     include_str!("../fog.wgsl"),
@@ -38,7 +39,21 @@ pub(super) const WATER_SHADER: &str = concat!(
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl"),
-    include_str!("../water.wgsl")
+    include_str!("../water.wgsl"),
+    include_str!("../water_no_rays.wgsl")
+);
+/// Water's shader with ray traced reflections (LE5): ray queries turned on
+/// first, and `water_rays.wgsl` in `water_no_rays.wgsl`'s place.
+pub(super) const TRACED_WATER_SHADER: &str = concat!(
+    "enable wgpu_ray_query;\n",
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../shader.wgsl"),
+    include_str!("../surface.wgsl"),
+    include_str!("../water.wgsl"),
+    include_str!("../water_rays.wgsl")
 );
 /// [`SCENE_SHADER`] without its `surface` function: a material's surface
 /// shader goes after it (`surface_shaders.rs`).

@@ -124,6 +124,7 @@ fn encode(model: &Model) -> Option<Vec<u8>> {
         center,
         primitives,
         hull_points,
+        collision,
         warnings,
         rig,
     } = model;
@@ -137,6 +138,10 @@ fn encode(model: &Model) -> Option<Vec<u8>> {
     body.floats(size);
     body.floats(center);
     body.array(hull_points);
+    body.u32(collision.len() as u32);
+    for piece in collision {
+        body.array(piece);
+    }
     body.u32(primitives.len() as u32);
     for primitive in primitives {
         encode_primitive(&mut body, &mut images, primitive)?;
@@ -509,6 +514,11 @@ fn decode(input: &mut Input<'_>, project: &Path, relative: &str) -> Option<Model
     let size = input.floats()?;
     let center = input.floats()?;
     let hull_points = input.array()?;
+    // Each piece is at least its count.
+    let pieces = input.count(4)?;
+    let collision = (0..pieces)
+        .map(|_| input.array())
+        .collect::<Option<Vec<_>>>()?;
     let count = input.count(1)?;
     let mut primitives = Vec::with_capacity(count);
     for _ in 0..count {
@@ -533,6 +543,7 @@ fn decode(input: &mut Input<'_>, project: &Path, relative: &str) -> Option<Model
         center,
         primitives,
         hull_points,
+        collision,
         warnings: Vec::new(),
         rig,
     })
@@ -820,8 +831,8 @@ mod tests {
             }
         }
         let mut out = format!(
-            "{:?} {:?} {:?} {:?} {:?}\n",
-            model.size, model.center, model.hull_points, model.warnings, model.rig
+            "{:?} {:?} {:?} {:?} {:?} {:?}\n",
+            model.size, model.center, model.hull_points, model.collision, model.warnings, model.rig
         );
         for each in &model.primitives {
             describe_primitive(&mut out, each);
@@ -854,6 +865,26 @@ mod tests {
             assert_eq!(describe(&again), describe(first), "{model}");
             assert_ne!(again.key(), first.key());
         }
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn a_cooked_model_keeps_its_collision_pieces() {
+        let project = std::env::temp_dir().join(format!(
+            "axcenity-cooked-model-pieces-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&project);
+        let folder = project.join("assets/models");
+        let gltf = crate::model::tests::rock_with_pieces(&folder);
+        fs::write(folder.join("rock.gltf"), gltf).unwrap();
+        let model = "assets/models/rock.gltf";
+        let first = Assets::new(&project).model_blocking(model).unwrap();
+        assert_eq!(first.collision.len(), 2);
+        assert!(read(&project, model, "").is_some());
+        let again = Assets::new(&project).model_blocking(model).unwrap();
+        assert_eq!(describe(&again), describe(&first));
+        assert_eq!(again.collision, first.collision);
         let _ = fs::remove_dir_all(project);
     }
 
