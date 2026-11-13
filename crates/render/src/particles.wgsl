@@ -30,8 +30,12 @@ struct Emitter {
     // while the curves below are used instead of the start and end values.
     look: vec4<f32>,
     // The spawn shape (0 box, 1 sphere, 2 cylinder, 3 disc), 1 for only
-    // its surface, and two unused (`SpawnShape`).
+    // its surface, which way they head (0 out, 1 in, 2 either at random,
+    // `ShapeInOut`), and one unused (`SpawnShape`).
     spawn_shape: vec4<u32>,
+    // The velocity each starts with besides its heading (the emitter's,
+    // times VelocityInheritance).
+    inherit: vec4<f32>,
     // Size, its envelope, transparency and its envelope over life, and
     // sRGB colors with the speed multiplier in w, at 32 even times from
     // birth to death (`ParticleCurves`).
@@ -161,7 +165,19 @@ fn born(index: u32) -> Particle {
     let third = random(&seed);
     let inside = spawn_point(first, second, third);
     let position = (emitter.spawn * vec4<f32>(inside, 1.0)).xyz;
-    let forward = emitter.direction.xyz;
+    // A round shape's particles head away from its middle (a cylinder's
+    // and disc's upright axis), as `SpawnShape::outward` on the CPU.
+    var forward = emitter.direction.xyz;
+    if emitter.spawn_shape.x != 0u {
+        var radial = inside;
+        if emitter.spawn_shape.x >= 2u {
+            radial.y = 0.0;
+        }
+        let out = (emitter.spawn * vec4<f32>(radial, 0.0)).xyz;
+        if dot(radial, radial) > 1e-12 && dot(out, out) > 0.0 {
+            forward = normalize(out);
+        }
+    }
     let z = 1.0 - random(&seed) * (1.0 - emitter.direction.w);
     let around = random(&seed) * TAU;
     let across = sqrt(max(1.0 - z * z, 0.0));
@@ -173,9 +189,14 @@ fn born(index: u32) -> Particle {
     let v = vec3<f32>(b, sign + forward.y * forward.y * a, -forward.y);
     let heading = forward * z + (u * cos(around) + v * sin(around)) * across;
     let life = emitter.life_size.x * (0.8 + 0.4 * random(&seed));
+    // Inward turns them round; InAndOut does for about half.
+    var flip = 1.0;
+    if emitter.spawn_shape.z == 1u || (emitter.spawn_shape.z == 2u && random(&seed) < 0.5) {
+        flip = -1.0;
+    }
     var particle: Particle;
     particle.position_age = vec4<f32>(position, 0.0);
-    particle.velocity_life = vec4<f32>(heading * emitter.air.w, life);
+    particle.velocity_life = vec4<f32>(heading * flip * emitter.air.w + emitter.inherit.xyz, life);
     return particle;
 }
 

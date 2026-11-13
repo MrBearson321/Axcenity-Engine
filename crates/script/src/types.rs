@@ -547,12 +547,13 @@ pub enum EnumType {
     RayTracedShadows,
     ParticleEmitterShape,
     ParticleEmitterShapeStyle,
+    ParticleEmitterShapeInOut,
     RayTracedAmbientOcclusion,
     RayTracedGlobalIllumination,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 47] = [
+    pub const ALL: [EnumType; 48] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -598,6 +599,7 @@ impl EnumType {
         EnumType::RayTracedShadows,
         EnumType::ParticleEmitterShape,
         EnumType::ParticleEmitterShapeStyle,
+        EnumType::ParticleEmitterShapeInOut,
         EnumType::RayTracedAmbientOcclusion,
         EnumType::RayTracedGlobalIllumination,
     ];
@@ -625,6 +627,7 @@ impl EnumType {
             EnumType::RayTracedShadows => "RayTracedShadows",
             EnumType::ParticleEmitterShape => "ParticleEmitterShape",
             EnumType::ParticleEmitterShapeStyle => "ParticleEmitterShapeStyle",
+            EnumType::ParticleEmitterShapeInOut => "ParticleEmitterShapeInOut",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::RayTracedGlobalIllumination => "RayTracedGlobalIllumination",
             EnumType::UserInputType => "UserInputType",
@@ -722,6 +725,8 @@ impl EnumType {
             // Where a ParticleEmitter's particles are born (roadmap R17.2).
             EnumType::ParticleEmitterShape => vec!["Box", "Sphere", "Cylinder", "Disc"],
             EnumType::ParticleEmitterShapeStyle => vec!["Volume", "Surface"],
+            // Which way they head from it (roadmap R17.2b).
+            EnumType::ParticleEmitterShapeInOut => vec!["Outward", "Inward", "InAndOut"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -867,7 +872,8 @@ impl LuaEnumItem {
             | EnumType::ModelStreamingMode
             | EnumType::StreamingState
             | EnumType::ParticleEmitterShape
-            | EnumType::ParticleEmitterShapeStyle => None,
+            | EnumType::ParticleEmitterShapeStyle
+            | EnumType::ParticleEmitterShapeInOut => None,
         }
     }
 }

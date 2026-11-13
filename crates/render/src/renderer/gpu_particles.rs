@@ -42,8 +42,11 @@ struct EmitterUniform {
     color_end: [f32; 4],
     look: [f32; 4],
     /// The spawn shape's code (`SpawnShape::code`), 1 for only its
-    /// surface, and two unused.
+    /// surface, which way they head (`ShapeInOut::code`), and one unused.
     spawn_shape: [u32; 4],
+    /// The velocity every new particle starts with besides its heading
+    /// (`ParticleEmitter::inherit`), and one unused.
+    inherit: [f32; 4],
     /// Size, transparency and color over life while `look[3]` is 1
     /// (`ParticleCurves`; colors' fourth number is the speed multiplier).
     shape: [[f32; 4]; CURVE_ENTRIES],
@@ -398,7 +401,13 @@ fn uniform_of(
             look.light_emission,
             if look.curves.is_some() { 1.0 } else { 0.0 },
         ],
-        spawn_shape: [emitter.shape.code(), u32::from(emitter.shape.surface), 0, 0],
+        spawn_shape: [
+            emitter.shape.code(),
+            u32::from(emitter.shape.surface),
+            emitter.in_out.code(),
+            0,
+        ],
+        inherit: finite(emitter.inherit).extend(0.0).to_array(),
         shape: look
             .curves
             .as_ref()

@@ -1314,6 +1314,17 @@ declare extern type EnumParticleEmitterShapeStyleItems with
 	Surface: EnumParticleEmitterShapeStyle
 end
 
+--- One choice of `Enum.ParticleEmitterShapeInOut`.
+declare extern type EnumParticleEmitterShapeInOut extends EnumItem with
+end
+
+--- The choices of `Enum.ParticleEmitterShapeInOut`.
+declare extern type EnumParticleEmitterShapeInOutItems with
+	Outward: EnumParticleEmitterShapeInOut
+	Inward: EnumParticleEmitterShapeInOut
+	InAndOut: EnumParticleEmitterShapeInOut
+end
+
 --- One choice of `Enum.RayTracedAmbientOcclusion`.
 declare extern type EnumRayTracedAmbientOcclusion extends EnumItem with
 end
@@ -1385,6 +1396,7 @@ declare extern type EnumLibrary with
 	RayTracedShadows: EnumRayTracedShadowsItems
 	ParticleEmitterShape: EnumParticleEmitterShapeItems
 	ParticleEmitterShapeStyle: EnumParticleEmitterShapeStyleItems
+	ParticleEmitterShapeInOut: EnumParticleEmitterShapeInOutItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
 end
@@ -4131,10 +4143,18 @@ declare extern type ParticleEmitter extends Instance with
 	TransparencyOverLife: NumberSequence?
 	--- A NumberSequence that multiplies Speed over each particle's life, from birth (0) to death (1): how far it moves each moment, with Acceleration and Drag still acting on its velocity. Envelopes aren't used. nil (the default) keeps Speed.
 	SpeedOverLife: NumberSequence?
-	--- Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). They still head along Direction within SpreadAngle.
+	--- Where in the part particles are born: `Enum.ParticleEmitterShape.Box` (the default, the whole part), `Sphere` (the ball inside it), `Cylinder` (upright along the part's Y) or `Disc` (flat across its middle, facing its Y). A Box's particles head along Direction within SpreadAngle; the round shapes' head away from their middle (see ShapeInOut).
 	Shape: EnumParticleEmitterShape | "Box" | "Sphere" | "Cylinder" | "Disc"
 	--- `Enum.ParticleEmitterShapeStyle.Volume` (the default) gives off particles anywhere inside the Shape; `Surface` only on it: a box's faces, the sphere, a cylinder's round side or a disc's rim.
 	ShapeStyle: EnumParticleEmitterShapeStyle | "Volume" | "Surface"
+	--- Which way particles head from the Shape, within SpreadAngle: `Enum.ParticleEmitterShapeInOut.Outward` (the default: along Direction for a Box; away from the middle for a Sphere, and from the upright axis for a Cylinder or Disc), `Inward` (the other way) or `InAndOut` (either, at random).
+	ShapeInOut: EnumParticleEmitterShapeInOut | "Outward" | "Inward" | "InAndOut"
+	--- How much of the part's own velocity each particle starts with, from 0 (none, the default) to 1 (all of it), so sparks from a moving car keep up with it.
+	VelocityInheritance: number
+	--- A NumberSequence of bursts while Enabled: each keypoint gives off Value particles (give or take Envelope) at its Time of every Duration seconds, over and over. Rate still adds its steady flow. A keypoint at time 1 is the next loop's start, so it gives off nothing: put that count at time 0. nil (the default) is no bursts.
+	Bursts: NumberSequence?
+	--- How long one loop of Bursts takes, in seconds (default 1, at least 0.05).
+	Duration: number
 	--- How far each particle is turned when it's born, in degrees.
 	Rotation: number
 	--- How fast particles spin, in degrees a second.
