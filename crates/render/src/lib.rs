@@ -23,9 +23,9 @@ pub use axcenity_render_types::Camera;
 pub use decal::{Decal, DecalRole, decal_quad};
 pub use draw_list::{
     AmbientLight, CURVE_ENTRIES, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
-    DepthOfField, DrawItem, DrawList, Dust, Edges, FilmGrain, Flipbook, FlipbookFrame,
+    DepthOfField, DrawItem, DrawList, Dust, DustBoxes, Edges, FilmGrain, Flipbook, FlipbookFrame,
     FlipbookMode, Fog, GridPlane, GridTint, ItemChunk, LensEffects, Light, LightProbeGrid,
-    LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline,
+    LightProbeVolume, MAX_DUST_BOXES, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline,
     ParticleCollision, ParticleCurves, ParticleEmitter, ParticleLook, PointShadows, PostProcessing,
     ProbeImage, ProbeSky, RectArea, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape,
     ShapeInOut, Skin, Sky, SkyImage, SpawnKind, SpawnShape, SpotShadows, Sprite, Sun, SunRays,

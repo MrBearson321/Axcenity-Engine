@@ -164,6 +164,43 @@ impl EditorApp {
                 return;
             }
         }
+        // A fog volume or an interior: the volume, then its FogEffect.
+        if matches!(what, Insertable::FogVolume | Insertable::InteriorVolume) {
+            let name = if what == Insertable::FogVolume {
+                "FogVolume"
+            } else {
+                "Interior"
+            };
+            self.insert_named(what, None, name, Vec::new());
+            let volume = self.selected;
+            let fog: Vec<(&'static str, Value)> = if what == Insertable::FogVolume {
+                vec![
+                    ("Density", Value::Number(0.02)),
+                    ("Glare", Value::Number(2.0)),
+                    ("HeightFalloff", Value::Number(20.0)),
+                    (
+                        "Color",
+                        Value::Color3(Color3::new(0.85, 0.88, 0.92)),
+                    ),
+                ]
+            } else {
+                vec![
+                    ("Interior", Value::Bool(true)),
+                    ("Density", Value::Number(0.015)),
+                    ("Glare", Value::Number(3.0)),
+                    (
+                        "Color",
+                        Value::Color3(Color3::new(0.95, 0.9, 0.82)),
+                    ),
+                ]
+            };
+            self.insert_named(Insertable::FogEffect, volume, "Fog", fog);
+            // The volume stays selected, to size it.
+            if let Some(volume) = volume {
+                self.select_from_viewport(Some(volume));
+            }
+            return;
+        }
         if what == Insertable::NavigationAgent {
             self.insert_agent(near.or(self.selected));
             return;
