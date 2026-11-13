@@ -255,3 +255,106 @@ fn a_toolbox_assets_tooltip_says_where_it_came_from_and_its_licence() {
     assert_eq!(browser.source_line("assets/audio/other.mp3"), None);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Roadmap G10: a plugin's item (`plugin:AddAssetAction`) is in a project
+/// asset's right-click menu when it's offered for that kind of file, and
+/// picking it reports the asset's path.
+#[test]
+fn a_plugins_item_in_an_assets_menu_reports_its_path() {
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-assets-plugin-menu-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(folder.join("assets/audio")).unwrap();
+    std::fs::write(folder.join("assets/audio/wind.ogg"), b"").unwrap();
+    let mut browser = AssetBrowser::default();
+    browser.open(Some(&folder));
+    let action = |id, label: &str, ext: &str| axcenity_plugins::AssetAction {
+        id,
+        label: label.into(),
+        tooltip: String::new(),
+        extensions: vec![ext.into()],
+    };
+    browser.plugin_actions = vec![
+        (2, action(7, "Loudness", "ogg")),
+        (2, action(8, "Not for sounds", "png")),
+    ];
+    fn texts(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+        fn walk(shape: &egui::Shape, found: &mut Vec<(String, egui::Pos2)>) {
+            match shape {
+                egui::Shape::Text(text) => found.push((
+                    text.galley.text().to_owned(),
+                    text.visual_bounding_rect().center(),
+                )),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut found);
+        }
+        found
+    }
+    let ctx = theme::test_context();
+    let mut frame = |events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(720.0, 480.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut action = None;
+        let output = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                if let Some(done) = browser.show(ui, true, false, None) {
+                    action = Some(done);
+                }
+            });
+        });
+        (texts(&output), action)
+    };
+    let click = |at: egui::Pos2, button: egui::PointerButton| {
+        [true, false].map(|pressed| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        })
+    };
+    frame(Vec::new());
+    let (shown, _) = frame(Vec::new());
+    let tile = shown
+        .iter()
+        .find(|(text, _)| text == "wind")
+        .unwrap_or_else(|| panic!("no wind tile in {shown:?}"))
+        .1;
+    frame(vec![egui::Event::PointerMoved(tile)]);
+    frame(click(tile, egui::PointerButton::Secondary).to_vec());
+    let (menu, _) = frame(Vec::new());
+    let item = menu
+        .iter()
+        .find(|(text, _)| text.ends_with("Loudness"))
+        .unwrap_or_else(|| panic!("no Loudness item in {menu:?}"))
+        .1;
+    assert!(
+        !menu
+            .iter()
+            .any(|(text, _)| text.ends_with("Not for sounds"))
+    );
+    frame(vec![egui::Event::PointerMoved(item)]);
+    let [press, release] = click(item, egui::PointerButton::Primary);
+    frame(vec![press]);
+    let (_, picked) = frame(vec![release]);
+    assert!(
+        matches!(
+            &picked,
+            Some(BrowserAction::PluginAction { plugin: 2, action: 7, path }) if path == "assets/audio/wind.ogg"
+        ),
+        "{picked:?}"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

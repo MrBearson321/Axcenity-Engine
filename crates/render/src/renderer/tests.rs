@@ -975,6 +975,7 @@ fn stats_time_each_pass_the_frame_draws() {
         let expected = !matches!(
             pass,
             FramePass::AccelerationStructures
+                | FramePass::RayTracedShadows
                 | FramePass::Ui
                 | FramePass::VolumetricFog
                 | FramePass::Particles

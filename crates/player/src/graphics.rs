@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use axcenity_render::{
         AmbientOcclusion, AntiAliasing, CloudQuality, DepthOfFieldQuality, MotionBlurQuality,
-        Quality, ReflectionQuality, ShadowQuality, TextureQuality,
+        Quality, RayTracedShadows, ReflectionQuality, ShadowQuality, TextureQuality,
     };
 
     fn temp_folder(test: &str) -> std::path::PathBuf {
@@ -127,6 +127,8 @@ mod tests {
             sharpen: None,
             motion_blur: Some(MotionBlurQuality::High),
             ray_tracing_distance: Some(1000.0),
+            ray_traced_shadows: Some(RayTracedShadows::High),
+            ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Medium),
             ray_tracing: Some(true),
         };
         save(&folder, &settings).unwrap();

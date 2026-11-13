@@ -571,6 +571,10 @@ declare extern type UserGameSettings with
 	Sharpen: boolean
 	--- How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.
 	MotionBlur: EnumMotionBlur
+	--- Hardware ray traced sun shadows: Off, Low (1 ray per pixel), Medium (2) or High (4). Off at every preset. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the shadow maps are drawn. Lighting's ShadowSoftness still sets how soft they are.
+	RayTracedShadows: EnumRayTracedShadows
+	--- Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.
+	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1244,6 +1248,30 @@ declare extern type EnumStreamingStateItems with
 	StreamedOut: EnumStreamingState
 end
 
+--- One choice of `Enum.RayTracedShadows`.
+declare extern type EnumRayTracedShadows extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedShadows`.
+declare extern type EnumRayTracedShadowsItems with
+	Off: EnumRayTracedShadows
+	Low: EnumRayTracedShadows
+	Medium: EnumRayTracedShadows
+	High: EnumRayTracedShadows
+end
+
+--- One choice of `Enum.RayTracedAmbientOcclusion`.
+declare extern type EnumRayTracedAmbientOcclusion extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedAmbientOcclusion`.
+declare extern type EnumRayTracedAmbientOcclusionItems with
+	Off: EnumRayTracedAmbientOcclusion
+	Low: EnumRayTracedAmbientOcclusion
+	Medium: EnumRayTracedAmbientOcclusion
+	High: EnumRayTracedAmbientOcclusion
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1288,6 +1316,8 @@ declare extern type EnumLibrary with
 	NormalId: EnumNormalIdItems
 	ModelStreamingMode: EnumModelStreamingModeItems
 	StreamingState: EnumStreamingStateItems
+	RayTracedShadows: EnumRayTracedShadowsItems
+	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
 end
 
 -- Instances -----------------------------------------------------------------
