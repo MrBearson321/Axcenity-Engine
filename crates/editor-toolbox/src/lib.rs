@@ -65,6 +65,7 @@ use axcenity_editor_kit::{responsive, widgets};
 pub mod agent;
 mod drawer;
 pub mod install;
+mod listen;
 mod packs;
 #[cfg(test)]
 mod search_tests;
@@ -136,6 +137,10 @@ pub enum Target {
     /// (roadmap G1): what it brings is placed there, as a tile dropped from
     /// the Assets panel would be.
     Drop(Spot),
+    /// A card was dragged out of the Toolbox and let go over the Assets
+    /// panel (roadmap G1): what it brings is got into the project and the
+    /// panel shows it, as Get does with nothing placed.
+    Assets,
 }
 
 /// Where a Toolbox card was let go over the viewport: the point on the
@@ -151,7 +156,8 @@ pub struct Spot {
 
 /// The drag payload of a Toolbox card (its picture is the handle): the
 /// result's key in the page shown and its name. The editor hands it to
-/// [`ToolboxPanel::get_dropped`] when it's let go over the viewport.
+/// [`ToolboxPanel::get_dropped`] when it's let go over the viewport or the
+/// Assets panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CardDrag {
     pub key: String,
@@ -192,6 +198,11 @@ pub enum ToolboxAction {
     /// Install a shared `.axcenity-plugin` into the project's plugins (or
     /// the user's Plugins folder when no project is open).
     ImportPlugin(PathBuf),
+    /// Play a sound result's preview, the file's `bytes`, on its own (the
+    /// listen button); `name` is for errors. Stops any it played before.
+    PlaySound { name: String, bytes: Vec<u8> },
+    /// Stop the preview [`ToolboxAction::PlaySound`] started.
+    StopSound,
 }
 
 #[derive(Clone)]
@@ -410,6 +421,8 @@ struct Card {
     blocked: Option<&'static str>,
     /// What Get would fetch ("Gets 2K JPG."), or `None` with no download.
     plan: Option<String>,
+    /// A sound's preview to listen to (empty for other kinds or none).
+    listen: String,
 }
 
 /// The Toolbox tab.
@@ -464,6 +477,10 @@ pub struct ToolboxPanel {
     reveal: Option<AssetRecord>,
     /// The view menu's Downloaded / Imported Assets… was picked.
     open_inventory: bool,
+    /// The sound result being listened to (`listen.rs`).
+    listen: Option<listen::Listen>,
+    /// Play and stop actions for the editor, handed back after drawing.
+    sound_out: Vec<ToolboxAction>,
 }
 
 impl Default for ToolboxPanel {
@@ -506,6 +523,8 @@ impl ToolboxPanel {
             queue: VecDeque::new(),
             reveal: None,
             open_inventory: false,
+            listen: None,
+            sound_out: Vec::new(),
         }
     }
 
@@ -519,8 +538,8 @@ impl ToolboxPanel {
     }
 
     /// A card dragged out of the panel ([`CardDrag`]) was let go over the
-    /// viewport: Get it, and hand it back with `target` so the editor places
-    /// it there. False (with the reason shown in the panel) when it can't be
+    /// viewport or the Assets panel: Get it, and hand it back with `target`
+    /// so the editor places or shows it there. False (with the reason shown in the panel) when it can't be
     /// got now: another download is running or the card is gone.
     pub fn get_dropped(
         &mut self,
@@ -575,6 +594,7 @@ impl ToolboxPanel {
         }
         let mut actions = Vec::new();
         self.poll(&ctx, &mut actions);
+        self.poll_listen();
         if can_edit {
             self.advance_queue(&ctx, project);
         }
@@ -734,6 +754,7 @@ impl ToolboxPanel {
         if search_view {
             ui.label(egui::RichText::new(credit).weak().small());
         }
+        actions.append(&mut self.sound_out);
         actions
     }
 
@@ -770,6 +791,10 @@ impl ToolboxPanel {
         let Some(first) = sources.first() else {
             return;
         };
+        if kind != Kind::Sound {
+            self.stop_listening();
+            self.listen = None;
+        }
         self.kind = kind;
         self.sources = if sources.len() > 1 {
             Sources::All
@@ -943,6 +968,11 @@ impl ToolboxPanel {
                     name: listing.name.clone(),
                     detail,
                     blocked: license::commercial_block(&record.license),
+                    listen: if record.kind == Kind::Sound {
+                        record.preview_url.clone()
+                    } else {
+                        String::new()
+                    },
                     plan: self
                         .package(listing)
                         .map(|choice| choice.describe())
@@ -1038,7 +1068,7 @@ impl ToolboxPanel {
             tip.push_str(&format!("\nNot for a commercial game: {why}."));
         }
         tip.push_str(if gettable {
-            "\nClick for details, or drag it onto the scene."
+            "\nClick for details, or drag it onto the scene or the Assets panel."
         } else {
             "\nClick for details."
         });
@@ -1066,19 +1096,25 @@ impl ToolboxPanel {
             None => egui::RichText::new(&card.detail).weak().small(),
         };
         ui.add(egui::Label::new(detail).truncate());
-        let button = ui.add_enabled(gettable, egui::Button::new("Get"));
-        let button = match &card.plan {
-            Some(plan) if can_get => button.on_hover_text(plan),
-            Some(_) => {
-                button.on_disabled_hover_text("Open a project (and stop Play) to get assets.")
+        let sound = self.kind == Kind::Sound;
+        ui.horizontal(|ui| {
+            let button = ui.add_enabled(gettable, egui::Button::new("Get"));
+            let button = match &card.plan {
+                Some(plan) if can_get => button.on_hover_text(plan),
+                Some(_) => {
+                    button.on_disabled_hover_text("Open a project (and stop Play) to get assets.")
+                }
+                None => button.on_disabled_hover_text(format!("{} has no download.", card.name)),
+            };
+            if button.clicked()
+                && let Some(project) = project
+            {
+                self.start_download(ui.ctx(), project, &card.key);
             }
-            None => button.on_disabled_hover_text(format!("{} has no download.", card.name)),
-        };
-        if button.clicked()
-            && let Some(project) = project
-        {
-            self.start_download(ui.ctx(), project, &card.key);
-        }
+            if sound && listen::button(ui, &self.listen, &card.key, &card.name, &card.listen) {
+                self.listen_clicked(ui.ctx(), &card.key, &card.name, &card.listen);
+            }
+        });
     }
 
     /// The listing with this key, in the page shown.
@@ -1567,7 +1603,9 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
 /// a drop on anything else (a sky, a model through the Import dialog) is
 /// used up, so it can't place the next Get.
 fn installed_action(installed: Installed, target: &mut Option<Target>) -> ToolboxAction {
-    let drop = matches!(target, Some(Target::Drop(_)));
+    // A drag's target is used up by what it got, so the next Get isn't
+    // placed or shown where this one was let go.
+    let drop = matches!(target, Some(Target::Drop(_) | Target::Assets));
     match installed {
         Installed::TextureSet { path, name } => ToolboxAction::TextureSet {
             path,
@@ -2407,6 +2445,45 @@ mod tests {
             },
             &mut target,
         );
+        assert_eq!(target, None);
+    }
+
+    /// G1: a card let go over the Assets panel hands its texture set or
+    /// sound back for the panel to show; a sky or model uses the drop up.
+    #[test]
+    fn a_card_dropped_on_the_assets_panel_is_shown_there() {
+        let mut target = Some(Target::Assets);
+        let action = installed_action(
+            Installed::TextureSet {
+                path: "assets/textures/rock.texture.json".into(),
+                name: "Rock".into(),
+            },
+            &mut target,
+        );
+        assert_eq!(
+            action,
+            ToolboxAction::TextureSet {
+                path: "assets/textures/rock.texture.json".into(),
+                name: "Rock".into(),
+                target: Some(Target::Assets),
+            }
+        );
+        assert_eq!(target, None);
+        let mut target = Some(Target::Assets);
+        let action = installed_action(
+            Installed::Sound("assets/sounds/bird.ogg".into()),
+            &mut target,
+        );
+        assert_eq!(
+            action,
+            ToolboxAction::Sound {
+                path: "assets/sounds/bird.ogg".into(),
+                target: Some(Target::Assets),
+            }
+        );
+        assert_eq!(target, None);
+        let mut target = Some(Target::Assets);
+        installed_action(Installed::Sky("assets/sky/a_2k.hdr".into()), &mut target);
         assert_eq!(target, None);
     }
 

@@ -42,9 +42,11 @@ use crate::weather::WeatherState;
 #[cfg(test)]
 mod collision_tests;
 mod collisions;
+mod presets;
 
 use collisions::{EmitOn, Event, Landing, Sub, events_on, is_sub, subs_of};
 pub use collisions::{MAX_SURFACE_RAYS, SurfaceHit, Surfaces};
+pub use presets::{EffectPreset, PresetEmitter, create_preset, preset_emitter};
 
 /// The most particles one emitter keeps; past this, no more are born
 /// until some die.
