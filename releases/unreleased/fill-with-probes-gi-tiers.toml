@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Fill with Probes, and real-time GI tiers by preset"
+details = "Fill with Probes (Light menu, under Bake Probes) puts a light probe volume around the selected parts or model, spaced to fit 512 probes, as one undo step, and says in Output how many probes stand inside solid parts (the bake leaves those out). Real-time GI, while on, now traces as much as the graphics preset allows: Low one probe a frame at 8² faces, Medium two at 8², High two at 16² (as before) and Ultra four at 16²."
+features = ["renderer.global-illumination"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

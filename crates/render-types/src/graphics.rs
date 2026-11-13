@@ -1912,7 +1912,9 @@ mod tests {
                 realtime_gi: Some(true),
                 ..GraphicsSettings::preset(quality)
             };
-            let tier = settings.effective(&Capabilities::default()).realtime_gi_tier;
+            let tier = settings
+                .effective(&Capabilities::default())
+                .realtime_gi_tier;
             (tier.probes_per_frame, tier.face_size)
         };
         assert_eq!(tier(Quality::Low), (1, 8));

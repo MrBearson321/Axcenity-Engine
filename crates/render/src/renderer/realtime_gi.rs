@@ -11,9 +11,9 @@
 use std::num::NonZeroU64;
 
 use super::light_probes::LightProbes;
-use crate::RealtimeGiTier;
 use super::probe_bake::ProbeCamera;
 use super::*;
+use crate::RealtimeGiTier;
 
 /// The most probes traced in a frame, at any tier. Must match `SLOTS` in
 /// light_probe_sum.wgsl.

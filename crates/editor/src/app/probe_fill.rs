@@ -22,8 +22,10 @@ const FILL_MARGIN: f32 = 2.0;
 /// picked in (tidy numbers in Properties).
 const FILL_SPACING_STEP: f32 = 0.5;
 
-/// What Fill with Probes made, for its Output line and for tests.
+/// What Fill with Probes made, for tests (callers only need the Output line
+/// and the selection it leaves).
 #[derive(Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) struct Filled {
     pub(super) part: InstanceId,
     pub(super) volume: InstanceId,
@@ -186,7 +188,9 @@ mod tests {
         for (at, size) in walls {
             let wall = app.world.create(ClassName::Part).unwrap();
             let vector = |v: Vec3| Value::Vector3(Vector3::new(v.x, v.y, v.z));
-            app.world.set_property(wall, "Position", vector(at)).unwrap();
+            app.world
+                .set_property(wall, "Position", vector(at))
+                .unwrap();
             app.world.set_property(wall, "Size", vector(size)).unwrap();
             app.world
                 .set_property(wall, "Anchored", Value::Bool(true))
@@ -239,7 +243,11 @@ mod tests {
             Some("Fill RoomProbes with probes")
         );
         app.undo();
-        assert!(app.world.get(filled.part).is_none_or(|p| p.parent().is_none()));
+        assert!(
+            app.world
+                .get(filled.part)
+                .is_none_or(|p| p.parent().is_none())
+        );
     }
 
     #[test]

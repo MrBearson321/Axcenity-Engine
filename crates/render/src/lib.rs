@@ -39,9 +39,8 @@ pub use graphics::{
     EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, MotionBlurQuality, POINT_SHADOW_FACES,
     PointShadowMapSize, Quality, RAY_TRACING_DISTANCE_RANGE, RENDER_SCALE_RANGE,
     RayTracedAmbientOcclusion, RayTracedGlobalIllumination, RayTracedShadows, RealtimeGiTier,
-    ReflectionQuality,
-    ShadowMapSize, ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
-    read_capabilities,
+    ReflectionQuality, ShadowMapSize, ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE,
+    TextureQuality, read_capabilities,
 };
 pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, layers_of};
 #[cfg(feature = "debug-views")]

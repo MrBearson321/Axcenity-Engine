@@ -443,7 +443,11 @@ fn bench_light_probes() {
         for x in -12..12 {
             for z in -12..12 {
                 list.items.push(block(
-                    Vec3::new(x as f32 * 3.0, 0.5 + (x * z % 3) as f32 * 0.5, z as f32 * 3.0),
+                    Vec3::new(
+                        x as f32 * 3.0,
+                        0.5 + (x * z % 3) as f32 * 0.5,
+                        z as f32 * 3.0,
+                    ),
                     Vec3::splat(1.0),
                     [0.6, 0.6, 0.6],
                 ));
@@ -502,7 +506,11 @@ fn bench_light_probes() {
         for v in 0..count {
             let side = 4096;
             list.light_probe_volumes.push(LightProbeVolume {
-                center: Vec3::new(-30.0 + (v % 4) as f32 * 20.0, 5.0, -10.0 + (v / 4) as f32 * 20.0),
+                center: Vec3::new(
+                    -30.0 + (v % 4) as f32 * 20.0,
+                    5.0,
+                    -10.0 + (v / 4) as f32 * 20.0,
+                ),
                 rotation: glam::Quat::IDENTITY,
                 half_size: Vec3::new(10.0, 5.0, 10.0),
                 blend_distance: 2.0,
