@@ -31,7 +31,7 @@ The editor's tabs beyond the Scene, Explorer and Properties. Each is a module (o
 
 ## Model Studio
 
-Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws through `View::use_model`. The Pose test skins exactly as `assets::Posed` does. Phase 90 ("A narrower Model Studio") removed Sculpt mode, retopology and Bake (about 5,600 lines); R15 brought Sculpt mode and Bake (with Make Low Poly) back at Paul's choice, and retopology by hand stays Blender's. R15.3 added a Levels of detail fold: each level's triangle count, the ratios Generate LODs uses, Regenerate, Remove LODs and Preview LOD 0–2 (`lods.rs`); the renderer still picks levels by size on screen.
+Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws through `View::use_model`. The Pose test skins exactly as `assets::Posed` does. Phase 90 ("A narrower Model Studio") removed Sculpt mode, retopology and Bake (about 5,600 lines); R15 brought Sculpt mode and Bake (with Make Low Poly) back at Paul's choice, and retopology by hand stays Blender's. R15.1 added seven brushes (Layer, Blob, Scrape, Fill, Draw Sharp, Nudge, Elastic Grab) and the Mesh Filter; brushes stay on the `Sculpt`'s fixed vertices (no dynamic topology), so masks, symmetry and chunks keep working. R15.3 added a Levels of detail fold: each level's triangle count, the ratios Generate LODs uses, Regenerate, Remove LODs and Preview LOD 0–2 (`lods.rs`); the renderer still picks levels by size on screen.
 
 ## Animation tab and sequencer
 

@@ -108,7 +108,7 @@ pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
 pub use reference::{Reference, SurfacePoint};
 pub use rig::{ArmBone, Armature, Skin};
-pub use sculpt::{Sculpt, subdivide, voxel_remesh};
+pub use sculpt::{MeshFilter, Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;
 pub use solid::{Combined, Solid, combine, combine_parts, save_pieces, save_union, solid_of};
