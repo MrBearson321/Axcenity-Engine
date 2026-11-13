@@ -111,6 +111,20 @@ pub(super) const RAY_GI_SHADER: &str = concat!(
     include_str!("../ray_cut_outs.wgsl"),
     include_str!("../ray_gi.wgsl")
 );
+/// The Path Traced view's pass (`path_tracer.wgsl`, renderer/path_tracer.rs):
+/// ray queries turned on first, then the sky's colors, the fog and the
+/// shared lighting (for the frame's uniform, lamps and sky), and cut-outs'
+/// holes.
+#[cfg(feature = "debug-views")]
+pub(super) const PATH_TRACER_SHADER: &str = concat!(
+    "enable wgpu_ray_query;\n",
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../ray_cut_outs.wgsl"),
+    include_str!("../path_tracer.wgsl")
+);
 /// Ray traced ambient occlusion's pass (`ray_ao.wgsl`, renderer/ray_ao.rs):
 /// ray queries turned on first, then cut-outs' holes.
 pub(super) const RAY_AO_SHADER: &str = concat!(

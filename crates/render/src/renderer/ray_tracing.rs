@@ -59,6 +59,9 @@ pub struct RayTracingStats {
     pub meshes_waiting: u32,
     /// Whether the TLAS was rebuilt this frame.
     pub rebuilt: bool,
+    /// Paths a pixel the editor's Path Traced view has averaged so far (0
+    /// while it isn't shown).
+    pub path_traced_paths: u32,
 }
 
 struct MeshBlas {
@@ -132,6 +135,18 @@ impl RayScene {
     /// The TLAS, built (this frame or before) with the frame's items.
     pub(super) fn tlas(&self) -> &wgpu::Tlas {
         &self.tlas
+    }
+
+    /// Each TLAS slot's mesh, in slot order.
+    #[cfg(feature = "debug-views")]
+    pub(super) fn slot_meshes(&self) -> impl Iterator<Item = MeshKey> + '_ {
+        self.slots.iter().map(|slot| slot.mesh.0)
+    }
+
+    /// How many TLAS slots are filled.
+    #[cfg(feature = "debug-views")]
+    pub(super) fn slot_count(&self) -> usize {
+        self.slots.len()
     }
 
     /// Brings the structures up to date with this frame's `draws`, recording
@@ -346,6 +361,7 @@ impl RayScene {
                 .sum(),
             meshes_waiting: waiting,
             rebuilt: changed,
+            path_traced_paths: 0,
         };
     }
 }
@@ -353,22 +369,33 @@ impl RayScene {
 impl ScenePipeline {
     /// Whether anything this frame traces rays on a device that can: a ray
     /// traced effect drawn this frame (`effects`: sun shadows, ambient
-    /// occlusion) or the editor's Ray Hits view.
+    /// occlusion) or the editor's Ray Hits or Path Traced view.
     pub(super) fn traces_rays(&self, effects: bool) -> bool {
         if !self.graphics.ray_queries {
             return false;
         }
-        if effects {
-            return true;
-        }
-        #[cfg(feature = "debug-views")]
-        if self
-            .debug_views
-            .as_ref()
-            .is_some_and(|debug| debug.view == super::DebugView::RayHits)
-        {
-            return true;
-        }
+        effects || self.ray_traced_view(false)
+    }
+
+    /// Whether the editor's Path Traced view is shown, which needs each
+    /// slot's [`SurfaceRaw`].
+    pub(super) fn path_traced(&self) -> bool {
+        self.graphics.ray_queries && self.ray_traced_view(true)
+    }
+
+    /// Whether the editor shows the Path Traced view, or (unless
+    /// `path_traced_only`) the Ray Hits view.
+    #[cfg(feature = "debug-views")]
+    fn ray_traced_view(&self, path_traced_only: bool) -> bool {
+        use super::DebugView;
+        self.debug_views.as_ref().is_some_and(|debug| {
+            debug.view == DebugView::PathTraced
+                || (!path_traced_only && debug.view == DebugView::RayHits)
+        })
+    }
+
+    #[cfg(not(feature = "debug-views"))]
+    fn ray_traced_view(&self, _path_traced_only: bool) -> bool {
         false
     }
 }

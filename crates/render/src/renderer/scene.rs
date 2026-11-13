@@ -451,6 +451,11 @@ impl ScenePipeline {
         if !self.graphics.volumetric_fog {
             self.volumetric_fog = None;
         }
+        // The Path Traced view's pass comes and goes with ray queries.
+        #[cfg(feature = "debug-views")]
+        if let Some(view) = self.debug_views.as_ref().map(|debug| debug.view) {
+            self.set_debug_view(Some(view));
+        }
         let quality = self.graphics.shadow_quality;
         if self.shadow_map.as_ref().map(|map| map.size) != quality.map() {
             self.shadow_map = None;
@@ -1306,6 +1311,7 @@ impl ScenePipeline {
             }
         };
         mark(&mut encoder, FramePass::AccelerationStructures);
+        let path_traced = self.path_traced();
         let tracing = ray_tracing::prepare_scene(
             &mut self.ray_scene,
             (
@@ -1319,7 +1325,7 @@ impl ScenePipeline {
                 self.frame,
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
-                ray_gi_batch.is_some() || water_rays,
+                ray_gi_batch.is_some() || water_rays || path_traced,
             ),
             &draws,
         );
@@ -1781,7 +1787,25 @@ impl ScenePipeline {
         // UI (renderer/debug_views.rs).
         #[cfg(feature = "debug-views")]
         if let Some(mut debug) = self.debug_views.take() {
-            debug.draw(self, &mut encoder, view, (&batches, &draws), view_proj);
+            // The sun, the sky and the lamps, for the Path Traced view.
+            let lighting = path_tracer::lighting_key(&[
+                bytemuck::bytes_of(&frame_uniform.sun_direction),
+                bytemuck::bytes_of(&frame_uniform.sun_radiance),
+                bytemuck::bytes_of(&frame_uniform.sky_top),
+                bytemuck::bytes_of(&frame_uniform.sky_horizon),
+                bytemuck::bytes_of(&frame_uniform.sky_ground),
+                bytemuck::bytes_of(&frame_uniform.environment),
+                bytemuck::bytes_of(&frame_uniform.night),
+                bytemuck::bytes_of(&frame_uniform.lights),
+                bytemuck::cast_slice(&planned_lights.lights),
+            ]);
+            debug.draw(
+                self,
+                &mut encoder,
+                view,
+                (&batches, &draws),
+                (view_proj, lighting),
+            );
             self.debug_views = Some(debug);
         }
 
@@ -2135,6 +2159,8 @@ impl ScenePipeline {
         if let Some(gi) = &mut self.ray_gi {
             gi.frame_group = ray_gi_group;
         }
+        #[cfg(feature = "debug-views")]
+        self.bind_path_tracer();
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
             &self.shadow_layout,
@@ -2298,7 +2324,15 @@ impl ScenePipeline {
             ray_tracing: self
                 .ray_scene
                 .as_ref()
-                .map_or_else(Default::default, |scene| scene.stats),
+                .map_or_else(Default::default, |scene| {
+                    #[allow(unused_mut)]
+                    let mut stats = scene.stats;
+                    #[cfg(feature = "debug-views")]
+                    {
+                        stats.path_traced_paths = self.path_traced_paths();
+                    }
+                    stats
+                }),
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),
             target_bytes: self.frame_targets.bytes

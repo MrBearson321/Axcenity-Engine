@@ -54,11 +54,16 @@ pub enum DebugView {
     /// item a color of its own, dimmer the farther away, and only items
     /// within the ray tracing distance. Needs a GPU with ray queries.
     RayHits,
+    /// A reference picture made by path tracing: rays bouncing through
+    /// hardware ray tracing's scene, one more path a pixel each frame,
+    /// averaged while nothing changes (`renderer/path_tracer.rs`). Needs a
+    /// GPU with ray queries.
+    PathTraced,
 }
 
 impl DebugView {
     /// Every view, in menu order.
-    pub const ALL: [DebugView; 10] = [
+    pub const ALL: [DebugView; 11] = [
         DebugView::Unlit,
         DebugView::Wireframe,
         DebugView::Normals,
@@ -69,6 +74,7 @@ impl DebugView {
         DebugView::Overdraw,
         DebugView::LodLevels,
         DebugView::RayHits,
+        DebugView::PathTraced,
     ];
 }
 
@@ -113,12 +119,15 @@ pub(super) struct DebugViews {
     depth: Option<((u32, u32), wgpu::TextureView)>,
     /// The Ray Hits view's pass, made when first shown.
     ray_hits: Option<super::ray_tracing::RayHitsPass>,
+    /// The Path Traced view's passes and sums, while it's shown.
+    pub(super) path_tracer: Option<Box<super::path_tracer::PathTracer>>,
 }
 
 impl ScenePipeline {
     /// Shows `view` in place of the lit scene from the next frame, or the
     /// lit scene again for `None`, which frees everything the debug views use.
     pub(super) fn set_debug_view(&mut self, view: Option<DebugView>) {
+        let path_traced = view == Some(DebugView::PathTraced);
         match (view, &mut self.debug_views) {
             (None, _) => self.debug_views = None,
             (Some(view), Some(debug)) => debug.view = view,
@@ -135,6 +144,53 @@ impl ScenePipeline {
                 )));
             }
         }
+        // The Path Traced view reads the frame's bindings, so its pass is
+        // made here, and its bindings with the frame's.
+        if let Some(debug) = &mut self.debug_views {
+            if !path_traced || !self.graphics.ray_queries {
+                debug.path_tracer = None;
+            } else if debug.path_tracer.is_none() && self.graphics.ray_queries {
+                debug.path_tracer = Some(Box::new(super::path_tracer::PathTracer::new(
+                    &self.device,
+                    &self.frame_entries,
+                    self.color_format,
+                )));
+                self.bind_frame();
+            }
+        }
+    }
+}
+
+impl ScenePipeline {
+    /// Makes the Path Traced view's bindings of the frame's, if it's shown
+    /// (with the frame's own, in `bind_frame`).
+    pub(super) fn bind_path_tracer(&mut self) {
+        let Some(layout) = self
+            .debug_views
+            .as_ref()
+            .and_then(|debug| debug.path_tracer.as_ref())
+            .map(|tracer| &tracer.frame_layout)
+        else {
+            return;
+        };
+        let group = self.frame_subset(layout, &super::path_tracer::FRAME_BINDINGS);
+        let Some(tracer) = self
+            .debug_views
+            .as_mut()
+            .and_then(|debug| debug.path_tracer.as_mut())
+        else {
+            return;
+        };
+        tracer.frame_group = Some(group);
+    }
+
+    /// Paths a pixel the Path Traced view has averaged so far, 0 while it
+    /// isn't shown.
+    pub(super) fn path_traced_paths(&self) -> u32 {
+        self.debug_views
+            .as_ref()
+            .and_then(|debug| debug.path_tracer.as_ref())
+            .map_or(0, |tracer| tracer.paths)
     }
 }
 
@@ -253,24 +309,31 @@ impl DebugViews {
             capacity,
             depth: None,
             ray_hits: None,
+            path_tracer: None,
         }
     }
 
     /// Draws the view over `target`, which is `scene`'s output: each of
     /// `batches` (the frame's, at `draws`' levels of detail) as the camera
-    /// sees it through `view_proj`.
+    /// sees it through `view_proj`. `lighting` stands for the frame's light,
+    /// for the Path Traced view
+    /// ([`lighting_key`](super::path_tracer::lighting_key)).
     pub(super) fn draw(
         &mut self,
         scene: &ScenePipeline,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         (batches, draws): (&[Batch], &[Draw]),
-        view_proj: Mat4,
+        (view_proj, lighting): (Mat4, u64),
     ) {
         let device = &scene.device;
         let size = scene.output_size;
         if self.view == DebugView::RayHits {
             self.draw_ray_hits(scene, encoder, target, view_proj);
+            return;
+        }
+        if self.view == DebugView::PathTraced {
+            self.draw_path_traced(scene, encoder, target, (view_proj, lighting));
             return;
         }
         if self.depth.as_ref().map(|(at, _)| *at) != Some(size) {
@@ -424,7 +487,54 @@ impl DebugViews {
     }
 }
 
+/// Clears `target` to a plain dark grey: a ray traced view on a GPU without
+/// ray queries (the editor says why).
+fn plain(encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("ray traced view unsupported"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: target,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: 0.02,
+                    g: 0.02,
+                    b: 0.02,
+                    a: 1.0,
+                }),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        ..Default::default()
+    });
+}
+
 impl DebugViews {
+    /// The Path Traced view, or a plain dark picture on a GPU without ray
+    /// queries.
+    fn draw_path_traced(
+        &mut self,
+        scene: &ScenePipeline,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        (view_proj, lighting): (Mat4, u64),
+    ) {
+        let (Some(rays), Some(tracer)) = (&scene.ray_scene, &mut self.path_tracer) else {
+            plain(encoder, target);
+            return;
+        };
+        let limit = scene.device.limits().max_storage_buffer_binding_size;
+        tracer.draw(
+            (&scene.device, &scene.queue),
+            encoder,
+            target,
+            (rays, view_proj, scene.output_size, lighting),
+            limit,
+            |key| scene.gpu_mesh(key),
+        );
+    }
+
     /// The Ray Hits view, or a plain dark picture on a GPU without ray
     /// queries (the editor says why).
     fn draw_ray_hits(
@@ -435,24 +545,7 @@ impl DebugViews {
         view_proj: Mat4,
     ) {
         let Some(rays) = &scene.ray_scene else {
-            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("ray hits unsupported"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    depth_slice: None,
-                    view: target,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.02,
-                            b: 0.02,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
+            plain(encoder, target);
             return;
         };
         let pass = self.ray_hits.get_or_insert_with(|| {

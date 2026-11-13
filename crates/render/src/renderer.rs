@@ -45,6 +45,8 @@ use glyphon::{
 };
 pub use gpu_particles::MAX_GPU_PARTICLES;
 pub use gpu_timer::FramePass;
+#[cfg(feature = "debug-views")]
+pub use path_tracer::MOST_PATHS as PATH_TRACED_MOST_PATHS;
 pub use probe_bake::{BakedProbe, LIGHT_PROBE_BAKE_SIZE, LightProbeBaker, PROBE_BAKE_SIZE};
 pub use ray_tracing::RayTracingStats;
 pub use surface_shaders::{ShaderError, SurfaceShader};
@@ -68,6 +70,8 @@ mod lighting;
 mod lod;
 mod occlusion;
 mod parallel;
+#[cfg(feature = "debug-views")]
+mod path_tracer;
 mod post;
 mod probe_bake;
 mod probes;
