@@ -53,12 +53,38 @@ impl TextureRenderer {
         size: u32,
         settings: &GraphicsSettings,
     ) -> Result<Vec<[[f32; 3]; 4]>> {
+        let mut baker = LightProbeBaker::new(device, queue, list, size, settings);
+        centers.iter().map(|&center| baker.bake(center)).collect()
+    }
+}
+
+/// Bakes light probes one at a time, as [`TextureRenderer::bake_light_probes`]
+/// does, keeping its renderer (and its copy of the scene) between them, so
+/// a host can spread a big bake over many frames and stop it part way.
+pub struct LightProbeBaker {
+    camera: ProbeCamera,
+}
+
+impl LightProbeBaker {
+    /// Uploads the scene in `list` once, for probes drawn at `size` with
+    /// `settings`.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        size: u32,
+        settings: &GraphicsSettings,
+    ) -> Self {
         let mut camera = ProbeCamera::new(device, queue, list, size, settings);
         camera.light_only();
-        centers
-            .iter()
-            .map(|&center| Ok(cube_light(camera.size, &camera.faces(center)?)))
-            .collect()
+        Self { camera }
+    }
+
+    /// The light reaching a probe at `center`, as four spherical harmonics
+    /// coefficients.
+    pub fn bake(&mut self, center: Vec3) -> Result<[[f32; 3]; 4]> {
+        let faces = self.camera.faces(center)?;
+        Ok(cube_light(self.camera.size, &faces))
     }
 }
 

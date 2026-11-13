@@ -64,6 +64,7 @@ mod open;
 mod people_history;
 mod plugins;
 mod prefabs;
+mod probe_bake;
 mod probes;
 mod project_upgrade;
 mod save_template;
@@ -366,9 +367,11 @@ pub struct EditorApp {
     /// Play starts in the start level, whichever level is open (the Levels
     /// panel's Play from Start Level).
     play_from_start: bool,
-    /// Bake Probes was clicked: the probes are baked on the next frame,
-    /// which has the GPU device.
+    /// Bake Probes was clicked: the bake starts on the next frame.
     bake_probes_asked: bool,
+    /// The probe bake in progress, a little each frame
+    /// (`app/probe_bake.rs`).
+    probe_bake: Option<probe_bake::ProbeBake>,
     /// The baked LightProbeVolumes out of date, as of a history revision
     /// (`app/probes.rs`).
     stale_light_probes: Option<((u64, bool), Vec<InstanceId>)>,
@@ -1009,6 +1012,7 @@ impl EditorApp {
             play_from_start: false,
             stale_light_probes: None,
             bake_probes_asked: false,
+            probe_bake: None,
             constraint_tool: None,
             importing: None,
             import_queue: VecDeque::new(),
@@ -1513,11 +1517,18 @@ impl EditorApp {
             .input(|input| f64::from(input.stable_dt))
             .min(MAX_FRAME_SECONDS);
         self.plugins_frame(seconds);
-        if self.bake_probes_asked
+        if self.bake_probes_asked {
+            self.bake_probes_asked = false;
+            self.start_probe_bake();
+        }
+        if self.probe_bake.is_some()
             && let Some(render_state) = render_state
         {
-            self.bake_probes_asked = false;
-            self.bake_probes(&render_state.device, &render_state.queue);
+            self.step_probe_bake(
+                &render_state.device,
+                &render_state.queue,
+                probe_bake::FRAME_BUDGET,
+            );
         }
         self.finish_thumbnail(ctx);
         // Taken from the input before the viewport sees it, so the S doesn't
@@ -1877,6 +1888,7 @@ impl EditorApp {
         }
         self.input_window(ctx);
         self.collision_groups_window(ctx);
+        self.probe_bake_window(ctx);
         self.custom_material_window(ctx);
         self.save_layout_dialog(ctx);
         self.references_window(ctx);
