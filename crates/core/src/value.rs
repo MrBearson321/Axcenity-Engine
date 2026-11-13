@@ -4,6 +4,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
+use crate::sequence::{ColorSequence, NumberSequence};
 use crate::world::InstanceId;
 
 /// A position, size or direction in studs. Y is up.
@@ -198,6 +199,10 @@ pub enum Value {
     Instance(Option<InstanceId>),
     /// A part's `CustomPhysicalProperties`, or none for its material's.
     PhysicalProperties(Option<PhysicalProperties>),
+    /// A number over time from 0 to 1 (R17.1); empty when unset.
+    NumberSequence(NumberSequence),
+    /// A color over time from 0 to 1 (R17.1); empty when unset.
+    ColorSequence(ColorSequence),
 }
 
 /// The type of a [`Value`], without the data. Used to check assignments.
@@ -219,6 +224,8 @@ pub enum ValueKind {
     EnumItem,
     Instance,
     PhysicalProperties,
+    NumberSequence,
+    ColorSequence,
 }
 
 impl Value {
@@ -240,6 +247,8 @@ impl Value {
             Value::EnumItem(_) => ValueKind::EnumItem,
             Value::Instance(_) => ValueKind::Instance,
             Value::PhysicalProperties(_) => ValueKind::PhysicalProperties,
+            Value::NumberSequence(_) => ValueKind::NumberSequence,
+            Value::ColorSequence(_) => ValueKind::ColorSequence,
         }
     }
 
@@ -360,11 +369,31 @@ impl Value {
         }
     }
 
+    pub fn as_number_sequence(&self) -> Option<&NumberSequence> {
+        match self {
+            Value::NumberSequence(sequence) => Some(sequence),
+            _ => None,
+        }
+    }
+
+    pub fn as_color_sequence(&self) -> Option<&ColorSequence> {
+        match self {
+            Value::ColorSequence(sequence) => Some(sequence),
+            _ => None,
+        }
+    }
+
     /// Whether an attribute can hold this value: a boolean, number,
     /// string, Vector3, Vector2, Color3, UDim2, CFrame or enum item.
     /// Property enums count as enum items.
     pub fn is_attribute(&self) -> bool {
-        !matches!(self, Value::Instance(_) | Value::PhysicalProperties(_))
+        !matches!(
+            self,
+            Value::Instance(_)
+                | Value::PhysicalProperties(_)
+                | Value::NumberSequence(_)
+                | Value::ColorSequence(_)
+        )
     }
 
     pub fn as_bool(&self) -> Option<bool> {
@@ -394,6 +423,8 @@ impl fmt::Display for ValueKind {
             ValueKind::EnumItem => "EnumItem",
             ValueKind::Instance => "Instance",
             ValueKind::PhysicalProperties => "PhysicalProperties",
+            ValueKind::NumberSequence => "NumberSequence",
+            ValueKind::ColorSequence => "ColorSequence",
         };
         f.write_str(name)
     }

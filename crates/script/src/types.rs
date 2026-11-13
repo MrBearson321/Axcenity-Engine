@@ -970,6 +970,13 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
             None => item.item.as_str().into_lua(lua),
         },
         Value::PhysicalProperties(p) => p.map(crate::physical::LuaPhysicalProperties).into_lua(lua),
+        // An unset (empty) sequence reads as nil.
+        Value::NumberSequence(sequence) => (!sequence.is_empty())
+            .then(|| crate::keypoints::LuaNumberSequence(sequence.clone()))
+            .into_lua(lua),
+        Value::ColorSequence(sequence) => (!sequence.is_empty())
+            .then(|| crate::keypoints::LuaColorSequence(sequence.clone()))
+            .into_lua(lua),
         // An ObjectValue pointing at a destroyed Instance holds nil.
         Value::Instance(id) => {
             let alive = id
@@ -1080,6 +1087,22 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
                 .ok()
                 .map(|p| Value::PhysicalProperties(Some(p.0.clamped())))
         }
+        (ValueKind::NumberSequence, mlua::Value::Nil) => {
+            Some(Value::NumberSequence(Default::default()))
+        }
+        (ValueKind::NumberSequence, _) => {
+            crate::keypoints::LuaNumberSequence::from_lua(value.clone(), lua)
+                .ok()
+                .map(|s| Value::NumberSequence(s.0))
+        }
+        (ValueKind::ColorSequence, mlua::Value::Nil) => {
+            Some(Value::ColorSequence(Default::default()))
+        }
+        (ValueKind::ColorSequence, _) => {
+            crate::keypoints::LuaColorSequence::from_lua(value.clone(), lua)
+                .ok()
+                .map(|s| Value::ColorSequence(s.0))
+        }
         (ValueKind::Instance, mlua::Value::Nil) => Some(Value::Instance(None)),
         (ValueKind::Instance, _) => LuaInstance::from_lua(value.clone(), lua)
             .ok()
@@ -1173,6 +1196,27 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
         if data.is::<crate::physical::LuaPhysicalProperties>() {
             return "PhysicalProperties".to_owned();
+        }
+        let sequences = [
+            (
+                data.is::<crate::keypoints::LuaNumberSequence>(),
+                "NumberSequence",
+            ),
+            (
+                data.is::<crate::keypoints::LuaNumberKeypoint>(),
+                "NumberSequenceKeypoint",
+            ),
+            (
+                data.is::<crate::keypoints::LuaColorSequence>(),
+                "ColorSequence",
+            ),
+            (
+                data.is::<crate::keypoints::LuaColorKeypoint>(),
+                "ColorSequenceKeypoint",
+            ),
+        ];
+        if let Some((_, name)) = sequences.into_iter().find(|(is, _)| *is) {
+            return name.to_owned();
         }
         if let Ok(item) = data.borrow::<LuaEnumItem>() {
             return item.enum_type.name().to_owned();

@@ -39,6 +39,7 @@ flowchart TB
 
 - **Conventions**: Y up, right-handed, sRGB colors 0–1 in the draw list (converted to linear), built-in shapes 1×1×1 at the origin (`transform = T × R × S(Size)`).
 - **Materials**: base color, metalness, roughness, emissive, opacity, plus maps (normal, ORM channels, emission, opacity, specular), tiling, double-sided, shading model (Standard, Unlit, Toon), outline, translucency (leaves), water, and an optional WGSL **surface shader** (`surface_shaders.rs`, checked by naga, pipelines cached by code hash). `render::Material` is additive (`..Default::default()`).
+- **Particle curves** (R17.1): an emitter's size, color and transparency curves (`NumberSequence`/`ColorSequence`) reach the draw list as one 32-entry `ParticleCurves` table that the CPU sprites and `particles.wgsl` both sample, so the two paths can't drift apart. `None` keeps the start and end blend. See `docs/rendering/particles.md`.
 - **Lights**: tiled on the CPU (32 px tiles, up to 64 lights per tile, 1,024 total), not clustered.
 - **Settings**: the machine's `GraphicsSettings` (Low/Medium/High/Ultra plus overrides) are a ceiling on the world's Lighting requests; capabilities lower what the GPU can't do with a note ([ADR-0013](../Architecture/Architecture-Decisions/ADR-0013-Look-Versus-Cost-Settings.md)). Frame targets exist only while used.
 

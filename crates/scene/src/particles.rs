@@ -31,7 +31,8 @@ use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    DrawList, MAX_GPU_PARTICLES, ParticleEmitter, ParticleLook, Sprite, TextureSource,
+    DrawList, MAX_GPU_PARTICLES, ParticleCurves, ParticleEmitter, ParticleLook, Sprite,
+    TextureSource,
 };
 
 use crate::draw_list::image_texture;
@@ -408,6 +409,7 @@ impl Particles {
                     brightness: look.brightness,
                     light_emission: look.light_emission,
                     texture: look.texture,
+                    curves: look.curves,
                 },
                 ..gpu.draw.clone()
             });
@@ -425,16 +427,27 @@ impl Particles {
             let look = Look::read(instance, assets);
             for particle in &state.particles {
                 let t = (particle.age / particle.life.max(1e-4)).clamp(0.0, 1.0);
-                let transparency = lerp(look.transparency, t).clamp(0.0, 1.0);
+                let (size, transparency, color) = match &look.curves {
+                    // The same table and spreads as on the GPU; the life
+                    // stays the same over the particle's life.
+                    Some(curves) => {
+                        curves.sample(t, ParticleCurves::spreads(particle.life.to_bits()))
+                    }
+                    None => (
+                        lerp(look.size, t).max(0.0),
+                        lerp(look.transparency, t).clamp(0.0, 1.0),
+                        [
+                            lerp((look.color.0.r, look.color.1.r), t),
+                            lerp((look.color.0.g, look.color.1.g), t),
+                            lerp((look.color.0.b, look.color.1.b), t),
+                        ],
+                    ),
+                };
                 sprites.push(Sprite {
                     position: particle.position,
-                    size: lerp(look.size, t).max(0.0),
+                    size,
                     rotation_degrees: look.rotation + look.spin * particle.age,
-                    color: [
-                        lerp((look.color.0.r, look.color.1.r), t),
-                        lerp((look.color.0.g, look.color.1.g), t),
-                        lerp((look.color.0.b, look.color.1.b), t),
-                    ],
+                    color,
                     opacity: 1.0 - transparency,
                     brightness: look.brightness,
                     light_emission: look.light_emission,
@@ -480,6 +493,50 @@ impl Particles {
     }
 }
 
+/// The emitter's size, transparency and color over life as one table, if
+/// any of `SizeOverLife`, `TransparencyOverLife` and `ColorOverLife` is
+/// set; the ones that aren't blend their start and end values.
+fn curves_of(
+    instance: &Instance,
+    size: (f32, f32),
+    colors: (Color3, Color3),
+    transparency: (f32, f32),
+) -> Option<Arc<ParticleCurves>> {
+    let numbers = |name| {
+        instance
+            .property(name)
+            .and_then(Value::as_number_sequence)
+            .filter(|sequence| !sequence.is_empty())
+    };
+    let sizes = numbers("SizeOverLife");
+    let transparencies = numbers("TransparencyOverLife");
+    let color_curve = instance
+        .property("ColorOverLife")
+        .and_then(Value::as_color_sequence)
+        .filter(|sequence| !sequence.is_empty());
+    if sizes.is_none() && transparencies.is_none() && color_curve.is_none() {
+        return None;
+    }
+    let curves = ParticleCurves::from_fn(|time| {
+        let (size, size_envelope) = sizes
+            .and_then(|sequence| sequence.sample(time))
+            .unwrap_or((lerp(size, time), 0.0));
+        let (seen, seen_envelope) = transparencies
+            .and_then(|sequence| sequence.sample(time))
+            .unwrap_or((lerp(transparency, time), 0.0));
+        let color = color_curve
+            .and_then(|sequence| sequence.sample(time))
+            .map(rgb)
+            .unwrap_or([
+                lerp((colors.0.r, colors.1.r), time),
+                lerp((colors.0.g, colors.1.g), time),
+                lerp((colors.0.b, colors.1.b), time),
+            ]);
+        ([size, size_envelope, seen, seen_envelope], color)
+    });
+    Some(Arc::new(curves))
+}
+
 /// A small random number generator (xorshift), so particles spread
 /// differently every time without a dependency.
 #[derive(Debug)]
@@ -513,6 +570,8 @@ struct Look {
     light_emission: f32,
     brightness: f32,
     texture: Option<Arc<dyn TextureSource>>,
+    /// While any of the OverLife sequences is set (roadmap R17.1).
+    curves: Option<Arc<ParticleCurves>>,
 }
 
 impl Look {
@@ -545,10 +604,15 @@ impl Look {
                     .unwrap_or(ParticleType::Circle);
                 Some(built_in(kind))
             });
+        let size = (number("Size", 1.0), number("SizeEnd", 1.0));
+        let colors = (color("Color"), color("ColorEnd"));
+        let transparency = (number("Transparency", 0.0), number("TransparencyEnd", 1.0));
+        let curves = curves_of(instance, size, colors, transparency);
         Self {
-            size: (number("Size", 1.0), number("SizeEnd", 1.0)),
-            color: (color("Color"), color("ColorEnd")),
-            transparency: (number("Transparency", 0.0), number("TransparencyEnd", 1.0)),
+            size,
+            color: colors,
+            transparency,
+            curves,
             rotation: number("Rotation", 0.0),
             spin: number("RotSpeed", 0.0),
             light_emission: number("LightEmission", 0.0).clamp(0.0, 1.0),
@@ -859,6 +923,84 @@ mod tests {
         }
         assert_eq!(particles.count(), 0);
         assert!(!particles.is_active(&world));
+    }
+
+    /// R17.1: set, the OverLife sequences shape particles in place of the
+    /// start and end values; an envelope spreads particles apart, each
+    /// keeping its own place in it; cleared, the pairs come back.
+    #[test]
+    fn particles_follow_their_curves_over_life_and_the_pairs_when_unset() {
+        use axcenity_core::{ColorSequence, NumberKeypoint, NumberSequence};
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let set = |world: &mut World, name: &str, value: Value| {
+            world.set_property(emitter, name, value).unwrap();
+        };
+        set(&mut world, "Lifetime", Value::Number(1.0));
+        // Grows from 1 to 5 by half its life, then shrinks to 0, give or
+        // take 0.5 in the middle.
+        let sizes = NumberSequence::new(vec![
+            NumberKeypoint::new(0.0, 1.0, 0.0),
+            NumberKeypoint::new(0.5, 5.0, 0.5),
+            NumberKeypoint::new(1.0, 0.0, 0.0),
+        ])
+        .unwrap();
+        set(&mut world, "SizeOverLife", Value::NumberSequence(sizes));
+        let green = Color3::new(0.0, 1.0, 0.0);
+        set(
+            &mut world,
+            "ColorOverLife",
+            Value::ColorSequence(ColorSequence::ramp(green, green)),
+        );
+        let mut particles = Particles::new();
+        particles.emit(&world, emitter, 40);
+        let assets = Assets::default();
+        let born = particles.sprites(&world, &assets);
+        assert!(born.iter().all(|sprite| (sprite.size - 1.0).abs() < 1e-4));
+        assert!(born.iter().all(|sprite| sprite.color == [0.0, 1.0, 0.0]));
+        // Transparency isn't set: it still blends 0 to 1 (TransparencyEnd).
+        assert!(
+            born.iter()
+                .all(|sprite| (sprite.opacity - 1.0).abs() < 1e-4)
+        );
+        // Lives are 0.8 to 1.2 seconds: at 0.5 s every particle is between
+        // 40% and 63% of its life, so near its biggest (a step is at most
+        // a quarter of a second).
+        particles.update(&world, 0.25);
+        particles.update(&world, 0.25);
+        let grown = particles.sprites(&world, &assets);
+        assert!(
+            grown
+                .iter()
+                .all(|sprite| sprite.size > 3.0 && sprite.size < 5.6)
+        );
+        let sizes: Vec<f32> = grown.iter().map(|sprite| sprite.size).collect();
+        let spread = sizes.iter().cloned().fold(f32::MIN, f32::max)
+            - sizes.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(spread > 0.3, "the envelope spreads them: {sizes:?}");
+        // Each keeps its place in the envelope: drawing again changes nothing.
+        let again: Vec<f32> = particles
+            .sprites(&world, &assets)
+            .iter()
+            .map(|sprite| sprite.size)
+            .collect();
+        assert_eq!(sizes, again);
+        set(
+            &mut world,
+            "SizeOverLife",
+            Value::NumberSequence(NumberSequence::default()),
+        );
+        set(
+            &mut world,
+            "ColorOverLife",
+            Value::ColorSequence(ColorSequence::default()),
+        );
+        assert!(
+            Look::read(world.get(emitter).unwrap(), &assets)
+                .curves
+                .is_none()
+        );
+        let unset = particles.sprites(&world, &assets);
+        assert!(unset.iter().all(|sprite| (sprite.size - 1.0).abs() < 1e-4));
     }
 
     #[test]

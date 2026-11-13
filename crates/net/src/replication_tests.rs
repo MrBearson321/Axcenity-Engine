@@ -500,6 +500,12 @@ fn every_kind_of_value_crosses_the_wire_unchanged() {
         Value::Instance(None),
         Value::PhysicalProperties(Some(PhysicalProperties::new(0.7, 0.3, 0.5, 1.0, 1.0))),
         Value::PhysicalProperties(None),
+        Value::NumberSequence(axcenity_core::NumberSequence::ramp(0.5, 2.0)),
+        Value::NumberSequence(axcenity_core::NumberSequence::default()),
+        Value::ColorSequence(axcenity_core::ColorSequence::ramp(
+            Color3::new(1.0, 0.0, 0.0),
+            Color3::new(0.0, 0.5, 1.0),
+        )),
     ];
     for value in values {
         let wire = crate::wire::WireValue::from_value(&value);

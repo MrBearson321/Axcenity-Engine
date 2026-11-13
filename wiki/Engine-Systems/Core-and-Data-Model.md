@@ -41,6 +41,7 @@ flowchart TB
 | `crates/core/src/world.rs` and `world/` | `World`, `Instance`, create/destroy/reparent, properties, attributes, tags, change recording, `descendants_iter`, `copy_from`, `duplicate` |
 | `crates/core/src/arena.rs` | `Arena<T>`, `Id { index, generation }`, `insert_at` for replicas |
 | `crates/core/src/class.rs`, `enums.rs`, `value.rs` | Class schema, enums, `Value` |
+| `crates/core/src/sequence.rs` | `NumberSequence`, `ColorSequence` (2–20 keypoints from time 0 to 1), not attributes |
 | `crates/core/src/index.rs` | Class and tag index; `World::check_index` cross-checks it in debug game tests |
 | `crates/core/src/prefab.rs`, `prefab/` | Placed prefab copies (`PrefabLink`), overrides, `sync` |
 | `crates/core/src/streaming.rs` | `Partition`, `Unit`: what loads together (Phase 80); `Settings::reach`, `Partition::summary` for the editor's Streaming overlay (R16) |
