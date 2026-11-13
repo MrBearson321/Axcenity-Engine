@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Particles can land on floors and bounce, and emitters can burst where other particles die or land"
+details = "A ParticleEmitter's new Collides makes its particles land on parts with CanCollide on and the ground, keeping Bounce of their speed into the surface and losing LifetimeLoss of their life each landing. A ParticleEmitter inside another with EmitOn set to Birth, Death or Collision becomes a sub-emitter, giving off EmitCount particles where each of its parent's particles is born, dies or lands: sparks that splash on the ground, fireworks that burst at the end of their trail. Such emitters move their particles on the CPU, up to 4,000 each; existing emitters are unchanged."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

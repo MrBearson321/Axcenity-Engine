@@ -532,3 +532,51 @@ fn points_inside_colliding_parts_and_under_terrain_are_inside_solids() {
     let skipped = inside_solids(&world, &assets, &points[..1], &[wall]);
     assert_eq!(skipped, [false], "a skipped part isn't solid");
 }
+
+/// Roadmap R17.4: particles' paths meet solid surfaces, passing by their
+/// own part, parts with CanCollide off and the parts they start inside.
+#[test]
+fn particle_paths_meet_solid_surfaces_but_not_their_own_part_or_sensors() {
+    let mut world = World::new();
+    let ground = floor(&mut world);
+    let own = part(&mut world, v(0.0, 5.0, 0.0), v(2.0, 2.0, 2.0), true);
+    let sensor = part(&mut world, v(10.0, 3.0, 0.0), v(4.0, 1.0, 4.0), true);
+    set(&mut world, sensor, "CanCollide", Value::Bool(false));
+    let assets = Assets::default();
+    let paths = [
+        // From inside its own part down through it to the floor.
+        (v(0.0, 5.0, 0.0), v(0.0, -1.0, 0.0)),
+        // Through a sensor to the floor.
+        (v(10.0, 5.0, 0.0), v(10.0, -1.0, 0.0)),
+        // Short of the floor.
+        (v(-5.0, 5.0, 0.0), v(-5.0, 1.0, 0.0)),
+        // Starting inside the floor: passes out of it.
+        (v(5.0, -0.5, 0.0), v(5.0, 2.0, 0.0)),
+        // Not a path.
+        (v(1.0, 1.0, 1.0), v(1.0, 1.0, 1.0)),
+    ];
+    let hits = surface_hits(&world, &assets, Some(own), &paths);
+    assert_eq!(hits.len(), paths.len());
+    for hit in &hits[..2] {
+        let hit = hit.unwrap();
+        assert_eq!(hit.instance, ground);
+        assert!(hit.position.y.abs() < 1e-3, "{hit:?}");
+        assert_eq!(hit.normal, v(0.0, 1.0, 0.0));
+    }
+    assert_eq!(hits[1].unwrap().position.x, 10.0);
+    assert!(hits[2..].iter().all(Option::is_none), "{hits:?}");
+
+    // Without skipping it, the own part stops the first path... except it
+    // starts inside it, so it still passes out to the floor.
+    let hits = surface_hits(&world, &assets, None, &paths[..1]);
+    assert_eq!(hits[0].unwrap().instance, ground);
+    // From above, the own part is hit.
+    let hits = surface_hits(
+        &world,
+        &assets,
+        None,
+        &[(v(0.0, 9.0, 0.0), v(0.0, -1.0, 0.0))],
+    );
+    assert_eq!(hits[0].unwrap().instance, own);
+    assert!(surface_hits(&world, &assets, None, &[]).is_empty());
+}

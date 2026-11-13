@@ -1115,7 +1115,12 @@ impl HostIo for PlayHost<'_> {
         for (emitter, count) in session.sim.scripts.take_particle_emits() {
             session.particles.emit(&session.sim.world, emitter, count);
         }
-        session.particles.update(&session.sim.world, seconds as f32);
+        let (world, assets) = (&session.sim.world, &session.sim.assets);
+        session
+            .particles
+            .update_against(world, seconds as f32, &mut |skip, paths| {
+                particle_surfaces(world, assets, skip, paths)
+            });
     }
 
     fn animator_error(&mut self, error: String) {
@@ -1442,4 +1447,24 @@ fn kept_note(kept: &[String]) -> String {
         ),
         (names, more) => format!(", kept {} and {more} more", names.join(", ")),
     }
+}
+
+/// Where colliding particles' paths meet solid surfaces (roadmap R17.4):
+/// physics' `surface_hits` for [`Particles::update_against`], in Play and
+/// in the Scene tab.
+pub(crate) fn particle_surfaces(
+    world: &World,
+    assets: &Assets,
+    skip: Option<InstanceId>,
+    paths: &[(Vector3, Vector3)],
+) -> Vec<Option<axcenity_scene::SurfaceHit>> {
+    axcenity_physics::surface_hits(world, assets, skip, paths)
+        .into_iter()
+        .map(|hit| {
+            hit.map(|hit| axcenity_scene::SurfaceHit {
+                position: hit.position,
+                normal: hit.normal,
+            })
+        })
+        .collect()
 }
