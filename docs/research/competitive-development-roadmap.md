@@ -632,7 +632,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. Improving the sculpting tools is still open.
+**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. R15.1 adds seven sculpt brushes (Layer, Blob, Scrape, Fill, Draw Sharp, Nudge, Elastic Grab) and a Mesh Filter over the whole object.
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -1152,7 +1152,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 12 | Advanced asset management | New (R12) | Implemented (#260, #262) | Mesh presets later, if needed |
 | 13 | Build pipeline improvements | New (R13) | Implemented (#268) | Build profiles and reports done |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
+| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271), seven more sculpt brushes and the Mesh Filter (R15.1) | Collision, LODs, Blender round trip |
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
 | 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1), spawn shapes and speed over life (R17.2), bursts, inherited velocity and headings (R17.2b), flipbooks (R17.2c), the Effect tab and effect assets (R17.3), collisions and sub-emitters (R17.4, R17.4b); design in [vfx-editor.md](vfx-editor.md) | R17.5 environment modules and the node-graph decision |
 | 18 | Global illumination improvements | New (R18) | Stages R18.1–R18.4 done; options and stages in [global-illumination.md](global-illumination.md) | PC numbers from `bench_light_probes`; probe visibility only if leaks remain; RT2 in the ray tracing thread |

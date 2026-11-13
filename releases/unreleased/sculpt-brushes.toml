@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Model Studio: seven new sculpt brushes and a Mesh Filter"
+details = "Sculpt mode adds Layer, Blob, Scrape, Fill, Draw Sharp, Nudge and Elastic Grab brushes, each explained on hover. The new Mesh Filter smooths, sharpens, inflates, scales or roughens the whole object at once, held back by the mask, as one undo step."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
