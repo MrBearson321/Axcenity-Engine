@@ -494,7 +494,7 @@ This phase should emphasize measurable improvements over feature-count competiti
 
 **Priority:** High
 **Existing reference:** G9
-**Status:** Partial. Stage 1: EASU + RCAS (FSR 1-class, MIT) after FXAA below 100% render scale, sharpening, about 0.13 ms at 1080p and 0.2–0.25 ms at 1440p/4K on an RX 9070 XT (#155, #171). Stage 2, upscaling inside TAA's resolve, not started.
+**Status:** Implemented. Stage 1: EASU + RCAS (FSR 1-class, MIT) after FXAA below 100% render scale, sharpening, about 0.13 ms at 1080p and 0.2–0.25 ms at 1440p/4K on an RX 9070 XT (#155, #171). Stage 2 (#277): below 100% render scale with TAA on, TAA upscales the picture in its resolve instead of the spatial upscale (`docs/rendering/temporal.md`). Vendor upscalers (DLSS, FSR 2+) stay out.
 
 Improve the current rendering-scale and temporal anti-aliasing pipeline.
 
@@ -607,7 +607,7 @@ Develop a unified authoring experience around existing CPU and GPU particle syst
 ## 6.5 Advanced world creation
 
 **Priority:** Medium-High
-**Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Streaming diagnostics in the editor are built: the Streaming overlay (R16) shows each unit by where it stands from the camera, what's always there, both radii, what a player standing there has and units too big to stream well, while editing too. Missing: region management and data layers; their plan is [world-regions-r16.md](world-regions-r16.md) (data layers as `DataLayer` objects named as tags, regions set aside in the editor, streaming while editing, `DataLayerService`; stages R16.2–R16.4).
+**Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Streaming diagnostics in the editor are built: the Streaming overlay (R16) shows each unit by where it stands from the camera, what's always there, both radii, what a player standing there has and units too big to stream well, while editing too. The plan is [world-regions-r16.md](world-regions-r16.md). Data layers in the editor (R16.2, #328: `DataLayer` objects named as tags, hidden and locked per person), Stream While Editing (R16.3, #331) and regions unloaded in the editor (R16.3b, #333) are built. Left: data layers in games (R16.4, `DataLayerService`).
 
 Improve large-world authoring and environmental systems.
 
@@ -632,7 +632,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. R15.1 adds seven sculpt brushes (Layer, Blob, Scrape, Fill, Draw Sharp, Nudge, Elastic Grab) and a Mesh Filter over the whole object. The eleven requirements are checked in [model-studio-r15.md](model-studio-r15.md): seven are met; collision shapes (R15.2), LOD management (R15.3) and the Blender round trip (R15.4) are the stages left.
+**Status:** Implemented (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. R15.1 adds seven sculpt brushes (Layer, Blob, Scrape, Fill, Draw Sharp, Nudge, Elastic Grab) and a Mesh Filter over the whole object. The eleven requirements are checked in [model-studio-r15.md](model-studio-r15.md), and every stage is built: sculpt masks saved (R15.1b, #322), collision pieces read and collided with (R15.2a, #319) and made in the Collision fold (R15.2b, #334), the Levels of detail fold (R15.3, #320) and Edit in Blender (R15.4, #321).
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -1099,7 +1099,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Feature | Axcenity | Unreal | Godot | s&box | Unity | Reference | Priority | Dependencies | Decision |
 |---|---|---|---|---|---|---|---|---|---|
 | Spatial upscaling | Implemented | TSR | FSR 1 | Source 2 upscaling | STP, FSR | `render` `upscale.wgsl` (G9 stage 1) | High | render | Keep |
-| Temporal upscaling | Missing | TSR, DLSS/FSR plugins | FSR 2 | DLSS | STP, DLSS | G9 stage 2 | High | TAA | Implement |
+| Temporal upscaling | Implemented (inside TAA, #277) | TSR, DLSS/FSR plugins | FSR 2 | DLSS | STP, DLSS | G9 | High | TAA | Done |
 | GPU-driven drawing | Deferred | Nanite | — | — | GPU Resident Drawer | L5, gap analysis P4 | Medium | M12 | Defer until a benchmark needs it |
 | Occlusion culling | Deferred (measured ≤ 1.9 ms) | HZB | Occluders | PVS | Umbra | `docs/rendering/performance.md` | Low | — | Defer |
 | LOD and vegetation | Implemented (leaf-card LOD open) | HLOD, Nanite foliage | Mesh LOD | LODs | LOD Groups, SpeedTree | `docs/rendering/models.md`, vegetation phases | High | render | Improve on measurement |
@@ -1107,7 +1107,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
 | Particle authoring (VFX editor) | Done (curves over life, spawn shapes, bursts, flipbooks, the Effect tab and effect assets, collisions, sub-emitters, environment and presets; a module stack rather than a node graph) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
 | World streaming | Implemented at runtime; Streaming overlay in the editor (R16) | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
-| Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
+| Region management and data layers | Partial (editor layers #328, regions #333; games R16.4 open) | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Finish R16.4 |
 | In-editor modeling | Partial: sculpting and baking back (#271), retopology by hand left to Blender | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
 | Humanoid retargeting | Implemented (stage 1) | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Hand-edited maps, profiles |
 | Runtime IK | Implemented | Control Rig | SkeletonIK3D | IK | Animation Rigging | `anim/src/ik_control.rs` | — | anim | Keep |
@@ -1151,9 +1151,9 @@ The following is the recommended order for execution. **Status** is on main `514
 | 11 | Plugin API improvements | G10 | Implemented | #265, #267, #270, #274 (scripting thread) |
 | 12 | Advanced asset management | New (R12) | Implemented (#260, #262) | Mesh presets later, if needed |
 | 13 | Build pipeline improvements | New (R13) | Implemented (#268) | Build profiles and reports done |
-| 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271), seven more sculpt brushes and the Mesh Filter (R15.1); audit and stages in [model-studio-r15.md](model-studio-r15.md) | R15.2 collision, R15.3 LODs, R15.4 Blender round trip |
-| 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
+| 14 | Temporal upscaling | G9 | Implemented (#155, #171, stage 2 inside TAA #277) | Nothing |
+| 15 | Advanced Model Studio workflows | New (R15) | Implemented: sculpting and baking back (#271), R15.1 brushes and Mesh Filter (#317), masks saved (#322), collision (#319, #334), LODs (#320), Edit in Blender (#321); audit in [model-studio-r15.md](model-studio-r15.md) | Nothing |
+| 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay, data layers in the editor (#328), Stream While Editing (#331), regions (#333); plan in [world-regions-r16.md](world-regions-r16.md) | Data layers in games (R16.4) |
 | 17 | Visual effects editor | New (R17) | Implemented: curves over life (R17.1), spawn shapes and speed over life (R17.2), bursts, inherited velocity and headings (R17.2b), flipbooks (R17.2c), the Effect tab and effect assets (R17.3), collisions and sub-emitters (R17.4, R17.4b), environment and presets (R17.5; the stack kept, no node graph); design in [vfx-editor.md](vfx-editor.md) | None |
 | 18 | Global illumination improvements | New (R18) | Stages R18.1–R18.4 done; options and stages in [global-illumination.md](global-illumination.md) | PC numbers from `bench_light_probes`; probe visibility only if leaks remain; RT2 in the ray tracing thread |
 | 19 | Online services architecture | New (R19) | Designed in [online-services.md](online-services.md) | Build only when Paul says; O1 and O2 need no website |
