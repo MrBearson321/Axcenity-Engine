@@ -33,7 +33,7 @@ While Hardware ray tracing is on (or turned on, waiting for a restart), the edit
 - **Ray tracing on: no effects**: the GPU ray traces, but no ray traced effect is turned on, so nothing looks different yet.
 - **Ray tracing: Shadows High, AO Medium · 812 items traced**: the effects drawing and how many items are in the ray traced scene this frame ("nothing in reach yet" when none).
 
-Hovering it gives the reach, the scene's meshes and triangles, any meshes still waiting to be built, and where to change it. With the setting off the badge is hidden.
+While effects draw, the badge's **Compare** toggle draws the view without them (`Viewport::rays_hidden`, `GraphicsSettings::without_ray_traced_effects` for the viewport only; the badge then says "Ray tracing: hidden to compare"), so what they add can be seen side by side without a restart or a settings change. Hovering it gives the reach, the scene's meshes and triangles, any meshes still waiting to be built, and where to change it. With the setting off the badge is hidden.
 
 ## One click: the ray traced look
 
