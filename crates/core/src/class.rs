@@ -2335,6 +2335,10 @@ impl ClassName {
                     ("Transparency", Value::Number(0.0)),
                     ("CanCollide", Value::Bool(true)),
                     ("WindAffected", Value::Bool(false)),
+                    // What it collides as: Default is the model's own
+                    // collision pieces (`_COL` objects) when it has any,
+                    // else its hull (R15.2).
+                    ("CollisionFidelity", collision_fidelity("Default")),
                 ];
                 properties.extend(collision_properties());
                 properties.extend(body_properties());
@@ -3268,8 +3272,8 @@ fn alignment_mode(enum_name: &str) -> Value {
     })
 }
 
-/// A UnionOperation's `CollisionFidelity` item: Box, Hull or
-/// PreciseConvexDecomposition.
+/// A MeshPart's or UnionOperation's `CollisionFidelity` item: Default,
+/// Box, Hull or PreciseConvexDecomposition.
 fn collision_fidelity(item: &str) -> Value {
     Value::EnumItem(EnumItem {
         enum_name: "CollisionFidelity".to_owned(),

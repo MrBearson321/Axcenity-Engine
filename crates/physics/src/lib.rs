@@ -355,7 +355,7 @@ impl PartState {
                 let mesh_id = instance.property("MeshId").and_then(Value::as_str)?;
                 let fidelity = match instance.property("CollisionFidelity") {
                     Some(Value::EnumItem(item)) => Fidelity::named(&item.item),
-                    _ => Fidelity::Hull,
+                    _ => Fidelity::Default,
                 };
                 Form::Mesh(assets.model_blocking(mesh_id), fidelity)
             }

@@ -374,6 +374,91 @@ fn a_files_own_lod1_object_is_the_simpler_copy_and_doesnt_size_the_model() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// Writes `rock.bin` into `folder` and returns a glTF file using it: a
+/// 1×1 square `Rock` with two collision pieces. `Rock_COL` is a triangle
+/// moved 5 along Z and doubled in X and Y, holding a hidden `Inner` of its
+/// own; `Rock_col2` is the square again. Neither is drawn.
+pub(super) fn rock_with_pieces(folder: &Path) -> &'static str {
+    std::fs::create_dir_all(folder).unwrap();
+    let floats: [f32; 27] = [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+    ];
+    let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+    std::fs::write(folder.join("rock.bin"), bytes).unwrap();
+    r#"{
+        "asset": { "version": "2.0" },
+        "buffers": [ { "uri": "rock.bin", "byteLength": 108 } ],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": 0, "byteLength": 72 },
+            { "buffer": 0, "byteOffset": 72, "byteLength": 36 }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": 6, "type": "VEC3",
+              "min": [0, 0, 0], "max": [1, 1, 0] },
+            { "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0, 0, 0], "max": [1, 1, 0] }
+        ],
+        "meshes": [
+            { "primitives": [ { "attributes": { "POSITION": 0 } } ] },
+            { "primitives": [ { "attributes": { "POSITION": 1 } } ] }
+        ],
+        "nodes": [
+            { "name": "Rock", "mesh": 0 },
+            { "name": "Rock_COL", "mesh": 1, "translation": [0, 0, 5], "scale": [2, 2, 1],
+              "children": [3] },
+            { "name": "Rock_col2", "mesh": 0 },
+            { "name": "Inner", "mesh": 1 }
+        ],
+        "scenes": [ { "nodes": [0, 1, 2] } ],
+        "scene": 0
+    }"#
+}
+
+#[test]
+fn a_files_col_objects_are_its_collision_pieces_not_drawn_and_not_sizing_it() {
+    let folder = std::env::temp_dir().join(format!("axcenity-gltf-col-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    let gltf = rock_with_pieces(&folder);
+    let model = load_model(gltf.as_bytes(), &folder, ModelFormat::Gltf).unwrap();
+    assert_eq!(model.primitives.len(), 1, "pieces aren't drawn");
+    assert_eq!(model.size, [1.0, 1.0, 0.0], "pieces don't size the model");
+    assert_eq!(model.hull_points.len(), 4);
+    assert_eq!(model.collision.len(), 2);
+    // Fitted like the triangles: the square's middle is the origin.
+    let mut first = model.collision[0].clone();
+    first.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        first,
+        vec![
+            // `Inner`, inside `Rock_COL`, is part of the same piece.
+            [-0.5, -0.5, 5.0],
+            [-0.5, -0.5, 5.0],
+            [-0.5, 1.5, 5.0],
+            [-0.5, 1.5, 5.0],
+            [1.5, -0.5, 5.0],
+            [1.5, -0.5, 5.0],
+        ]
+    );
+    assert_eq!(model.collision[1].len(), 6);
+    assert!(model.collision[1].iter().all(|p| p[2] == 0.0));
+
+    // Picking the object by name brings its pieces with it.
+    let picked = load_models(
+        gltf.as_bytes(),
+        &folder,
+        ModelFormat::Gltf,
+        &[Pick::Objects(vec!["Rock".to_owned()])],
+    )
+    .unwrap();
+    assert_eq!(picked[0].primitives.len(), 1);
+    assert_eq!(picked[0].collision.len(), 2);
+    // Objects inside a picked one come only if picked too, as everywhere.
+    assert_eq!(picked[0].collision[0].len(), 3);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 #[test]
 fn a_gltf_materials_extras_say_how_it_moves_in_the_wind() {
     let wind = |text: &str| {
