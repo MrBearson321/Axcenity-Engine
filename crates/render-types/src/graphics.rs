@@ -940,6 +940,38 @@ impl GraphicsSettings {
         self.ray_traced_shadows.unwrap_or(RayTracedShadows::Off)
     }
 
+    /// These settings with the ray traced look turned on in one go
+    /// (Settings > Graphics > Ray tracing's "Use the ray traced look"):
+    /// Hardware ray tracing on, ray traced shadows and ambient occlusion at
+    /// Medium, and what they look best with: shadows and reflections at
+    /// least High (reflections show a sky picture) and TAA, which averages
+    /// the rays that turn each frame. Everything else stays as it was.
+    /// On a GPU that can't ray trace, `effective` turns the ray traced parts
+    /// off again with a note, and the rest still applies.
+    pub fn ray_traced(&self) -> GraphicsSettings {
+        GraphicsSettings {
+            ray_tracing: Some(true),
+            ray_traced_shadows: Some(RayTracedShadows::Medium),
+            ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Medium),
+            shadow_quality: Some(self.shadow_quality().max(ShadowQuality::High)),
+            reflection_quality: Some(self.reflection_quality().max(ReflectionQuality::High)),
+            anti_aliasing: Some(AntiAliasing::Taa),
+            ..self.clone()
+        }
+    }
+
+    /// These settings with every ray traced effect off (back to their
+    /// presets, which are all Off). Hardware ray tracing itself stays as
+    /// it was, since turning it off takes a restart.
+    pub fn without_ray_traced_effects(&self) -> GraphicsSettings {
+        GraphicsSettings {
+            ray_traced_shadows: None,
+            ray_traced_ambient_occlusion: None,
+            ray_traced_global_illumination: None,
+            ..self.clone()
+        }
+    }
+
     /// Hardware ray traced ambient occlusion: the override, or Off (every
     /// preset).
     pub fn ray_traced_ambient_occlusion(&self) -> RayTracedAmbientOcclusion {
@@ -1991,6 +2023,59 @@ mod tests {
             RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::probes_per_frame),
             [0, 32, 64, 128]
         );
+    }
+
+    #[test]
+    fn the_ray_traced_look_turns_on_what_it_needs_and_keeps_the_rest() {
+        let mine = GraphicsSettings {
+            shadow_quality: Some(ShadowQuality::Ultra),
+            reflection_quality: Some(ReflectionQuality::Low),
+            render_scale: Some(0.75),
+            ..GraphicsSettings::default()
+        };
+        let look = mine.ray_traced();
+        assert!(look.ray_tracing());
+        assert_eq!(look.ray_traced_shadows(), RayTracedShadows::Medium);
+        assert_eq!(
+            look.ray_traced_ambient_occlusion(),
+            RayTracedAmbientOcclusion::Medium
+        );
+        assert_eq!(look.shadow_quality(), ShadowQuality::Ultra, "never lowered");
+        assert_eq!(look.reflection_quality(), ReflectionQuality::High, "raised");
+        assert_eq!(look.anti_aliasing(), AntiAliasing::Taa);
+        assert_eq!(look.render_scale(), 0.75, "the rest is kept");
+        // On a GPU that ray traces it's all drawn; on one that can't, the
+        // rays are off with notes.
+        let rays = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        assert_eq!(
+            look.effective(&rays).ray_traced_shadows,
+            RayTracedShadows::Medium
+        );
+        let none = look.effective(&Capabilities::default());
+        assert_eq!(none.ray_traced_shadows, RayTracedShadows::Off);
+        assert!(!none.notes.is_empty());
+
+        let off = look.without_ray_traced_effects();
+        assert_eq!(off.ray_traced_shadows(), RayTracedShadows::Off);
+        assert_eq!(
+            off.ray_traced_ambient_occlusion(),
+            RayTracedAmbientOcclusion::Off
+        );
+        let with_gi = GraphicsSettings {
+            ray_traced_global_illumination: Some(RayTracedGlobalIllumination::High),
+            ..look.clone()
+        };
+        assert_eq!(
+            with_gi
+                .without_ray_traced_effects()
+                .ray_traced_global_illumination(),
+            RayTracedGlobalIllumination::Off
+        );
+        assert!(off.ray_tracing(), "turning the device off takes a restart");
+        assert_eq!(off.shadow_quality(), ShadowQuality::Ultra);
     }
 
     #[test]

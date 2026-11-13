@@ -222,6 +222,12 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Viewport,
+            "Show streaming",
+            &["Streaming diagnostics", "Streaming radius", "Large worlds"],
+            "What streams around the camera, with Workspace streaming on.",
+        ),
+        setting(
+            Viewport,
             "Show culling",
             &["Frustum", "Occlusion", "Culled objects"],
             "What's drawn and what's culled for the current view.",

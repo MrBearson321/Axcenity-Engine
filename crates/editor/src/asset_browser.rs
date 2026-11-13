@@ -246,6 +246,13 @@ pub enum BrowserAction {
     FindUnused(Vec<String>),
     /// A line for Output. `error` is a failure.
     Notice { error: bool, text: String },
+    /// A plugin's menu item (`plugin:AddAssetAction`) was picked for the
+    /// project asset at `path`.
+    PluginAction {
+        plugin: usize,
+        action: u64,
+        path: String,
+    },
 }
 
 /// A question the panel is asking about an asset.
@@ -313,6 +320,10 @@ pub struct AssetBrowser {
     flat: bool,
     /// The sections folded shut.
     folded: HashSet<Origin>,
+    /// Running plugins' items for the right-click menu
+    /// (`plugin:AddAssetAction`), each with its plugin's place in the
+    /// editor's list; the app sets them each frame.
+    pub plugin_actions: Vec<(usize, axcenity_plugins::AssetAction)>,
 }
 
 impl AssetBrowser {
@@ -624,6 +635,12 @@ pub fn icon_of(entry: &AssetEntry) -> &'static str {
 /// What a tile's right-click menu asked for.
 pub(super) enum ItemMenu {
     FindReferences {
+        path: String,
+    },
+    /// A plugin's item (`plugin:AddAssetAction`).
+    Plugin {
+        plugin: usize,
+        action: u64,
         path: String,
     },
     ImportPreset {

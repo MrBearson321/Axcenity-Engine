@@ -656,9 +656,25 @@ impl ScenePipeline {
         // With TAA, the scene is drawn a fraction of a pixel to one side,
         // a different way each frame (renderer/temporal.rs).
         let view_proj = camera_view_projection(&list.camera, aspect);
+        // Upscaling TAA steps through more places, since each output pixel
+        // gets fewer of the scene's.
+        let taa_upscales = self
+            .frame_targets
+            .temporal
+            .as_ref()
+            .is_some_and(|temporal| temporal.upscales());
+        let jitter_phases = if taa_upscales {
+            temporal::jitter_phases(
+                self.frame_targets.size.0 as f32 / self.frame_targets.output.0.max(1) as f32,
+            )
+        } else {
+            temporal::JITTER_PHASES
+        };
+        let jitter = self.history.jitter(jitter_phases);
         let drawn_view_proj = match &self.frame_targets.temporal {
             Some(temporal) if temporal.has_taa() => {
-                self.history.jittered(view_proj, self.frame_targets.size)
+                self.history
+                    .jittered(view_proj, self.frame_targets.size, jitter_phases)
             }
             _ => view_proj,
         };
@@ -678,7 +694,25 @@ impl ScenePipeline {
         } else {
             0.0
         };
-        frame_uniform.night = [stars, f32::from(u8::from(sky.scattered)), 0.0, 0.0];
+        // A creator's sky picture dims at night as the colors do; an
+        // atmosphere's works out its own light.
+        let picture_light =
+            if sky.image.is_some() && !sky.scattered && list.sky.daylight.is_finite() {
+                list.sky.daylight.clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+        for coefficient in &mut frame_uniform.sky_light {
+            for channel in &mut coefficient[..3] {
+                *channel *= picture_light;
+            }
+        }
+        frame_uniform.night = [
+            stars,
+            f32::from(u8::from(sky.scattered)),
+            picture_light,
+            0.0,
+        ];
         // Volumetric fog needs the prepass's depth, which its setting keeps.
         let volumetric = fog::volumetric_drawn(&list.fog, &self.graphics)
             && self.frame_targets.occlusion.is_some();
@@ -956,8 +990,11 @@ impl ScenePipeline {
             self.temporal.prepare(
                 (&self.device, &self.queue),
                 &self.history,
-                (view_proj, drawn_view_proj),
-                self.frame_targets.size,
+                (view_proj, drawn_view_proj, jitter),
+                (
+                    self.frame_targets.size,
+                    taa_upscales.then_some(self.frame_targets.output),
+                ),
                 (blur, self.graphics.motion_blur),
                 &moved,
             );
@@ -1582,16 +1619,27 @@ impl ScenePipeline {
         }
         mark(&mut encoder, FramePass::PostProcessing);
 
-        // TAA, then motion blur, each copied over the scene.
-        if let Some(temporal) = &self.frame_targets.temporal {
-            self.temporal.draw_post(
-                &mut encoder,
-                (temporal, &self.history),
-                &self.frame_targets.hdr,
-            );
+        // TAA, then motion blur, each copied over the scene, then depth of
+        // field. While TAA upscales, it comes last: motion blur and depth of
+        // field are drawn on the scene first, and TAA reads the result.
+        let targets = &self.frame_targets;
+        let temporal_targets = targets.temporal.as_ref().map(|t| (t, &self.history));
+        if let Some(temporal) = temporal_targets
+            && !taa_upscales
+        {
+            self.temporal.draw_taa(&mut encoder, temporal, &targets.hdr);
         }
-        if let Some(target) = &self.frame_targets.depth_of_field {
+        if let Some(temporal) = temporal_targets {
+            self.temporal
+                .draw_motion_blur(&mut encoder, temporal, &targets.hdr);
+        }
+        if let Some(target) = &targets.depth_of_field {
             self.post.depth_of_field.draw(&mut encoder, target);
+        }
+        if let Some(temporal) = temporal_targets
+            && taa_upscales
+        {
+            self.temporal.draw_taa(&mut encoder, temporal, &targets.hdr);
         }
         self.post.draw(
             &mut encoder,

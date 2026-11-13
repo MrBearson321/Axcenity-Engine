@@ -49,7 +49,9 @@ Blocks: "load around *position* for *player*", "when *thing* streams in", and "*
 
 ## Editor
 
-During Play with streaming on, the viewport streams around the camera as the host does and shows both radii as rings at its feet (`paint_streaming_radius`). Editing always shows everything. `RequestStreamAroundAsync` in Play carries on at once. `Play` never hosts, so its joined-player paths run only with Play with several clients.
+During Play with streaming on, the viewport streams around the camera as the host does and shows both radii as rings at its feet (`paint_streaming_radius`). Editing always shows everything.
+
+**Streaming overlay** (roadmap R16; Viewport menu ▸ Overlays ▸ Streaming, the command palette, or Settings ▸ Viewport ▸ Show streaming; kept between runs): with `StreamingEnabled` on, it shows what streams around the camera while editing as well as in Play, from the same `Partition` the server and the host's screen use (`editor/src/viewport/streaming_overlay.rs`, kept between frames and split again when the Workspace's tree or the World changes). Each unit's box within the unload radius is outlined by where it stands from the camera (`Settings::reach`, `Reach`): green within the minimum radius (there at once), blue within the target (loads), grey up to the unload radius (kept if it was loaded). At most 3,000 boxes are drawn, nearest first. Parts in no unit (a `Persistent` Model, code a device runs) are outlined in orange, and both radii lie at the camera's feet. A legend in the bottom-left corner counts what a player standing at the camera has (`Partition::summary`: units and Instances loaded of all of them, units kept, parts always there) and names the biggest unit when it holds more than `LARGE_UNIT` (1,000) Instances, since it loads and unloads all at once. With streaming off, the legend says so. `RequestStreamAroundAsync` in Play carries on at once. `Play` never hosts, so its joined-player paths run only with Play with several clients.
 
 ## What it costs
 

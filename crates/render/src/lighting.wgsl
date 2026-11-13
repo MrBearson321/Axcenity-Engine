@@ -73,7 +73,9 @@ struct Frame {
     // the wind in studs a second (`DrawList::wind`), for swaying plants.
     clock: vec4<f32>,
     // x: how bright the stars are (0 by day), y: 1 when the sky image is an
-    // atmosphere's, so the sun or moon and the stars are drawn over it.
+    // atmosphere's, so the sun or moon and the stars are drawn over it, z:
+    // how much of its light a creator's sky image gives (dimmer at night;
+    // 1 otherwise), also scaling the environment maps made from it.
     night: vec4<f32>,
     // What fades into the distance (fog.wgsl).
     fog: Fog,
@@ -572,7 +574,8 @@ fn sky_radiance(dir: vec3<f32>, spread: f32) -> vec3<f32> {
         // average).
         let across = max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.0625);
         let level = log2(max(spread * frame.environment.w / (2.0 * PI) / across, 1.0));
-        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb;
+        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb
+            * frame.night.z;
         if frame.night.y < 0.5 {
             return sky;
         }
@@ -663,7 +666,8 @@ fn sky_diffuse(n: vec3<f32>) -> vec3<f32> {
 fn sky_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     if frame.environment.x > 0.5 {
         let level = roughness * frame.environment.y;
-        return textureSampleLevel(environment_map, environment_sampler, dir, level).rgb;
+        return textureSampleLevel(environment_map, environment_sampler, dir, level).rgb
+            * frame.night.z;
     }
     return environment_specular(dir, roughness);
 }

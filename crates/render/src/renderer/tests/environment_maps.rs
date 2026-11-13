@@ -219,6 +219,35 @@ fn sky_seen(
 }
 
 #[test]
+fn a_sky_image_darkens_at_night_like_the_sky_colors() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let mut list = mirror_list(Some(plain_sky(13, [1.5, 0.0, 0.0])));
+    let red = |renderer: &mut TextureRenderer, list: &DrawList| {
+        renderer.render(list).unwrap();
+        let pixels = renderer.read_pixels();
+        // Behind the scene, and in the mirror.
+        (pixels[0], pixels[(32 * 64 + 32) * 4])
+    };
+    let (day_sky, day_mirror) = red(&mut renderer, &list);
+    list.sky.daylight = 0.06;
+    let (night_sky, night_mirror) = red(&mut renderer, &list);
+    assert!(
+        night_sky < day_sky / 2 && night_mirror < day_mirror / 2,
+        "darker at night: sky {day_sky} to {night_sky}, mirror {day_mirror} to {night_mirror}"
+    );
+    list.sky.daylight = 1.0;
+    assert_eq!(
+        red(&mut renderer, &list),
+        (day_sky, day_mirror),
+        "and back by day"
+    );
+}
+
+#[test]
 fn no_sun_is_drawn_over_a_sky_image() {
     let Some((device, queue)) = test_device() else {
         eprintln!("skipped: no graphics adapter on this machine");

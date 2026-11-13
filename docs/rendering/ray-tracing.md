@@ -34,6 +34,10 @@ While Hardware ray tracing is on (or turned on, waiting for a restart), the edit
 
 Hovering it gives the reach, the scene's meshes and triangles, any meshes still waiting to be built, and where to change it. With the setting off the badge is hidden.
 
+## One click: the ray traced look
+
+Settings > Graphics > Ray tracing has **Use the ray traced look** (`GraphicsSettings::ray_traced`): Hardware ray tracing on, ray traced shadows and ambient occlusion at Medium, shadow and reflection quality raised to at least High, and TAA, keeping every other setting. **Ray traced effects off** (`without_ray_traced_effects`) clears the two effect overrides without a restart. While the setting is on but the GPU was opened without ray queries on a card that offers them, the section says to restart, and to check a Desktop shortcut opens this version (an older installed copy shares the settings folder but can't ray trace). The Learn guide `documentation/learn/ray-tracing.md` walks through it, the badge, and getting good shadows and sky.
+
 ## Ray traced sun shadows (RT1)
 
 The sun's shadows traced as rays from each pixel instead of read from the shadow map cascades: exact up close, with no cascade blur, acne or peter-panning, and soft by how far the caster is from the receiver.

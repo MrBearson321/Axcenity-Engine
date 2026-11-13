@@ -147,7 +147,7 @@ pub fn ray_hits_lines(stats: &RenderStats) -> Vec<(Option<Color32>, String)> {
 }
 
 /// `value` with thin separators every three digits: 1,234,567.
-fn thousands(value: u64) -> String {
+pub(super) fn thousands(value: u64) -> String {
     let digits = value.to_string();
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {

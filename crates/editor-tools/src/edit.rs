@@ -54,6 +54,10 @@ pub enum Edit {
     /// Puts the engine's default sky into the project (if it isn't there)
     /// and asks whether to use it, with the sun moved to match.
     UseDefaultSky,
+    /// Lets the sky follow the time of day: clears Lighting's `SkyImage`
+    /// and adds an Atmosphere to Lighting if it has none, for sunrises and
+    /// sunsets as `ClockTime` changes.
+    UseTimeOfDaySky,
     /// Animates the selected Part, Model or UI element: an Animator, a new
     /// clip and an Animation playing it, opened in the Animation tab.
     Animate,

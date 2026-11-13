@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "renderer"
+title = "A sky picture darkens toward night, and one click makes the sky follow the time of day"
+details = "A sky image (Lighting.SkyImage, such as the default sky) now dims with ClockTime as the drawn sky does, so night falls with a picture too; its own colors stay the picture's. Under Lighting's SkyImage row a note says so, with a Follow time of day button that clears the picture and adds an Atmosphere, for a sky that turns orange at sunrise and sunset."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

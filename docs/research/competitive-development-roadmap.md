@@ -67,7 +67,7 @@ In particular (status checked on main `5143a5a`):
 | G7 | Memory profiling | **Implemented** (#125, #126; history, peaks and budget warnings #241) |
 | G8 | Audio occlusion | **Implemented** (#128) |
 | G9 | Upscaling | **Partial**: stage 1 spatial FSR-class upscale (#155, timings #171); stage 2 (temporal, inside TAA) not started |
-| G10 | Plugin API | **Partial**: toolbars, dock widgets, selection, settings, project files, mouse. Viewport drawing, property rows and importer hooks missing |
+| G10 | Plugin API | **Implemented**: viewport drawing #265, drag handles #267, Properties rows #270, importers, Assets panel items and `plugin.ApiVersion` #274, on Phase 54's toolbars, dock widgets, selection, settings, files and mouse |
 | G11 | Editor modularization | **Implemented** for every planned move (#162, #164, #166, #189, #193, #194); further moves as they pay off |
 | G12 | Cooked-only games | **Implemented** (#243): Build Game leaves texture sources out; reading the pack in place not planned |
 | G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines |
@@ -406,7 +406,7 @@ Expand asset management beyond discovery and downloading.
 
 **Priority:** High
 **Existing reference:** G12
-**Status:** Partial. `.axgame` v2 with zstd, file times and threaded unpacking (M9, #61), cooked textures and models, installers for three OSes, `scripts/check-packages.py`. Cooked-only packs are built (G12, #243: Build Game leaves texture sources out). Missing: build profiles and build reports (R13).
+**Status:** Implemented (R13: #268). `.axgame` v2 with zstd, file times and threaded unpacking (M9, #61), cooked textures and models, installers for three OSes, `scripts/check-packages.py`. Cooked-only packs are built (G12, #243: Build Game leaves texture sources out). Build profiles (Release, Development and the project's own in `build-profiles.json`, `project/src/build_profiles.rs`), Asset Check before each build (a profile can stop on problems) and a build report beside the game (`build-report.json` and `.txt`) are built (`docs/project/export.md`).
 
 Improve the game build pipeline.
 
@@ -434,7 +434,7 @@ Improve the game build pipeline.
 
 **Priority:** Medium-High
 **Existing reference:** G10
-**Status:** Partial. Lua plugins have toolbars, dock widgets made of UI Instances, selection, undo waypoints, settings, project files behind a permission, the viewport mouse and `.axcenity-plugin` sharing (`docs/editor/plugins.md`). Missing: viewport drawing and handles, property rows, importer hooks, asset browser integration.
+**Status:** Implemented. Lua plugins have toolbars, dock widgets made of UI Instances, selection, undo waypoints, settings, project files behind a permission, the viewport mouse and `.axcenity-plugin` sharing (Phase 54), and since G10: retained viewport drawing (#265), drag handles (#267), declared Properties rows and buttons (#270), and (#274) importers for file kinds the editor doesn't import, `plugin.AssetImported`, Assets panel menu items and `plugin.ApiVersion` (2). All in `docs/editor/plugins.md`. Not done: a native extension ABI (deliberately, as below) and permissions beyond `files`.
 
 Expand the existing Lua plugin architecture.
 
@@ -576,7 +576,7 @@ Do not immediately attempt a complete Lumen or SDFGI equivalent.
 ## 6.4 Visual effects editor
 
 **Priority:** Medium
-**Status:** Missing (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`); there is no node-based or curve-based effect authoring.
+**Status:** Missing (R17). CPU and GPU particles (100k in 0.23 ms), weather and wind exist and are set through Properties and Lua (`docs/rendering/particles.md`); there is no node-based or curve-based effect authoring. Design and stages R17.1–R17.5: [vfx-editor.md](vfx-editor.md).
 
 Develop a unified authoring experience around existing CPU and GPU particle systems.
 
@@ -607,7 +607,7 @@ Develop a unified authoring experience around existing CPU and GPU particle syst
 ## 6.5 Advanced world creation
 
 **Priority:** Medium-High
-**Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Missing: streaming diagnostics in the editor while editing, region management and data layers.
+**Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Streaming diagnostics in the editor are built: the Streaming overlay (R16) shows each unit by where it stands from the camera, what's always there, both radii, what a player standing there has and units too big to stream well, while editing too. Missing: region management and data layers.
 
 Improve large-world authoring and environmental systems.
 
@@ -632,7 +632,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1).
+**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. Improving the sculpting tools is still open.
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -1077,7 +1077,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Import presets and compression profiles | Done (textures, #262) | Texture groups, LOD settings | `.import` presets | Per asset | Presets, platform overrides | R12 | Medium | assets, cook | Implement |
 | Cooked textures and models | Implemented | Cooking | Import cache | Compiled assets | Import pipeline | L2, `crates/cook` | Critical | cook | Keep |
 | Cooked-only game packages | Implemented (#243) | Cooked pak | `.pck` | Compiled | Built player | G12 | High | cook, project | Keep |
-| Build profiles and reports | Missing | Build profiles, cook reports | Export presets | Publish wizard | Build profiles, build report | R13 | High | project | Implement |
+| Build profiles and reports | Implemented (#268) | Build profiles, cook reports | Export presets | Publish wizard | Build profiles, build report | R13 | High | project | Implement |
 
 ### Editor and production
 
@@ -1087,7 +1087,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | UI prefabs | Implemented | Widget Blueprints | Scenes | Razor panels | UI prefabs | G5 | High | ui, project | Keep |
 | Memory breakdown | Implemented, with history, peaks and budgets (#241) | Memory Insights | Monitors | — | Memory Profiler | `editor/src/profiler.rs`, `core::memory` (G7) | High | sim, render | Keep |
 | CPU and GPU profiling | Implemented | Unreal Insights | Profiler | Profiler | Profiler | Profiler panel, Tracy, `--bench` | High | — | Keep |
-| Editor plugins | Partial: no viewport drawing, property rows, importer hooks | Editor modules, Utility Widgets | EditorPlugin | Editor tools (C#) | Editor scripting | `crates/plugins` (G10) | Medium-High | plugins | Improve |
+| Editor plugins | Implemented: drawing, handles, Properties rows, importers, Assets panel items (G10) | Editor modules, Utility Widgets | EditorPlugin | Editor tools (C#) | Editor scripting | `crates/plugins` (G10) | Medium-High | plugins | Improve |
 | Simulate without a player | Implemented (Run, F8, #245) | Simulate | Run scene | — | Play without player | G14 | Medium | editor Play | Keep |
 | Physics debug views | Implemented: colliders, rays, contacts, centers of mass, sleeping (#253) | Chaos Visual Debugger | Visible collision shapes | Physics debug | Physics Debugger | G15 | Medium | physics | Keep |
 | Live collaboration | Implemented (hand checks open) | Multi-User Editing | — | — | Unity Version Control | Collaborate 2.0, ADR-0022 | Strategic | collab, repo | Keep |
@@ -1106,9 +1106,9 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 | Global illumination | Partial: baked probes, optional real-time probes | Lumen | SDFGI, VoxelGI | Baked, probes | APV, lightmaps | `docs/rendering/lights.md` (R18) | Medium | render | Improve selectively |
 | Ray tracing | Planned, optional (RT0–RT5) | Yes | — | — | HDRP | [hardware-ray-tracing.md](hardware-ray-tracing.md) (PR #240) | Medium | RT-capable GPU; L5 only for RT5 | Implement as an option, sun shadows first (RT1) |
 | Particle authoring (VFX editor) | Missing (particles exist) | Niagara | Particle editors | Particle editor | VFX Graph | `docs/rendering/particles.md` (R17) | Medium | particles | Implement in stages |
-| World streaming | Implemented at runtime; editor diagnostics partial | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
+| World streaming | Implemented at runtime; Streaming overlay in the editor (R16) | World Partition | — | — | Additive scenes | `docs/architecture/streaming.md` (R16) | Medium-High | core streaming | Improve |
 | Region management and data layers | Missing | World Partition, Data Layers | — | — | Scenes | R16 | Medium | levels | Implement where justified |
-| In-editor modeling | Partial: sculpt and bake to come back (Paul, 12 Nov) | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
+| In-editor modeling | Partial: sculpting and baking back (#271), retopology by hand left to Blender | Modeling Mode | — | Mapping (Hammer) | ProBuilder | `crates/editor-model-studio` (R15) | Medium-High | mesh_edit | Restore sculpt and bake, then improve |
 | Humanoid retargeting | Implemented (stage 1) | IK Retargeter | Retarget on import | Citizen | Humanoid Avatars | G16 | High | anim | Hand-edited maps, profiles |
 | Runtime IK | Implemented | Control Rig | SkeletonIK3D | IK | Animation Rigging | `anim/src/ik_control.rs` | — | anim | Keep |
 
@@ -1148,13 +1148,13 @@ The following is the recommended order for execution. **Status** is on main `514
 | 8 | UI prefabs | G5 | Implemented (#122) | Nothing |
 | 9 | Cooked-only games | G12 | Implemented (#243) | Hand check a real game's size on the PC |
 | 10 | Humanoid retargeting | G16 | Implemented (stage 1, #244) | Hand-edited maps, profiles, fingers |
-| 11 | Plugin API improvements | G10 | Partial | Owned by the scripting thread (viewport drawing, property rows, importer hooks) |
+| 11 | Plugin API improvements | G10 | Implemented | #265, #267, #270, #274 (scripting thread) |
 | 12 | Advanced asset management | New (R12) | Implemented (#260, #262) | Mesh presets later, if needed |
-| 13 | Build pipeline improvements | New (R13) | Partial | Build profiles and reports |
+| 13 | Build pipeline improvements | New (R13) | Implemented (#268) | Build profiles and reports done |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial | Bring sculpting and baking back (Paul's decision, section 2.1) |
-| 16 | Large-world rendering and authoring | New (R16) | Partial | Streaming diagnostics in the editor |
-| 17 | Visual effects editor | New (R17) | Missing | Design, then curves and an effect asset |
+| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
+| 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
+| 17 | Visual effects editor | New (R17) | Missing; design in [vfx-editor.md](vfx-editor.md) | R17.1 curves, then spawn shapes, the effect editor and asset |
 | 18 | Global illumination improvements | New (R18) | Partial | Measure and document options |
 | 19 | Online services architecture | New (R19) | Missing | Design document only |
 | 20 | Platform expansion | New (R20) | Deferred | Research document only |

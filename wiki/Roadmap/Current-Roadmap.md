@@ -71,8 +71,8 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; a coroutine the script made itself still can't pause |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats); history, peaks and budgets | **Done** (#125, #126; history, peaks and budgets #241) |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
-| G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA) not started |
-| G10 | Plugin API additions | Moved to the scripting thread (viewport drawing, property rows, importer hooks) |
+| G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA: output-sized history, more jitter places, then RCAS) in a PR, awaiting a 9070 XT bench |
+| G10 | Plugin API additions | Implemented: viewport drawing #265, handles #267, Properties rows #270, importers and Assets panel items #274, `plugin.ApiVersion` 2 |
 | G11 | Split the editor (L6) | In progress: `editor-kit` (#162), the Toolbox tab in `editor-toolbox` (#164), Graphics Benchmark in `editor-benchmark` (#166), the viewport tools in `editor-tools` and the Model Studio in `editor-model-studio` (#189; editor rebuild after an edit 35.5 → 32.5 s in the cloud), the node-graph editor in `editor-node-graph` and the UI Designer in `editor-ui-designer` (editor rebuild after an edit 30.7 s) |
 | G12 | Cooked-only games, read the pack in place | **Cooked-only done** (#243); read in place not planned (unpacking is 30–170 ms) |
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
@@ -87,7 +87,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 
 ## Competitive development roadmap (Paul's of 2026-11-12)
 
-`docs/research/competitive-development-roadmap.md` carries the G items forward and adds R12–R20 (asset management, build profiles and reports, Model Studio with sculpting and baking back, large worlds, a VFX editor, GI, online services and platforms as documents only). Its section 11 is the living feature matrix against Unreal, Godot, s&box and Unity; section 12 is the order of work with each item's status. Update both when an item lands.
+`docs/research/competitive-development-roadmap.md` carries the G items forward and adds R12–R20 (asset management, build profiles and reports, Model Studio with sculpting and baking back, large worlds, a VFX editor, GI, online services and platforms as documents only). R17's design (D1–D7, stages R17.1–R17.5: curves as `NumberSequence`/`ColorSequence`, the effect asset as a prefab, a module stack before a node graph) is `docs/research/vfx-editor.md`. Its section 11 is the living feature matrix against Unreal, Godot, s&box and Unity; section 12 is the order of work with each item's status. Update both when an item lands.
 
 ## Feature plan (unified plan, Phases 1–93)
 
