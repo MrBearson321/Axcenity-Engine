@@ -116,17 +116,23 @@ impl OcclusionPasses {
         }
     }
 
-    /// Tests and blurs the occlusion of what the prepass drew into `targets`.
-    pub(super) fn draw(&self, encoder: &mut wgpu::CommandEncoder, targets: &OcclusionTargets) {
-        let clear = wgpu::LoadOp::Clear(wgpu::Color::WHITE);
+    /// Tests the occlusion of what the prepass drew into `targets`, from
+    /// the screen alone, into its raw target.
+    pub(super) fn draw_raw(&self, encoder: &mut wgpu::CommandEncoder, targets: &OcclusionTargets) {
         fullscreen_pass(
             encoder,
             "ambient occlusion",
             &targets.raw_view,
-            clear,
+            wgpu::LoadOp::Clear(wgpu::Color::WHITE),
             &self.occlusion,
             &[&targets.occlusion_group],
         );
+    }
+
+    /// Blurs the raw occlusion (screen-space, ray traced or both) into
+    /// what the scene reads.
+    pub(super) fn blur(&self, encoder: &mut wgpu::CommandEncoder, targets: &OcclusionTargets) {
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::WHITE);
         fullscreen_pass(
             encoder,
             "ambient occlusion blur",

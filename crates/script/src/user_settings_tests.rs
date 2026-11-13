@@ -214,6 +214,47 @@ fn taa_and_motion_blur_are_settings_for_local_scripts() {
 }
 
 #[test]
+fn ray_traced_shadows_are_a_setting_for_local_scripts() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_graphics(
+        &GraphicsSettings::preset(Quality::High),
+        &Capabilities::default(),
+    );
+    let printed = run(
+        &mut runtime,
+        &mut world,
+        "scripts/rays.client.lua",
+        "local s = game:GetService('UserGameSettings')
+        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion)
+        s.RayTracedShadows = Enum.RayTracedShadows.Medium
+        s.RayTracedAmbientOcclusion = Enum.RayTracedAmbientOcclusion.High
+        print(s.RayTracedShadows, s.RayTracedAmbientOcclusion)
+        print(pcall(function() s.RayTracedShadows = Enum.MotionBlur.Low end))",
+    );
+    assert_eq!(
+        printed[0],
+        "Enum.RayTracedShadows.Off\tEnum.RayTracedAmbientOcclusion.Off"
+    );
+    assert_eq!(
+        printed[1],
+        "Enum.RayTracedShadows.Medium\tEnum.RayTracedAmbientOcclusion.High"
+    );
+    assert!(printed[2].starts_with("false\t"), "{printed:?}");
+    let change = runtime.take_graphics_change().unwrap();
+    assert_eq!(
+        change,
+        GraphicsSettings {
+            ray_traced_shadows: Some(axcenity_render_types::RayTracedShadows::Medium),
+            ray_traced_ambient_occlusion: Some(
+                axcenity_render_types::RayTracedAmbientOcclusion::High
+            ),
+            ..GraphicsSettings::preset(Quality::High)
+        }
+    );
+}
+
+#[test]
 fn automatic_picks_the_machines_quality() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();

@@ -100,8 +100,6 @@ impl RayScene {
     }
 
     /// The TLAS, built (this frame or before) with the frame's items.
-    // Only the Ray Hits view traces rays so far.
-    #[cfg_attr(not(feature = "debug-views"), allow(dead_code))]
     pub(super) fn tlas(&self) -> &wgpu::Tlas {
         &self.tlas
     }
@@ -273,11 +271,15 @@ impl RayScene {
 }
 
 impl ScenePipeline {
-    /// Whether anything this frame traces rays (only the editor's Ray Hits
-    /// view so far) on a device that can.
-    pub(super) fn traces_rays(&self) -> bool {
+    /// Whether anything this frame traces rays on a device that can: a ray
+    /// traced effect drawn this frame (`effects`: sun shadows, ambient
+    /// occlusion) or the editor's Ray Hits view.
+    pub(super) fn traces_rays(&self, effects: bool) -> bool {
         if !self.graphics.ray_queries {
             return false;
+        }
+        if effects {
+            return true;
         }
         #[cfg(feature = "debug-views")]
         if self
