@@ -881,7 +881,7 @@ The website should complement the editor rather than duplicate all of its functi
 
 These projects should not delay the core engine roadmap.
 
-**Status:** Research only (R20). Desktop is Windows and Linux first, macOS secondary; mobile is deferred by policy.
+**Status:** Research only (R20). Desktop is Windows and Linux first, macOS secondary; mobile is deferred by policy. What each target would need, its blockers and the first spike (Android, then PC VR through OpenXR; web only WebGPU and later; consoles only through platform programs): [platform-expansion.md](platform-expansion.md).
 
 ## 8.1 Mobile exports
 
@@ -1157,7 +1157,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 17 | Visual effects editor | New (R17) | Partial: curves over life (R17.1); design in [vfx-editor.md](vfx-editor.md) | R17.2 spawn shapes and bursts, then the effect editor and asset |
 | 18 | Global illumination improvements | New (R18) | Partial; options and stages in [global-illumination.md](global-illumination.md) | R18.1 probe overlay, then invalid probes and sky light apart |
 | 19 | Online services architecture | New (R19) | Designed in [online-services.md](online-services.md) | Build only when Paul says; O1 and O2 need no website |
-| 20 | Platform expansion | New (R20) | Deferred | Research document only |
+| 20 | Platform expansion | New (R20) | Deferred; researched in [platform-expansion.md](platform-expansion.md) | Spikes (Android, OpenXR) only when Paul lifts the deferral |
 
 Also done: G14 (Run without a player, #245) and G15 (physics debug views, #253). Still open: G13 (LAN scale test) when Paul's machines are free.
 
