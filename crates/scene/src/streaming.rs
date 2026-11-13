@@ -29,6 +29,9 @@ pub struct Streaming {
     hidden: FxHashSet<InstanceId>,
     /// The units in range now, to keep near the edge.
     shown: FxHashSet<InstanceId>,
+    /// What the editor leaves out on top (its hidden data layers, roadmap
+    /// R16.2), whether streaming is on or not.
+    also_hidden: FxHashSet<InstanceId>,
     regions: Vec<(Vec3, f64)>,
     clock: f64,
     focus: Vec3,
@@ -44,13 +47,25 @@ impl Streaming {
 
     /// Whether `id` is out of range, so not drawn.
     pub fn is_hidden(&self, id: InstanceId) -> bool {
-        self.hidden.contains(&id)
+        self.hidden.contains(&id) || self.also_hidden.contains(&id)
+    }
+
+    /// Leaves `ids` out of what's drawn as well, streaming or not: the
+    /// editor's hidden data layers (R16.2). They go off the GPU as what
+    /// streams out does.
+    pub fn set_also_hidden(&mut self, ids: impl IntoIterator<Item = InstanceId>) {
+        self.also_hidden = ids.into_iter().collect();
+    }
+
+    /// What [`set_also_hidden`](Self::set_also_hidden) left out.
+    pub fn take_also_hidden(&mut self) -> FxHashSet<InstanceId> {
+        std::mem::take(&mut self.also_hidden)
     }
 
     /// Whether anything is out of range now: when nothing is, a frame needn't
     /// ask about each Instance.
     pub(crate) fn hides_anything(&self) -> bool {
-        !self.hidden.is_empty()
+        !self.hidden.is_empty() || !self.also_hidden.is_empty()
     }
 
     /// Where everything streams around: the camera, and any regions asked for.

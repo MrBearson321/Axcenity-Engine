@@ -142,8 +142,21 @@ pub fn pick_hit(world: &World, ray: Ray, skip: Option<InstanceId>) -> Option<Hit
 /// Like [`pick_hit`], leaving out every part in `skip` (such as all the
 /// parts being dragged together). Terrains count, by their ground.
 pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option<Hit> {
+    pick_hit_where(world, ray, |id| skip.contains(&id))
+}
+
+/// [`pick_hit_skipping`] with what to skip as a test, for a long list
+/// kept in a set (the editor's hidden and locked data layers, R16.2).
+pub fn pick_hit_where(world: &World, ray: Ray, skip: impl Fn(InstanceId) -> bool) -> Option<Hit> {
+    let terrains: Vec<InstanceId> = world
+        .all_below(world.workspace(), |class| {
+            class == axcenity_core::ClassName::Terrain
+        })
+        .into_iter()
+        .filter(|&id| skip(id))
+        .collect();
     let mut nearest: Option<Hit> =
-        crate::terrain::terrain_hit(world, ray.origin, ray.direction, skip).map(
+        crate::terrain::terrain_hit(world, ray.origin, ray.direction, &terrains).map(
             |(terrain, distance, normal)| Hit {
                 part: terrain,
                 distance,
@@ -151,7 +164,7 @@ pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option
             },
         );
     for id in world.descendants_iter(world.workspace()) {
-        if skip.contains(&id) || axcenity_core::csg::out_of_world(world, id) {
+        if skip(id) || axcenity_core::csg::out_of_world(world, id) {
             continue;
         }
         let Some((shape, transform)) = world.get(id).and_then(part_placement) else {

@@ -142,3 +142,5 @@ Instance classes: everything that can be in the tree.
 | [Color3Value](classes/Color3Value.md) | Holds one Color3 in Value. |
 | [CFrameValue](classes/CFrameValue.md) | Holds one CFrame in Value. |
 | [ObjectValue](classes/ObjectValue.md) | Points at another Instance in Value, or nil. |
+| [DataLayerService](classes/DataLayerService.md) | The service that holds the project's DataLayers (roadmap R16). |
+| [DataLayer](classes/DataLayer.md) | A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. |

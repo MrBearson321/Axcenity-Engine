@@ -443,10 +443,17 @@ pub enum ClassName {
     Color3Value,
     CFrameValue,
     ObjectValue,
+    /// The project's data layers (roadmap R16): each `DataLayer` in it
+    /// gathers the Instances tagged with its name.
+    DataLayerService,
+    /// A data layer (R16): the Instances tagged with its `Name`, shown
+    /// together, hidden or locked in the editor and turned on and off in a
+    /// game.
+    DataLayer,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 133] = [
+    pub const ALL: [ClassName; 135] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -580,6 +587,8 @@ impl ClassName {
         ClassName::Color3Value,
         ClassName::CFrameValue,
         ClassName::ObjectValue,
+        ClassName::DataLayerService,
+        ClassName::DataLayer,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -717,6 +726,8 @@ impl ClassName {
             ClassName::Color3Value => "Color3Value",
             ClassName::CFrameValue => "CFrameValue",
             ClassName::ObjectValue => "ObjectValue",
+            ClassName::DataLayerService => "DataLayerService",
+            ClassName::DataLayer => "DataLayer",
         }
     }
 
@@ -909,6 +920,7 @@ impl ClassName {
                 | ClassName::Teams
                 | ClassName::SoundService
                 | ClassName::TextChatService
+                | ClassName::DataLayerService
         )
     }
 
@@ -1025,6 +1037,7 @@ impl ClassName {
             | ClassName::ServerStorage
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
+            | ClassName::DataLayerService
             | ClassName::ForceField
             | ClassName::RemoteEvent
             | ClassName::RemoteFunction
@@ -1083,6 +1096,12 @@ impl ClassName {
                 ("UserId", Value::Number(0.0)),
                 // The name they joined with; `Name` is that, made unique.
                 ("DisplayName", Value::String(String::new())),
+            ],
+            ClassName::DataLayer => vec![
+                // How the editor marks its members.
+                ("Color", Value::Color3(Color3::new(0.35, 0.6, 1.0))),
+                // Off, a game starts with the layer set aside (R16.4).
+                ("ActiveOnStart", Value::Bool(true)),
             ],
             ClassName::Team => vec![
                 ("TeamColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
@@ -2925,6 +2944,8 @@ impl ClassName {
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
             | ClassName::Team
+            | ClassName::DataLayerService
+            | ClassName::DataLayer
             | ClassName::SoundService
             | ClassName::SoundGroup
             | ClassName::ReverbSoundEffect

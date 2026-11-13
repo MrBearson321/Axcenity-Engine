@@ -94,6 +94,14 @@ DataModel.TextChatService: TextChatService
 
 The default chat (Phase 67): a chat window at the bottom left that `/` opens, styled with `TextChatService` rules (`TextChatService::key` styles the names). SendMessage sends from a LocalScript; on the server, OnIncomingMessage sees every message and returns its text, changed or not, or nil to drop it; DisplaySystemMessage shows a message from the game. MessageReceived fires on each device as a message arrives. ChatEnabled off hides the window.
 
+#### DataLayerService
+
+```luau
+DataModel.DataLayerService: DataLayerService
+```
+
+The service that holds the project's DataLayers (roadmap R16). Every level shares them.
+
 #### Debris
 
 ```luau

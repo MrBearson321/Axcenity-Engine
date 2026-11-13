@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "networking"
+title = "Network protocol 13: games and Collaborate sessions on this version can't join older ones"
+details = "The new DataLayerService (roadmap R16.2) is made with every world, after the other services, so the Instances after it are numbered differently than on older versions. A player or Collaborate member on an older version is told to update when they join."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

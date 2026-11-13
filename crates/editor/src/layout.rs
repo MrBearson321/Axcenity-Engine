@@ -81,6 +81,8 @@ pub enum Pane {
     Material,
     /// Every tag in the world (`tags.rs`). Starts closed.
     Tags,
+    /// The data layers (`layers.rs`, roadmap R16.2). Starts closed.
+    Layers,
     /// The project's levels (`levels.rs`, Phase 48). Starts closed.
     Levels,
     /// A cutscene sequence on a timeline (`sequencer.rs`, Phase 51).
@@ -132,7 +134,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 28] = [
+    pub const CLOSABLE: [Pane; 29] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -149,6 +151,7 @@ impl Pane {
         Pane::DataTable,
         Pane::Material,
         Pane::Tags,
+        Pane::Layers,
         Pane::Levels,
         Pane::Sequencer,
         Pane::Tests,
@@ -183,6 +186,7 @@ impl Pane {
             Pane::DataTable => "Data Table",
             Pane::Material => "Material",
             Pane::Tags => "Tags",
+            Pane::Layers => "Layers",
             Pane::Levels => "Levels",
             Pane::Sequencer => "Sequencer",
             Pane::Tests => "Tests",
@@ -220,6 +224,7 @@ impl Pane {
             Pane::DataTable => icons::TABLE,
             Pane::Material => icons::SPHERE,
             Pane::Tags => icons::TAG,
+            Pane::Layers => icons::STACK_SIMPLE,
             Pane::Levels => icons::STACK,
             Pane::Sequencer => icons::FILM_SLATE,
             Pane::Tests => icons::FLASK,
@@ -358,6 +363,7 @@ impl Layout {
             // A tab beside Properties, down the right.
             Pane::Terrain
             | Pane::Tags
+            | Pane::Layers
             | Pane::Levels
             | Pane::Plugins
             | Pane::LodInspector
@@ -386,6 +392,7 @@ impl Layout {
                 | Pane::Properties
                 | Pane::Terrain
                 | Pane::Tags
+                | Pane::Layers
                 | Pane::Levels
                 | Pane::Plugins
                 | Pane::VersionExplorer
@@ -773,6 +780,7 @@ mod tests {
                     | Pane::DataTable
                     | Pane::Material
                     | Pane::Tags
+                    | Pane::Layers
                     | Pane::Levels
                     | Pane::Sequencer
                     | Pane::Mixer

@@ -51,6 +51,7 @@ mod global_assets;
 mod graph_keys_tests;
 mod history;
 mod import_dialog;
+mod layers;
 mod layout;
 mod levels;
 mod loading;

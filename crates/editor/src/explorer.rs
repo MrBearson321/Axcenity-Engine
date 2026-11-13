@@ -114,6 +114,9 @@ pub struct Explorer {
     /// Rows other Collaborate members have selected, with their colours.
     /// The app fills it in each frame.
     pub others: HashMap<InstanceId, Vec<egui::Color32>>,
+    /// What hidden data layers leave out of the viewport (R16.2): their
+    /// rows are dimmed. The app fills it in.
+    pub hidden: std::collections::HashSet<InstanceId>,
     /// The text in Filter: while it isn't blank, only the Instances whose
     /// name or class has it in them show, with the branches above them.
     pub filter: String,
@@ -274,6 +277,7 @@ impl Explorer {
             renaming: None,
             warnings: HashMap::new(),
             others: HashMap::new(),
+            hidden: Default::default(),
             filter: String::new(),
             keys: Vec::new(),
             anchor: None,
@@ -649,7 +653,8 @@ impl Explorer {
                     let icon = egui::RichText::new(row_icon(world, row))
                         .color(theme::class_color(row.class, ui.visuals()));
                     // A branch shown only for what's below it is dimmed.
-                    let label_text = if row.matches {
+                    let layer_hidden = self.hidden.contains(&row.id);
+                    let label_text = if row.matches && !layer_hidden {
                         egui::RichText::new(name)
                     } else {
                         egui::RichText::new(name).color(palette.text_weak)
@@ -725,6 +730,11 @@ impl Explorer {
                     if world.is_locked(row.id) {
                         ui.weak(icons::LOCK)
                             .on_hover_text("Locked: the viewport can't select or change it.");
+                    }
+                    if layer_hidden {
+                        ui.weak(icons::EYE_SLASH).on_hover_text(
+                            "In a layer hidden in the Layers panel: the viewport doesn't show it.",
+                        );
                     }
 
                     if !editable {

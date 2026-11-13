@@ -211,6 +211,8 @@
     * [Color3Value](api/classes/Color3Value.md)
     * [CFrameValue](api/classes/CFrameValue.md)
     * [ObjectValue](api/classes/ObjectValue.md)
+    * [DataLayerService](api/classes/DataLayerService.md)
+    * [DataLayer](api/classes/DataLayer.md)
   * [Data types](api/types.md)
     * [Vector3](api/types/Vector3.md)
     * [Vector2](api/types/Vector2.md)

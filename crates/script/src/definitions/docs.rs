@@ -3253,6 +3253,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "For a script inside an object: the project file its code is in, such as `objects/Door/Open.module.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
     ),
     (
+        ClassName::DataLayer,
+        "Color",
+        "The colour the editor's Layers panel marks the layer with (roadmap R16).",
+    ),
+    (
+        ClassName::DataLayer,
+        "ActiveOnStart",
+        "If false, a game starts with the layer's Instances set aside, until a script makes it active (roadmap R16.4). The editor shows every layer whatever this is; hiding one there is the Layers panel's eye.",
+    ),
+    (
         ClassName::TextChatService,
         "ChatEnabled",
         "If false, the default chat window isn't drawn and `/` doesn't open it, for a game with its own chat or none. Scripts can still send and hear messages.",
@@ -5270,6 +5280,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         ClassName::Teams => "The service that holds the Teams players can be on.",
         ClassName::SoundService => {
             "The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups."
+        }
+        ClassName::DataLayerService => {
+            "The service that holds the project's DataLayers (roadmap R16). Every level shares them."
+        }
+        ClassName::DataLayer => {
+            "A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag."
         }
         ClassName::TextChatService => {
             "The default chat (Phase 67): a chat window at the bottom left that `/` opens, styled with `TextChatService` rules (`TextChatService::key` styles the names). SendMessage sends from a LocalScript; on the server, OnIncomingMessage sees every message and returns its text, changed or not, or nil to drop it; DisplaySystemMessage shows a message from the game. MessageReceived fires on each device as a message arrives. ChatEnabled off hides the window."

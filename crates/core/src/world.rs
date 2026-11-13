@@ -324,6 +324,7 @@ pub struct World {
     teams: InstanceId,
     sound_service: InstanceId,
     text_chat_service: InstanceId,
+    data_layer_service: InstanceId,
     changes: ChangeLog,
     /// Every edit with what it replaced, once [`World::record_edits`] is on.
     journal: EditJournal,
@@ -475,7 +476,11 @@ impl World {
         let server_storage = add_service(ClassName::ServerStorage, root);
         // After it, so nothing before it moves (Phase 67), and last.
         let text_chat_service = add_service(ClassName::TextChatService, root);
+        // R16: made after every other service, so none of theirs moves,
+        // and listed last.
+        let data_layer_service = add_service(ClassName::DataLayerService, root);
         let game = instances.get_mut(root.0).expect("inserted first");
+        let data_layers = game.children.pop();
         let text_chat = game.children.pop();
         game.children.pop();
         let at = game
@@ -486,6 +491,7 @@ impl World {
             + 1;
         game.children.insert(at, server_storage);
         game.children.extend(text_chat);
+        game.children.extend(data_layers);
 
         Self {
             instances,
@@ -500,6 +506,7 @@ impl World {
             teams,
             sound_service,
             text_chat_service,
+            data_layer_service,
             changes: ChangeLog::default(),
             journal: EditJournal::default(),
             destroyed: None,
@@ -886,6 +893,11 @@ impl World {
         self.text_chat_service
     }
 
+    /// Holds the project's DataLayers (roadmap R16).
+    pub fn data_layer_service(&self) -> InstanceId {
+        self.data_layer_service
+    }
+
     /// The player's master volume (`UserGameSettings.MasterVolume`): a
     /// multiplier on everything the game plays, from 0 (silent) to 1 (as
     /// mixed). Copies of the world (Play) start with it, and save slots
@@ -916,6 +928,7 @@ impl World {
             ClassName::Teams => self.teams,
             ClassName::SoundService => self.sound_service,
             ClassName::TextChatService => self.text_chat_service,
+            ClassName::DataLayerService => self.data_layer_service,
             _ => return None,
         };
         Some(id)

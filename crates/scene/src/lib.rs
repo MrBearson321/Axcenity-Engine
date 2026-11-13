@@ -63,7 +63,7 @@ pub use particles::{
 };
 pub use pick::{
     CameraView, Hit, Occluders, Ray, part_box_edges, part_half_extent, part_hit, pick, pick_hit,
-    pick_hit_skipping, visible_box_edges,
+    pick_hit_skipping, pick_hit_where, visible_box_edges,
 };
 pub use preload::{AssetFile, asset_files};
 pub use streaming::Streaming;
