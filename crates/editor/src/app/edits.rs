@@ -546,7 +546,9 @@ impl EditorApp {
             1 => format!("Add {class}"),
             n => format!("Add {n} {class}s"),
         };
-        self.add_children(&parts, class, &[], label);
+        // New lights cast shadows (ray traced ones, with Ray traced shadows
+        // on); the class's default stays off so saved worlds look the same.
+        self.add_children(&parts, class, &[("Shadows", Value::Bool(true))], label);
     }
     /// Puts a new `class` with `properties` in each of `parts` (if it can
     /// go there), named after the class, as one undo step named `label`.
