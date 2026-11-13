@@ -282,3 +282,9 @@ The choices of `Enum.RayTracedAmbientOcclusion`.
 
 Items: `Off`, `Low`, `Medium`, `High`
 
+## Enum.RayTracedGlobalIllumination
+
+The choices of `Enum.RayTracedGlobalIllumination`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+

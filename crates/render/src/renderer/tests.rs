@@ -976,6 +976,7 @@ fn stats_time_each_pass_the_frame_draws() {
             pass,
             FramePass::AccelerationStructures
                 | FramePass::RayTracedShadows
+                | FramePass::RayTracedGi
                 | FramePass::Ui
                 | FramePass::VolumetricFog
                 | FramePass::Particles

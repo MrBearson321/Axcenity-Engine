@@ -605,6 +605,8 @@ declare extern type UserGameSettings with
 	RayTracedShadows: EnumRayTracedShadows
 	--- Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
+	--- Hardware ray traced global illumination: Off, Low (32 light probes a frame, 64 rays each), Medium (64, 128 rays) or High (128, 256 rays). Off at every preset. On, the world's LightProbeVolumes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts; it does nothing without a LightProbeVolume. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).
+	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1324,6 +1326,18 @@ declare extern type EnumRayTracedAmbientOcclusionItems with
 	High: EnumRayTracedAmbientOcclusion
 end
 
+--- One choice of `Enum.RayTracedGlobalIllumination`.
+declare extern type EnumRayTracedGlobalIllumination extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedGlobalIllumination`.
+declare extern type EnumRayTracedGlobalIlluminationItems with
+	Off: EnumRayTracedGlobalIllumination
+	Low: EnumRayTracedGlobalIllumination
+	Medium: EnumRayTracedGlobalIllumination
+	High: EnumRayTracedGlobalIllumination
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1372,6 +1386,7 @@ declare extern type EnumLibrary with
 	ParticleEmitterShape: EnumParticleEmitterShapeItems
 	ParticleEmitterShapeStyle: EnumParticleEmitterShapeStyleItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
+	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
 end
 
 -- Instances -----------------------------------------------------------------
