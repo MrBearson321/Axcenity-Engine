@@ -1059,6 +1059,40 @@ pub struct Fog {
     /// around it).
     pub sun_scattering: f32,
     pub forward_scattering: f32,
+    /// Dust or mist filling a box (a GraphicsVolume's FogEffect with a
+    /// Density), on top of the fog above, or `None`.
+    pub dust: Option<Dust>,
+}
+
+/// Dust or mist filling a box, such as the air of a room: light passing
+/// through it is lost at `density` per stud, and `color` of what's lost is
+/// scattered, lit by the sun and its shadows (shafts of light, through the
+/// volumetric fog), lamps and the light around it. It thins to nothing
+/// over `edge` studs at the box's faces (half outside them, half inside).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dust {
+    pub density: f32,
+    /// How much of the light lost is scattered (sRGB).
+    pub color: [f32; 3],
+    /// How much of the scattered light goes forward, away from the light
+    /// (Henyey-Greenstein g, 0 the same every way).
+    pub forward_scattering: f32,
+    /// The box: the world to its own space (rotation and position, in
+    /// studs, its middle at 0), and half its size.
+    pub to_box: Mat4,
+    pub half_size: Vec3,
+    pub edge: f32,
+}
+
+impl Dust {
+    /// Whether it takes away any light.
+    pub fn is_drawn(&self) -> bool {
+        self.density.is_finite()
+            && self.density > 0.0
+            && self.half_size.is_finite()
+            && self.half_size.min_element() > 0.0
+            && self.to_box.is_finite()
+    }
 }
 
 impl Fog {
@@ -1068,7 +1102,11 @@ impl Fog {
 
     /// Whether any fog is drawn.
     pub fn is_drawn(&self) -> bool {
-        self.has_distance_fog() || self.has_height_fog()
+        self.has_distance_fog() || self.has_height_fog() || self.has_dust()
+    }
+
+    pub fn has_dust(&self) -> bool {
+        self.dust.is_some_and(|dust| dust.is_drawn())
     }
 
     pub fn has_distance_fog(&self) -> bool {
@@ -1095,6 +1133,7 @@ impl Default for Fog {
             falloff: 50.0,
             sun_scattering: 0.0,
             forward_scattering: 0.0,
+            dust: None,
         }
     }
 }

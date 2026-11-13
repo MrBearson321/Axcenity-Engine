@@ -542,3 +542,45 @@ fn motion_targets_exist_only_while_taa_or_motion_blur_use_them() {
     check(settings(Off, Blur::High), &plain, (0, 0, 0), false);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }
+
+#[test]
+fn a_plant_swaying_in_the_wind_has_motion_of_its_own() {
+    // Its leaves move though it stands still and so does the camera, so TAA
+    // must take them from where the wind had them last frame, or they smear.
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = renderer(
+        &device,
+        &queue,
+        &settings(AntiAliasing::Taa, MotionBlurQuality::Off),
+    );
+    let at = |time: f32| {
+        let mut plant = card(
+            [0.2, 0.8, 0.2],
+            Vec3::new(0.0, 1.0, -5.0),
+            Vec3::new(1.0, 4.0, 0.2),
+            2,
+        );
+        plant.sway = Some(crate::Sway {
+            base: -1.0,
+            height: 4.0,
+            strength: 1.0,
+            flutter: 0.0,
+        });
+        let mut list = list_of(vec![wall(-10.0), plant]);
+        list.wind = Vec3::new(20.0, 0.0, 0.0);
+        list.time = time;
+        list
+    };
+    renderer.render(&at(0.0)).unwrap();
+    let now = at(0.25);
+    renderer.render(&now).unwrap();
+    let motion = read_motion(&renderer);
+    // Near its top, which sways the most; its foot stays put.
+    let top = motion_at(&motion, pixel_of(uv_of(&now, Vec3::new(0.0, 2.6, -4.9))));
+    assert!(top.length() > 1e-3, "the top swayed: {top}");
+    let still = motion_at(&motion, pixel_of(uv_of(&now, Vec3::new(4.0, 4.0, -10.0))));
+    assert!(still.length() < 1e-4, "the wall didn't move: {still}");
+}

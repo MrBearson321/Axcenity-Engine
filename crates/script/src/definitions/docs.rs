@@ -1019,6 +1019,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Studs from the camera where everything is the fog's color (200 by default).",
     ),
     (
+        ClassName::FogEffect,
+        "Density",
+        "Above 0, the fog is dust or mist filling the volume's box, seen from anywhere, instead of distance fog: it takes away this much of the light per stud (0.02 hides about half of what's 35 studs away), and Color is how much of the light it takes it scatters back. It's lit by the sun and its shadows (shafts of light, with volumetric fog on), by lamps and by the light around it (light probes), and it thins to nothing over BlendDistance at the box's faces. 0 by default.",
+    ),
+    (
+        ClassName::FogEffect,
+        "Glare",
+        "How much of the dust's light goes forward, away from the sun, from 0 to 10 (0 by default): more makes it glow brighter looking toward the sun.",
+    ),
+    (
         ClassName::BloomEffect,
         "Enabled",
         "If false, it changes nothing.",
@@ -5273,7 +5283,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside a GraphicsVolume: the exposure while the camera is in the volume, in place of Lighting's Exposure."
         }
         ClassName::FogEffect => {
-            "Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog."
+            "Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog. With a Density above 0, dust or mist filling the volume's box instead, seen from anywhere and lit by the sun (shafts of light through windows and gaps)."
         }
         ClassName::BloomEffect => {
             "Inside a GraphicsVolume: how bright light blooms while the camera is in the volume, in place of Lighting's BloomIntensity and BloomThreshold."

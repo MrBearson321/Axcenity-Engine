@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Sun shafts indoors: dusty air in a box, volumetric fog that stays dark in closed rooms, leaf-shaped ray traced shadows"
+details = "A FogEffect inside a GraphicsVolume takes Density and Glare: above 0 it fills the volume's box with dust or mist, seen from anywhere, that the sun's shadows carve into shafts through windows and gaps (volumetric fog, Ultra), without thickening the sky or reddening the sun as an Atmosphere does. Volumetric fog now lights the air by the light around it (light probe volumes or ray traced GI), so a closed room's air no longer glows like the open air outside and hides its shafts, and it looks up the sun's shadow at 8 points a cell, so shafts no longer step and crawl. Ray traced shadows pass through cut-outs' holes (leaves cast leaf-shaped shadows instead of solid cards). TAA takes swaying plants' motion into account, so leaves in the wind no longer smear, and Sun Rays' noise averages away under TAA."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

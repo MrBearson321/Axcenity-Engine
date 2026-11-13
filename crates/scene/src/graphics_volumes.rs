@@ -16,8 +16,8 @@
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Instance, Value, World};
-use axcenity_render::glam::Vec3;
-use axcenity_render::{Atmosphere, ColorGrading, Fog, PostProcessing, Sky, Sun};
+use axcenity_render::glam::{Mat4, Vec3};
+use axcenity_render::{Atmosphere, ColorGrading, Dust, Fog, PostProcessing, Sky, Sun};
 
 use crate::draw_list::part_placement;
 
@@ -41,7 +41,7 @@ pub(crate) fn blend(
     camera: Vec3,
     mut look: Look,
 ) -> Look {
-    let mut volumes: Vec<(f64, f32, &Instance)> = world
+    let enabled: Vec<&Instance> = world
         .all_below(world.workspace(), |class| {
             class == ClassName::GraphicsVolume
         })
@@ -49,6 +49,12 @@ pub(crate) fn blend(
         .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(|id| world.get(id))
         .filter(|volume| volume.property("Enabled") != Some(&Value::Bool(false)))
+        .collect();
+    // Dust fills its box wherever the camera is: it's in the air, not a
+    // look the camera takes on inside the volume.
+    let dust = nearest_dust(world, &enabled, camera);
+    let mut volumes: Vec<(f64, f32, &Instance)> = enabled
+        .into_iter()
         .filter_map(|volume| {
             let weight = weight(volume, camera)?;
             let priority = number(volume, "Priority").unwrap_or(0.0);
@@ -61,8 +67,69 @@ pub(crate) fn blend(
         let target = applied(world, assets, lighting, volume, &look);
         look = mix(look, target, weight);
     }
+    look.fog.dust = dust;
     look
 }
+
+/// A volume's enabled FogEffect with a Density above 0: dust filling the
+/// box rather than distance fog while the camera is inside.
+fn dust_effect<'a>(world: &'a World, volume: &Instance) -> Option<&'a Instance> {
+    volume
+        .children()
+        .iter()
+        .filter_map(|&id| world.get(id))
+        .filter(|child| child.property("Enabled") != Some(&Value::Bool(false)))
+        .find(|child| child.class() == ClassName::FogEffect)
+        .filter(|fog| number(fog, "Density").is_some_and(|density| density > 0.0))
+}
+
+/// The dust of the volume nearest `camera` (inside one, the one with the
+/// highest Priority, then the first), as the renderer draws one box of it
+/// at a time.
+fn nearest_dust(world: &World, volumes: &[&Instance], camera: Vec3) -> Option<Dust> {
+    let mut best: Option<(f32, f64, Dust)> = None;
+    for &volume in volumes {
+        let Some(effect) = dust_effect(world, volume) else {
+            continue;
+        };
+        let Some((_, transform)) = part_placement(volume) else {
+            continue;
+        };
+        let (size, rotation, center) = transform.to_scale_rotation_translation();
+        let half_size = size.abs() * 0.5;
+        let local = rotation.inverse() * (camera - center);
+        let outside = (local.abs() - half_size).max(Vec3::ZERO).length();
+        let priority = number(volume, "Priority").unwrap_or(0.0);
+        let glare = number(effect, "Glare").unwrap_or(0.0).clamp(0.0, 10.0);
+        let color = effect
+            .property("Color")
+            .and_then(Value::as_color3)
+            .map_or([0.75; 3], |color| [color.r, color.g, color.b]);
+        let dust = Dust {
+            density: number(effect, "Density").unwrap_or(0.0).clamp(0.0, 10.0) as f32,
+            color,
+            forward_scattering: (DUST_FORWARD + DUST_GLARE_FORWARD * glare) as f32,
+            to_box: Mat4::from_rotation_translation(rotation, center).inverse(),
+            half_size,
+            edge: number(volume, "BlendDistance").unwrap_or(0.0).max(0.0) as f32,
+        };
+        let better = match &best {
+            None => true,
+            Some((distance, best_priority, _)) => {
+                outside < *distance || (outside == *distance && priority > *best_priority)
+            }
+        };
+        if better {
+            best = Some((outside, priority, dust));
+        }
+    }
+    best.map(|(_, _, dust)| dust)
+}
+
+/// How much of dust's light goes forward without Glare, and with each step
+/// of it, as an Atmosphere's fog.
+const DUST_FORWARD: f64 = 0.6;
+const DUST_GLARE_FORWARD: f64 = 0.03;
 
 /// How much of `volume`'s look the camera at `camera` gets: 1 inside its
 /// box, falling evenly to 0 at `BlendDistance` studs outside it.
@@ -107,7 +174,11 @@ fn applied(
             crate::time_of_day::sun_and_sky_through(lighting, Some(atmosphere), &mut look.sky);
         look.fog = crate::fog::atmosphere_fog(atmosphere);
     }
-    if let Some(fog) = first(ClassName::FogEffect) {
+    // A FogEffect with a Density is dust in the box (`nearest_dust`), not
+    // the camera's fog.
+    if let Some(fog) = first(ClassName::FogEffect)
+        .filter(|fog| !number(fog, "Density").is_some_and(|density| density > 0.0))
+    {
         let start = number(fog, "Start").unwrap_or(0.0).max(0.0);
         let end = number(fog, "End").unwrap_or(200.0).max(start);
         let color = fog.property("Color").and_then(Value::as_color3);
@@ -487,5 +558,44 @@ mod tests {
         let storage = world.replicated_storage();
         world.set_parent(stored, Some(storage)).unwrap();
         assert!(close(exposure_at(&world, 0.0), 1.5));
+    }
+    #[test]
+    fn a_fog_effect_with_a_density_fills_its_volumes_box_with_dust_seen_from_anywhere() {
+        let mut world = World::new();
+        let lighting = world.lighting();
+        set(&mut world, lighting, "FogEnd", Value::Number(500.0));
+        // A carriage-sized box around x = 0, from 1 to 9 studs up.
+        let room = volume(&mut world, [0.0, 5.0, -20.0], [9.0, 8.0, 40.0], 0.5);
+        let fog = child(&mut world, room, ClassName::FogEffect);
+        set(&mut world, fog, "Density", Value::Number(0.03));
+        set(&mut world, fog, "Glare", Value::Number(5.0));
+        set(
+            &mut world,
+            fog,
+            "Color",
+            Value::Color3(Color3::new(1.0, 0.9, 0.8)),
+        );
+        for x in [0.0, 300.0] {
+            let look = seen_from(&world, x);
+            let dust = look.fog.dust.expect("dust, inside the box or far away");
+            assert!(close(dust.density, 0.03));
+            assert_eq!(dust.color, [1.0, 0.9, 0.8]);
+            assert!(
+                close(dust.forward_scattering, 0.75),
+                "{}",
+                dust.forward_scattering
+            );
+            assert!(close(dust.edge, 0.5));
+            assert_eq!(dust.half_size, Vec3::new(4.5, 4.0, 20.0));
+            let middle = dust.to_box.transform_point3(Vec3::new(0.0, 5.0, -20.0));
+            assert!(middle.length() < 1e-4, "{middle}");
+            // Lighting's own fog stays: dust doesn't replace the camera's fog.
+            assert!(close(look.fog.end, 500.0), "at x = {x}: {}", look.fog.end);
+        }
+        // Without a Density it's distance fog inside the box, as before.
+        set(&mut world, fog, "Density", Value::Number(0.0));
+        let look = seen_from(&world, 0.0);
+        assert!(look.fog.dust.is_none());
+        assert!(close(look.fog.end, 200.0));
     }
 }

@@ -1400,6 +1400,13 @@ impl ClassName {
                 ),
                 ("Start", Value::Number(0.0)),
                 ("End", Value::Number(200.0)),
+                // Above 0: dust or mist filling the volume's box instead,
+                // taking away this much of the light per stud and lit by
+                // the sun, its shadows and lamps; Start and End aren't used.
+                ("Density", Value::Number(0.0)),
+                // How much of the dust's light goes forward, away from the
+                // sun, 0 to 10, as an Atmosphere's Glare.
+                ("Glare", Value::Number(0.0)),
             ],
             ClassName::BloomEffect => vec![
                 ("Enabled", Value::Bool(true)),

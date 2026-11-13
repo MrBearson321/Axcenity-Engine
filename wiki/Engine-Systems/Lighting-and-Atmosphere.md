@@ -61,7 +61,7 @@ flowchart LR
 | Reflection probes | Editor bakes a cubemap at a part's middle; used inside its box with `BlendDistance` | Left out at Low |
 | Light probe volumes | Grid of probes in a part's box (`Spacing`, max 16 a side); diffuse indirect light | Bake fingerprint warns when stale; the editor's Light Probes overlay (R18.1) shows each probe's baked light and each volume's bake state; probes baked inside a solid are invalid and left out of the blend (R18.2); the sky's share of each probe's light is baked apart and scaled by the sky drawn now, so a dimming or tinted sky relights volumes without tracing (R18.3); Bake Probes runs about 30 ms a frame (`editor/src/app/probe_bake.rs`, one `LightProbeBaker` for every volume) with a progress window and Cancel, so a big bake no longer freezes the editor |
 | Real-time GI | Re-traces `PROBES_PER_FRAME` (2) probes each frame with a kept `ProbeCamera` | `realtime_gi` setting, off by default |
-| Volumetric fog | Froxel grid in compute, sun shafts | Setting |
+| Volumetric fog | Froxel grid in compute: sun shafts from 8 shadow samples a cell, height fog's own light by how open the air is (light probes), dust in a GraphicsVolume's box (FogEffect `Density`) | Setting |
 
 ## Integration
 

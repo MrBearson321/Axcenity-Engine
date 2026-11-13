@@ -11,7 +11,7 @@ use glam::Vec3;
 
 use super::lighting::linear_color;
 use super::*;
-use crate::draw_list::Fog;
+use crate::draw_list::{Dust, Fog};
 
 /// The volumetric fog's cells across the screen, down it and along each
 /// ray. Must match `GRID` in volumetric_fog.wgsl.
@@ -28,19 +28,38 @@ const GRID_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub(super) struct FogRaw {
     pub(super) color: [f32; 4],
+    /// x, y: distance fog's start and end; z: the lamps' share scattered;
+    /// w: 1 while the volumetric fog scatters height fog's own light
+    /// within its reach (the surfaces leave it out there).
     pub(super) distance: [f32; 4],
     pub(super) height: [f32; 4],
     pub(super) sun: [f32; 4],
     pub(super) sun_direction: [f32; 4],
+    /// The dust (`Fog::dust`): x the light it takes away per stud (0 for
+    /// none), y how much of its light goes forward, z the studs over which
+    /// it thins at the box's faces.
+    pub(super) dust: [f32; 4],
+    /// How much of the light it takes away the dust scatters (linear).
+    pub(super) dust_color: [f32; 4],
+    /// The sun's light the dust scatters (the sun's times its color).
+    pub(super) dust_sun: [f32; 4],
+    /// The sky's light it scatters with nothing in the way (the sky's
+    /// average times its color), for when the volumetric fog is off.
+    pub(super) dust_ambient: [f32; 4],
+    /// The rows of the world to the box's space, and half its size.
+    pub(super) dust_box: [[f32; 4]; 3],
+    pub(super) dust_extent: [f32; 4],
 }
 
 impl FogRaw {
     /// `fog` with the sky's color around the horizon (`horizon`, linear
-    /// light) for fog that takes it, the sun as the frame has it, and the
-    /// volumetric fog reaching `reach` studs (0 while it's off).
+    /// light) for fog that takes it, the sky's average light (`sky`) for
+    /// dust, the sun as the frame has it, and the volumetric fog reaching
+    /// `reach` studs (0 while it's off).
     pub(super) fn new(
         fog: &Fog,
         horizon: Vec3,
+        sky: Vec3,
         sun_direction: Vec3,
         sun_radiance: Vec3,
         reach: f32,
@@ -48,6 +67,41 @@ impl FogRaw {
         if !fog.is_drawn() {
             return Self::default();
         }
+        let mut raw = Self::without_dust(fog, horizon, sun_direction, sun_radiance, reach);
+        if let Some(dust) = fog.dust.filter(Dust::is_drawn) {
+            let color = linear_color(dust.color).max(Vec3::ZERO);
+            let forward = if dust.forward_scattering.is_finite() {
+                dust.forward_scattering.clamp(-0.95, 0.95)
+            } else {
+                0.0
+            };
+            let edge = if dust.edge.is_finite() {
+                dust.edge.max(0.0)
+            } else {
+                0.0
+            };
+            raw.dust = [dust.density, forward, edge, 0.0];
+            raw.dust_color = color.extend(0.0).to_array();
+            raw.dust_sun = (sun_radiance * color).extend(0.0).to_array();
+            raw.dust_ambient = (sky.max(Vec3::ZERO) * color).extend(0.0).to_array();
+            let rows = dust.to_box.transpose();
+            raw.dust_box = [
+                rows.x_axis.to_array(),
+                rows.y_axis.to_array(),
+                rows.z_axis.to_array(),
+            ];
+            raw.dust_extent = dust.half_size.extend(0.0).to_array();
+        }
+        raw
+    }
+
+    fn without_dust(
+        fog: &Fog,
+        horizon: Vec3,
+        sun_direction: Vec3,
+        sun_radiance: Vec3,
+        reach: f32,
+    ) -> Self {
         let color = fog.color.map_or(horizon, linear_color);
         let (start, end) = if fog.has_distance_fog() {
             (fog.start.max(0.0), fog.end.max(fog.start.max(0.0)))
@@ -69,20 +123,27 @@ impl FogRaw {
         } else {
             0.0
         };
+        // Within the volumetric fog's reach, the grid scatters height fog's
+        // own light too, by how open the air is to the sky there (so the
+        // air of a closed room doesn't glow like the open air outside);
+        // distance fog keeps its flat color.
+        let own_in_grid = reach > 0.0 && density > 0.0 && start >= NEVER;
         Self {
             color: color.extend(1.0).to_array(),
-            distance: [start, end, scattering, 0.0],
+            distance: [start, end, scattering, f32::from(u8::from(own_in_grid))],
             height: [density, fog.height, fog.falloff.max(0.001), reach],
             sun: (sun_radiance * scattering).extend(forward).to_array(),
             sun_direction: sun_direction.extend(0.0).to_array(),
+            ..Self::default()
         }
     }
 }
 
 /// Whether the volumetric fog is drawn for `fog`: the settings allow it,
-/// and the world has height fog that scatters light.
+/// and the world has height fog that scatters light, or dust.
 pub(super) fn volumetric_drawn(fog: &Fog, graphics: &EffectiveGraphics) -> bool {
-    graphics.volumetric_fog && fog.has_height_fog() && fog.sun_scattering > 0.0
+    graphics.volumetric_fog
+        && ((fog.has_height_fog() && fog.sun_scattering > 0.0) || fog.has_dust())
 }
 
 /// The volumetric fog's grid, its passes, and the frame's bindings as its
@@ -376,7 +437,14 @@ mod tests {
 
     #[test]
     fn no_fog_is_drawn_by_default() {
-        let raw = FogRaw::new(&Fog::default(), Vec3::ONE, Vec3::Y, Vec3::ONE, 0.0);
+        let raw = FogRaw::new(
+            &Fog::default(),
+            Vec3::ONE,
+            Vec3::ONE,
+            Vec3::Y,
+            Vec3::ONE,
+            0.0,
+        );
         assert_eq!(raw, FogRaw::default());
         assert_eq!(raw.color[3], 0.0, "the shaders leave the color as it is");
     }
@@ -389,7 +457,7 @@ mod tests {
             end: 50.0,
             ..Fog::default()
         };
-        let raw = FogRaw::new(&fog, Vec3::ZERO, Vec3::Y, Vec3::splat(3.0), 0.0);
+        let raw = FogRaw::new(&fog, Vec3::ZERO, Vec3::ONE, Vec3::Y, Vec3::splat(3.0), 0.0);
         assert_eq!(raw.color, [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(raw.distance[..2], [10.0, 50.0]);
         assert_eq!(raw.height[0], 0.0, "no height fog");
@@ -408,10 +476,89 @@ mod tests {
             ..Fog::default()
         };
         let horizon = Vec3::new(0.2, 0.3, 0.4);
-        let raw = FogRaw::new(&fog, horizon, Vec3::Y, Vec3::splat(2.0), VOLUMETRIC_REACH);
+        let raw = FogRaw::new(
+            &fog,
+            horizon,
+            Vec3::ONE,
+            Vec3::Y,
+            Vec3::splat(2.0),
+            VOLUMETRIC_REACH,
+        );
         assert_eq!(raw.color, [0.2, 0.3, 0.4, 1.0]);
         assert!(raw.distance[0] >= NEVER, "no distance fog");
         assert_eq!(raw.height, [0.01, -5.0, 20.0, VOLUMETRIC_REACH]);
         assert_eq!(raw.sun, [1.0, 1.0, 1.0, 0.6]);
+    }
+    #[test]
+    fn height_fogs_own_light_moves_into_the_volumetric_grid_but_distance_fogs_does_not() {
+        let height = Fog {
+            color: None,
+            density: 0.01,
+            sun_scattering: 0.8,
+            ..Fog::default()
+        };
+        let sky = Vec3::splat(0.3);
+        let on = FogRaw::new(&height, sky, sky, Vec3::Y, Vec3::ONE, VOLUMETRIC_REACH);
+        assert_eq!(
+            on.distance[3], 1.0,
+            "the grid scatters it by how open the air is"
+        );
+        let off = FogRaw::new(&height, sky, sky, Vec3::Y, Vec3::ONE, 0.0);
+        assert_eq!(
+            off.distance[3], 0.0,
+            "without the grid, the surfaces keep it"
+        );
+        let distance = Fog {
+            start: 10.0,
+            end: 50.0,
+            ..height
+        };
+        let both = FogRaw::new(&distance, sky, sky, Vec3::Y, Vec3::ONE, VOLUMETRIC_REACH);
+        assert_eq!(
+            both.distance[3], 0.0,
+            "distance fog's flat color stays as it was"
+        );
+    }
+
+    #[test]
+    fn dust_packs_its_box_color_and_the_suns_light_it_scatters() {
+        let middle = Vec3::new(5.0, 2.0, -10.0);
+        let fog = Fog {
+            dust: Some(Dust {
+                density: 0.03,
+                color: [1.0, 1.0, 1.0],
+                forward_scattering: 0.7,
+                to_box: glam::Mat4::from_translation(-middle),
+                half_size: Vec3::new(4.0, 3.0, 20.0),
+                edge: 0.5,
+            }),
+            ..Fog::default()
+        };
+        assert!(fog.is_drawn() && fog.has_dust());
+        let raw = FogRaw::new(
+            &fog,
+            Vec3::ZERO,
+            Vec3::splat(0.2),
+            Vec3::Y,
+            Vec3::splat(3.0),
+            0.0,
+        );
+        assert_eq!(raw.color[3], 1.0, "dust alone is fog to draw");
+        assert_eq!(raw.dust, [0.03, 0.7, 0.5, 0.0]);
+        assert_eq!(raw.dust_sun, [3.0, 3.0, 3.0, 0.0]);
+        assert_eq!(raw.dust_ambient, [0.2, 0.2, 0.2, 0.0]);
+        // The box's rows take its middle to 0.
+        let row = |r: [f32; 4]| r[0] * middle.x + r[1] * middle.y + r[2] * middle.z + r[3];
+        assert_eq!(raw.dust_box.map(row), [0.0; 3]);
+        assert_eq!(raw.dust_extent, [4.0, 3.0, 20.0, 0.0]);
+        // Without a box worth drawing, nothing.
+        let empty = Fog {
+            dust: Some(Dust {
+                density: 0.0,
+                ..fog.dust.unwrap()
+            }),
+            ..Fog::default()
+        };
+        assert!(!empty.is_drawn());
     }
 }

@@ -28,6 +28,8 @@ struct Temporal {
     // This frame's and last frame's views, without the jitter.
     view_proj: mat4x4<f32>,
     previous_view_proj: mat4x4<f32>,
+    // Last frame's time and wind, for swayed plants (shader.wgsl).
+    previous_clock: vec4<f32>,
     // Turns this frame's clip space (as drawn, with the jitter) to the world.
     inv_view_proj: mat4x4<f32>,
     // x: 1 when last frame's history can be used, y: this frame's share of
