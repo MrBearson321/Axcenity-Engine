@@ -2,7 +2,9 @@
 //! of probes and each ReflectionProbe's view from the middle of its part is
 //! drawn on the GPU, saved in `assets/probes`, and named by its `Bake`, all
 //! one undo step. A light probe bake keeps a fingerprint of the world, so a
-//! volume whose bake is out of date gets a warning in the Explorer.
+//! volume whose bake is out of date gets a warning in the Explorer, and the
+//! probes that stood inside a solid part or under the ground, which surfaces
+//! leave out (roadmap R18.2).
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -140,7 +142,9 @@ impl EditorApp {
                     continue;
                 }
             };
+            let invalid = invalid_probes(&self.world, &self.assets, volume.id, &grid.points);
             let Some(probes) = axcenity_assets::LightProbes::new(grid.counts, fingerprint, probes)
+                .and_then(|probes| probes.with_invalid(invalid))
             else {
                 self.output.error(format!(
                     "Could not bake the light probes in {part_name}: the light came back \
@@ -310,9 +314,83 @@ fn bake_path(
     path_of(&name)
 }
 
+/// The probes of `volume` standing at `points` inside a solid: a colliding
+/// part (not the volume's own) or under a Terrain's ground (roadmap R18.2).
+fn invalid_probes(
+    world: &World,
+    assets: &Assets,
+    volume: InstanceId,
+    points: &[axcenity_render::glam::Vec3],
+) -> Vec<u32> {
+    let own: Vec<InstanceId> = world
+        .get(volume)
+        .and_then(|v| v.parent())
+        .into_iter()
+        .collect();
+    let points: Vec<Vector3> = points
+        .iter()
+        .map(|point| Vector3::new(point.x, point.y, point.z))
+        .collect();
+    axcenity_physics::inside_solids(world, assets, &points, &own)
+        .into_iter()
+        .zip(0u32..)
+        .filter_map(|(inside, index)| inside.then_some(index))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R18.2: a wall through a volume makes the probes inside it invalid;
+    /// the volume's own part, colliding or not, doesn't.
+    #[test]
+    fn probes_inside_a_wall_are_invalid_and_the_volumes_own_part_is_not() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let room = world.create(ClassName::Part).unwrap();
+        world.set_parent(room, Some(workspace)).unwrap();
+        let set = |world: &mut World, id, name: &str, value| {
+            world.set_property(id, name, value).unwrap();
+        };
+        set(
+            &mut world,
+            room,
+            "Size",
+            Value::Vector3(Vector3::new(12.0, 4.0, 4.0)),
+        );
+        set(
+            &mut world,
+            room,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 2.0, 0.0)),
+        );
+        set(&mut world, room, "Anchored", Value::Bool(true));
+        let volume = world.create(ClassName::LightProbeVolume).unwrap();
+        world.set_parent(volume, Some(room)).unwrap();
+        // Probes 4 apart: three along X, at -4, 0 and 4.
+        let wall = world.create(ClassName::Part).unwrap();
+        world.set_parent(wall, Some(workspace)).unwrap();
+        set(
+            &mut world,
+            wall,
+            "Size",
+            Value::Vector3(Vector3::new(1.0, 10.0, 10.0)),
+        );
+        set(
+            &mut world,
+            wall,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 2.0, 0.0)),
+        );
+        set(&mut world, wall, "Anchored", Value::Bool(true));
+        let grid = axcenity_scene::light_probe_points(&world, volume).unwrap();
+        assert_eq!(grid.counts, [3, 1, 1]);
+        let assets = Assets::default();
+        assert_eq!(invalid_probes(&world, &assets, volume, &grid.points), [1]);
+        set(&mut world, wall, "CanCollide", Value::Bool(false));
+        assert!(invalid_probes(&world, &assets, volume, &grid.points).is_empty());
+    }
 
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = axcenity_render::adapters::instance();

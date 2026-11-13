@@ -157,6 +157,9 @@ pub struct LightProbeGrid {
     /// Y, Z and X), each linear red, green and blue, already blurred over a
     /// hemisphere and divided by π.
     pub probes: Arc<Vec<[[f32; 3]; 4]>>,
+    /// The probes that stood inside a solid when baked, by their place in
+    /// `probes`: surfaces leave them out of their blend (roadmap R18.2).
+    pub invalid: Arc<Vec<u32>>,
 }
 
 impl fmt::Debug for LightProbeGrid {
