@@ -1,7 +1,8 @@
 //! Scene pipelines, meshes, textures and materials on the GPU.
 //!
 //! A caller's mesh or texture is uploaded the first time it is drawn and
-//! dropped after `KEEP_UNDRAWN_FRAMES` frames without a draw. Color textures
+//! dropped after `KEEP_UNDRAWN_FRAMES` frames and `KEEP_UNDRAWN_SECONDS`
+//! seconds without a draw. Color textures
 //! are stored as bytes and sampled through an sRGB view.
 
 use std::borrow::Cow;

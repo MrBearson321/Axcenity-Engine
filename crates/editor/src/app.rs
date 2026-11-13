@@ -176,12 +176,14 @@ const IMPORT_HOVER: &str = "Import models (.gltf, .glb or .fbx), images, sounds 
 /// The same cap as the player's.
 const MAX_FRAME_SECONDS: f64 = 0.1;
 /// How many frames the loading screen stays up after a project opens, at
-/// the least: then it stays while the scene's meshes and textures are
-/// still on their way to the GPU (see `app/session.rs`).
+/// the least: then it stays while the world's meshes and textures are
+/// still on their way to the GPU, and until frames come quickly (see
+/// `app/session.rs`).
 const FINISHING_FRAMES: u64 = 2;
-/// The longest the loading screen waits for the scene's meshes and
-/// textures, in seconds: what's still on its way after that arrives in
-/// the open editor (drawn white, or not yet drawn, until it does).
+/// The longest the loading screen waits for the world's meshes and
+/// textures and for frames to settle, in seconds: what's still on its way
+/// after that arrives in the open editor (drawn white, or not yet drawn,
+/// until it does).
 const FINISHING_LIMIT: f32 = 60.0;
 /// After the last input, frames keep coming at the display's rate for this
 /// long (see [`EditorApp::keep_frames_steady`]).
@@ -402,6 +404,9 @@ pub struct EditorApp {
     /// seen on their way to the GPU at once (its count's total).
     cover_started: Option<Instant>,
     cover_uploads: usize,
+    /// Whether frames have come quickly since: the cover stays until they
+    /// do, so the editor answers as soon as it's gone.
+    cover_settling: loading::Settling,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
     /// The script tabs closed last in each project, for the welcome page.
@@ -1027,6 +1032,7 @@ impl EditorApp {
             cover_shown: false,
             cover_started: None,
             cover_uploads: 0,
+            cover_settling: loading::Settling::default(),
             recent: Vec::new(),
             recent_tabs: welcome::RecentTabs::default(),
             start: StartScreen::default(),

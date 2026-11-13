@@ -358,6 +358,7 @@ impl ScenePipeline {
             white_texture,
             plain_material,
             uploader: None,
+            frame_clock: std::collections::VecDeque::new(),
             custom_meshes: FxHashMap::default(),
             textures: FxHashMap::default(),
             full_textures: FxHashMap::default(),
@@ -2604,6 +2605,36 @@ impl ScenePipeline {
         }
     }
 
+    /// Asks the upload thread for every mesh (with its levels of detail)
+    /// and color texture of `list`'s items, drawn this frame or not, so
+    /// turning the camera later finds them on the GPU. Only while
+    /// background uploads are on.
+    pub(super) fn preload(&mut self, list: &DrawList) {
+        if self.uploader.is_none() {
+            return;
+        }
+        let frame = self.frame;
+        let chunked = list.chunks.iter().flat_map(|chunk| chunk.items.iter());
+        for item in list.items.iter().chain(chunked) {
+            if item.material.terrain.is_some() {
+                continue;
+            }
+            if let Shape::Mesh(source) = &item.shape {
+                let levels = (1..=source.lod_count()).filter_map(|level| source.lod(level));
+                for mesh in std::iter::once(source).chain(levels) {
+                    if !self.custom_meshes.contains_key(&mesh.key())
+                        && let Some(uploader) = &mut self.uploader
+                    {
+                        uploader.mesh(mesh);
+                    }
+                }
+            }
+            for source in material_textures(item).into_iter().flatten() {
+                self.note_texture(source, frame, false);
+            }
+        }
+    }
+
     /// How many background uploads are still on their way.
     pub(super) fn pending_uploads(&self) -> usize {
         self.uploader
@@ -2646,7 +2677,19 @@ impl ScenePipeline {
     /// drawn lately.
     pub(super) fn forget_undrawn(&mut self) {
         let frame = self.frame;
-        let recent = |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES;
+        // The first frame of the last `KEEP_UNDRAWN_SECONDS`.
+        let now = std::time::Instant::now();
+        self.frame_clock.push_back((frame, now));
+        while self
+            .frame_clock
+            .front()
+            .is_some_and(|&(_, at)| now.duration_since(at).as_secs_f32() > KEEP_UNDRAWN_SECONDS)
+        {
+            self.frame_clock.pop_front();
+        }
+        let since = self.frame_clock.front().map_or(frame, |&(first, _)| first);
+        let recent =
+            |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES || last_drawn >= since;
         self.custom_meshes
             .retain(|_, cached| recent(cached.last_drawn));
         self.textures.retain(|_, cached| recent(cached.last_drawn));

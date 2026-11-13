@@ -67,7 +67,7 @@ flowchart TB
 
 1. The host builds a `DrawList` ([Scene bridge](Scene-Bridge.md)) in the frame's `draw.scene` / `draw.ui` steps (player) or in the viewport (editor).
 2. `Renderer::render` / `TextureRenderer::render` → `ScenePipeline::draw`: plan (cull, LOD, batch, shadow casters), upload what's new, fit the texture budget, record passes, submit.
-3. Resources not drawn for 600 frames are freed. GPU timings come back a frame or two later without the CPU waiting.
+3. Resources not drawn for 600 frames and 10 seconds are freed. GPU timings come back a frame or two later without the CPU waiting.
 
 ## Dependencies
 
