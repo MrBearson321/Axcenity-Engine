@@ -11,8 +11,9 @@
 //! reads, so nothing comes back to the CPU. Hits are lit by the probes as
 //! last updated, so light bounces again with each update.
 //!
-//! Exists only while the setting is on, the GPU can ray trace and light
-//! probe volumes are drawn.
+//! Exists only while the setting is on and the GPU can ray trace. The
+//! camera then brings probes of its own (`light_probes.rs`), so it needs
+//! no light probe volume; any drawn are traced too.
 
 use std::num::NonZeroU64;
 
@@ -21,11 +22,11 @@ use crate::graphics::{EffectiveGraphics, RayTracedGlobalIllumination};
 use super::light_probes::LightProbes;
 
 /// The most probes in one batch: High's.
-const MOST_PROBES: u32 = 128;
+const MOST_PROBES: u32 = 512;
 
 /// About how long, in seconds, a probe's light takes to settle after a
 /// change (its blend over updates, as frames come at 60 a second).
-const SETTLE_SECONDS: f32 = 0.25;
+const SETTLE_SECONDS: f32 = 0.5;
 
 /// Must match `RayGi` in ray_gi.wgsl.
 #[repr(C)]
@@ -275,11 +276,15 @@ impl RayGlobalIllumination {
     }
 }
 
-/// Whether ray traced GI is drawn with `graphics` for `probes` light probes.
-pub(super) fn traced(graphics: &EffectiveGraphics, probes: u32) -> bool {
+/// Whether `graphics` asks for ray traced GI (and the GPU can trace rays).
+pub(super) fn wanted(graphics: &EffectiveGraphics) -> bool {
     graphics.ray_queries
         && graphics.ray_traced_global_illumination != RayTracedGlobalIllumination::Off
-        && probes > 0
+}
+
+/// Whether ray traced GI is drawn with `graphics` for `probes` light probes.
+pub(super) fn traced(graphics: &EffectiveGraphics, probes: u32) -> bool {
+    wanted(graphics) && probes > 0
 }
 
 /// How much of what a probe had is kept when `count` of `total` probes are

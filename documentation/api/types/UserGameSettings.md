@@ -190,5 +190,5 @@ Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) o
 UserGameSettings.RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
 ```
 
-Hardware ray traced global illumination: Off, Low (32 light probes a frame, 64 rays each), Medium (64, 128 rays) or High (128, 256 rays). Off at every preset. On, the world's LightProbeVolumes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts; it does nothing without a LightProbeVolume. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).
+Hardware ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).
 
