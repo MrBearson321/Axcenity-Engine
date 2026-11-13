@@ -132,9 +132,9 @@ fn cell_sun_visibility(id: vec3<u32>) -> f32 {
         if weight >= 1.0 {
             return traced;
         }
-        return mix(cascade_sun_visibility(id), traced, weight);
+        return mix(cell_cascade_sun(id), traced, weight);
     }
-    return cascade_sun_visibility(id);
+    return cell_cascade_sun(id);
 }
 
 // How much sunlight reaches cell `id`'s air by ray_shadows.wgsl's
@@ -153,7 +153,7 @@ fn traced_air(id: vec3<u32>) -> f32 {
 }
 
 // The same from the sun's shadow maps.
-fn cascade_sun_visibility(id: vec3<u32>) -> f32 {
+fn cell_cascade_sun(id: vec3<u32>) -> f32 {
     if frame.shadow.x == 0.0 {
         return 1.0;
     }
