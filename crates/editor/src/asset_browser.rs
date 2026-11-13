@@ -390,6 +390,12 @@ impl AssetBrowser {
         self.picked = vec![path.to_owned()];
     }
 
+    /// The paths picked now.
+    #[cfg(test)]
+    pub fn picked(&self) -> &[String] {
+        &self.picked
+    }
+
     /// The files nothing uses, for the Unused filter.
     pub fn set_unused(&mut self, unused: Vec<String>) {
         self.unused = Some(unused.into_iter().collect());
