@@ -46,7 +46,7 @@ pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, lay
 #[cfg(feature = "debug-views")]
 pub use renderer::DebugView;
 pub use renderer::{
-    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES,
+    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES, LightProbeBaker,
     MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RayTracingStats, RenderStats, Renderer,
     SHADOW_CASCADE_COUNT, ShaderError, SurfaceShader, TextureRenderer,
 };

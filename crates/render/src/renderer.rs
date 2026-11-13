@@ -45,7 +45,7 @@ use glyphon::{
 };
 pub use gpu_particles::MAX_GPU_PARTICLES;
 pub use gpu_timer::FramePass;
-pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
+pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, LightProbeBaker, PROBE_BAKE_SIZE};
 pub use ray_tracing::RayTracingStats;
 pub use surface_shaders::{ShaderError, SurfaceShader};
 
