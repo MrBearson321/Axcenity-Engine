@@ -6,7 +6,8 @@
 //! with FXAA on an LDR target that FXAA then smooths into the output. While
 //! the render scale is below 1, both stay at the scene's size and an
 //! FSR 1-style upscale and sharpen (`upscale.wgsl`) take the picture to the
-//! output's.
+//! output's. With TAA on, TAA upscales instead (`temporal.rs`): bloom and the
+//! composite pass read its output-sized picture, and only the sharpen runs.
 
 use super::gpu::{create_depth_view, target_bytes};
 use super::grading::GradingPass;
@@ -270,21 +271,28 @@ impl PostPasses {
             }
         }
         if let Some(upscale) = upscale {
-            fullscreen_pass(
-                encoder,
-                "upscale",
-                &upscale.upscaled,
-                clear,
-                &self.easu,
-                &[&upscale.source_group],
-            );
+            // TAA upscaled already: only the sharpen is left.
+            let sharpened = match &upscale.upscaled {
+                Some((upscaled, group)) => {
+                    fullscreen_pass(
+                        encoder,
+                        "upscale",
+                        upscaled,
+                        clear,
+                        &self.easu,
+                        &[&upscale.source_group],
+                    );
+                    group
+                }
+                None => &upscale.source_group,
+            };
             fullscreen_pass(
                 encoder,
                 "sharpen upscaled",
                 target,
                 clear,
                 &self.rcas,
-                &[&upscale.upscaled_group],
+                &[sharpened],
             );
         }
     }
@@ -381,8 +389,19 @@ impl FrameTargets {
             view: texture("scene (MSAA)", (width, height), HDR_FORMAT, samples),
             _alive: alive.msaa.clone(),
         });
+        // Upscaled only when the scene is smaller than the output; a render
+        // scale above 1 is scaled down by the composite pass's sampler. With
+        // TAA, TAA upscales (G9 stage 2), and what comes after it (bloom, the
+        // composite pass) works at the output's size.
+        let upscaled = width < output.0 && height < output.1;
+        let taa_upscales = upscaled && occlusion && temporal.taa;
+        let source = if taa_upscales {
+            output
+        } else {
+            (width, height)
+        };
         let mut levels = Vec::new();
-        let (mut level_width, mut level_height) = ((width / 2).max(1), (height / 2).max(1));
+        let (mut level_width, mut level_height) = ((source.0 / 2).max(1), (source.1 / 2).max(1));
         loop {
             levels.push(make("bloom level", level_width, level_height));
             let last = (output.0 >> BLOOM_LEVELS, output.1 >> BLOOM_LEVELS);
@@ -427,22 +446,6 @@ impl FrameTargets {
         let occlusion = occlusion.then(|| {
             OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
         });
-        let temporal = occlusion
-            .as_ref()
-            .filter(|_| temporal.any())
-            .map(|prepass| {
-                TemporalTargets::new(
-                    device,
-                    temporal_passes,
-                    (width, height),
-                    SceneViews {
-                        hdr: &hdr_view,
-                        depth: &prepass.depth_view,
-                    },
-                    temporal,
-                    alive,
-                )
-            });
         let depth_of_field = occlusion
             .as_ref()
             .filter(|_| depth_of_field)
@@ -455,11 +458,37 @@ impl FrameTargets {
                     &alive.depth_of_field,
                 )
             });
-        // What bloom and the composite pass read: the scene, or with depth
-        // of field its blurred copy.
-        let scene = depth_of_field
+        // While TAA upscales, depth of field is drawn before it, on the
+        // scene, and TAA reads its blurred copy.
+        let taa_source = depth_of_field
             .as_ref()
+            .filter(|_| taa_upscales)
             .map_or(&hdr_view, |target| &target.view);
+        let temporal = occlusion
+            .as_ref()
+            .filter(|_| temporal.any())
+            .map(|prepass| {
+                TemporalTargets::new(
+                    device,
+                    temporal_passes,
+                    ((width, height), taa_upscales.then_some(output)),
+                    SceneViews {
+                        hdr: &hdr_view,
+                        depth: &prepass.depth_view,
+                        taa_source,
+                    },
+                    temporal,
+                    alive,
+                )
+            });
+        // What bloom and the composite pass read: the scene, or with depth
+        // of field its blurred copy, or TAA's upscaled picture.
+        let scene = match temporal.as_ref().and_then(TemporalTargets::upscaled_view) {
+            Some(upscaled) => upscaled,
+            None => depth_of_field
+                .as_ref()
+                .map_or(&hdr_view, |target| &target.view),
+        };
         let prefilter_group = group(&post.layout, scene, None);
         // Index 0 is never used, but keeps the lists indexed by level.
         let downsample_groups = (0..levels.len())
@@ -469,11 +498,13 @@ impl FrameTargets {
             .map(|level| group(&post.layout, &levels[level], None))
             .collect();
         let composite_group = group(&post.composite_layout, scene, Some(&levels[0]));
-        // Upscaled only when the scene is smaller than the output; a render
-        // scale above 1 is scaled down by the composite pass's sampler.
-        let upscaled = width < output.0 && height < output.1;
+        let taa_upscales = temporal.as_ref().is_some_and(TemporalTargets::upscales);
         // FXAA smooths the picture at the size it's drawn at.
-        let finished_size = if upscaled { (width, height) } else { output };
+        let finished_size = if upscaled && !taa_upscales {
+            (width, height)
+        } else {
+            output
+        };
         let fxaa = fxaa.then(|| {
             let view = texture("tone mapped (FXAA)", finished_size, FXAA_FORMAT, 1);
             FxaaTarget {
@@ -512,18 +543,21 @@ impl FrameTargets {
                         view_formats,
                     })
                 };
-            let finished = target("finished (to upscale)", (width, height), &[FXAA_FORMAT]);
+            let finished = target("finished (to upscale)", finished_size, &[FXAA_FORMAT]);
             let view = finished.create_view(&wgpu::TextureViewDescriptor {
                 format: Some(FXAA_FORMAT),
                 ..Default::default()
             });
             let source = finished.create_view(&wgpu::TextureViewDescriptor::default());
-            let upscaled = target("upscaled", output, &[])
-                .create_view(&wgpu::TextureViewDescriptor::default());
+            let upscaled = (!taa_upscales).then(|| {
+                let upscaled = target("upscaled", output, &[])
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let group = one_texture(&upscaled);
+                (upscaled, group)
+            });
             UpscaleTarget {
                 view,
                 source_group: one_texture(&source),
-                upscaled_group: one_texture(&upscaled),
                 upscaled,
                 _alive: alive.upscale.clone(),
             }
