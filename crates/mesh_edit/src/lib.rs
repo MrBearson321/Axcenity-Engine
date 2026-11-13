@@ -97,7 +97,7 @@ pub use generate::{Settings, generate, generate_for};
 pub use glb::{GlbMaterial, write_glb};
 pub use half_edge::{EditMesh, Face, HalfEdge, Polygon};
 pub use low_poly::{decimate_to, relax};
-pub use model_doc::{DocObject, LOD_RATIOS, ModelDoc, from_model};
+pub use model_doc::{DocObject, LOD_RATIOS, MIN_LOD_RATIO, ModelDoc, from_model};
 pub use modifiers::{
     Axis, Evaluated, MAX_COPIES, MAX_LEVELS, Modifier, ModifierKind, Purpose, clip, evaluate,
 };
@@ -108,7 +108,7 @@ pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
 pub use reference::{Reference, SurfacePoint};
 pub use rig::{ArmBone, Armature, Skin};
-pub use sculpt::{Sculpt, subdivide, voxel_remesh};
+pub use sculpt::{MeshFilter, Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;
 pub use solid::{Combined, Solid, combine, combine_parts, save_pieces, save_union, solid_of};

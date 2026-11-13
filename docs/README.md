@@ -29,6 +29,8 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Whole-frame benchmarks, the S10k scene, `--bench`, profiler spans and Tracy | [benchmarks.md](benchmarks.md) |
 | The competitive development roadmap (Paul's of 2026-11-12): each item's status against Unreal, Godot, s&box and Unity, the feature matrix, and the order of work (G items and R12–R20) | [research/competitive-development-roadmap.md](research/competitive-development-roadmap.md) |
 | The visual effects editor (R17): decisions D1–D7 (one particle system, NumberSequence and ColorSequence curves, the effect asset as a prefab, a module stack before a node graph) and stages R17.1–R17.5 | [research/vfx-editor.md](research/vfx-editor.md) |
+| Model Studio improvements (R15): the eleven requirements checked against main (seven met), decisions D1–D4 (sculpting by brushes and filters, collision as `_COL` objects with MeshPart `CollisionFidelity`, LODs left to the renderer, Blender launched not embedded) and stages R15.1–R15.4 | [research/model-studio-r15.md](research/model-studio-r15.md) |
+| Large-world authoring (R16): the section 6.5 audit, data layers as `DataLayer` objects named as tags, per-person layer and region visibility, regions as top-level Folders and Models, streaming while editing, `DataLayerService`, decisions D1–D6 and stages R16.2–R16.4 | [research/world-regions-r16.md](research/world-regions-r16.md) |
 | Global illumination improvements (R18): what probe volumes and real-time GI do today, the options weighed (overlay, invalid probes, sky light kept apart, auto placement, tiers; not L2 SH, SSGI, lightmaps or SDFGI), decisions D1–D5 and stages R18.1–R18.4 beside RT2 | [research/global-illumination.md](research/global-illumination.md) |
 | Platform expansion (R20, research only): what Android, iOS, the web, PC VR through OpenXR, consoles and advanced simulation would need from the engine, blockers per target, and the spike order | [research/platform-expansion.md](research/platform-expansion.md) |
 | The lighting engine audit (Paul's request of 2026-11-13): is the ray tracing real, what's missing, incomplete or unnecessary against Unreal 5 and NVIDIA RTX, and items LE1–LE7 (lamp shadows, fog volumes, traced shafts, terrain water, traced water reflections, path tracing, cut-outs in AO and GI) | [research/lighting-engine-audit.md](research/lighting-engine-audit.md) |
@@ -38,6 +40,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Selection or Properties | [editor/selection.md](editor/selection.md) |
 | Move, scale, rotate, or undo | [editor/transforms.md](editor/transforms.md) |
 | The Explorer tree | [editor/tree.md](editor/tree.md) |
+| Data layers: `DataLayerService`, `DataLayer`, the Layers panel, hidden and locked layers (`.axcenity/layers.json`) | [editor/layers.md](editor/layers.md) |
 | Script tabs, file watching, hot reload of scripts with their state kept, or rebuilding the engine | [editor/scripts.md](editor/scripts.md) |
 | Model import or the Animation panel | [editor/import.md](editor/import.md) |
 | The Model Studio tab, editable meshes (`EditMesh`, `ModelDoc`), modeling operations (`MeshOp`), modifiers and the `.meshedit.json` sidecar, Generate LODs, saving `.glb` | [editor/model-studio.md](editor/model-studio.md) |

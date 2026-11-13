@@ -566,6 +566,14 @@ fn sculpting_a_500k_triangle_mesh_stays_above_30_frames_a_second() {
         SculptTool::Grab,
         SculptTool::SnakeHook,
         SculptTool::Mask,
+        // R15.1's.
+        SculptTool::Layer,
+        SculptTool::Blob,
+        SculptTool::Scrape,
+        SculptTool::Fill,
+        SculptTool::DrawSharp,
+        SculptTool::Nudge,
+        SculptTool::ElasticGrab,
     ] {
         sculpt.begin_stroke();
         let mut frames = Vec::new();
@@ -603,6 +611,19 @@ fn sculpting_a_500k_triangle_mesh_stays_above_30_frames_a_second() {
         assert!(mean < budget, "{}: {mean:?} a frame", tool.label());
         assert!(slow < budget, "{}: 95% within {slow:?}", tool.label());
     }
+    // R15.1: a Mesh Filter over all of it is one click, not a frame each,
+    // but shouldn't stall the window either.
+    for filter in crate::sculpt::MeshFilter::ALL {
+        let started = Instant::now();
+        assert!(sculpt.filter(filter, 0.2));
+        let took = started.elapsed();
+        println!("Mesh Filter {}: {took:?}", filter.label());
+        assert!(
+            took < Duration::from_secs(1),
+            "{}: {took:?}",
+            filter.label()
+        );
+    }
     let mut mesh = mesh;
     let written = Instant::now();
     sculpt.write_back(&mut mesh);
@@ -610,4 +631,234 @@ fn sculpting_a_500k_triangle_mesh_stays_above_30_frames_a_second() {
         "built in {build_time:?}; the stroke's vertices back in the mesh in {:?}",
         written.elapsed()
     );
+}
+
+/// How far each vertex of `after` moved from `before`.
+fn moves(before: &Sculpt, after: &Sculpt) -> Vec<Vec3> {
+    before
+        .positions()
+        .iter()
+        .zip(after.positions())
+        .map(|(p, q)| *q - *p)
+        .collect()
+}
+
+/// R15.1: the brushes added after Phase 60, each its own way.
+#[test]
+fn the_r15_brushes_move_the_surface_their_ways() {
+    let mesh = remeshed_sphere();
+    let untouched = Sculpt::new(&mesh);
+    let run = |settings: Stroke, from: Vec3, to: Vec3| {
+        let mut sculpt = Sculpt::new(&mesh);
+        assert!(
+            stroke(&mut sculpt, settings, from, to),
+            "{} changed nothing",
+            settings.tool.label()
+        );
+        sculpt
+    };
+    let across = (Vec3::new(-0.05, 0.0, 1.0), Vec3::new(0.05, 0.0, 1.0));
+    let of = Stroke::of;
+
+    // Layer rises to one height however many dabs go over a vertex.
+    let layer = of(SculptTool::Layer);
+    let goal = layer.radius * 0.1 * layer.strength;
+    let layered = run(layer, across.0, across.1);
+    let highest = moves(&untouched, &layered)
+        .iter()
+        .map(|m| m.length())
+        .fold(0.0, f32::max);
+    assert!(highest > goal * 0.5, "rose {highest} of {goal}");
+    assert!(
+        highest <= goal * 1.001,
+        "rose past its height: {highest} > {goal}"
+    );
+    let lowered = run(
+        Stroke {
+            invert: true,
+            ..layer
+        },
+        across.0,
+        across.1,
+    );
+    assert!(
+        moves(&untouched, &lowered)
+            .iter()
+            .any(|m| m.z < -goal * 0.5)
+    );
+
+    // Blob and Draw Sharp build, and dig with Ctrl; Draw Sharp's line is
+    // narrower than Draw's.
+    let front = |sculpt: &Sculpt| on_surface(sculpt, Vec3::Z).unwrap().0.z;
+    for tool in [SculptTool::Blob, SculptTool::DrawSharp] {
+        assert!(front(&run(of(tool), across.0, across.1)) > front(&untouched) + 0.002);
+        let dug = run(
+            Stroke {
+                invert: true,
+                ..of(tool)
+            },
+            across.0,
+            across.1,
+        );
+        assert!(
+            front(&dug) < front(&untouched) - 0.002,
+            "{} digs",
+            tool.label()
+        );
+    }
+    let spread = |sculpt: &Sculpt| {
+        moves(&untouched, sculpt)
+            .iter()
+            .filter(|m| m.length() > 1e-4)
+            .count()
+    };
+    let total = |sculpt: &Sculpt| {
+        moves(&untouched, sculpt)
+            .iter()
+            .map(|m| m.length())
+            .sum::<f32>()
+    };
+    let draw = run(of(SculptTool::Draw), across.0, across.1);
+    let sharp = run(of(SculptTool::DrawSharp), across.0, across.1);
+    assert!(spread(&sharp) < spread(&draw), "sharp is narrower");
+    assert!(total(&sharp) < total(&draw));
+
+    // Scrape only takes down what stands above the plane under it (on a
+    // sphere, the middle: in toward the centre); Fill only brings up
+    // what's below (the rim: out). Ctrl swaps them.
+    for (tool, invert, inward) in [
+        (SculptTool::Scrape, false, true),
+        (SculptTool::Fill, false, false),
+        (SculptTool::Scrape, true, false),
+        (SculptTool::Fill, true, true),
+    ] {
+        let sculpt = run(Stroke { invert, ..of(tool) }, across.0, across.1);
+        let mut moved = 0;
+        for (p, q) in untouched.positions().iter().zip(sculpt.positions()) {
+            if p.distance(*q) < 1e-6 {
+                continue;
+            }
+            moved += 1;
+            let went_in = q.length() < p.length();
+            assert_eq!(went_in, inward, "{} (Ctrl {invert}) at {p}", tool.label());
+        }
+        assert!(moved > 0, "{} moved nothing", tool.label());
+    }
+
+    // Nudge pushes the surface the way the stroke goes.
+    let nudged = run(
+        of(SculptTool::Nudge),
+        Vec3::new(-0.15, 0.0, 1.0),
+        Vec3::new(0.15, 0.0, 1.0),
+    );
+    let dx: f32 = moves(&untouched, &nudged).iter().map(|m| m.x).sum();
+    assert!(dx > 0.0, "nudged along +X: {dx}");
+
+    // Elastic Grab drags like Grab, and reaches past the radius.
+    let settings = |tool| Stroke {
+        radius: 0.2,
+        ..of(tool)
+    };
+    let lift = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.3, 1.0));
+    let grab = run(settings(SculptTool::Grab), lift.0, lift.1);
+    let elastic = run(settings(SculptTool::ElasticGrab), lift.0, lift.1);
+    let far_moved = |sculpt: &Sculpt| {
+        untouched
+            .positions()
+            .iter()
+            .zip(sculpt.positions())
+            .any(|(p, q)| p.distance(Vec3::Z) > 0.21 && p.distance(*q) > 1e-3)
+    };
+    assert!(!far_moved(&grab), "Grab stays inside its radius");
+    assert!(far_moved(&elastic), "Elastic Grab reaches past it");
+    let lifted = moves(&untouched, &elastic)
+        .iter()
+        .map(|m| m.y)
+        .fold(0.0, f32::max);
+    assert!(lifted > 0.1, "lifted {lifted}");
+}
+
+/// R15.1: mesh filters change the whole sculpt, held back by the mask.
+#[test]
+fn mesh_filters_change_the_whole_sculpt_but_what_is_masked() {
+    use crate::sculpt::MeshFilter;
+    let mesh = remeshed_sphere();
+    let untouched = Sculpt::new(&mesh);
+    let mean_radius = |sculpt: &Sculpt| {
+        sculpt.positions().iter().map(|p| p.length()).sum::<f32>() / sculpt.vertex_count() as f32
+    };
+    let filtered = |filter, amount| {
+        let mut sculpt = Sculpt::new(&mesh);
+        assert!(
+            sculpt.filter(filter, amount),
+            "{} moved nothing",
+            filter.label()
+        );
+        sculpt
+    };
+    let r = mean_radius(&untouched);
+    assert!(mean_radius(&filtered(MeshFilter::Inflate, 1.0)) > r + 0.01);
+    assert!(mean_radius(&filtered(MeshFilter::Inflate, -1.0)) < r - 0.01);
+    let grown = mean_radius(&filtered(MeshFilter::Scale, 1.0));
+    assert!((grown / r - 1.1).abs() < 0.01, "scaled {}", grown / r);
+    // Smooth shrinks a sphere a little (its points go toward chords) and
+    // Sharpen does the opposite.
+    assert!(mean_radius(&filtered(MeshFilter::Smooth, 0.5)) < r);
+    assert!(mean_radius(&filtered(MeshFilter::Sharpen, 0.5)) > r);
+    // Random is the same each time, in and out.
+    let a = filtered(MeshFilter::Random, 1.0);
+    let b = filtered(MeshFilter::Random, 1.0);
+    assert_eq!(a.positions(), b.positions());
+    let radial: Vec<f32> = moves(&untouched, &a)
+        .iter()
+        .zip(untouched.positions())
+        .map(|(m, p)| m.dot(p.normalize()))
+        .collect();
+    assert!(radial.iter().any(|&d| d > 1e-4) && radial.iter().any(|&d| d < -1e-4));
+    assert!(!Sculpt::new(&mesh).filter(MeshFilter::Smooth, 0.0));
+
+    // The masked front and hidden parts don't move.
+    let mut sculpt = Sculpt::new(&mesh);
+    let mask = Stroke {
+        radius: 0.45,
+        strength: 1.0,
+        ..Stroke::of(SculptTool::Mask)
+    };
+    stroke(
+        &mut sculpt,
+        mask,
+        Vec3::new(-0.1, 0.0, 1.0),
+        Vec3::new(0.1, 0.0, 1.0),
+    );
+    let held: Vec<usize> = (0..sculpt.vertex_count())
+        .filter(|&v| sculpt.mask()[v] == 1.0)
+        .collect();
+    assert!(!held.is_empty());
+    for filter in MeshFilter::ALL {
+        let before = sculpt.positions().to_vec();
+        assert!(sculpt.filter(filter, 0.5), "{}", filter.label());
+        for &v in &held {
+            assert_eq!(
+                sculpt.positions()[v],
+                before[v],
+                "{} moved a masked vertex",
+                filter.label()
+            );
+        }
+    }
+    let mut hidden = Sculpt::new(&mesh);
+    stroke(
+        &mut hidden,
+        mask,
+        Vec3::new(-0.1, 0.0, 1.0),
+        Vec3::new(0.1, 0.0, 1.0),
+    );
+    hidden.hide_masked();
+    hidden.clear_mask();
+    let before = hidden.positions().to_vec();
+    assert!(hidden.filter(MeshFilter::Inflate, 1.0));
+    let front_still = (0..hidden.vertex_count())
+        .filter(|&v| before[v].z > 0.99)
+        .all(|v| hidden.positions()[v] == before[v]);
+    assert!(front_still, "hidden parts stay");
 }

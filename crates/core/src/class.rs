@@ -443,10 +443,17 @@ pub enum ClassName {
     Color3Value,
     CFrameValue,
     ObjectValue,
+    /// The project's data layers (roadmap R16): each `DataLayer` in it
+    /// gathers the Instances tagged with its name.
+    DataLayerService,
+    /// A data layer (R16): the Instances tagged with its `Name`, shown
+    /// together, hidden or locked in the editor and turned on and off in a
+    /// game.
+    DataLayer,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 133] = [
+    pub const ALL: [ClassName; 135] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -580,6 +587,8 @@ impl ClassName {
         ClassName::Color3Value,
         ClassName::CFrameValue,
         ClassName::ObjectValue,
+        ClassName::DataLayerService,
+        ClassName::DataLayer,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -717,6 +726,8 @@ impl ClassName {
             ClassName::Color3Value => "Color3Value",
             ClassName::CFrameValue => "CFrameValue",
             ClassName::ObjectValue => "ObjectValue",
+            ClassName::DataLayerService => "DataLayerService",
+            ClassName::DataLayer => "DataLayer",
         }
     }
 
@@ -909,6 +920,7 @@ impl ClassName {
                 | ClassName::Teams
                 | ClassName::SoundService
                 | ClassName::TextChatService
+                | ClassName::DataLayerService
         )
     }
 
@@ -1025,6 +1037,7 @@ impl ClassName {
             | ClassName::ServerStorage
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
+            | ClassName::DataLayerService
             | ClassName::ForceField
             | ClassName::RemoteEvent
             | ClassName::RemoteFunction
@@ -1083,6 +1096,12 @@ impl ClassName {
                 ("UserId", Value::Number(0.0)),
                 // The name they joined with; `Name` is that, made unique.
                 ("DisplayName", Value::String(String::new())),
+            ],
+            ClassName::DataLayer => vec![
+                // How the editor marks its members.
+                ("Color", Value::Color3(Color3::new(0.35, 0.6, 1.0))),
+                // Off, a game starts with the layer set aside (R16.4).
+                ("ActiveOnStart", Value::Bool(true)),
             ],
             ClassName::Team => vec![
                 ("TeamColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
@@ -1407,6 +1426,13 @@ impl ClassName {
                 // How much of the dust's light goes forward, away from the
                 // sun, 0 to 10, as an Atmosphere's Glare.
                 ("Glare", Value::Number(0.0)),
+                // Studs above the volume's bottom over which the dust thins
+                // by e (haze lying low); 0 keeps it even.
+                ("HeightFalloff", Value::Number(0.0)),
+                // On: the volume is an interior. Inside it the air outside
+                // (the Atmosphere's fog, Lighting's and lower volumes' dust)
+                // is cleared, and only this effect's own Density fills it.
+                ("Interior", Value::Bool(false)),
             ],
             ClassName::BloomEffect => vec![
                 ("Enabled", Value::Bool(true)),
@@ -2335,6 +2361,10 @@ impl ClassName {
                     ("Transparency", Value::Number(0.0)),
                     ("CanCollide", Value::Bool(true)),
                     ("WindAffected", Value::Bool(false)),
+                    // What it collides as: Default is the model's own
+                    // collision pieces (`_COL` objects) when it has any,
+                    // else its hull (R15.2).
+                    ("CollisionFidelity", collision_fidelity("Default")),
                 ];
                 properties.extend(collision_properties());
                 properties.extend(body_properties());
@@ -2379,6 +2409,17 @@ impl ClassName {
                 // the project, such as "assets/terrain/Terrain". The editor
                 // picks one.
                 ("DataFolder", Value::String(String::new())),
+                // Water (LE4): with `Water` on, the hollows below
+                // `WaterLevel` (world Y) are flooded, with waves, foam and
+                // reflections (`docs/terrain.md`).
+                ("Water", Value::Bool(false)),
+                ("WaterLevel", Value::Number(0.0)),
+                ("WaterColor", Value::Color3(Color3::new(0.02, 0.16, 0.22))),
+                ("WaterClarity", Value::Number(4.0)),
+                ("WaveHeight", Value::Number(0.25)),
+                ("WaveLength", Value::Number(12.0)),
+                ("WaveSpeed", Value::Number(1.0)),
+                ("WaveDirection", Value::Number(0.0)),
             ],
             ClassName::TerrainLayer => vec![
                 // The material: a tint, the texture maps (files relative to
@@ -2925,6 +2966,8 @@ impl ClassName {
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
             | ClassName::Team
+            | ClassName::DataLayerService
+            | ClassName::DataLayer
             | ClassName::SoundService
             | ClassName::SoundGroup
             | ClassName::ReverbSoundEffect
@@ -3268,8 +3311,8 @@ fn alignment_mode(enum_name: &str) -> Value {
     })
 }
 
-/// A UnionOperation's `CollisionFidelity` item: Box, Hull or
-/// PreciseConvexDecomposition.
+/// A MeshPart's or UnionOperation's `CollisionFidelity` item: Default,
+/// Box, Hull or PreciseConvexDecomposition.
 fn collision_fidelity(item: &str) -> Value {
     Value::EnumItem(EnumItem {
         enum_name: "CollisionFidelity".to_owned(),

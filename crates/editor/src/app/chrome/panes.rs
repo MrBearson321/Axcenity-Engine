@@ -4,6 +4,7 @@ impl EditorApp {
     /// The Explorer panel, then whatever was clicked or done in it.
     pub(in crate::app) fn explorer_pane(&mut self, ui: &mut egui::Ui) {
         let editing = !self.playing();
+        self.update_layer_sets();
         self.explorer.others.clear();
         for member in self.team_selections() {
             for id in member.selection {
@@ -230,6 +231,7 @@ impl EditorApp {
             }
             Some(BrowserAction::EditMaterial(path)) => self.open_material(&path),
             Some(BrowserAction::EditModel(path)) => self.open_in_model_studio(&path),
+            Some(BrowserAction::EditInBlender(path)) => self.edit_in_blender(&path),
             Some(BrowserAction::FindReferences(path)) => self.find_asset_references(&path),
             Some(BrowserAction::View(path)) => self.view_asset(&path),
             Some(BrowserAction::PluginAction {
@@ -1016,6 +1018,7 @@ impl EditorApp {
     ) -> ViewportOutput {
         let ctx = ui.ctx().clone();
         self.scene_drawn_pass = Some(theme::frame_number(&ctx));
+        self.update_layer_sets();
         self.refresh_nav_mesh(&ctx);
         self.update_sequence_preview();
         // The game's particles and streaming, which its frame moves on, are

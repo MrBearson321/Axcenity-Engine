@@ -52,15 +52,36 @@ fn a_click_goes_through_a_locked_part_to_what_is_behind_it() {
         origin: Vec3::new(0.0, 20.0, 0.0),
         direction: Vec3::NEG_Y,
     };
-    assert_eq!(input::pick_unlocked(&world, down).unwrap().part, above);
+    let viewport = Viewport::new();
+    assert_eq!(viewport.pick_unlocked(&world, down).unwrap().part, above);
     world
         .set_property(above, "Locked", axcenity_core::Value::Bool(true))
         .unwrap();
-    assert_eq!(input::pick_unlocked(&world, down).unwrap().part, below);
+    assert_eq!(viewport.pick_unlocked(&world, down).unwrap().part, below);
     world
         .set_property(below, "Locked", axcenity_core::Value::Bool(true))
         .unwrap();
-    assert!(input::pick_unlocked(&world, down).is_none());
+    assert!(viewport.pick_unlocked(&world, down).is_none());
+}
+
+/// R16.2: a hidden data layer isn't drawn and a click goes through it, as
+/// through a locked one.
+#[test]
+fn a_click_goes_through_hidden_and_locked_layers() {
+    let mut world = World::new();
+    let (below, above) = two_stacked_parts(&mut world);
+    let down = axcenity_scene::Ray {
+        origin: Vec3::new(0.0, 20.0, 0.0),
+        direction: Vec3::NEG_Y,
+    };
+    let mut viewport = Viewport::new();
+    viewport.set_layer_sets([above].into(), [above].into());
+    assert!(viewport.terrain.streaming.is_hidden(above));
+    assert!(!viewport.terrain.streaming.is_hidden(below));
+    assert_eq!(viewport.pick_unlocked(&world, down).unwrap().part, below);
+    viewport.set_layer_sets(Default::default(), [above, below].into());
+    assert!(!viewport.terrain.streaming.is_hidden(above));
+    assert!(viewport.pick_unlocked(&world, down).is_none());
 }
 
 #[test]

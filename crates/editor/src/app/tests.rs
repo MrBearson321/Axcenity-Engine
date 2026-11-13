@@ -604,6 +604,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::DataTable => app.data_table_pane(ui),
                         Pane::Material => app.material_pane(ui, None),
                         Pane::Tags => app.tags_pane(ui),
+                        Pane::Layers => app.layers_pane(ui),
                         Pane::Levels => app.levels_pane(ui),
                         Pane::Sequencer => app.sequencer_pane(ui),
                         Pane::Plugins => app.plugins_pane(ui),

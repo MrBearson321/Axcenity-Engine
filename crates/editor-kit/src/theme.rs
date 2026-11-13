@@ -1323,6 +1323,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Teams => icons::USERS_THREE,
         ClassName::SoundService => icons::SPEAKER_HIFI,
         ClassName::TextChatService => icons::CHAT_CIRCLE_TEXT,
+        ClassName::DataLayerService => icons::STACK_SIMPLE,
+        ClassName::DataLayer => icons::SQUARES_FOUR,
         ClassName::SoundGroup => icons::FADERS,
         ClassName::ReverbSoundEffect => icons::WAVEFORM,
         ClassName::EqualizerSoundEffect => icons::EQUALIZER,

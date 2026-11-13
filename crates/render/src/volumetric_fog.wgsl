@@ -180,8 +180,9 @@ fn cs_scatter(@builtin(global_invocation_id) id: vec3<u32>) {
     let dir = view_ray(uv);
     let middle = 0.5 * (slice_distance(f32(id.z)) + slice_distance(f32(id.z) + 1.0));
     let position = frame.camera_position.xyz + dir * middle;
-    let fog_density = fog.height.x * fog_thickness(fog, position.y);
-    let dust = dust_density(fog, position);
+    let air = dust_at(fog, position, dir);
+    let fog_density = fog.height.x * fog_thickness(fog, position.y) * air.keep;
+    let dust = air.density;
     let density = fog_density + dust;
     if density <= 0.0 {
         textureStore(scatter_out, id, vec4<f32>(0.0));
@@ -197,9 +198,9 @@ fn cs_scatter(@builtin(global_invocation_id) id: vec3<u32>) {
         if own {
             light += fog_density * fog.color.rgb * openness(around);
         }
-        light += dust * fog.dust_color.rgb * (around + lamps);
+        light += air.scatter * (around + lamps);
     }
-    light += dust * fog.dust_sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.dust.y) * sun;
+    light += air.sun * sun;
     textureStore(scatter_out, id, vec4<f32>(light, density));
 }
 

@@ -739,6 +739,10 @@ pub struct Viewport {
     frozen_culling: Option<axcenity_render::Camera>,
     /// The Streaming overlay's split of the world (roadmap R16).
     streaming_overlay: streaming_overlay::StreamingOverlay,
+    /// What a click goes through for the data layers: hidden or locked
+    /// ones (R16.2; hidden ones aren't drawn either, through
+    /// `Streaming::set_also_hidden`).
+    layer_unpickable: std::collections::HashSet<InstanceId>,
     /// The Overdraw view's numbers, once its legend's Measure was clicked;
     /// cleared when the view changes.
     overdraw: Option<axcenity_render::OverdrawStats>,
@@ -861,6 +865,7 @@ impl Viewport {
             last_pixels: (0, 0),
             frozen_culling: None,
             streaming_overlay: Default::default(),
+            layer_unpickable: Default::default(),
             overdraw: None,
             measure_overdraw: false,
             restart_requested: false,
@@ -2009,7 +2014,8 @@ fn speed_label(speed: f32) -> String {
 /// What's streamed while editing, once a frame outside Play. With Stream
 /// While Editing on (roadmap R16.3), what Play would leave out around the
 /// camera isn't drawn, but what's selected always is, so nothing being
-/// edited vanishes. Off, editing shows everything, whatever Play streamed.
+/// edited vanishes. Off, editing shows everything, whatever Play streamed,
+/// but the hidden data layers (R16.2).
 fn stream_editing(
     streaming: &mut axcenity_scene::Streaming,
     world: &World,
@@ -2022,7 +2028,11 @@ fn stream_editing(
         streaming.step(world, focus, seconds);
         streaming.show_anyway(world, selection.iter().copied());
     } else if streaming.settings().is_some() {
+        // Editing shows everything, whatever Play streamed, but the hidden
+        // data layers.
+        let layers = streaming.take_also_hidden();
         *streaming = axcenity_scene::Streaming::default();
+        streaming.set_also_hidden(layers);
     }
 }
 

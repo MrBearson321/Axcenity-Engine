@@ -107,8 +107,8 @@ pub use model::{
     LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model,
     ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
     Primitive, PrimitiveReport, Rig, Take, TextureRole, Track, cached_meshes, cooked_models,
-    embedded_files, list_objects, load_model, load_models, load_takes, lod_level, tangents,
-    texture_roles,
+    embedded_files, is_collision_piece, list_objects, load_model, load_models, load_takes,
+    lod_level, tangents, texture_roles,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{

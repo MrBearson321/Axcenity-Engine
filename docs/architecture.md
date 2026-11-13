@@ -19,6 +19,7 @@ Map only. Open the one file that matches the change.
 - Selection and Properties: [editor/selection.md](editor/selection.md)
 - Move, scale, rotate, undo: [editor/transforms.md](editor/transforms.md)
 - Explorer tree: [editor/tree.md](editor/tree.md)
+- Data layers and the Layers panel (R16.2): [editor/layers.md](editor/layers.md)
 - Script tabs and file watching: [editor/scripts.md](editor/scripts.md)
 - Import and the Animation panel: [editor/import.md](editor/import.md)
 - Build tools: [editor/building.md](editor/building.md)

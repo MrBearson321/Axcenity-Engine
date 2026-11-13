@@ -55,6 +55,8 @@ pub(super) enum SettingsPage {
     Layout,
     /// AutoRecover (`app/autorecover.rs`).
     Saving,
+    /// Programs the editor opens files in: Blender (`blender.rs`).
+    Tools,
     /// What the Scene view draws while editing (the menu bar's Viewport).
     Viewport,
     Graphics,
@@ -74,11 +76,12 @@ pub(super) enum SettingsPage {
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 13] = [
+    const ALL: [SettingsPage; 14] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
         SettingsPage::Saving,
+        SettingsPage::Tools,
         SettingsPage::Viewport,
         SettingsPage::Graphics,
         SettingsPage::Shortcuts,
@@ -96,6 +99,7 @@ impl SettingsPage {
             SettingsPage::Typography => "Text & density",
             SettingsPage::Layout => "Editor layout",
             SettingsPage::Saving => "Saving",
+            SettingsPage::Tools => "External tools",
             SettingsPage::Viewport => "Viewport",
             SettingsPage::Graphics => "Graphics",
             SettingsPage::Shortcuts => "Shortcuts",
@@ -114,6 +118,7 @@ impl SettingsPage {
             SettingsPage::Typography => icons::TEXT_AA,
             SettingsPage::Layout => icons::LAYOUT,
             SettingsPage::Saving => icons::FLOPPY_DISK,
+            SettingsPage::Tools => icons::WRENCH,
             SettingsPage::Viewport => icons::CUBE_FOCUS,
             SettingsPage::Graphics => icons::MONITOR,
             SettingsPage::Shortcuts => icons::KEYBOARD,
@@ -215,6 +220,7 @@ impl EditorApp {
                                 SettingsPage::Typography => typography_page(ui, &mut appearance),
                                 SettingsPage::Layout => self.layout_page(ui),
                                 SettingsPage::Saving => self.saving_page(ui),
+                                SettingsPage::Tools => self.tools_page(ui),
                                 SettingsPage::Viewport => self.viewport_page(ui),
                                 SettingsPage::Graphics => {
                                     let capabilities = self.capabilities.unwrap_or_default();
@@ -569,6 +575,60 @@ impl EditorApp {
                  save those yourself. A Collaborate session keeps its own copy.",
             )
             .color(theme::palette(ui.ctx()).text_weak),
+        );
+    }
+
+    /// Programs the editor opens files in (R15.4): Blender's path.
+    fn tools_page(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            "External tools",
+            "Programs the editor opens your files in. Yours, for every project.",
+        );
+        section(ui, "Blender");
+        let blender = crate::blender::find_blender(&self.blender_path);
+        let row = ui
+            .horizontal(|ui| {
+                ui.label(theme::with_icon(icons::ARROW_SQUARE_OUT, "Blender"));
+                let width = (ui.available_width() - 90.0).max(120.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.blender_path)
+                        .desired_width(width)
+                        .hint_text("Found by itself"),
+                );
+                if ui.button("Browse…").clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .set_title("Where is Blender?")
+                        .pick_file()
+                {
+                    self.blender_path = file.to_string_lossy().into_owned();
+                }
+            })
+            .response
+            .on_hover_text(
+                "The Blender program Edit in Blender opens models in. Leave it empty to use the \
+                 one on PATH or in the usual install folder.",
+            );
+        found(ui, &row, "Blender");
+        ui.add_space(space::S);
+        let palette = theme::palette(ui.ctx());
+        match blender {
+            Some(path) => ui.label(
+                egui::RichText::new(format!("Uses {}", path.display())).color(palette.text_weak),
+            ),
+            None => ui.colored_label(
+                palette.warning,
+                "Blender wasn't found. Install it from blender.org, or browse to it.",
+            ),
+        };
+        ui.label(
+            egui::RichText::new(
+                "Edit in Blender (on a model in Assets, a MeshPart's Properties or the Model \
+                 Studio) opens the .glb there. Save in Blender (Ctrl+S) to send it back: \
+                 MeshParts using it reload, and the Model Studio offers to load it again. \
+                 Nothing is installed into Blender.",
+            )
+            .color(palette.text_weak),
         );
     }
 

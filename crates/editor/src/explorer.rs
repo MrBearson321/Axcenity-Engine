@@ -114,6 +114,9 @@ pub struct Explorer {
     /// Rows other Collaborate members have selected, with their colours.
     /// The app fills it in each frame.
     pub others: HashMap<InstanceId, Vec<egui::Color32>>,
+    /// What hidden data layers leave out of the viewport (R16.2): their
+    /// rows are dimmed. The app fills it in.
+    pub hidden: std::collections::HashSet<InstanceId>,
     /// The text in Filter: while it isn't blank, only the Instances whose
     /// name or class has it in them show, with the branches above them.
     pub filter: String,
@@ -274,6 +277,7 @@ impl Explorer {
             renaming: None,
             warnings: HashMap::new(),
             others: HashMap::new(),
+            hidden: Default::default(),
             filter: String::new(),
             keys: Vec::new(),
             anchor: None,
@@ -649,7 +653,8 @@ impl Explorer {
                     let icon = egui::RichText::new(row_icon(world, row))
                         .color(theme::class_color(row.class, ui.visuals()));
                     // A branch shown only for what's below it is dimmed.
-                    let label_text = if row.matches {
+                    let layer_hidden = self.hidden.contains(&row.id);
+                    let label_text = if row.matches && !layer_hidden {
                         egui::RichText::new(name)
                     } else {
                         egui::RichText::new(name).color(palette.text_weak)
@@ -725,6 +730,11 @@ impl Explorer {
                     if world.is_locked(row.id) {
                         ui.weak(icons::LOCK)
                             .on_hover_text("Locked: the viewport can't select or change it.");
+                    }
+                    if layer_hidden {
+                        ui.weak(icons::EYE_SLASH).on_hover_text(
+                            "In a layer hidden in the Layers panel: the viewport doesn't show it.",
+                        );
                     }
 
                     if !editable {
@@ -1558,6 +1568,18 @@ pub fn insert_hint(what: Insertable) -> String {
              is inside it, fading in over its BlendDistance. Put Exposure, Fog, Bloom, Color \
              Correction or an Atmosphere inside it; where volumes overlap, the higher Priority \
              wins."
+        }
+        Insertable::FogVolume => {
+            "Insert a Fog Volume: a big invisible box of haze (200 × 60 × 200 studs) that the \
+             sun's light shines through in shafts, lit by lamps too. Resize it to fit; its Fog \
+             sets the Density, Color, Glare and HeightFalloff (low-lying haze). Shafts need \
+             Volumetric fog (Ultra)."
+        }
+        Insertable::InteriorVolume => {
+            "Insert an Interior: an invisible box for a room or building. Inside it the outdoor \
+             fog and haze is cleared, and its own Fog fills it instead (a little dust, so light \
+             through windows shows as shafts; set Density to 0 for clear air). Fit it to the \
+             room's walls."
         }
         Insertable::ExposureEffect => {
             "Insert an ExposureEffect into the selected Graphics Volume (or a new one): the \

@@ -1,20 +1,34 @@
 use super::*;
 
-/// The nearest part along `ray` that isn't locked: a click or a drag goes
-/// straight through locked parts.
-pub(super) fn pick_unlocked(
-    world: &World,
-    ray: axcenity_scene::Ray,
-) -> Option<axcenity_scene::Hit> {
-    let locked: Vec<InstanceId> = world
-        .descendants(world.workspace())
-        .into_iter()
-        .filter(|&id| world.is_locked(id))
-        .collect();
-    axcenity_scene::pick_hit_skipping(world, ray, &locked)
-}
-
 impl Viewport {
+    /// The data layers' sets (R16.2): `hidden` isn't drawn, and a click
+    /// goes through `unpickable` (hidden or locked).
+    pub fn set_layer_sets(
+        &mut self,
+        hidden: std::collections::HashSet<InstanceId>,
+        unpickable: std::collections::HashSet<InstanceId>,
+    ) {
+        self.terrain.streaming.set_also_hidden(hidden);
+        self.layer_unpickable = unpickable;
+    }
+
+    /// Whether a click can't pick `id`: it's locked, or in a hidden or
+    /// locked data layer.
+    pub(super) fn unpickable(&self, world: &World, id: InstanceId) -> bool {
+        self.layer_unpickable.contains(&id) || world.is_locked(id)
+    }
+
+    /// The nearest part along `ray` that a click can pick: a click or a
+    /// drag goes straight through locked parts and hidden or locked data
+    /// layers.
+    pub(super) fn pick_unlocked(
+        &self,
+        world: &World,
+        ray: axcenity_scene::Ray,
+    ) -> Option<axcenity_scene::Hit> {
+        axcenity_scene::pick_hit_where(world, ray, |id| self.unpickable(world, id))
+    }
+
     /// The mouse and left button over the terrain `brush` works on.
     pub(super) fn terrain_input(
         &mut self,
@@ -399,7 +413,7 @@ impl Viewport {
             }
         } else if body_drag
             && let Some(origin) = press_origin
-            && let Some(id) = light_at(lights, origin).filter(|id| !world.is_locked(*id))
+            && let Some(id) = light_at(lights, origin).filter(|id| !self.unpickable(world, *id))
             && let Some(pose) = free_pose(world, id)
         {
             // A light's icon is in front of the parts behind it.
@@ -427,7 +441,7 @@ impl Viewport {
             input.grabbed = Some(id);
         } else if body_drag
             && let Some(origin) = press_origin
-            && let Some(hit) = pick_unlocked(world, screen.ray(origin))
+            && let Some(hit) = self.pick_unlocked(world, screen.ray(origin))
             // Terrain is ground, not something to carry around.
             && world.get(hit.part).map(|i| i.class()) != Some(axcenity_core::ClassName::Terrain)
             && let Some(mut place) =
@@ -575,8 +589,11 @@ impl Viewport {
         Some(Clicked {
             part: ui_scene
                 .hit(pointer)
-                .or_else(|| light_at(lights, pointer).filter(|id| !world.is_locked(*id)))
-                .or_else(|| pick_unlocked(world, screen.ray(pointer)).map(|hit| hit.part))
+                .or_else(|| light_at(lights, pointer).filter(|id| !self.unpickable(world, *id)))
+                .or_else(|| {
+                    self.pick_unlocked(world, screen.ray(pointer))
+                        .map(|hit| hit.part)
+                })
                 // A road's piece or a scattered tree selects what made it.
                 .map(|id| axcenity_core::spline::generator_of(world, id).unwrap_or(id)),
             modifiers: ui.input(|input| input.modifiers),
