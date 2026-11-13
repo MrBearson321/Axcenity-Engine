@@ -12,10 +12,12 @@ impl Viewport {
         self.layer_unpickable = unpickable;
     }
 
-    /// Whether a click can't pick `id`: it's locked, or in a hidden or
-    /// locked data layer.
+    /// Whether a click can't pick `id`: it's locked, in a hidden or locked
+    /// data layer or an unloaded region, or streamed out while editing.
     pub(super) fn unpickable(&self, world: &World, id: InstanceId) -> bool {
-        self.layer_unpickable.contains(&id) || world.is_locked(id)
+        self.layer_unpickable.contains(&id)
+            || world.is_locked(id)
+            || self.terrain.streaming.is_hidden(id)
     }
 
     /// The nearest part along `ray` that a click can pick: a click or a

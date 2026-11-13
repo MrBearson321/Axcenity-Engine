@@ -145,3 +145,51 @@ fn a_hidden_layer_is_this_persons_view_and_play_shows_it() {
     reopened.layer_action(LayerAction::ToggleLocked("Layer".into()));
     assert!(!folder.join(layers::VIEW_FILE).exists());
 }
+
+/// R16.3b: unloading a region is this person's view too. It isn't drawn,
+/// picked or listed bright in the Explorer, it saves unchanged, and Play
+/// shows it.
+#[test]
+fn an_unloaded_region_is_set_aside_but_saved_unchanged() {
+    let folder = copy_of_example("hello-touched", "regions-view");
+    let mut app = EditorApp::new(Some(&folder));
+    let pad = part(&app, "Pad");
+    let region = app.world.create(ClassName::Folder).unwrap();
+    app.world.set_name(region, "Arena").unwrap();
+    app.world
+        .set_parent(region, Some(app.world.workspace()))
+        .unwrap();
+    app.world.set_parent(pad, Some(region)).unwrap();
+    assert!(app.save());
+    let steps = app.history.undo_label().map(str::to_owned);
+
+    app.layer_action(LayerAction::ToggleUnloaded("Arena".into()));
+    app.update_layer_sets();
+    assert!(app.viewport.terrain.streaming.is_hidden(pad));
+    assert!(app.layer_sets.unpickable.contains(&region));
+    assert!(app.explorer.hidden.contains(&pad));
+    assert_eq!(app.history.undo_label().map(str::to_owned), steps);
+    assert!(!app.unsaved(), "unloading isn't an edit");
+    assert!(LayerView::load(&folder).unloaded.contains("Arena"));
+
+    // Saved unchanged: it's still in the world when reopened, still
+    // unloaded for this person.
+    assert!(app.save());
+    let mut reopened = EditorApp::new(Some(&folder));
+    let arena = part(&reopened, "Arena");
+    let pad = reopened.world.find_first_child(arena, "Pad").unwrap();
+    reopened.update_layer_sets();
+    assert!(reopened.viewport.terrain.streaming.is_hidden(pad));
+
+    // Play shows it.
+    reopened.play();
+    play_for(&mut reopened, 0.2);
+    reopened.update_layer_sets();
+    assert!(reopened.explorer.hidden.is_empty());
+    reopened.stop();
+
+    reopened.layer_action(LayerAction::ToggleUnloaded("Arena".into()));
+    reopened.update_layer_sets();
+    assert!(!reopened.viewport.terrain.streaming.is_hidden(pad));
+    assert!(!folder.join(layers::VIEW_FILE).exists());
+}

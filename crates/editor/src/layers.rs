@@ -9,6 +9,11 @@
 //! of drawing and picking and the Explorer dims. The Layers panel
 //! ([`LayersPanel`]) lists the layers; its edits are the app's
 //! (`app/layers.rs`).
+//!
+//! Regions (roadmap R16.3) are the Workspace's top-level Folders and
+//! Models. This person can unload one in the editor ([`LayerView::unloaded`],
+//! by name): it isn't drawn or picked while editing, but it stays in the
+//! world and is saved unchanged. The same panel lists them ([`regions`]).
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
@@ -23,13 +28,17 @@ use crate::widgets;
 /// Where a project keeps this computer's layer view.
 pub const VIEW_FILE: &str = ".axcenity/layers.json";
 
-/// Which layers this person hides and locks, by name.
+/// Which layers this person hides and locks, and which regions they
+/// unloaded, by name.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LayerView {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub hidden: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub locked: BTreeSet<String>,
+    /// Regions (top-level Folders and Models) unloaded in the editor.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub unloaded: BTreeSet<String>,
 }
 
 impl LayerView {
@@ -46,7 +55,7 @@ impl LayerView {
     /// hidden or locked).
     pub fn save(&self, project: &Path) -> std::io::Result<()> {
         let path = project.join(VIEW_FILE);
-        if self.hidden.is_empty() && self.locked.is_empty() {
+        if self.hidden.is_empty() && self.locked.is_empty() && self.unloaded.is_empty() {
             return match std::fs::remove_file(&path) {
                 Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
                 _ => Ok(()),
@@ -124,6 +133,65 @@ pub fn covered<'a>(world: &World, names: impl IntoIterator<Item = &'a str>) -> H
     ids
 }
 
+/// One region: a top-level Folder or Model of the Workspace.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    pub id: InstanceId,
+    pub name: String,
+    pub class: ClassName,
+    /// How many parts are inside it.
+    pub parts: usize,
+    pub unloaded: bool,
+}
+
+/// The Workspace's regions, in order, as `view` sees them.
+pub fn regions(world: &World, view: &LayerView) -> Vec<Region> {
+    region_ids(world)
+        .filter_map(|id| {
+            let instance = world.get(id)?;
+            Some(Region {
+                id,
+                name: instance.name().to_owned(),
+                class: instance.class(),
+                parts: world
+                    .descendants_iter(id)
+                    .filter(|&inside| world.get(inside).is_some_and(|i| i.class().is_part()))
+                    .count(),
+                unloaded: view.unloaded.contains(instance.name()),
+            })
+        })
+        .collect()
+}
+
+/// The Workspace's top-level Folders and Models.
+fn region_ids(world: &World) -> impl Iterator<Item = InstanceId> + '_ {
+    world
+        .get(world.workspace())
+        .map(|workspace| workspace.children().to_vec())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|&id| {
+            world
+                .get(id)
+                .is_some_and(|i| matches!(i.class(), ClassName::Folder | ClassName::Model))
+        })
+}
+
+/// The regions named in `names`, and everything inside them. Two regions
+/// with the same name go together.
+fn unloaded_regions(world: &World, names: &BTreeSet<String>) -> Vec<InstanceId> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    region_ids(world)
+        .filter(|&id| world.get(id).is_some_and(|i| names.contains(i.name())))
+        .collect()
+}
+
+/// What [`LayerSets`] were made from: the tree's version, the view, each
+/// hidden or locked layer's tagged Instances and the unloaded regions.
+type SetsKey = (u64, LayerView, Vec<Vec<InstanceId>>, Vec<InstanceId>);
+
 /// What the view hides and locks, as Instances, worked out again only when
 /// the tree, a layer's tagged Instances or the view change.
 #[derive(Default)]
@@ -132,7 +200,7 @@ pub struct LayerSets {
     /// Locked or hidden: what a click goes through.
     pub unpickable: HashSet<InstanceId>,
     /// What the sets were made from.
-    key: Option<(u64, LayerView, Vec<Vec<InstanceId>>)>,
+    key: Option<SetsKey>,
 }
 
 impl LayerSets {
@@ -154,6 +222,7 @@ impl LayerSets {
                 .filter(|n| names.contains(n))
                 .cloned()
                 .collect(),
+            unloaded: view.unloaded.clone(),
         };
         let tagged: Vec<Vec<InstanceId>> = view
             .hidden
@@ -161,12 +230,18 @@ impl LayerSets {
             .chain(&view.locked)
             .map(|name| world.tagged_iter(name).collect())
             .collect();
-        let key = (world.structure_version(), view, tagged);
+        // By id too, as a rename doesn't change the tree.
+        let unloaded = unloaded_regions(world, &view.unloaded);
+        let key = (world.structure_version(), view, tagged, unloaded);
         if self.key.as_ref() == Some(&key) {
             return false;
         }
         let view = &key.1;
         self.hidden = covered(world, view.hidden.iter().map(String::as_str));
+        for &region in &key.3 {
+            self.hidden.insert(region);
+            self.hidden.extend(world.descendants_iter(region));
+        }
         self.unpickable = covered(world, view.locked.iter().map(String::as_str));
         self.unpickable.extend(self.hidden.iter().copied());
         self.key = Some(key);
@@ -194,6 +269,8 @@ pub enum LayerAction {
     Rename(InstanceId, String),
     /// Delete the layer (and its tag from every member).
     Delete(InstanceId),
+    /// Unload the region of this name in the editor, or load it again.
+    ToggleUnloaded(String),
 }
 
 /// One row as the panel shows it.
@@ -229,12 +306,14 @@ impl LayersPanel {
         self.renaming = Some((id, name.to_owned()));
     }
 
-    /// Draws the panel. `selected` is how many Instances are selected,
-    /// for the buttons that use them; `editable` is false during Play.
+    /// Draws the panel: the layers, then the regions. `selected` is how
+    /// many Instances are selected, for the buttons that use them;
+    /// `editable` is false during Play.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         rows: &[LayerRow],
+        regions: &[Region],
         selected: usize,
         editable: bool,
     ) -> Option<LayerAction> {
@@ -253,19 +332,18 @@ impl LayersPanel {
             }
         });
         ui.add_space(4.0);
-        if rows.is_empty() {
-            widgets::empty_state(
-                ui,
-                icons::STACK_SIMPLE,
-                "No layers",
-                "A layer gathers what's tagged with its name, wherever it is, to hide or lock it while you work.",
-                None,
-            );
-            return action;
-        }
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
+                if rows.is_empty() {
+                    widgets::empty_state(
+                        ui,
+                        icons::STACK_SIMPLE,
+                        "No layers",
+                        "A layer gathers what's tagged with its name, wherever it is, to hide or lock it while you work.",
+                        None,
+                    );
+                }
                 for row in rows {
                     let layer = &row.layer;
                     if let Some((_, name)) = self.renaming.as_mut().filter(|(id, _)| *id == layer.id)
@@ -424,8 +502,79 @@ impl LayersPanel {
                         },
                     );
                 }
+                regions_section(ui, regions, editable, &mut action);
             });
         action
+    }
+}
+
+/// The Regions list under the layers: each top-level Folder and Model,
+/// its part count, and Unload in Editor.
+fn regions_section(
+    ui: &mut egui::Ui,
+    regions: &[Region],
+    editable: bool,
+    action: &mut Option<LayerAction>,
+) {
+    let palette = theme::palette(ui.ctx());
+    ui.add_space(8.0);
+    ui.separator();
+    ui.label(RichText::new("Regions").strong()).on_hover_text(
+        "The Workspace's top-level Folders and Models. Unload one to set it aside while you \
+             work on another: it isn't drawn or picked, but it stays in the world and saves \
+             unchanged. Play shows everything.",
+    );
+    if regions.is_empty() {
+        ui.label(
+            RichText::new("Put the Workspace's parts in top-level Folders or Models to unload them one region at a time.")
+                .color(palette.text_weak),
+        );
+        return;
+    }
+    for region in regions {
+        let row_layout = egui::Layout::right_to_left(egui::Align::Center);
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+            row_layout,
+            |ui| {
+                ui.label(RichText::new(region.parts.to_string()).color(palette.text_weak))
+                    .on_hover_text("Parts inside it");
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let tip = if region.unloaded {
+                        "Unloaded in the editor: click to load it"
+                    } else {
+                        "Click to unload it in the editor: not drawn or picked, still saved"
+                    };
+                    let toggle = ui.add_enabled_ui(editable, |ui| {
+                        widgets::icon_button(ui, icons::EJECT, tip, region.unloaded)
+                    });
+                    if toggle.inner.clicked() {
+                        *action = Some(LayerAction::ToggleUnloaded(region.name.clone()));
+                    }
+                    let icon = match (region.class, region.unloaded) {
+                        (_, true) => icons::FOLDER_SIMPLE_DASHED,
+                        (ClassName::Model, false) => icons::CUBE,
+                        _ => icons::FOLDER_SIMPLE,
+                    };
+                    let text = format!("{icon} {}", region.name);
+                    let name = if region.unloaded {
+                        RichText::new(text).color(palette.text_weak)
+                    } else {
+                        RichText::new(text)
+                    };
+                    let label = ui
+                        .add(
+                            egui::Label::new(name)
+                                .truncate()
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text("Click to select it");
+                    if label.clicked() {
+                        *action = Some(LayerAction::Edit(region.id));
+                    }
+                });
+            },
+        );
     }
 }
 
@@ -480,21 +629,73 @@ mod tests {
         assert_eq!(unused_name(&world), "Layer");
     }
 
+    /// R16.3b: an unloaded region isn't drawn, with everything inside it,
+    /// and follows a rename by its name.
+    #[test]
+    fn an_unloaded_region_is_hidden_with_everything_inside() {
+        let (mut world, model, part) = world_with_layers();
+        world.set_name(model, "Town").unwrap();
+        let folder = world.create(ClassName::Folder).unwrap();
+        world.set_name(folder, "Forest").unwrap();
+        world.set_parent(folder, Some(world.workspace())).unwrap();
+        let tree = world.create(ClassName::Part).unwrap();
+        world.set_parent(tree, Some(folder)).unwrap();
+        let loose = world.create(ClassName::Part).unwrap();
+        world.set_parent(loose, Some(world.workspace())).unwrap();
+
+        let mut view = LayerView::default();
+        let listed = regions(&world, &view);
+        let names: Vec<_> = listed.iter().map(|r| (r.name.as_str(), r.parts)).collect();
+        assert_eq!(
+            names,
+            [("Town", 1), ("Forest", 1)],
+            "a loose part isn't a region"
+        );
+
+        let mut sets = LayerSets::default();
+        view.unloaded.insert("Forest".into());
+        assert!(sets.update(&world, &view));
+        assert_eq!(sets.hidden, HashSet::from([folder, tree]));
+        assert!(sets.unpickable.contains(&tree));
+        assert!(regions(&world, &view)[1].unloaded);
+
+        // Renamed, it's another region as far as the view goes.
+        world.set_name(folder, "Woods").unwrap();
+        assert!(sets.update(&world, &view));
+        assert!(sets.hidden.is_empty());
+        world.set_name(model, "Forest").unwrap();
+        assert!(sets.update(&world, &view));
+        assert_eq!(sets.hidden, HashSet::from([model, part]));
+
+        // Kept in the project folder with the layers.
+        let project = std::env::temp_dir().join(format!(
+            "axcenity-editor-regions-test-{}",
+            std::process::id()
+        ));
+        view.save(&project).unwrap();
+        assert_eq!(LayerView::load(&project), view);
+        view.unloaded.clear();
+        view.save(&project).unwrap();
+        assert!(!project.join(VIEW_FILE).exists());
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
     #[test]
     fn the_panel_lists_each_layer_and_snapshot() {
         let (world, _, _) = world_with_layers();
         let view = LayerView {
             hidden: BTreeSet::from(["Night lights".to_owned()]),
-            locked: BTreeSet::new(),
+            ..Default::default()
         };
         let rows = rows(&world, &view);
+        let regions = regions(&world, &view);
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[1].layer.name.as_str(), rows[1].members), ("Props", 1));
         assert!(rows[0].hidden && !rows[1].hidden);
         let mut panel = LayersPanel::default();
         let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let _ = panel.show(ui, &rows, 1, true);
+                let _ = panel.show(ui, &rows, &regions, 1, true);
             });
         };
         // Drawn without a GPU too, so the panel's code runs in every test run.
@@ -505,7 +706,7 @@ mod tests {
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             crate::snapshot::snapshot(
                 &std::path::PathBuf::from(folder).join("layers-panel.png"),
-                egui::vec2(260.0, 160.0),
+                egui::vec2(260.0, 220.0),
                 vec![Vec::new(); 3],
                 &mut draw,
             );

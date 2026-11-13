@@ -409,6 +409,26 @@ fn streaming_while_editing_hides_what_is_far_but_never_the_selection() {
     assert!(streaming.is_hidden(far), "out of range isn't drawn");
     assert!(!streaming.is_hidden(selected), "the selection always shows");
 
+    // A click goes through what isn't drawn (R16.3b).
+    let mut viewport = Viewport::new();
+    stream_editing(
+        &mut viewport.terrain.streaming,
+        &world,
+        true,
+        Vec3::ZERO,
+        1.0,
+        &[],
+    );
+    let toward = |x: f32| axcenity_scene::Ray {
+        origin: Vec3::new(x, 50.0, 0.0),
+        direction: Vec3::NEG_Y,
+    };
+    assert_eq!(
+        viewport.pick_unlocked(&world, toward(0.0)).unwrap().part,
+        near
+    );
+    assert!(viewport.pick_unlocked(&world, toward(900.0)).is_none());
+
     // Off, editing shows everything again.
     stream_editing(&mut streaming, &world, false, Vec3::ZERO, 1.0, &[]);
     assert!(!streaming.is_hidden(far));
