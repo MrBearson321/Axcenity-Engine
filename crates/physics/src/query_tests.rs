@@ -497,3 +497,38 @@ fn of_two_parts_at_the_same_distance_the_first_in_the_tree_wins() {
     world.set_parent(first, Some(world.workspace())).unwrap();
     assert_eq!(hit_below(&world, 0.0), Some(second));
 }
+
+// --- Points inside solids (roadmap R18.2) -------------------------------------
+
+#[test]
+fn points_inside_colliding_parts_and_under_terrain_are_inside_solids() {
+    let mut world = World::new();
+    let wall = part(&mut world, v(0.0, 5.0, 0.0), v(1.0, 10.0, 10.0), true);
+    let ball = part(&mut world, v(10.0, 5.0, 0.0), v(4.0, 4.0, 4.0), true);
+    set(
+        &mut world,
+        ball,
+        "Shape",
+        Value::PartType(axcenity_core::PartType::Ball),
+    );
+    let sensor = part(&mut world, v(20.0, 5.0, 0.0), v(4.0, 4.0, 4.0), true);
+    set(&mut world, sensor, "CanCollide", Value::Bool(false));
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    let points = [
+        v(0.2, 5.0, 3.0),      // in the wall
+        v(1.0, 5.0, 3.0),      // beside it
+        v(10.0, 5.5, 0.5),     // in the ball
+        v(11.9, 6.9, 0.0),     // in the ball's box, not the ball
+        v(20.0, 5.0, 0.0),     // in a part that doesn't collide
+        v(-46.0, -3.0, -46.0), // under the ground
+        v(-46.0, 3.0, -46.0),  // above it
+    ];
+    let assets = Assets::default();
+    assert_eq!(
+        inside_solids(&world, &assets, &points, &[]),
+        [true, false, true, false, false, true, false]
+    );
+    let skipped = inside_solids(&world, &assets, &points[..1], &[wall]);
+    assert_eq!(skipped, [false], "a skipped part isn't solid");
+}

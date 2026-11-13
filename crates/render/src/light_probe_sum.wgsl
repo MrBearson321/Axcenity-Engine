@@ -84,7 +84,8 @@ fn sum_probe(
         // the cosine lobe's share of each band, over pi: 1, then 2/3.
         let scale = 4.0 * PI / max(sums[0][0].w, 1e-30);
         let first = 4u * targets[group.x].x;
-        light_probes[first] = vec4<f32>(sums[0][0].rgb * scale, 0.0);
+        // Its w (1 for a probe baked inside a solid, R18.2) stays.
+        light_probes[first] = vec4<f32>(sums[0][0].rgb * scale, light_probes[first].w);
         for (var k = 1u; k < 4u; k++) {
             light_probes[first + k] = vec4<f32>(sums[0][k].rgb * scale * (2.0 / 3.0), 0.0);
         }

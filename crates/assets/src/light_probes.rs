@@ -17,7 +17,10 @@
 //! matte surface facing `n` returns `c0 · 0.282095 + 0.488603 · (c1 n.y +
 //! c2 n.z + c3 n.x)`. `fingerprint` is what the world looked like when it
 //! was baked (16 hexadecimal digits), so the editor can tell when a bake is
-//! out of date.
+//! out of date. `invalid`, if there, lists the probes (by their place in
+//! `probes`) that stood inside a solid part or under the ground when baked;
+//! surfaces leave them out of their blend (roadmap R18.2). Bakes from before
+//! it have none.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -60,6 +63,9 @@ pub struct LightProbes {
     /// Each probe's light, X first, then Y, then Z. Shared, so handing it
     /// to the renderer each frame copies nothing.
     pub probes: Arc<Vec<ProbeLight>>,
+    /// The probes inside a solid when baked, by their place in `probes`, in
+    /// order (roadmap R18.2).
+    pub invalid: Arc<Vec<u32>>,
 }
 
 impl LightProbes {
@@ -77,7 +83,23 @@ impl LightProbes {
             counts,
             fingerprint,
             probes: Arc::new(probes),
+            invalid: Arc::new(Vec::new()),
         })
+    }
+
+    /// The bake with the probes at `invalid` (places in `probes`, in any
+    /// order) marked invalid, or `None` if one is past the last probe.
+    pub fn with_invalid(mut self, mut invalid: Vec<u32>) -> Option<Self> {
+        invalid.sort_unstable();
+        invalid.dedup();
+        if invalid
+            .last()
+            .is_some_and(|&last| last as usize >= self.probes.len())
+        {
+            return None;
+        }
+        self.invalid = Arc::new(invalid);
+        Some(self)
     }
 
     /// Different for every bake read or made.
@@ -99,6 +121,8 @@ struct File {
     counts: [u32; 3],
     fingerprint: String,
     probes: Vec<ProbeLight>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    invalid: Vec<u32>,
 }
 
 /// Reads the bake at `path` inside `folder`, or explains why it can't. Not
@@ -124,12 +148,15 @@ pub fn decode_light_probes(text: &str) -> Result<LightProbes, String> {
         .map_err(|_| "its fingerprint isn't 16 hexadecimal digits".to_owned())?;
     let [x, y, z] = file.counts;
     let count = file.probes.len();
-    LightProbes::new(file.counts, fingerprint, file.probes).ok_or_else(|| {
+    let probes = LightProbes::new(file.counts, fingerprint, file.probes).ok_or_else(|| {
         format!(
             "it has {count} probes for a {x}×{y}×{z} grid (each side 1 to \
              {MAX_LIGHT_PROBES_PER_SIDE}), or a value that isn't a number"
         )
-    })
+    })?;
+    probes
+        .with_invalid(file.invalid)
+        .ok_or_else(|| format!("it lists an invalid probe past its {count} probes"))
 }
 
 /// `probes` as a bake file's text.
@@ -138,6 +165,7 @@ pub fn encode_light_probes(probes: &LightProbes) -> String {
         counts: probes.counts,
         fingerprint: format!("{:016x}", probes.fingerprint),
         probes: probes.probes.as_ref().clone(),
+        invalid: probes.invalid.as_ref().clone(),
     };
     serde_json::to_string(&file).expect("plain numbers always encode")
 }
@@ -176,12 +204,16 @@ mod tests {
         assert!(
             is_light_probes_file(&path) && !is_light_probes_file("assets/probes/Hall.probe.hdr")
         );
-        let baked = LightProbes::new([2, 1, 3], u64::MAX - 7, (0..6).map(probe).collect()).unwrap();
+        let baked = LightProbes::new([2, 1, 3], u64::MAX - 7, (0..6).map(probe).collect())
+            .unwrap()
+            .with_invalid(vec![4, 1, 4])
+            .unwrap();
         write_light_probes(&folder, &path, &baked).unwrap();
         let read = read_light_probes(&folder, &path).unwrap();
         assert_eq!(read.counts, [2, 1, 3]);
         assert_eq!(read.fingerprint, u64::MAX - 7, "every bit of it");
         assert_eq!(read.probes, baked.probes);
+        assert_eq!(*read.invalid, [1, 4], "in order, each once");
         assert_ne!(read.key(), baked.key());
         let _ = std::fs::remove_dir_all(&folder);
     }
@@ -215,5 +247,22 @@ mod tests {
             "too many"
         );
         assert!(LightProbes::new([1, 1, 1], 0, vec![[[f32::NAN; 3]; 4]]).is_none());
+        let past = r#"{"counts":[1,1,1],"fingerprint":"0","probes":[[[0,0,0],[0,0,0],[0,0,0],[0,0,0]]],"invalid":[1]}"#;
+        assert!(
+            decode_light_probes(past)
+                .unwrap_err()
+                .contains("past its 1")
+        );
+    }
+
+    /// R18.2: a bake from before invalid probes reads with none, and one
+    /// without any is written as before.
+    #[test]
+    fn a_bake_without_invalid_probes_reads_and_writes_as_before() {
+        let old =
+            r#"{"counts":[1,1,1],"fingerprint":"0","probes":[[[0,0,0],[0,0,0],[0,0,0],[0,0,0]]]}"#;
+        let read = decode_light_probes(old).unwrap();
+        assert!(read.invalid.is_empty());
+        assert!(!encode_light_probes(&read).contains("invalid"));
     }
 }

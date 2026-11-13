@@ -4,7 +4,9 @@
 //! one undo step. The bake itself runs a little each frame
 //! (`app/probe_bake.rs`); this file finds what to bake and where. A light
 //! probe bake keeps a fingerprint of the world, so a volume whose bake is
-//! out of date gets a warning in the Explorer.
+//! out of date gets a warning in the Explorer, and the probes that stood
+//! inside a solid part or under the ground are listed so surfaces leave
+//! them out (roadmap R18.2, `invalid_probes`).
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -125,11 +127,85 @@ pub(super) fn bake_path(
     path_of(&name)
 }
 
+/// The probes of `volume` standing at `points` inside a solid: a colliding
+/// part (not the volume's own) or under a Terrain's ground (roadmap R18.2).
+pub(super) fn invalid_probes(
+    world: &World,
+    assets: &Assets,
+    volume: InstanceId,
+    points: &[axcenity_render::glam::Vec3],
+) -> Vec<u32> {
+    let own: Vec<InstanceId> = world
+        .get(volume)
+        .and_then(|v| v.parent())
+        .into_iter()
+        .collect();
+    let points: Vec<Vector3> = points
+        .iter()
+        .map(|point| Vector3::new(point.x, point.y, point.z))
+        .collect();
+    axcenity_physics::inside_solids(world, assets, &points, &own)
+        .into_iter()
+        .zip(0u32..)
+        .filter_map(|(inside, index)| inside.then_some(index))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use axcenity_render::{PROBE_BAKE_SIZE, wgpu};
 
     use super::*;
+
+    /// R18.2: a wall through a volume makes the probes inside it invalid;
+    /// the volume's own part, colliding or not, doesn't.
+    #[test]
+    fn probes_inside_a_wall_are_invalid_and_the_volumes_own_part_is_not() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let room = world.create(ClassName::Part).unwrap();
+        world.set_parent(room, Some(workspace)).unwrap();
+        let set = |world: &mut World, id, name: &str, value| {
+            world.set_property(id, name, value).unwrap();
+        };
+        set(
+            &mut world,
+            room,
+            "Size",
+            Value::Vector3(Vector3::new(12.0, 4.0, 4.0)),
+        );
+        set(
+            &mut world,
+            room,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 2.0, 0.0)),
+        );
+        set(&mut world, room, "Anchored", Value::Bool(true));
+        let volume = world.create(ClassName::LightProbeVolume).unwrap();
+        world.set_parent(volume, Some(room)).unwrap();
+        // Probes 4 apart: three along X, at -4, 0 and 4.
+        let wall = world.create(ClassName::Part).unwrap();
+        world.set_parent(wall, Some(workspace)).unwrap();
+        set(
+            &mut world,
+            wall,
+            "Size",
+            Value::Vector3(Vector3::new(1.0, 10.0, 10.0)),
+        );
+        set(
+            &mut world,
+            wall,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 2.0, 0.0)),
+        );
+        set(&mut world, wall, "Anchored", Value::Bool(true));
+        let grid = axcenity_scene::light_probe_points(&world, volume).unwrap();
+        assert_eq!(grid.counts, [3, 1, 1]);
+        let assets = Assets::default();
+        assert_eq!(invalid_probes(&world, &assets, volume, &grid.points), [1]);
+        set(&mut world, wall, "CanCollide", Value::Bool(false));
+        assert!(invalid_probes(&world, &assets, volume, &grid.points).is_empty());
+    }
 
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = axcenity_render::adapters::instance();

@@ -2,7 +2,8 @@
 //!
 //! Each volume's grid of baked probes is uploaded once into one storage
 //! buffer, four `vec4`s a probe (its spherical harmonics coefficients, rgb
-//! each). Surfaces inside a volume's box blend the eight probes around them
+//! each; the first's `w` is 1 for a probe baked inside a solid, which
+//! surfaces leave out, roadmap R18.2). Surfaces inside a volume's box blend the eight probes around them
 //! for their diffuse environment light, in place of the sky's
 //! (`surrounding_diffuse` in lighting.wgsl). The buffer is rewritten only
 //! when the volumes drawn change, and shrinks back to one blank probe while
@@ -12,7 +13,7 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Quat, Vec3};
 
-use crate::draw_list::LightProbeVolume;
+use crate::draw_list::{LightProbeGrid, LightProbeVolume};
 
 use super::probes::{box_distance, to_box_rows};
 
@@ -98,8 +99,7 @@ impl LightProbes {
         if keys != self.held {
             let texels: Vec<ProbeTexels> = chosen
                 .iter()
-                .flat_map(|volume| volume.probes.probes.iter())
-                .map(|probe| probe.map(|[r, g, b]| [r, g, b, 0.0]))
+                .flat_map(|volume| probe_texels(&volume.probes))
                 .collect();
             let count = texels.len().max(1);
             if self.buffer.size() != buffer_size(count) {
@@ -198,6 +198,21 @@ fn probe_buffer(device: &wgpu::Device, probes: usize) -> wgpu::Buffer {
 
 /// Whether `volume` can be drawn: it has as many probes as its grid says
 /// (and not too many), and its box is a real box.
+/// A volume's probes as the shaders read them, the invalid ones flagged.
+fn probe_texels(grid: &LightProbeGrid) -> Vec<ProbeTexels> {
+    let mut texels: Vec<ProbeTexels> = grid
+        .probes
+        .iter()
+        .map(|probe| probe.map(|[r, g, b]| [r, g, b, 0.0]))
+        .collect();
+    for &index in grid.invalid.iter() {
+        if let Some(probe) = texels.get_mut(index as usize) {
+            probe[0][3] = 1.0;
+        }
+    }
+    texels
+}
+
 fn usable(volume: &LightProbeVolume) -> bool {
     let [x, y, z] = volume.probes.counts.map(|count| count as usize);
     let total = x * y * z;
@@ -218,7 +233,6 @@ mod tests {
     use glam::Quat;
 
     use super::*;
-    use crate::draw_list::LightProbeGrid;
 
     fn volume(counts: [u32; 3], probes: usize) -> LightProbeVolume {
         LightProbeVolume {
@@ -230,6 +244,7 @@ mod tests {
                 key: 1,
                 counts,
                 probes: Arc::new(vec![[[0.0; 3]; 4]; probes]),
+                invalid: Arc::default(),
             },
         }
     }

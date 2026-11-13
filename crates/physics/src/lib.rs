@@ -79,8 +79,8 @@ pub use debug::{DebugBody, DebugContact, DebugView, MAX_DEBUG_CONTACTS};
 pub use mass::Mass;
 pub use query::{
     CastShape, ColliderOutline, Column, PastPose, QueryParams, RayHit, Solid, cast_ray,
-    cast_ray_excluding, debug_colliders, part_solids, parts_in_box, parts_in_part, parts_in_radius,
-    raycast, raycast_rewound, shapecast, solids,
+    cast_ray_excluding, debug_colliders, inside_solids, part_solids, parts_in_box, parts_in_part,
+    parts_in_radius, raycast, raycast_rewound, shapecast, solids,
 };
 pub use shapes::prepare_precise;
 

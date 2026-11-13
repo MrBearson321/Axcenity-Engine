@@ -108,6 +108,7 @@ fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawList {
             key: 1,
             counts: COUNTS,
             probes: Arc::new(probes),
+            invalid: Arc::default(),
         },
     });
     list
@@ -223,4 +224,54 @@ fn probes_are_uploaded_once_and_their_buffer_shrinks_without_them() {
     assert!(renderer.scene.light_probes.buffer().size() > blank);
     renderer.render(&room).unwrap();
     assert_eq!(renderer.scene.light_probes.buffer().size(), blank);
+}
+
+/// R18.2: a probe baked inside a wall (here, glowing red with the light it
+/// saw there) leaks into the room until it's marked invalid; then the blend
+/// leaves it out and makes the others' shares whole. With every probe
+/// around a point invalid, the sky lights it as if there were no volume.
+#[test]
+fn a_probe_marked_inside_a_wall_no_longer_lights_the_room() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let sky_only = list_of(Vec::new());
+    // Two probes along X, at -3 and 3: a dark one in the room, a red one
+    // in the "wall".
+    let volume = |invalid: Vec<u32>, key: u64| {
+        let mut list = sky_only.clone();
+        list.light_probe_volumes.push(LightProbeVolume {
+            center: ROOM_MIDDLE,
+            rotation: glam::Quat::IDENTITY,
+            half_size: ROOM_HALF,
+            blend_distance: 0.5,
+            probes: LightProbeGrid {
+                key,
+                counts: [2, 1, 1],
+                probes: Arc::new(vec![
+                    [[0.0; 3]; 4],
+                    [[4.0, 0.0, 0.0], [0.0; 3], [0.0; 3], [0.0; 3]],
+                ]),
+                invalid: Arc::new(invalid),
+            },
+        });
+        list
+    };
+    let at = Vec3::new(-1.5, 3.0, 0.0);
+    let leaking = white_block_at(&mut renderer, &volume(Vec::new(), 1), at);
+    let walled = white_block_at(&mut renderer, &volume(vec![1], 2), at);
+    let neither = white_block_at(&mut renderer, &volume(vec![0, 1], 3), at);
+    let sky = white_block_at(&mut renderer, &sky_only, at);
+    assert!(
+        leaking[0] - leaking[1] > 20,
+        "the wall's red leaks: {leaking:?}"
+    );
+    assert!(
+        (walled[0] - walled[1]).abs() <= 3 && walled[0] < leaking[0] - 20,
+        "only the dark probe lights it: {walled:?} (leaking {leaking:?})"
+    );
+    let most = (0..3).map(|c| (neither[c] - sky[c]).abs()).max().unwrap();
+    assert!(most <= 2, "{neither:?} against the sky's {sky:?}");
 }
