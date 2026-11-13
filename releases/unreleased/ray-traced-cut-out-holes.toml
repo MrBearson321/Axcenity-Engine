@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "renderer"
+title = "Ray traced ambient occlusion and GI see through cut-outs' holes"
+details = "Ray traced ambient occlusion and ray traced global illumination now let rays through the cut-out parts of leaves, grilles and fences, as ray traced shadows already did, instead of treating every cut-out as a solid card. Foliage no longer darkens the ground around it in card-shaped patches, and light bounces through gaps between leaves."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

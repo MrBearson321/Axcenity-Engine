@@ -1474,7 +1474,7 @@ impl ScenePipeline {
                 pass.draw(
                     (&self.device, &self.queue),
                     &mut encoder,
-                    (rays.tlas(), occlusion),
+                    (rays, occlusion),
                     uniform,
                     screen_space_occlusion,
                 );
@@ -1512,7 +1512,7 @@ impl ScenePipeline {
             gi.trace(
                 (&self.device, &self.queue),
                 &mut encoder,
-                (rays.tlas(), &surfaces.buffer),
+                (rays.tlas(), &surfaces.buffer, &rays.cut_outs),
                 batch,
                 &self.light_probes,
             );

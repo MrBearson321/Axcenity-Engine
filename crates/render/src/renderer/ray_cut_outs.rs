@@ -430,3 +430,66 @@ mod tests {
         assert!(shrunk_alpha(&[], 8, 8).iter().all(|&a| a == 255));
     }
 }
+
+/// The four bindings a pass that lets rays through cut-outs' holes reads
+/// (`ray_cut_outs.wgsl`), from `first`: the slots' [`CutOutRaw`]s, the
+/// meshes' texture coordinates, the alpha array and its sampler.
+pub(super) fn layout_entries(
+    first: u32,
+    visibility: wgpu::ShaderStages,
+) -> [wgpu::BindGroupLayoutEntry; 4] {
+    let storage = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    [
+        storage(first),
+        storage(first + 1),
+        wgpu::BindGroupLayoutEntry {
+            binding: first + 2,
+            visibility,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: first + 3,
+            visibility,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+    ]
+}
+
+impl CutOuts {
+    /// What [`layout_entries`] lays out, bound from `first`.
+    pub(super) fn entries(&self, first: u32) -> [wgpu::BindGroupEntry<'_>; 4] {
+        [
+            wgpu::BindGroupEntry {
+                binding: first,
+                resource: self.info.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: first + 1,
+                resource: self.uvs.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: first + 2,
+                resource: wgpu::BindingResource::TextureView(&self.alpha_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: first + 3,
+                resource: wgpu::BindingResource::Sampler(&self.sampler),
+            },
+        ]
+    }
+}

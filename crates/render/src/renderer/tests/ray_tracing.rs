@@ -398,14 +398,14 @@ mod sun_shadows {
         assert!(renderer.scene.ray_shadows.is_none());
     }
 
-    /// A texture `size` pixels square whose alpha is `alpha` everywhere.
-    struct AlphaTexture {
+    /// A texture 4 pixels square whose alpha is `alpha` everywhere.
+    pub(super) struct AlphaTexture {
         key: u64,
         rgba: Vec<u8>,
     }
 
     impl AlphaTexture {
-        fn new(key: u64, alpha: u8) -> Self {
+        pub(super) fn new(key: u64, alpha: u8) -> Self {
             Self {
                 key,
                 rgba: [255, 255, 255, alpha].repeat(16),
@@ -531,6 +531,47 @@ mod ambient_occlusion {
                 "{rays:?}: open floor is unchanged: {on:?} vs {off:?}"
             );
         }
+    }
+
+    /// LE7: rays pass through cut-outs' holes, as they do for shadows.
+    #[test]
+    fn rays_pass_through_a_cut_outs_holes() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let block_with = |alpha: u8, key: u64| {
+            let mut list = block_on_floor();
+            let material = &mut list.items[1].material;
+            material.alpha_cutoff = 0.5;
+            material.base_color_texture = Some(std::sync::Arc::new(
+                super::sun_shadows::AlphaTexture::new(key, alpha),
+            ));
+            list
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, PROBE_SIZE, PROBE_SIZE);
+        renderer.set_graphics(&traced(
+            RayTracedAmbientOcclusion::High,
+            AmbientOcclusion::Off,
+        ));
+        let [solid] = colors(&mut renderer, &block_with(255, 1), &[CORNER])[..] else {
+            unreachable!()
+        };
+        let [holes] = colors(&mut renderer, &block_with(0, 2), &[CORNER])[..] else {
+            unreachable!()
+        };
+        let mut open = block_on_floor();
+        open.items.truncate(1);
+        let [none] = colors(&mut renderer, &open, &[CORNER])[..] else {
+            unreachable!()
+        };
+        assert!(
+            solid[0] + 6 < none[0],
+            "where it isn't cut out it hides the corner: {solid:?} vs {none:?}"
+        );
+        assert!(
+            within(holes, none, 2),
+            "rays pass where it's cut out: {holes:?} vs {none:?}"
+        );
     }
 
     #[test]

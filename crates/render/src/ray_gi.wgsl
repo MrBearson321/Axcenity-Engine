@@ -20,7 +20,8 @@
 // kept. One a bake found inside a solid (w 1, R18.2) stays marked.
 //
 // Compiled after `sky.wgsl`, `fog.wgsl`, `clouds.wgsl` and `lighting.wgsl`
-// (for the frame's bindings, its sky and its probes), with
+// (for the frame's bindings, its sky and its probes) and
+// `ray_cut_outs.wgsl`, with
 // `enable wgpu_ray_query;` put first (renderer/gpu.rs).
 
 // Threads a probe's rays are shared between, one workgroup a probe.
@@ -59,6 +60,11 @@ struct RayGi {
 // Four a probe of the batch: what's copied over its place in
 // `light_probes` once this pass is done.
 @group(1) @binding(4) var<storage, read_write> gi_traced: array<vec4<f32>>;
+// Cut-outs' holes (LE7, ray_cut_outs.wgsl): light passes through them.
+@group(1) @binding(5) var<storage, read> cut_outs: array<CutOut>;
+@group(1) @binding(6) var<storage, read> cut_out_uvs: array<vec2<f32>>;
+@group(1) @binding(7) var cut_out_alpha: texture_2d_array<f32>;
+@group(1) @binding(8) var cut_out_sampler: sampler;
 
 // Each thread's sums of its rays: the four coefficients, then (x) how many
 // found the back of a solid thing.
@@ -84,9 +90,8 @@ fn gi_direction(i: u32, count: u32, turn: f32) -> vec3<f32> {
 fn gi_blocked(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> bool {
     var query: ray_query;
     rayQueryInitialize(&query, gi_scene, RayDesc(
-        RAY_FLAG_TERMINATE_ON_FIRST_HIT | RAY_FLAG_FORCE_OPAQUE, GI_MASK_CASTERS, 0.0,
-        distance, origin, direction));
-    rayQueryProceed(&query);
+        RAY_FLAG_TERMINATE_ON_FIRST_HIT, GI_MASK_CASTERS, 0.0, distance, origin, direction));
+    proceed_through_holes(&query);
     return rayQueryGetCommittedIntersection(&query).kind != RAY_QUERY_INTERSECTION_NONE;
 }
 
@@ -134,8 +139,8 @@ fn gi_hit_light(position: vec3<f32>, n: vec3<f32>, color: vec3<f32>) -> vec3<f32
 fn gi_ray_light(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
     var query: ray_query;
     rayQueryInitialize(&query, gi_scene, RayDesc(
-        RAY_FLAG_FORCE_OPAQUE, GI_MASK_SURFACES, 0.0, gi.settings.y, origin, direction));
-    while rayQueryProceed(&query) {}
+        0u, GI_MASK_SURFACES, 0.0, gi.settings.y, origin, direction));
+    proceed_through_holes(&query);
     let hit = rayQueryGetCommittedIntersection(&query);
     if hit.kind == RAY_QUERY_INTERSECTION_NONE {
         // The sky as drawn, without the sun's disc (the sun lights what
