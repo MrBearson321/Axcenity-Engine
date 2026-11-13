@@ -32,8 +32,10 @@ pub(super) const MASK_SOLID: u8 = 1 << 0;
 pub(super) const MASK_CUT_OUT: u8 = 1 << 1;
 /// See-through items and water.
 pub(super) const MASK_SEE_THROUGH: u8 = 1 << 2;
-/// Solid or cut-out items with `casts_shadow` off.
+/// Solid items with `casts_shadow` off.
 pub(super) const MASK_NO_SHADOW: u8 = 1 << 3;
+/// Cut-out items with `casts_shadow` off.
+pub(super) const MASK_NO_SHADOW_CUT_OUT: u8 = 1 << 4;
 
 /// The most triangles built into new BLASes in one frame. One mesh bigger
 /// than this is still built whole, on a frame of its own. About 5 ms on an
@@ -442,13 +444,11 @@ fn mask_of(material: &Material, draw: &Draw) -> u8 {
     if material.opacity < 1.0 || material.water.is_some() {
         return MASK_SEE_THROUGH;
     }
-    if !draw.casts_shadow {
-        return MASK_NO_SHADOW;
-    }
-    if material.alpha_cutoff > 0.0 {
-        MASK_CUT_OUT
-    } else {
-        MASK_SOLID
+    match (draw.casts_shadow, material.alpha_cutoff > 0.0) {
+        (true, true) => MASK_CUT_OUT,
+        (true, false) => MASK_SOLID,
+        (false, true) => MASK_NO_SHADOW_CUT_OUT,
+        (false, false) => MASK_NO_SHADOW,
     }
 }
 

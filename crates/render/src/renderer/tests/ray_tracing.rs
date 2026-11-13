@@ -281,6 +281,46 @@ mod sun_shadows {
     }
 
     #[test]
+    fn a_cut_out_right_on_a_surface_does_not_blot_it_but_one_farther_off_shades_it() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        // Cut-outs are traced as solid cards: one farther off still shades.
+        let mut list = shadowed_wall();
+        list.items[1].material.alpha_cutoff = 0.5;
+        let far = middle_of(&mut renderer, &list);
+        list.items[1].casts_shadow = false;
+        let open = middle_of(&mut renderer, &list);
+        assert!(open[0] > far[0] + 40, "{far:?} vs {open:?}");
+
+        // A thin card standing out of the wall beside the middle (a grass
+        // blade, a leaf on the ground), seen edge-on, with the sun low
+        // across the wall: its shadow would be a card-shaped blotch.
+        let mut list = shadowed_wall();
+        list.sun.direction = Vec3::new(1.0, 0.0, 0.2);
+        list.items[1].transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(0.01, 4.0, 0.3),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.25, 0.0, -9.35),
+        );
+        list.items[1].material.alpha_cutoff = 0.5;
+        let beside = middle_of(&mut renderer, &list);
+        list.items[1].casts_shadow = false;
+        let without = middle_of(&mut renderer, &list);
+        assert!(
+            beside[0].abs_diff(without[0]) <= 4,
+            "a card on the surface blots it: {beside:?} vs {without:?}"
+        );
+        // A solid block there still shades it: only cut-outs are let off.
+        list.items[1].casts_shadow = true;
+        list.items[1].material.alpha_cutoff = 0.0;
+        let solid = middle_of(&mut renderer, &list);
+        assert!(without[0] > solid[0] + 40, "{solid:?} vs {without:?}");
+    }
+
+    #[test]
     fn past_their_reach_the_shadow_maps_take_over() {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();

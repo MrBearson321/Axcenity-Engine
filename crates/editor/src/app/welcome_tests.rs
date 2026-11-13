@@ -137,3 +137,63 @@ fn ribbon_captions_share_one_baseline() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Settings > Appearance > Menu icons places the icons of the ribbon's
+/// tick boxes (Snapping's Move, Surfaces, …) as it does in menus: Centered
+/// moves the icon to the middle of its column, and the label stays put.
+#[test]
+fn ribbon_tick_box_icons_follow_the_menu_icons_setting() {
+    let folder = copy_of_example("hello-touched", "ribbon-menu-icons");
+    let mut app = EditorApp::new(Some(&folder));
+    let ctx = theme::test_context();
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1440.0, 900.0),
+        )),
+        ..Default::default()
+    };
+    // Where Snapping's Move icon's middle and its label's start are drawn.
+    let mut placed = |place: theme::MenuIcons| {
+        app.appearance.menu_icons = place;
+        // As Settings does when a choice changes.
+        theme::apply(&ctx, &app.appearance);
+        let mut output = None;
+        for _ in 0..4 {
+            output = Some(crate::theme::run(&ctx, input(), |ui| app.frame(ui, None)));
+        }
+        let texts: Vec<(String, egui::Rect)> = output
+            .unwrap()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.pos.y < 200.0 => {
+                    Some((text.galley.text().to_owned(), text.visual_bounding_rect()))
+                }
+                _ => None,
+            })
+            .collect();
+        let icon = texts
+            .iter()
+            .find(|(text, _)| text == icons::GRID_FOUR)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{place:?}: no Move icon in the ribbon"));
+        let label = texts
+            .iter()
+            .filter(|(text, rect)| text == "Move" && rect.left() > icon.left())
+            .map(|(_, rect)| rect.left())
+            .fold(f32::MAX, f32::min);
+        (icon.center().x, label)
+    };
+    let (left_icon, left_label) = placed(theme::MenuIcons::Left);
+    let (centered_icon, centered_label) = placed(theme::MenuIcons::Centered);
+    assert!(
+        centered_icon > left_icon + 2.0,
+        "Centered icon at {centered_icon}, Left at {left_icon}"
+    );
+    assert!(
+        (centered_label - left_label).abs() < 0.5,
+        "label moved from {left_label} to {centered_label}"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
