@@ -361,6 +361,12 @@ fn every_kind_of_value_survives_a_slot_file() {
             enum_name: "KeyCode".into(),
             item: "E".into(),
         }),
+        Value::NumberSequence(axcenity_core::NumberSequence::ramp(0.5, 2.0)),
+        Value::NumberSequence(axcenity_core::NumberSequence::default()),
+        Value::ColorSequence(axcenity_core::ColorSequence::ramp(
+            Color3::new(1.0, 0.0, 0.0),
+            Color3::new(0.0, 0.5, 1.0),
+        )),
     ];
     for value in values {
         let json = serde_json::to_string(&SavedValue(value.clone())).unwrap();

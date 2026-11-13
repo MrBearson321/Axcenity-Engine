@@ -83,6 +83,7 @@ flowchart LR
 - Rect lights light from a representative point, not a true area integral.
 - Bakes go stale when the world changes; the editor flags them but doesn't rebake automatically.
 - Real-time GI draws six faces of the whole scene per probe. With hardware ray tracing (planned RT2, `docs/research/hardware-ray-tracing.md`) rays would update the same light probe volumes instead.
+- Probes inside walls and solid parts leak light, volumes can't be seen in the viewport, and without real-time GI a sky change leaves volumes lit as baked. R18 (`docs/research/global-illumination.md`) plans a probe overlay, invalid probes, sky light kept apart, and placement and GI tiers, all in the same volumes.
 
 ## Related documentation
 

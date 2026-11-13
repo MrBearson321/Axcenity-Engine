@@ -24,9 +24,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use axcenity_core::{
-    CFrame, ClassName, Color3, EnumItem, InstanceId, Material, PartType, ParticleType,
-    PhysicalProperties, TextureChannel, ToneMapping, UDim2, Value, ValueKind, Vector2, Vector3,
-    World,
+    CFrame, ClassName, Color3, ColorSequence, EnumItem, InstanceId, Material, NumberSequence,
+    PartType, ParticleType, PhysicalProperties, TextureChannel, ToneMapping, UDim2, Value,
+    ValueKind, Vector2, Vector3, World,
 };
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -134,6 +134,8 @@ fn to_json(value: &Value) -> serde_json::Value {
         Value::PhysicalProperties(p) => {
             json!({ "PhysicalProperties": p.map(PhysicalProperties::to_array) })
         }
+        Value::NumberSequence(sequence) => json!({ "NumberSequence": sequence.to_rows() }),
+        Value::ColorSequence(sequence) => json!({ "ColorSequence": sequence.to_rows() }),
     }
 }
 
@@ -170,6 +172,12 @@ fn from_json(json: &serde_json::Value) -> Option<Value> {
                         PhysicalProperties::from_array(numbers).clamped(),
                     ))
                 }),
+                "NumberSequence" => rows(value)
+                    .and_then(|rows| NumberSequence::from_rows(&rows).ok())
+                    .map(Value::NumberSequence),
+                "ColorSequence" => rows(value)
+                    .and_then(|rows| ColorSequence::from_rows(&rows).ok())
+                    .map(Value::ColorSequence),
                 "EnumItem" => {
                     let (enum_name, item) = name()?.split_once('.')?;
                     Some(Value::EnumItem(EnumItem {
@@ -182,6 +190,11 @@ fn from_json(json: &serde_json::Value) -> Option<Value> {
         }
         _ => None,
     }
+}
+
+/// A JSON array of rows of exactly `N` numbers each.
+fn rows<const N: usize>(json: &serde_json::Value) -> Option<Vec<[f32; N]>> {
+    json.as_array()?.iter().map(numbers).collect()
 }
 
 /// Exactly `N` numbers, from a JSON array.

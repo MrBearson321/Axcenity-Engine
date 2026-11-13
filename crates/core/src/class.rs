@@ -3,6 +3,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
+use crate::sequence::{ColorSequence, NumberSequence};
 use crate::value::{CFrame, Color3, EnumItem, UDim2, Value, Vector2, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
@@ -1424,6 +1425,21 @@ impl ClassName {
                     ("ColorEnd", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                     ("Transparency", Value::Number(0.0)),
                     ("TransparencyEnd", Value::Number(1.0)),
+                    // Over each particle's life, from birth (0) to death (1),
+                    // in place of the start and end values above while set
+                    // (roadmap R17.1). Empty is unset.
+                    (
+                        "SizeOverLife",
+                        Value::NumberSequence(NumberSequence::default()),
+                    ),
+                    (
+                        "ColorOverLife",
+                        Value::ColorSequence(ColorSequence::default()),
+                    ),
+                    (
+                        "TransparencyOverLife",
+                        Value::NumberSequence(NumberSequence::default()),
+                    ),
                     // Starting turn, in degrees, and degrees a second.
                     ("Rotation", Value::Number(0.0)),
                     ("RotSpeed", Value::Number(0.0)),

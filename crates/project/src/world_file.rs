@@ -75,8 +75,8 @@ use std::sync::Arc;
 
 use axcenity_core::prefab::{Overrides, PrefabLink, Segment, child_segments, overrides};
 use axcenity_core::{
-    CFrame, ClassName, EnumItem, InstanceId, Material, PartType, ParticleType, TextureChannel,
-    ToneMapping, Value, ValueKind, World,
+    CFrame, ClassName, ColorSequence, EnumItem, InstanceId, Material, NumberSequence, PartType,
+    ParticleType, TextureChannel, ToneMapping, Value, ValueKind, World,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
@@ -721,7 +721,37 @@ pub fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
         // Read by `apply_properties` as a path.
         ValueKind::Instance => Err("expected a path of names".to_owned()),
         ValueKind::PhysicalProperties => physical_properties(json),
+        ValueKind::NumberSequence => {
+            const EXPECTED: &str =
+                "expected [[time, value, envelope], ...] from time 0 to 1, or []";
+            let rows = number_rows::<3>(json).ok_or(EXPECTED)?;
+            NumberSequence::from_rows(&rows)
+                .map(Value::NumberSequence)
+                .map_err(|error| format!("{EXPECTED}: {error}"))
+        }
+        ValueKind::ColorSequence => {
+            const EXPECTED: &str = "expected [[time, r, g, b], ...] from time 0 to 1, or []";
+            let rows = number_rows::<4>(json).ok_or(EXPECTED)?;
+            ColorSequence::from_rows(&rows)
+                .map(Value::ColorSequence)
+                .map_err(|error| format!("{EXPECTED}: {error}"))
+        }
     }
+}
+
+/// A JSON array of rows of exactly `N` numbers each.
+fn number_rows<const N: usize>(json: &Json) -> Option<Vec<[f32; N]>> {
+    json.as_array()?
+        .iter()
+        .map(|row| {
+            let items = row.as_array().filter(|items| items.len() == N)?;
+            let mut out = [0.0; N];
+            for (slot, item) in out.iter_mut().zip(items) {
+                *slot = item.as_f64()? as f32;
+            }
+            Some(out)
+        })
+        .collect()
 }
 
 /// The names of a `PhysicalProperties`' numbers in a file, in the order
@@ -1144,6 +1174,14 @@ fn json_value(value: &Value) -> String {
                 .map(|(field, n)| format!("\"{field}\": {n}"))
                 .collect();
             format!("{{ {} }}", fields.join(", "))
+        }
+        Value::NumberSequence(sequence) => {
+            let rows: Vec<String> = sequence.to_rows().into_iter().map(json_triple).collect();
+            format!("[{}]", rows.join(", "))
+        }
+        Value::ColorSequence(sequence) => {
+            let rows: Vec<String> = sequence.to_rows().into_iter().map(json_quad).collect();
+            format!("[{}]", rows.join(", "))
         }
     }
 }

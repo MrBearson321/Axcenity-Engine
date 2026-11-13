@@ -19,6 +19,9 @@ pub(super) struct Badge {
     /// True while ray tracing is wanted but not drawing (a restart or a GPU
     /// that can't), shown in the warning color.
     pub warning: bool,
+    /// True when a restart would start ray tracing: the badge has a
+    /// Restart now button.
+    pub restart: bool,
 }
 
 /// The ray traced effects `effective` draws, shortly: "Shadows High".
@@ -55,9 +58,13 @@ pub(super) fn badge(
             Badge {
                 text: "Ray tracing: restart to turn on".to_owned(),
                 detail: "Hardware ray tracing is on in the settings, but the GPU was opened \
-                         without it. Restart the editor to ray trace."
+                         without it. Restart now starts the editor again with this project, \
+                         keeping unsaved world and script edits. If it still says this \
+                         afterward, check your Desktop shortcut opens this version of the \
+                         editor."
                     .to_owned(),
                 warning: true,
+                restart: true,
             }
         } else {
             Badge {
@@ -67,6 +74,7 @@ pub(super) fn badge(
                          drawn without it."
                     .to_owned(),
                 warning: true,
+                restart: false,
             }
         });
     }
@@ -86,6 +94,7 @@ pub(super) fn badge(
                 }
             ),
             warning: false,
+            restart: false,
         });
     }
     let seen = if stats.instances == 0 {
@@ -115,12 +124,15 @@ pub(super) fn badge(
             stats.meshes, stats.triangles
         ),
         warning: false,
+        restart: false,
     })
 }
 
-/// Draws `badge` at the bottom right of `rect`.
-pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) {
+/// Draws `badge` at the bottom right of `rect`. True when its Restart now
+/// was clicked.
+pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) -> bool {
     let palette = crate::theme::palette(ui.ctx());
+    let mut restart = false;
     egui::Area::new(egui::Id::new("ray tracing badge"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::RIGHT_BOTTOM)
@@ -136,13 +148,22 @@ pub(super) fn paint(ui: &egui::Ui, rect: egui::Rect, badge: &Badge) {
                     } else {
                         palette.text
                     };
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(&badge.text).small().color(color))
-                            .sense(egui::Sense::hover()),
-                    )
-                    .on_hover_text(&badge.detail);
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&badge.text).small().color(color))
+                                .sense(egui::Sense::hover()),
+                        )
+                        .on_hover_text(&badge.detail);
+                        if badge.restart {
+                            restart = ui
+                                .small_button("Restart now")
+                                .on_hover_text(&badge.detail)
+                                .clicked();
+                        }
+                    });
                 });
         });
+    restart
 }
 
 #[cfg(test)]
@@ -172,12 +193,12 @@ mod tests {
         let off = effective(false, RayTracedShadows::High);
         let restart = badge(&off, true, true, &RayTracingStats::default()).unwrap();
         assert!(
-            restart.warning && restart.text.contains("restart"),
+            restart.warning && restart.restart && restart.text.contains("restart"),
             "{restart:?}"
         );
         let cannot = badge(&off, true, false, &RayTracingStats::default()).unwrap();
         assert!(
-            cannot.warning && cannot.text.contains("not on this GPU"),
+            cannot.warning && !cannot.restart && cannot.text.contains("not on this GPU"),
             "{cannot:?}"
         );
     }

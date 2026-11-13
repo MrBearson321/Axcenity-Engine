@@ -288,7 +288,17 @@ pub fn show(
                     {
                         edit = Some(Edit::Keep(field, keep));
                     }
-                    let enabled = !locked || name == "Locked";
+                    // A start and end pair gives way to its curve while the
+                    // curve is set.
+                    let replaced = instance.class() == ClassName::ParticleEmitter
+                        && groups::replacing_curve(name)
+                            .and_then(|curve| instance.property(curve))
+                            .is_some_and(|curve| match curve {
+                                Value::NumberSequence(sequence) => !sequence.is_empty(),
+                                Value::ColorSequence(sequence) => !sequence.is_empty(),
+                                _ => false,
+                            });
+                    let enabled = (!locked || name == "Locked") && !replaced;
                     let made = ui.add_enabled_ui(enabled, |ui| match value {
                         // Who sits there is up to the game, not the editor.
                         Value::Instance(target)
@@ -402,6 +412,7 @@ pub fn show(
     edit
 }
 
+mod curves;
 mod files;
 mod groups;
 mod many;
