@@ -2342,6 +2342,10 @@ impl ClassName {
                     ("Transparency", Value::Number(0.0)),
                     ("CanCollide", Value::Bool(true)),
                     ("WindAffected", Value::Bool(false)),
+                    // What it collides as: Default is the model's own
+                    // collision pieces (`_COL` objects) when it has any,
+                    // else its hull (R15.2).
+                    ("CollisionFidelity", collision_fidelity("Default")),
                 ];
                 properties.extend(collision_properties());
                 properties.extend(body_properties());
@@ -2386,6 +2390,17 @@ impl ClassName {
                 // the project, such as "assets/terrain/Terrain". The editor
                 // picks one.
                 ("DataFolder", Value::String(String::new())),
+                // Water (LE4): with `Water` on, the hollows below
+                // `WaterLevel` (world Y) are flooded, with waves, foam and
+                // reflections (`docs/terrain.md`).
+                ("Water", Value::Bool(false)),
+                ("WaterLevel", Value::Number(0.0)),
+                ("WaterColor", Value::Color3(Color3::new(0.02, 0.16, 0.22))),
+                ("WaterClarity", Value::Number(4.0)),
+                ("WaveHeight", Value::Number(0.25)),
+                ("WaveLength", Value::Number(12.0)),
+                ("WaveSpeed", Value::Number(1.0)),
+                ("WaveDirection", Value::Number(0.0)),
             ],
             ClassName::TerrainLayer => vec![
                 // The material: a tint, the texture maps (files relative to
@@ -3275,8 +3290,8 @@ fn alignment_mode(enum_name: &str) -> Value {
     })
 }
 
-/// A UnionOperation's `CollisionFidelity` item: Box, Hull or
-/// PreciseConvexDecomposition.
+/// A MeshPart's or UnionOperation's `CollisionFidelity` item: Default,
+/// Box, Hull or PreciseConvexDecomposition.
 fn collision_fidelity(item: &str) -> Value {
     Value::EnumItem(EnumItem {
         enum_name: "CollisionFidelity".to_owned(),

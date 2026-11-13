@@ -186,6 +186,18 @@ pub fn show(
             {
                 edit = Some(Edit::OpenInModelStudio);
             }
+            if !playing
+                && instance.class() == ClassName::MeshPart
+                && has_mesh
+                && ui
+                    .button(theme::with_icon(icons::ARROW_SQUARE_OUT, "Edit in Blender"))
+                    .on_hover_text(
+                        "Open its model's .glb in Blender. Save there (Ctrl+S) to send it back.",
+                    )
+                    .clicked()
+            {
+                edit = Some(Edit::OpenInBlender);
+            }
             ui.add_space(2.0);
             // Filter properties: shows only the rows whose names (or whose
             // section's title) match, with their sections open. Kept from

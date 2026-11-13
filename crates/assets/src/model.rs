@@ -7,6 +7,7 @@
 //! file (1 glTF unit, or 1 meter in an FBX file, is 1 stud), which is the
 //! `Size` an imported MeshPart starts with.
 
+mod collision;
 pub(crate) mod cooked_model;
 mod fbx;
 mod lod;
@@ -19,6 +20,7 @@ mod stamped;
 #[cfg(test)]
 mod test_rig;
 
+pub use collision::is_piece as is_collision_piece;
 pub use lod::level_of as lod_level;
 pub use lod_report::{LevelReport, LodReport, LodWarning, PrimitiveReport};
 pub use maps::{MapSlot, TextureRole, texture_roles};
@@ -100,6 +102,10 @@ pub struct Model {
     pub primitives: Vec<Primitive>,
     /// Every distinct corner, for the collision hull.
     pub hull_points: Vec<[f32; 3]>,
+    /// The file's collision pieces (its `_COL` objects, see [`collision`]),
+    /// each the corners of one convex piece, fitted like the triangles.
+    /// Empty when it has none.
+    pub collision: Vec<Vec<[f32; 3]>>,
     /// Problems that didn't stop it loading, such as an FBX texture that
     /// isn't there (the model is drawn without it). They finish the sentence
     /// "The model `…` ".
@@ -115,7 +121,7 @@ impl Model {
     /// 1×1×1 cube as a loaded one is, without simpler copies: one being
     /// edited changes too often to simplify.
     pub fn from_primitives(primitives: Vec<Primitive>) -> Result<Model, ModelError> {
-        fit_with(primitives, None)
+        fit_with(primitives, Vec::new(), None)
     }
 
     /// A new model of the same triangles with each primitive drawn by
@@ -164,6 +170,7 @@ impl Model {
             center: self.center,
             primitives,
             hull_points: self.hull_points.clone(),
+            collision: self.collision.clone(),
             warnings: Vec::new(),
             rig: self.rig.clone(),
         }
@@ -990,6 +997,7 @@ fn read(
         wanted: None,
         found: HashSet::new(),
         level: 0,
+        pieces: collision::Pieces::default(),
         joints: Vec::new(),
         skins: HashMap::new(),
     };
@@ -1004,7 +1012,11 @@ fn read(
         if let Some(path) = missing(&reader.wanted, &reader.found) {
             return Err(ModelError::NoObject(path));
         }
-        let mut model = fit(std::mem::take(&mut reader.primitives), in_project)?;
+        let mut model = fit(
+            std::mem::take(&mut reader.primitives),
+            reader.pieces.take(),
+            in_project,
+        )?;
         if !reader.joints.is_empty() {
             model.rig = Some(Arc::new(gltf_rig(
                 &document,
@@ -1194,7 +1206,8 @@ fn mesh_name(mesh: &gltf::Mesh) -> String {
 }
 
 /// True if the object at `path` is in `wanted` (or everything is wanted),
-/// or is a wanted object's `_LOD1` or `_LOD2` copy, which comes with it.
+/// or is a wanted object's `_LOD1` or `_LOD2` copy or `_COL` collision
+/// piece, which come with it.
 /// A wanted path met is added to `found`.
 fn want(wanted: &Option<HashSet<String>>, found: &mut HashSet<String>, path: &str) -> bool {
     match wanted {
@@ -1203,7 +1216,9 @@ fn want(wanted: &Option<HashSet<String>>, found: &mut HashSet<String>, path: &st
             found.insert(path.to_owned());
             true
         }
-        Some(wanted) => lod::full_path(path).is_some_and(|full| wanted.contains(full)),
+        Some(wanted) => lod::full_path(path)
+            .or_else(|| collision::owner_path(path))
+            .is_some_and(|full| wanted.contains(full)),
     }
 }
 
@@ -1283,6 +1298,8 @@ struct Reader<'a> {
     found: HashSet<String>,
     /// The level of detail of the objects being read (see [`lod::level_of`]).
     level: u8,
+    /// The collision pieces read (see [`collision`]).
+    pieces: collision::Pieces,
     /// The skins' joints so far, each a node and its inverse bind matrix,
     /// and where each skin's start in them.
     joints: Vec<(usize, Mat4)>,
@@ -1311,7 +1328,9 @@ impl Reader<'_> {
                 for mesh in document.meshes() {
                     let path = siblings.path("", &mesh_name(&mesh));
                     if want(&self.wanted, &mut self.found, &path) {
+                        let outer = self.pieces.enter(&mesh_name(&mesh));
                         self.mesh(&mesh, Mat4::IDENTITY, None)?;
+                        self.pieces.leave(outer);
                     }
                 }
             }
@@ -1334,12 +1353,15 @@ impl Reader<'_> {
         // Everything inside a `_LOD1` node is part of that copy.
         let outer = self.level;
         self.level = self.level.max(lod::level_of(&node_name(node)));
+        // And everything inside a `_COL` node is part of that piece.
+        let outer_piece = self.pieces.enter(&node_name(node));
         if let Some(mesh) = node.mesh()
             && want(&self.wanted, &mut self.found, path)
         {
             // A skinned mesh is where its joints put it: its node's own
-            // transform doesn't count (glTF's rule).
-            match node.skin().and_then(|skin| self.skin(&skin)) {
+            // transform doesn't count (glTF's rule). A piece isn't skinned.
+            let skin = node.skin().filter(|_| !self.pieces.reading());
+            match skin.and_then(|skin| self.skin(&skin)) {
                 Some(first) => self.mesh(&mesh, Mat4::IDENTITY, Some(first))?,
                 None => self.mesh(&mesh, transform, None)?,
             }
@@ -1350,6 +1372,7 @@ impl Reader<'_> {
             self.node(&child, transform, depth + 1, &child_path)?;
         }
         self.level = outer;
+        self.pieces.leave(outer_piece);
         Ok(())
     }
 
@@ -1402,6 +1425,11 @@ impl Reader<'_> {
                 .ok_or(ModelError::NoPositions)?
                 .map(|p| transform.transform_point3(Vec3::from(p)).to_array())
                 .collect();
+            // A collision piece is only its corners.
+            if self.pieces.reading() {
+                self.pieces.add(positions);
+                continue;
+            }
             let count = positions.len();
             let mut indices: Vec<u32> = match reader.read_indices() {
                 Some(indices) => indices.into_u32().collect(),
@@ -1855,16 +1883,22 @@ pub fn tangents(
 
 /// Fits the primitives into the 1×1×1 cube centered on the origin and
 /// makes the model. The full model's primitives decide its box and hull;
-/// simpler copies (see [`lod`]) are placed the same way and attached to them.
+/// simpler copies (see [`lod`]) are placed the same way and attached to
+/// them, and collision `pieces` (see [`collision`]) are placed the same way.
 /// The simpler copies are taken from the mesh cache when it has them, and
 /// kept there when they're made (for a model `in_project`).
-fn fit(primitives: Vec<Primitive>, in_project: Option<InProject<'_>>) -> Result<Model, ModelError> {
-    fit_with(primitives, Some(in_project))
+fn fit(
+    primitives: Vec<Primitive>,
+    pieces: Vec<Vec<[f32; 3]>>,
+    in_project: Option<InProject<'_>>,
+) -> Result<Model, ModelError> {
+    fit_with(primitives, pieces, Some(in_project))
 }
 
 /// [`fit`], with simpler copies only if `simplify` (`Some`).
 fn fit_with(
     mut primitives: Vec<Primitive>,
+    pieces: Vec<Vec<[f32; 3]>>,
     simplify: Option<Option<InProject<'_>>>,
 ) -> Result<Model, ModelError> {
     // A file with only `_LOD1` objects has them as its full model.
@@ -1931,6 +1965,18 @@ fn fit_with(
             );
         }
     }
+    let collision = pieces
+        .into_iter()
+        .map(|piece| {
+            piece
+                .into_iter()
+                .map(|corner| (Vec3::from(corner) - center) * scale)
+                .filter(|corner| corner.is_finite())
+                .map(|corner| corner.to_array())
+                .collect::<Vec<_>>()
+        })
+        .filter(|piece| !piece.is_empty())
+        .collect();
     Ok(Model {
         key: new_key(),
         size: Vec3::select(thick, size, Vec3::ZERO).to_array(),
@@ -1940,6 +1986,7 @@ fn fit_with(
             None => primitives,
         },
         hull_points,
+        collision,
         warnings: Vec::new(),
         rig: None,
     })

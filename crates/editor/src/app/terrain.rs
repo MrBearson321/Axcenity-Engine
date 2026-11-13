@@ -209,7 +209,8 @@ impl EditorApp {
             }
             TerrainAction::RemoveLayer(layer) => self.delete(layer),
             TerrainAction::MoveLayer(layer, up) => self.move_terrain_layer(layer, up),
-            TerrainAction::SetLayer(layer, name, value) => {
+            TerrainAction::SetLayer(layer, name, value)
+            | TerrainAction::SetTerrain(layer, name, value) => {
                 // A texture dropped on a map may be a global one.
                 if let Value::String(path) = &value
                     && !self.use_global_asset(path)

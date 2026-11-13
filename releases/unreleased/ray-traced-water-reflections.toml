@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Ray traced water reflections"
+details = "With hardware ray tracing on, water at High and Ultra reflection quality traces a ray where its screen-space reflection finds nothing, so parts above or behind the view, or hidden on screen, show in the water. What a ray finds is lit by the sun (with its shadow), nearby lamps, the ambient light and the light probes."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

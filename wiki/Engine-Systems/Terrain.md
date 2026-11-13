@@ -24,9 +24,12 @@ flowchart LR
   TB --> TD
   TD --> MESH[terrain::mesh chunks<br/>split cells like parry]
   MESH --> SC[scene TerrainCache:<br/>chunks on a worker, weights, foliage draw]
+  SC --> WA[terrain water: one water item<br/>per chunk below WaterLevel]
   TD --> PH[physics heightfield + colliding foliage]
   TD <--> PR[project terrain_files: PNG + JSON]
 ```
+
+Since LE4 (the 2026-11-13 lighting audit) a Terrain can flood its hollows: `scene/src/terrain_water.rs` draws the renderer's water over every chunk whose lowest ground is below `WaterLevel`. It is drawn only; physics doesn't see it.
 
 ## Performance
 
