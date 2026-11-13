@@ -5,11 +5,12 @@ use super::*;
 
 /// This computer's graphics settings: a preset, its overrides, and what's
 /// in use once the GPU's limits are applied, with why anything was lowered.
+/// True when Restart now was clicked.
 pub(super) fn graphics_page(
     ui: &mut egui::Ui,
     settings: &mut GraphicsSettings,
     capabilities: &Capabilities,
-) {
+) -> bool {
     page_title(
         ui,
         "Graphics",
@@ -337,7 +338,7 @@ pub(super) fn graphics_page(
             }
         });
     ui.add_space(space::L);
-    ray_tracing_section(ui, settings, capabilities, &preset);
+    let restart = ray_tracing_section(ui, settings, capabilities, &preset);
     ui.add_space(space::L);
     section(ui, "In use");
     let effective = settings.effective(capabilities);
@@ -453,17 +454,19 @@ pub(super) fn graphics_page(
         )
         .color(palette.text_secondary),
     );
+    restart
 }
 
 /// Hardware ray tracing: whether this GPU can, and how far rays reach. Each
 /// ray traced effect is its own switch here, off unless turned on
 /// (`docs/rendering/ray-tracing.md`).
+/// The Ray tracing section. True when Restart now was clicked.
 fn ray_tracing_section(
     ui: &mut egui::Ui,
     settings: &mut GraphicsSettings,
     capabilities: &Capabilities,
     preset: &GraphicsSettings,
-) {
+) -> bool {
     let palette = theme::palette(ui.ctx());
     section(ui, "Ray tracing");
     ui.label(
@@ -499,17 +502,31 @@ fn ray_tracing_section(
             *settings = settings.without_ray_traced_effects();
         }
     });
-    if settings.ray_tracing()
-        && !capabilities.ray_queries
-        && axcenity_render::adapters::adapter_can_ray_trace()
-    {
-        ui.label(
-            egui::RichText::new(
-                "Restart the editor to start ray tracing. Opened from a Desktop shortcut, \
-                 check it's this version of the editor.",
-            )
-            .color(palette.warning),
-        );
+    let mut restart = false;
+    if needs_restart(
+        capabilities.ray_queries,
+        axcenity_render::adapters::adapter_can_ray_trace(),
+        settings.ray_tracing(),
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                egui::RichText::new(if settings.ray_tracing() {
+                    "Restart the editor to start ray tracing."
+                } else {
+                    "Restart the editor to stop ray tracing."
+                })
+                .color(palette.warning),
+            );
+            restart = ui
+                .button("Restart now")
+                .on_hover_text(
+                    "Saves these settings and starts the editor again with this project, \
+                     carrying unsaved world and script edits (save Event Graphs, behavior \
+                     trees, data tables and materials first). If it still asks to restart \
+                     afterward, check your Desktop shortcut opens this version of the editor.",
+                )
+                .clicked();
+        });
     }
     egui::Grid::new("ray tracing settings")
         .num_columns(2)
@@ -623,6 +640,14 @@ fn ray_tracing_section(
             });
             ui.end_row();
         });
+    restart
+}
+
+/// Whether the GPU must be opened again for Hardware ray tracing to be as
+/// set: `wanted` but not `opened` on a GPU that `can`, or opened but no
+/// longer wanted.
+pub(super) fn needs_restart(opened: bool, can: bool, wanted: bool) -> bool {
+    if wanted { !opened && can } else { opened }
 }
 
 /// What the Ray tracing section says about this GPU: whether the device

@@ -11,6 +11,15 @@ use super::*;
 use crate::rebuild::BuildMessage;
 use crate::relaunch::{self, Handoff, TabHandoff, View};
 
+/// Which editor `update` starts with a written handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LaunchInto {
+    /// The editor a background build just made (Relaunch).
+    Rebuilt,
+    /// This same editor program again (Restart now).
+    Same,
+}
+
 /// The keys Settings > Engine is saved under.
 pub(super) const REBUILD_KEY: &str = "engine rebuild on change";
 pub(super) const RELAUNCH_KEY: &str = "engine relaunch automatically";
@@ -192,7 +201,23 @@ impl EditorApp {
     /// and closes this one. Refused (and said why) when there's no rebuilt
     /// editor, or when there are unsaved edits it can't carry.
     pub(super) fn relaunch(&mut self) {
-        if !self.rebuilds.ready || self.launching.is_some() {
+        if !self.rebuilds.ready {
+            return;
+        }
+        self.hand_off_and_launch(LaunchInto::Rebuilt, "Relaunch");
+    }
+
+    /// Restart now: starts this editor again with the session, for a
+    /// setting read only at start (Hardware ray tracing). Refused, and said
+    /// why, while there are unsaved edits it can't carry.
+    pub(super) fn restart_editor(&mut self) {
+        self.hand_off_and_launch(LaunchInto::Same, "Restart now");
+    }
+
+    /// Writes the handoff for `into`; `update` then starts it and closes
+    /// this editor. `action` names the button in what's said.
+    fn hand_off_and_launch(&mut self, into: LaunchInto, action: &str) {
+        if self.launching.is_some() {
             return;
         }
         if self.ui_graphs_unsaved()
@@ -200,12 +225,12 @@ impl EditorApp {
             || self.data_tables.unsaved()
             || self.materials.unsaved()
         {
-            self.output.warning(
-                "Relaunch carries the world and script tabs, not Event Graphs, behavior \
-                 trees, data tables or materials. Save those first, then Relaunch.",
-            );
+            self.output.warning(format!(
+                "{action} carries the world and script tabs, not Event Graphs, behavior \
+                 trees, data tables or materials. Save those first, then {action}."
+            ));
             self.toasts
-                .warning("Save the Event Graph or behavior tree first.");
+                .warning("Save the Event Graph, behavior tree, data table or material first.");
             return;
         }
         let written = relaunch::handoff_root()
@@ -218,29 +243,34 @@ impl EditorApp {
         match written {
             Ok(folder) => {
                 self.toasts.offer = None;
-                self.launching = Some(folder);
+                self.launching = Some((folder, into));
             }
             Err(err) => self.output.error(format!(
-                "Could not relaunch: writing the handoff failed: {err}"
+                "Could not {}: writing the handoff failed: {err}",
+                action.to_lowercase()
             )),
         }
     }
 
-    /// Starts the rebuilt editor with the handoff `relaunch` wrote, and
-    /// closes this one. The settings are saved first, so the new editor
-    /// reads the same ones.
+    /// Starts the rebuilt editor, or this one again, with the handoff
+    /// `relaunch` or `restart_editor` wrote, and closes this one. The
+    /// settings are saved first, so the new editor reads the same ones.
     pub(super) fn launch(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let Some(folder) = self.launching.take() else {
-            return;
-        };
-        let Some(source) = self.rebuilds.source.clone() else {
+        let Some((folder, into)) = self.launching.take() else {
             return;
         };
         if let Some(storage) = frame.storage_mut() {
             eframe::App::save(self, storage);
             storage.flush();
         }
-        match relaunch::launch(&source, &folder) {
+        let started = match into {
+            LaunchInto::Rebuilt => match self.rebuilds.source.clone() {
+                Some(source) => relaunch::launch(&source, &folder),
+                None => return,
+            },
+            LaunchInto::Same => relaunch::restart(&folder),
+        };
+        match started {
             Ok(()) => {
                 self.closing = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -248,7 +278,7 @@ impl EditorApp {
             Err(err) => {
                 let _ = std::fs::remove_dir_all(&folder);
                 self.output
-                    .error(format!("Could not start the rebuilt editor: {err}"));
+                    .error(format!("Could not start the editor again: {err}"));
             }
         }
     }

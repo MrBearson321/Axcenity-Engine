@@ -27,7 +27,7 @@ Viewport > View Mode > **Ray Hits** (`DebugView::RayHits`, `ray_hits.wgsl`) trac
 
 While Hardware ray tracing is on (or turned on, waiting for a restart), the editor's viewport shows a small badge at the bottom right (`viewport/ray_badge.rs`), so whether rays are drawing is never a guess:
 
-- **Ray tracing: restart to turn on** (warning color): the setting is on but the GPU was opened without it.
+- **Ray tracing: restart to turn on** (warning color), with a **Restart now** button: the setting is on but the GPU was opened without it. Restart now starts the editor again with the project and its unsaved world and script edits (`docs/editor/scripts.md`, Restart now); Settings > Graphics > Ray tracing has the same button while a restart would turn ray tracing on or off.
 - **Ray tracing: not on this GPU** (warning color): the GPU or driver can't ray trace.
 - **Ray tracing on: no effects**: the GPU ray traces, but no ray traced effect is turned on, so nothing looks different yet.
 - **Ray tracing: Shadows High, AO Medium · 812 items traced**: the effects drawing and how many items are in the ray traced scene this frame ("nothing in reach yet" when none).

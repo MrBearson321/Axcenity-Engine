@@ -209,6 +209,20 @@ fn relaunch_needs_a_rebuilt_editor_first() {
     assert!(app.launching.is_none(), "nothing was rebuilt yet");
 }
 
+#[test]
+fn restart_now_hands_off_to_this_editor_without_a_rebuild() {
+    let folder = copy_of_example("hello-touched", "restart-now");
+    let mut app = EditorApp::new(Some(&folder));
+    edit_the_pad(&mut app);
+    app.restart_editor();
+    let (handoff, into) = app.launching.clone().expect("a handoff was written");
+    assert_eq!(into, engine::LaunchInto::Same);
+    let read = Handoff::read(&handoff).unwrap();
+    let _ = std::fs::remove_dir_all(&handoff);
+    assert_eq!(read.project.as_deref(), Some(folder.as_path()));
+    assert!(read.world.is_some(), "the unsaved edit goes along");
+}
+
 /// A Cargo workspace in a temporary folder, with one tiny package named
 /// like the editor, whose `main.rs` is `main`.
 pub(super) fn tiny_workspace(test: &str, main: &str) -> PathBuf {
