@@ -568,6 +568,16 @@ impl TextureRenderer {
         self.scene.pending_uploads()
     }
 
+    /// Asks for every mesh (with its levels of detail) and color texture of
+    /// `list`'s items to be uploaded, seen or not, so that looking around
+    /// later doesn't wait for them: the editor does this behind its loading
+    /// screen. Does nothing unless background uploads are on
+    /// ([`set_background_uploads`](Self::set_background_uploads)); count
+    /// them with [`pending_uploads`](Self::pending_uploads).
+    pub fn preload(&mut self, list: &DrawList) {
+        self.scene.preload(list);
+    }
+
     /// For the editor's culling overlay: while `camera` is set, items and
     /// sprites are culled as if seen from it (at this texture's aspect)
     /// rather than from the draw list's camera, and each item's bounds are

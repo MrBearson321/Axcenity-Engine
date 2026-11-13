@@ -198,7 +198,57 @@ pub fn show_finishing(
 fn finishing_text(uploads: Option<(usize, usize)>) -> String {
     match uploads {
         Some(_) => "Sending models and textures to the graphics card".to_owned(),
-        None => "Preparing the scene".to_owned(),
+        None => "Getting the editor ready".to_owned(),
+    }
+}
+
+/// How many frames in a row must come quickly for the editor to count as
+/// ready after a project opens (see [`Settling`]).
+pub const SETTLED_FRAMES: u32 = 5;
+/// A frame this quick, in seconds, counts toward [`SETTLED_FRAMES`].
+const QUICK_FRAME: f32 = 0.1;
+
+/// Whether the editor's frames have settled after a project opens. The
+/// first frames that draw a scene make pipelines, build ray tracing's
+/// acceleration structures and so on, each a stall: the loading screen
+/// stays up until [`SETTLED_FRAMES`] frames in a row each take no more
+/// than [`QUICK_FRAME`] (or twice the quickest frame yet, on a computer
+/// that never draws the scene that fast), so the editor answers the
+/// moment it's gone.
+#[derive(Debug, Default)]
+pub struct Settling {
+    /// egui's number for the last frame counted, and when it started.
+    last: Option<(u64, Instant)>,
+    quickest: Option<f32>,
+    quick: u32,
+}
+
+impl Settling {
+    /// Counts frame `number` (egui's `cumulative_frame_nr`: a frame egui
+    /// lays out twice is counted once), started at `now`, and says
+    /// whether frames have settled.
+    pub fn frame(&mut self, number: u64, now: Instant) -> bool {
+        match self.last {
+            Some((last_number, _)) if last_number == number => {}
+            Some((_, last)) => {
+                self.last = Some((number, now));
+                let seconds = now.saturating_duration_since(last).as_secs_f32();
+                let quickest = self.quickest.map_or(seconds, |q| q.min(seconds));
+                self.quickest = Some(quickest);
+                if seconds <= QUICK_FRAME.max(quickest * 2.0) {
+                    self.quick += 1;
+                } else {
+                    self.quick = 0;
+                }
+            }
+            None => self.last = Some((number, now)),
+        }
+        self.settled()
+    }
+
+    /// Whether the last [`SETTLED_FRAMES`] frames came quickly.
+    pub fn settled(&self) -> bool {
+        self.quick >= SETTLED_FRAMES
     }
 }
 
@@ -558,6 +608,41 @@ fn paint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_settle_once_several_in_a_row_are_quick() {
+        let start = Instant::now();
+        // Each frame's egui number and seconds since the first frame.
+        let settles = |frames: &[(u64, f32)]| {
+            let mut settling = Settling::default();
+            frames
+                .iter()
+                .map(|&(number, seconds)| {
+                    settling.frame(number, start + std::time::Duration::from_secs_f32(seconds))
+                })
+                .collect::<Vec<bool>>()
+        };
+        let quick = SETTLED_FRAMES as u64;
+        // Quick frames, then a two-second stall: the count starts again
+        // after it, and a frame laid out twice (the same number) counts
+        // once.
+        let mut frames: Vec<(u64, f32)> = (0..3).map(|n| (n, n as f32 * 0.016)).collect();
+        frames.push((3, 2.04));
+        frames.extend((1..quick).map(|n| (3 + n, 2.04 + n as f32 * 0.016)));
+        let last = frames.last().unwrap().1;
+        frames.push((3 + quick - 1, last + 0.001));
+        frames.push((3 + quick, last + 0.016));
+        let settled = settles(&frames);
+        assert!(settled[..settled.len() - 1].iter().all(|&s| !s));
+        assert!(settled[settled.len() - 1]);
+        // A computer that never draws quicker than half a second settles
+        // on frames near its quickest.
+        let mut slow: Vec<(u64, f32)> = (0..quick).map(|n| (n, n as f32 * 0.5)).collect();
+        slow.push((quick, (quick - 1) as f32 * 0.5 + 0.6));
+        let settled = settles(&slow);
+        assert!(!settled[settled.len() - 2]);
+        assert!(settled[settled.len() - 1]);
+    }
 
     #[test]
     fn the_bar_fills_only_by_what_is_counted() {

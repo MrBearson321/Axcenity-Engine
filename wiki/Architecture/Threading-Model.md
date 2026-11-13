@@ -32,7 +32,7 @@ Rule of thumb: **anything that reads or writes the World runs on the frame's thr
 |---|---|---|---|
 | `asset loader` ×(cores − 2, clamped 4–8) | `assets/src/loading.rs` | Reads and decodes model, texture, material and sound files off the `Assets` lock (M5) | Results into the `Assets` cache; a `LoadTicket` per request |
 | Player preload | `player/src/preload.rs` | Requests the Workspace's assets right after the project loads (I11) | Holds the loading screen until they're in |
-| Texture uploads | `render/src/renderer/uploads.rs` | Background GPU uploads of meshes and textures while streaming is on, and in the editor while a project opens (`set_background_uploads`, `Viewport::opening`) | Uploaded meshes and textures; the editor's loading screen counts them down |
+| Texture uploads | `render/src/renderer/uploads.rs` | Background GPU uploads of meshes and textures while streaming is on, and always in the editor's viewport (`set_background_uploads`); behind the editor's loading screen, everything in the world (`TextureRenderer::preload`, `Viewport::opening`) | Uploaded meshes and textures; the editor's loading screen counts them down |
 | `viewport renderer` (editor) | `editor/src/viewport.rs` | Makes the viewport's `TextureRenderer` (pipelines) while a project loads | The renderer, taken by the first viewport frame |
 | `navmesh build` | `nav/src/shared.rs` | Assembles the navigation mesh from the changed parts' solids (`Assembly::run`, M13) | The new mesh about 0.1 s of game time later (`SharedNavMesh`) |
 | Terrain layer maps | `scene` / loading workers | Decoded on the asset loading workers even when cooked, and the layer arrays built in parallel, each texture resized once (PRs #67, #69) | Pixels for the terrain's texture arrays |
