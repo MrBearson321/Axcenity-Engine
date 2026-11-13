@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Listen to Toolbox sounds before getting them"
+details = "Each sound in the Toolbox, and its details, has a listen button that plays the source's preview in the editor without downloading the sound into the project. Press it again, listen to another sound or leave the Sounds tab to stop it."
+features = []
+fixes = []
+introduces_issues = []
+prs = [315]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

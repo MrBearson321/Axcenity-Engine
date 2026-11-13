@@ -258,17 +258,24 @@ pub(super) fn plan_lights(
         };
         let index = planned.lights.len() as u32;
         let mut raw = light_raw(light);
+        // Ray traced shadows (LE1) trace every lamp that casts shadows.
+        raw.shadow[2] = super::ray_shadows::traced_start(light);
         if planned.spot_shadows.len() < spot_layers
             && let Some(map) = spot_map
             && let Some((shadow, texel)) = spot_shadow(light, map.size)
         {
-            raw.shadow = [planned.spot_shadows.len() as f32, texel, 0.0, 0.0];
+            raw.shadow = [planned.spot_shadows.len() as f32, texel, raw.shadow[2], 0.0];
             planned.spot_shadows.push(shadow);
         } else if planned.point_shadows.len() < point_lights
             && let Some(map) = point_map
             && let Some((shadow, texel)) = point_shadow(light, map.size)
         {
-            raw.shadow = [planned.point_shadows.len() as f32, texel, 0.0, 0.0];
+            raw.shadow = [
+                planned.point_shadows.len() as f32,
+                texel,
+                raw.shadow[2],
+                0.0,
+            ];
             planned.point_shadows.push(shadow);
         }
         planned.lights.push(raw);

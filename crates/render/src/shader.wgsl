@@ -741,8 +741,10 @@ fn toon_surface(
     let sun = sun_arrival(world_position, geometric, pixel, solid);
     var lit = toon_light(n, v, sun, color);
     let lamps = tile_lamps(pixel);
+    var slot = 0u;
     for (var i = 0u; i < lamps.count; i++) {
-        let lamp = lamp_arrival(lamps, i, world_position, geometric, pixel, solid);
+        let lamp = lamp_arrival(lamps, i, slot, world_position, geometric, pixel, solid);
+        slot += lamp_slots(lamps, i);
         if lamp.visible > 0.0 {
             lit += toon_light(n, v, lamp, color);
         }

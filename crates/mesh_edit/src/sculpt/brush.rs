@@ -21,6 +21,15 @@ const FLATTEN: f32 = 0.5;
 /// The share of the way to the middle Pinch (and Crease's pinch) takes a
 /// vertex at full strength.
 const PINCH: f32 = 0.3;
+/// How high Layer raises the surface in one stroke at full strength, as a
+/// share of the radius.
+const LAYER: f32 = 0.1;
+/// The share of what's left to its height Layer takes a vertex each dab.
+const LAYER_STEP: f32 = 0.5;
+/// Elastic Grab moves what's this many radii away a little too. Further
+/// costs more than a frame on a 500k-triangle sculpt (three radii took
+/// 200 ms a dab, one and a half 38 ms).
+const ELASTIC_REACH: f32 = 1.25;
 
 /// A sculpting brush.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -46,19 +55,44 @@ pub enum SculptTool {
     SnakeHook,
     /// Paints the mask, which holds vertices still (Ctrl: takes it off).
     Mask,
+    /// Raises the surface to one height a stroke, however often it's gone
+    /// over (Ctrl: lowers it).
+    Layer,
+    /// Pushes out a rounded bump, its sides drawn in (Ctrl: a dent).
+    Blob,
+    /// Flattens only what stands above the plane under the brush (Ctrl:
+    /// fills what's below).
+    Scrape,
+    /// Fills only what's below the plane under the brush (Ctrl: scrapes
+    /// what's above).
+    Fill,
+    /// Draw with a narrow, crisp middle, for cuts and seams (Ctrl: in).
+    DrawSharp,
+    /// Pushes the surface along the stroke, over the surface.
+    Nudge,
+    /// Grab with a soft falloff reaching a quarter of a radius further, so
+    /// what's moved stretches instead of tearing.
+    ElasticGrab,
 }
 
 impl SculptTool {
-    pub const ALL: [SculptTool; 10] = [
+    pub const ALL: [SculptTool; 17] = [
         SculptTool::Draw,
+        SculptTool::DrawSharp,
         SculptTool::ClayStrips,
-        SculptTool::Smooth,
-        SculptTool::Grab,
+        SculptTool::Layer,
+        SculptTool::Blob,
         SculptTool::Inflate,
         SculptTool::Crease,
+        SculptTool::Smooth,
         SculptTool::Flatten,
+        SculptTool::Scrape,
+        SculptTool::Fill,
         SculptTool::Pinch,
+        SculptTool::Grab,
+        SculptTool::ElasticGrab,
         SculptTool::SnakeHook,
+        SculptTool::Nudge,
         SculptTool::Mask,
     ];
 
@@ -74,13 +108,51 @@ impl SculptTool {
             SculptTool::Pinch => "Pinch",
             SculptTool::SnakeHook => "Snake Hook",
             SculptTool::Mask => "Mask",
+            SculptTool::Layer => "Layer",
+            SculptTool::Blob => "Blob",
+            SculptTool::Scrape => "Scrape",
+            SculptTool::Fill => "Fill",
+            SculptTool::DrawSharp => "Draw Sharp",
+            SculptTool::Nudge => "Nudge",
+            SculptTool::ElasticGrab => "Elastic Grab",
+        }
+    }
+
+    /// What it does, for its button's hover.
+    pub fn tip(self) -> &'static str {
+        match self {
+            SculptTool::Draw => "Push the surface out along its normal (Ctrl: in)",
+            SculptTool::ClayStrips => "Build up a flat layer, a strip at a time (Ctrl: dig it)",
+            SculptTool::Smooth => "Even the surface out",
+            SculptTool::Grab => "Drag what's under the brush with the mouse",
+            SculptTool::Inflate => "Push each point out along its own normal (Ctrl: deflate)",
+            SculptTool::Crease => "Push a groove in and pinch its sides (Ctrl: a ridge)",
+            SculptTool::Flatten => "Take the surface toward the plane under the brush",
+            SculptTool::Pinch => "Pull the surface toward the brush's middle (Ctrl: away)",
+            SculptTool::SnakeHook => "Pull out what's under the brush along the stroke",
+            SculptTool::Mask => "Paint the mask, which holds the surface still (Ctrl: unmask)",
+            SculptTool::Layer => {
+                "Raise the surface to one height a stroke, however often you go over it \
+                 (Ctrl: lower it)"
+            }
+            SculptTool::Blob => "Push out a rounded bump (Ctrl: a dent)",
+            SculptTool::Scrape => "Flatten only what stands above the surface (Ctrl: fill)",
+            SculptTool::Fill => "Fill only what's below the surface (Ctrl: scrape)",
+            SculptTool::DrawSharp => "Draw a crisp, narrow line, for cuts and seams (Ctrl: in)",
+            SculptTool::Nudge => "Push the surface along the stroke",
+            SculptTool::ElasticGrab => {
+                "Grab with a soft reach past the radius, so the surface stretches"
+            }
         }
     }
 
     /// True for the brushes that move what they hold by the mouse's move
     /// (strength doesn't change them).
     pub fn drags(self) -> bool {
-        matches!(self, SculptTool::Grab | SculptTool::SnakeHook)
+        matches!(
+            self,
+            SculptTool::Grab | SculptTool::ElasticGrab | SculptTool::SnakeHook
+        )
     }
 }
 
@@ -178,15 +250,26 @@ fn mirror(mut v: Vec3, mirror: [bool; 3]) -> Vec3 {
     v
 }
 
+/// How much Elastic Grab moves a point `t` radii from where it took hold:
+/// a regularised Kelvinlet's falloff, 1 at the middle and long-tailed,
+/// brought down to 0 at [`ELASTIC_REACH`] so there's no step there.
+pub(crate) fn elastic(t: f32) -> f32 {
+    let kelvinlet = |t: f32| (1.0 + t * t).powf(-1.5);
+    let edge = kelvinlet(ELASTIC_REACH);
+    ((kelvinlet(t) - edge) / (1.0 - edge)).max(0.0)
+}
+
 /// The part of `v` along the plane square to `normal`.
 fn along_plane(v: Vec3, normal: Vec3) -> Vec3 {
     v - normal * v.dot(normal)
 }
 
 impl Sculpt {
-    /// Starts a stroke: Grab takes hold afresh at its first dab.
+    /// Starts a stroke: Grab takes hold afresh at its first dab, and Layer
+    /// starts a new layer.
     pub fn begin_stroke(&mut self) {
         self.grabbed = None;
+        self.layer.clear();
     }
 
     /// One dab of `tool` (and its mirrored copies). True if it moved or
@@ -203,16 +286,32 @@ impl Sculpt {
             return self.paint_mask(&copies, falloff);
         }
         let mut moves: Vec<(u32, Vec3)> = Vec::new();
-        if tool == SculptTool::Grab {
+        if matches!(tool, SculptTool::Grab | SculptTool::ElasticGrab) {
             if self.grabbed.is_none() {
                 let mut grabbed = Vec::new();
+                let elastic_reach = tool == SculptTool::ElasticGrab;
                 for (copy, mirrored) in &copies {
                     let radius = copy.radius.max(1e-6);
+                    let reach = if elastic_reach {
+                        radius * ELASTIC_REACH
+                    } else {
+                        radius
+                    };
                     let center = copy.center;
                     let held = self
-                        .gather(center, radius, |p| p.distance(center) / radius)
+                        .gather(center, reach, |p| p.distance(center) / reach)
                         .into_iter()
-                        .map(|(v, t)| (v, falloff.weight(t)))
+                        .map(|(v, out)| {
+                            let w = if elastic_reach {
+                                elastic(out * ELASTIC_REACH)
+                            } else {
+                                falloff.weight(out)
+                            };
+                            (v, w)
+                        })
+                        // What would hardly move isn't held (a frame's
+                        // worth of work on a big sculpt).
+                        .filter(|&(_, w)| w > 0.005)
                         .collect();
                     grabbed.push((held, *mirrored));
                 }
@@ -347,7 +446,40 @@ impl Sculpt {
                     along_plane(center - p, normal) * (sign * falloff.weight(t) * strength * PINCH)
                 }
                 SculptTool::SnakeHook => dab.motion * falloff.weight(t),
-                SculptTool::Grab | SculptTool::Mask => continue,
+                SculptTool::Layer => {
+                    // Each vertex rises toward its own height for this
+                    // stroke, and no further however often it's gone over.
+                    let goal = sign * radius * LAYER * strength * falloff.weight(t);
+                    let risen = self.layer.get(&v).copied().unwrap_or(0.0);
+                    let left = goal - risen;
+                    if left * sign <= 0.0 {
+                        continue;
+                    }
+                    let rise = left * LAYER_STEP;
+                    self.layer.insert(v, risen + rise);
+                    normal * rise
+                }
+                SculptTool::Blob => {
+                    let w = falloff.weight(t) * strength;
+                    let out = self.normals[v as usize] * (sign * w * radius * DRAW);
+                    out + along_plane(center - p, normal) * (w * PINCH * 0.5)
+                }
+                SculptTool::Scrape | SculptTool::Fill => {
+                    let height = (p - middle).dot(normal);
+                    let scrape = (tool == SculptTool::Scrape) != dab.invert;
+                    if (scrape && height <= 0.0) || (!scrape && height >= 0.0) {
+                        continue;
+                    }
+                    -normal * (height * falloff.weight(t) * strength * FLATTEN)
+                }
+                SculptTool::DrawSharp => {
+                    let w = falloff.weight(t).powi(3);
+                    normal * (sign * w * strength * radius * DRAW)
+                }
+                SculptTool::Nudge => {
+                    along_plane(dab.motion, normal) * (falloff.weight(t) * strength)
+                }
+                SculptTool::Grab | SculptTool::ElasticGrab | SculptTool::Mask => continue,
             };
             moves.push((v, step));
         }

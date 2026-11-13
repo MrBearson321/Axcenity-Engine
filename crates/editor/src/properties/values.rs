@@ -431,8 +431,8 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         }
         // How a Fracture's pieces are spread (Phase 42).
         "FracturePattern" => vec!["Uniform", "Impact"],
-        // What a UnionOperation collides as (Phase 50).
-        "CollisionFidelity" => vec!["Box", "Hull", "PreciseConvexDecomposition"],
+        // What a MeshPart or UnionOperation collides as (Phase 50, R15.2).
+        "CollisionFidelity" => vec!["Default", "Box", "Hull", "PreciseConvexDecomposition"],
         // How a Model streams (Phase 80).
         "ModelStreamingMode" => axcenity_core::streaming::STREAMING_MODES.to_vec(),
         // Which ProximityPrompts in reach show (Phase 44).

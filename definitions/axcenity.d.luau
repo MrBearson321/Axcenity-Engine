@@ -1145,6 +1145,7 @@ end
 
 --- The choices of `Enum.CollisionFidelity`.
 declare extern type EnumCollisionFidelityItems with
+	Default: EnumCollisionFidelity
 	Box: EnumCollisionFidelity
 	Hull: EnumCollisionFidelity
 	PreciseConvexDecomposition: EnumCollisionFidelity
@@ -1873,6 +1874,8 @@ declare extern type MeshPart extends Instance with
 	CanCollide: boolean
 	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 	WindAffected: boolean
+	--- What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.
+	CollisionFidelity: EnumCollisionFidelity | "Default" | "Box" | "Hull" | "PreciseConvexDecomposition"
 	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
 	CollisionGroup: string
 	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
@@ -1962,8 +1965,8 @@ declare extern type UnionOperation extends Instance with
 	UsePartColor: boolean
 	--- The color the whole solid is drawn in while UsePartColor is on. Union sets it to the first part's.
 	Color: Color3
-	--- What it collides as: `Enum.CollisionFidelity.Box` (its box), `Hull` (the default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build.
-	CollisionFidelity: EnumCollisionFidelity | "Box" | "Hull" | "PreciseConvexDecomposition"
+	--- What it collides as: `Enum.CollisionFidelity.Default` (a MeshPart's default: the model's own collision pieces, its objects named `<name>_COL`, when it has any, else its hull), `Box` (its box), `Hull` (a UnionOperation's default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build, which is slow for a big model. A union has no pieces, so Default is its hull.
+	CollisionFidelity: EnumCollisionFidelity | "Default" | "Box" | "Hull" | "PreciseConvexDecomposition"
 	--- If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
 	CastShadow: boolean
 	--- From 0 (as solid as its model) to 1 (invisible).
@@ -4127,7 +4130,7 @@ declare extern type ExposureEffect extends Instance with
 	[string]: any
 end
 
---- Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog. With a Density above 0, dust or mist filling the volume's box instead, seen from anywhere and lit by the sun (shafts of light through windows and gaps).
+--- Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog. With a Density above 0, dust or mist filling the volume's box instead, seen from anywhere and lit by the sun (shafts of light through windows and gaps); with Interior on, the volume clears the outdoor fog inside it.
 declare extern type FogEffect extends Instance with
 	--- If false, it changes nothing.
 	Enabled: boolean
@@ -4141,6 +4144,10 @@ declare extern type FogEffect extends Instance with
 	Density: number
 	--- How much of the dust's light goes forward, away from the sun, from 0 to 10 (0 by default): more makes it glow brighter looking toward the sun.
 	Glare: number
+	--- Studs above the volume's bottom over which its dust thins by e, for haze lying low in a valley; 0 (the default) keeps it even all the way up.
+	HeightFalloff: number
+	--- Makes the volume an interior (a room, a building): inside its box the air outside is cleared (an Atmosphere's fog, Lighting's fog and lower volumes' dust), and only this effect's own Density fills it, 0 for clear air. False by default.
+	Interior: boolean
 	[string]: any
 end
 
