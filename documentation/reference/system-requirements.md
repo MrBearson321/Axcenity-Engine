@@ -98,7 +98,7 @@ The engine uses ray tracing on GPUs that have:
 - **Linux**: a Vulkan driver with ray queries (`VK_KHR_ray_query`) on the same GPUs.
 - **macOS**: macOS 15 or later. Apple M3 and newer have ray tracing hardware.
 
-Setting the environment variable `AXCENITY_RAY_TRACING` to `0` opens the GPU without ray tracing, as on a GPU that lacks it.
+Setting the environment variable `AXCENITY_RAY_TRACING` to `0` opens the GPU without ray tracing, as on a GPU that lacks it. The editor's ray tracing badge says so while it's set, and Restart now starts the editor without it.
 
 For a sense of cost, on the RX 9070 XT one shadow or ambient occlusion ray per pixel at 1440p, over 20 million triangles, took about 0.3 ms.
 

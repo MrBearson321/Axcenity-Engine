@@ -91,6 +91,20 @@ pub fn adapter_can_ray_trace() -> bool {
     RAY_TRACING_OFFERED.load(Ordering::Relaxed)
 }
 
+/// The environment variable that overrides the hardware ray tracing
+/// setting: `1` opens devices with it, `0` without it.
+pub const RAY_TRACING_VARIABLE: &str = "AXCENITY_RAY_TRACING";
+
+/// What [`RAY_TRACING_VARIABLE`] forces, if it's set to `0` or `1`, so a
+/// host can say why the setting isn't followed.
+pub fn ray_tracing_override() -> Option<bool> {
+    match std::env::var(RAY_TRACING_VARIABLE).as_deref() {
+        Ok("0") => Some(false),
+        Ok("1") => Some(true),
+        _ => None,
+    }
+}
+
 /// Adds hardware ray tracing to `descriptor` when it's wanted
 /// ([`want_ray_tracing`]) and `adapter` has it: wgpu's ray queries (an
 /// experimental wgpu feature) and the adapter's acceleration structure
@@ -106,11 +120,8 @@ pub fn with_ray_queries(adapter: &wgpu::Adapter, descriptor: &mut wgpu::DeviceDe
         .features()
         .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     RAY_TRACING_OFFERED.store(offered, Ordering::Relaxed);
-    let wanted = match std::env::var("AXCENITY_RAY_TRACING").as_deref() {
-        Ok("0") => false,
-        Ok("1") => true,
-        _ => RAY_TRACING_WANTED.load(Ordering::Relaxed),
-    };
+    let wanted =
+        ray_tracing_override().unwrap_or_else(|| RAY_TRACING_WANTED.load(Ordering::Relaxed));
     if !wanted || !offered {
         return;
     }

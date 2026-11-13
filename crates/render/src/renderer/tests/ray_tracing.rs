@@ -237,6 +237,50 @@ mod sun_shadows {
     }
 
     #[test]
+    fn a_soft_shadow_on_a_slope_seen_side_on_is_smooth_not_dithered() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        // The wall turned almost edge-on to the camera: neighbouring pixels
+        // lie far apart in depth, though on one surface. (Smoothing used to
+        // leave such pixels out, so sloped faces showed the rays'
+        // per-pixel pattern as a dither.)
+        let mut list = shadowed_wall();
+        let turn = glam::Quat::from_rotation_y(80f32.to_radians());
+        list.items[0].transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(40.0, 30.0, 1.0),
+            turn,
+            Vec3::new(0.0, 0.0, -12.0),
+        );
+        list.sun.direction = turn * Vec3::new(0.3, 0.0, 1.0);
+        list.shadows.softness = 1.0;
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        let row = middle_row(&mut renderer, &list);
+        let (low, high) = (*row.iter().min().unwrap(), *row.iter().max().unwrap());
+        assert!(high - low > 30, "a shadow falls across the row: {row:?}");
+        // A smooth soft edge goes one way across it; a dithered one turns
+        // back and forth from pixel to pixel.
+        let steps: Vec<i32> = row
+            .windows(2)
+            .map(|pair| i32::from(pair[1]) - i32::from(pair[0]))
+            .filter(|step| step.abs() > 3)
+            .collect();
+        let turns = steps
+            .windows(2)
+            .filter(|pair| pair[0].signum() != pair[1].signum())
+            .count();
+        assert!(turns <= 6, "dithered: {turns} turns\n{row:?}");
+        // And the edge is smoothed into a soft one, as on a surface facing
+        // the camera (left unsmoothed it's hard, or noisy with more rays).
+        let between = row
+            .iter()
+            .filter(|&&value| value > low + 8 && value + 8 < high)
+            .count();
+        assert!(between >= 4, "an unsmoothed edge: {row:?}");
+    }
+
+    #[test]
     fn past_their_reach_the_shadow_maps_take_over() {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();

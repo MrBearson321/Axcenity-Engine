@@ -378,6 +378,10 @@ pub fn restart(handoff: &Path) -> std::io::Result<()> {
     if let Ok(folder) = std::env::current_dir() {
         command.current_dir(folder);
     }
+    // Restarting is for the settings to apply, so an override of the ray
+    // tracing setting left in the environment (`AXCENITY_RAY_TRACING=0`
+    // from a test) doesn't come along.
+    command.env_remove(axcenity_render::adapters::RAY_TRACING_VARIABLE);
     command.arg(RESUME_FLAG).arg(handoff).spawn()?;
     Ok(())
 }

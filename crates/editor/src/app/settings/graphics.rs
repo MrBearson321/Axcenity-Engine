@@ -510,11 +510,18 @@ fn ray_tracing_section(
     ) {
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                egui::RichText::new(if settings.ray_tracing() {
-                    "Restart the editor to start ray tracing."
-                } else {
-                    "Restart the editor to stop ray tracing."
-                })
+                egui::RichText::new(
+                    if settings.ray_tracing()
+                        && axcenity_render::adapters::ray_tracing_override() == Some(false)
+                    {
+                        "AXCENITY_RAY_TRACING=0, set where the editor was started, keeps ray \
+                     tracing off. Restart now starts it without that."
+                    } else if settings.ray_tracing() {
+                        "Restart the editor to start ray tracing."
+                    } else {
+                        "Restart the editor to stop ray tracing."
+                    },
+                )
                 .color(palette.warning),
             );
             restart = ui
