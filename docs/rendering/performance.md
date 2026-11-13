@@ -298,6 +298,16 @@ At 2560 × 1440 on Ultra, the GPU's frame was 40.1 ms before distance bands and 
 - **Real-time GI in the editor.** The editor was at 2 frames a second with Ultra and `realtime_gi` on: 434 of each 474 ms went to tracing probes (12 whole draws of a 36,000-item scene each frame, on one CPU thread, at 16² so the GPU had little to do). `light_state` saw the sky picture finish loading as the light changing, so all 1,472 probes were traced after every open, about six minutes. See Real-time GI in [sky.md](sky.md) for what a heavy scene does now.
 - **Distance bands (`SortKey::band`)**: solid items are drawn nearest first in about 2 bands per doubling of the distance, then by mesh and material. Looking along a forest, every pixel had 8 or more layers of leaves, each shaded; a band drawn first hides what's behind it, by depth, before the shader runs. It's a few more batches for about a quarter less GPU time there.
 
+## Light probes (`bench_light_probes`, roadmap R18)
+
+`bench_light_probes` in `render/src/renderer/tests/realtime_gi.rs` measures what light probes cost ([global-illumination.md](../research/global-illumination.md), D5):
+
+```
+cargo test -p axcenity-render --release --lib -- --ignored bench_light_probes --nocapture
+```
+
+In a yard with 576 blocks at 1920 × 1080 it prints a bake per probe (16² faces, then with the sky's share kept apart, R18.3), a frame with 8 volumes of 16³ probes against none, and each preset's real-time GI tier (R18.4) with the sun moving every frame so it never rests: the frame, what tracing added and that per probe. Times are the median wall clock of a frame waited on. The cloud container only proves it runs (a software GPU in a debug build: a bake about 120 ms a probe, 145 with the sky apart). The RX 9070 XT's numbers go here when it's run on the PC.
+
 ## Sharing the frame's planning among the CPU's threads
 
 That forest ran at 26 frames a second at 2560 × 1440 on Ultra: 40.8 ms of CPU on one thread of 32, and 31 ms of GPU. Measured with `shoot_project` from the same camera, on the machine above (AMD Radeon RX 9070 XT, Vulkan), release build. The picture is the same to within noise: 176 of 3.7 million pixels differ by more than 32 of 255. Times are milliseconds.

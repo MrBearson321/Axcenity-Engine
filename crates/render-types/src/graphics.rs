@@ -618,6 +618,36 @@ pub struct PointShadowMapSize {
 /// along each way of each axis.
 pub const POINT_SHADOW_FACES: u32 = 6;
 
+/// How much real-time GI traces each frame (roadmap R18.4): how many light
+/// probes, and the size of each of a probe's six faces in texels per side.
+/// It follows the preset while real-time GI is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RealtimeGiTier {
+    pub probes_per_frame: u32,
+    pub face_size: u32,
+}
+
+impl RealtimeGiTier {
+    /// The most probes any tier traces in a frame.
+    pub const MAX_PROBES_PER_FRAME: u32 = 4;
+
+    /// The tier of `quality`: Low traces one probe a frame at 8² a face,
+    /// Medium two at 8², High two at 16² (a bake's size, what real-time GI
+    /// always did before tiers) and Ultra four at 16².
+    pub fn of(quality: Quality) -> Self {
+        let (probes_per_frame, face_size) = match quality {
+            Quality::Low => (1, 8),
+            Quality::Medium => (2, 8),
+            Quality::High => (2, 16),
+            Quality::Ultra => (4, 16),
+        };
+        Self {
+            probes_per_frame,
+            face_size,
+        }
+    }
+}
+
 /// The sky's environment maps: each cubemap face's size in texels per
 /// side, and how many directions each texel of a rough reflection averages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -854,6 +884,12 @@ impl GraphicsSettings {
     /// the override, or off (every preset's).
     pub fn realtime_gi(&self) -> bool {
         self.realtime_gi.unwrap_or(false)
+    }
+
+    /// How much real-time GI traces each frame while it's on: the preset's
+    /// tier.
+    pub fn realtime_gi_tier(&self) -> RealtimeGiTier {
+        RealtimeGiTier::of(self.quality)
     }
 
     /// Whether fog is drawn volumetric: the override, or the preset's (on
@@ -1119,6 +1155,7 @@ impl GraphicsSettings {
             // Like ambient occlusion, it reads only the prepass.
             contact_shadows: self.contact_shadows(),
             realtime_gi,
+            realtime_gi_tier: self.realtime_gi_tier(),
             volumetric_fog,
             // Every GPU can draw it: it's worked out in the sky's pixels.
             cloud_quality: self.cloud_quality(),
@@ -1212,6 +1249,8 @@ pub struct EffectiveGraphics {
     pub contact_shadows: bool,
     /// Whether light probe volumes are traced again as the light changes.
     pub realtime_gi: bool,
+    /// How much real-time GI traces each frame while it's on.
+    pub realtime_gi_tier: RealtimeGiTier,
     /// Whether fog shows the sun's shadows and lamps' light (needs the
     /// prepass's depth).
     pub volumetric_fog: bool,
@@ -1862,6 +1901,34 @@ mod tests {
         // Asking for none needs nothing, so nothing is noted.
         let off = GraphicsSettings::preset(Quality::High).effective(&no_compute);
         assert!(!off.realtime_gi && off.notes.is_empty());
+    }
+
+    /// R18.4: real-time GI's tier follows the preset, and High's is what it
+    /// traced before tiers (two probes a frame, faces a bake's size).
+    #[test]
+    fn realtime_gi_tiers_follow_the_preset() {
+        let tier = |quality| {
+            let settings = GraphicsSettings {
+                realtime_gi: Some(true),
+                ..GraphicsSettings::preset(quality)
+            };
+            let tier = settings
+                .effective(&Capabilities::default())
+                .realtime_gi_tier;
+            (tier.probes_per_frame, tier.face_size)
+        };
+        assert_eq!(tier(Quality::Low), (1, 8));
+        assert_eq!(tier(Quality::Medium), (2, 8));
+        assert_eq!(tier(Quality::High), (2, 16));
+        assert_eq!(tier(Quality::Ultra), (4, 16));
+        let mut last = 0;
+        for quality in Quality::ALL {
+            let tier = RealtimeGiTier::of(quality);
+            let work = tier.probes_per_frame * tier.face_size * tier.face_size;
+            assert!(work > last, "each tier traces more than the one below");
+            assert!(tier.probes_per_frame <= RealtimeGiTier::MAX_PROBES_PER_FRAME);
+            last = work;
+        }
     }
 
     #[test]

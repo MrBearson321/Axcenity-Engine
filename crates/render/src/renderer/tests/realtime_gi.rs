@@ -364,5 +364,214 @@ fn a_gpu_without_compute_shaders_keeps_the_bake_and_notes_why() {
 }
 
 fn realtime_gi_probes_per_frame() -> u32 {
-    super::super::realtime_gi::PROBES_PER_FRAME
+    settings(true).realtime_gi_tier().probes_per_frame
+}
+
+/// `settings(true)` at the preset `quality`.
+fn at_quality(quality: crate::Quality) -> GraphicsSettings {
+    GraphicsSettings {
+        quality,
+        ..settings(true)
+    }
+}
+
+/// Roadmap R18.4: each preset traces its tier's probes a frame, at its
+/// faces' size, and a smaller tier still lands near a fresh bake. Moving to
+/// another preset makes it again with the new tier.
+#[test]
+fn each_tier_traces_its_probes_a_frame_and_lands_near_a_fresh_bake() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let lit = yard(SUN_ON_WALL);
+    let moved = yard(SUN_BEHIND_WALL);
+    let (before, after) = (bake(&device, &queue, &lit), bake(&device, &queue, &moved));
+    let change = difference(&before, &after);
+    let world = with_volume(&moved, before);
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    for (quality, per_frame, face_size, near) in [
+        (crate::Quality::Low, 1, 8, 0.2),
+        (crate::Quality::Medium, 2, 8, 0.2),
+        (crate::Quality::High, 2, 16, 0.01),
+        (crate::Quality::Ultra, 4, 16, 0.01),
+    ] {
+        renderer.set_graphics(&at_quality(quality));
+        renderer.render(&world).unwrap();
+        assert_eq!(
+            renderer.scene.probes_traced(),
+            Some(per_frame),
+            "{quality:?} traces {per_frame} a frame"
+        );
+        let tier = renderer.scene.realtime_gi.as_ref().unwrap().tier;
+        assert_eq!(tier.face_size, face_size, "{quality:?}");
+        for _ in 1..PROBES / per_frame {
+            renderer.render(&world).unwrap();
+        }
+        assert_eq!(renderer.scene.probes_traced(), Some(PROBES));
+        let error = difference(&probes_held(&renderer), &after);
+        // 8² faces see the wall coarser than a bake's 16²: about a tenth
+        // of what the sun's move changed (0.11 of 0.81 at Low).
+        assert!(
+            error < near * change,
+            "{quality:?} lands near a fresh bake: off by {error} (the sun moved {change})"
+        );
+    }
+}
+
+/// What light probes cost (roadmap R18, D5), for
+/// `docs/rendering/performance.md`: `cargo test -p axcenity-render
+/// --release --lib -- --ignored bench_light_probes --nocapture`.
+///
+/// In a yard with 576 blocks at 1920×1080 it times a bake per probe (16²
+/// faces, with and without the sky kept apart), a frame with 8 volumes of
+/// 16³ probes against none, and real-time GI at each preset's tier with
+/// the sun moving every frame (so it never rests), per probe traced. Times
+/// are the median wall clock of a frame waited on, so they hold the GPU's
+/// work on any adapter.
+#[test]
+#[ignore]
+fn bench_light_probes() {
+    use std::time::Instant;
+
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let field = |toward: Vec3| {
+        let mut list = yard(toward);
+        for x in -12..12 {
+            for z in -12..12 {
+                list.items.push(block(
+                    Vec3::new(
+                        x as f32 * 3.0,
+                        0.5 + (x * z % 3) as f32 * 0.5,
+                        z as f32 * 3.0,
+                    ),
+                    Vec3::splat(1.0),
+                    [0.6, 0.6, 0.6],
+                ));
+            }
+        }
+        list.shadows.enabled = true;
+        list.post.enabled = true;
+        list.camera = Camera {
+            position: Vec3::new(-30.0, 12.0, -30.0),
+            look_at: Vec3::ZERO,
+            fov_y_degrees: 60.0,
+        };
+        list
+    };
+    let median = |mut values: Vec<f64>| {
+        values.sort_by(f64::total_cmp);
+        values[values.len() / 2]
+    };
+    let ms = |since: Instant| since.elapsed().as_secs_f64() * 1000.0;
+    let wait = || device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+    // Bake: a 4 × 4 × 4 grid.
+    let lit = field(SUN_ON_WALL);
+    let points: Vec<Vec3> = (0..64)
+        .map(|i| Vec3::new((i % 4) as f32, 1.0 + (i / 4 % 4) as f32, (i / 16) as f32) * 4.0)
+        .collect();
+    let bake_settings = settings(false);
+    let start = Instant::now();
+    TextureRenderer::bake_light_probes(
+        &device,
+        &queue,
+        &lit,
+        &points,
+        LIGHT_PROBE_BAKE_SIZE,
+        &bake_settings,
+    )
+    .unwrap();
+    let plain = ms(start) / points.len() as f64;
+    let mut baker = crate::LightProbeBaker::keeping_sky_apart(
+        &device,
+        &queue,
+        &lit,
+        LIGHT_PROBE_BAKE_SIZE,
+        &bake_settings,
+    );
+    let start = Instant::now();
+    for &point in &points {
+        baker.bake(point).unwrap();
+    }
+    let apart = ms(start) / points.len() as f64;
+    println!("Bake, per probe: {plain:.2} ms; keeping the sky apart {apart:.2} ms");
+
+    // Frames: 8 volumes of 16³ probes against none.
+    let volumes = |list: &DrawList, count: usize| {
+        let mut list = list.clone();
+        for v in 0..count {
+            let side = 4096;
+            list.light_probe_volumes.push(LightProbeVolume {
+                center: Vec3::new(
+                    -30.0 + (v % 4) as f32 * 20.0,
+                    5.0,
+                    -10.0 + (v / 4) as f32 * 20.0,
+                ),
+                rotation: glam::Quat::IDENTITY,
+                half_size: Vec3::new(10.0, 5.0, 10.0),
+                blend_distance: 2.0,
+                probes: LightProbeGrid {
+                    key: 100 + v as u64,
+                    counts: [16, 16, 16],
+                    probes: Arc::new(vec![[[0.3, 0.3, 0.3], [0.0; 3], [0.05; 3], [0.0; 3]]; side]),
+                    invalid: Arc::default(),
+                    sky: None,
+                },
+            });
+        }
+        list
+    };
+    let frame = |list: &DrawList, graphics: &GraphicsSettings, moving_sun: bool| {
+        let mut renderer = TextureRenderer::new(&device, &queue, 1920, 1080);
+        renderer.set_graphics(graphics);
+        let mut times = Vec::new();
+        for frame in 0..90 {
+            let mut list = list.clone();
+            if moving_sun {
+                list.sun.direction = if frame % 2 == 0 {
+                    SUN_ON_WALL
+                } else {
+                    SUN_BEHIND_WALL
+                };
+            }
+            let start = Instant::now();
+            renderer.render(&list).unwrap();
+            wait();
+            if frame >= 10 {
+                times.push(ms(start));
+            }
+        }
+        median(times)
+    };
+    let none = frame(&lit, &settings(false), false);
+    let eight = frame(&volumes(&lit, 8), &settings(false), false);
+    println!(
+        "Frame: no volumes {none:.2} ms; 8 volumes of 16³ {eight:.2} ms ({:+.2} ms)",
+        eight - none
+    );
+
+    // Real-time GI per tier, one volume of 16³, the sun moving each frame.
+    let one = volumes(&lit, 1);
+    println!("Real-time GI: preset  probes/frame  face  frame ms  added ms  per probe ms");
+    for quality in crate::Quality::ALL {
+        let off = GraphicsSettings {
+            quality,
+            ..settings(false)
+        };
+        let on = at_quality(quality);
+        let tier = on.realtime_gi_tier();
+        let (base, traced) = (frame(&one, &off, true), frame(&one, &on, true));
+        println!(
+            "              {:<6}  {:>12}  {:>3}²  {traced:>8.2}  {:>8.2}  {:>12.2}",
+            quality.label(),
+            tier.probes_per_frame,
+            tier.face_size,
+            traced - base,
+            (traced - base) / f64::from(tier.probes_per_frame),
+        );
+    }
 }
