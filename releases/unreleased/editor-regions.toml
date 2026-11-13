@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Unload a region of a big world while you edit another"
+details = "The Layers panel lists the Workspace's top-level Folders and Models under Regions, with their part counts. Unload in Editor sets one aside: it isn't drawn and a click goes through it, but it stays in the world, saves unchanged and plays as usual. Which regions you unloaded is kept for you in .axcenity/layers.json, like hidden layers. A click now also goes through what Stream While Editing leaves out."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

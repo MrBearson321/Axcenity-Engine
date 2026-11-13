@@ -188,6 +188,10 @@ fn unloaded_regions(world: &World, names: &BTreeSet<String>) -> Vec<InstanceId> 
         .collect()
 }
 
+/// What [`LayerSets`] were made from: the tree's version, the view, each
+/// hidden or locked layer's tagged Instances and the unloaded regions.
+type SetsKey = (u64, LayerView, Vec<Vec<InstanceId>>, Vec<InstanceId>);
+
 /// What the view hides and locks, as Instances, worked out again only when
 /// the tree, a layer's tagged Instances or the view change.
 #[derive(Default)]
@@ -195,9 +199,8 @@ pub struct LayerSets {
     pub hidden: HashSet<InstanceId>,
     /// Locked or hidden: what a click goes through.
     pub unpickable: HashSet<InstanceId>,
-    /// What the sets were made from: the tree, the view, each hidden or
-    /// locked layer's tagged Instances and the unloaded regions.
-    key: Option<(u64, LayerView, Vec<Vec<InstanceId>>, Vec<InstanceId>)>,
+    /// What the sets were made from.
+    key: Option<SetsKey>,
 }
 
 impl LayerSets {
