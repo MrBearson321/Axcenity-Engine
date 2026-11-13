@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "renderer"
+title = "Particles can be born in a sphere, cylinder or disc, or only on its surface, and change speed over their lives"
+details = "A ParticleEmitter's new Shape (Box, Sphere, Cylinder, Disc) and ShapeStyle (Volume, Surface) pick where in its part particles start, stretched to the part's size, and SpeedOverLife (a NumberSequence) scales their speed as they age. The defaults give off from anywhere in the part at a steady speed, as before. CPU and GPU particles follow the same shapes and curve."
+features = ["renderer.particles"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

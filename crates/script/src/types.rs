@@ -545,11 +545,13 @@ pub enum EnumType {
     ModelStreamingMode,
     StreamingState,
     RayTracedShadows,
+    ParticleEmitterShape,
+    ParticleEmitterShapeStyle,
     RayTracedAmbientOcclusion,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 44] = [
+    pub const ALL: [EnumType; 46] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -593,6 +595,8 @@ impl EnumType {
         EnumType::ModelStreamingMode,
         EnumType::StreamingState,
         EnumType::RayTracedShadows,
+        EnumType::ParticleEmitterShape,
+        EnumType::ParticleEmitterShapeStyle,
         EnumType::RayTracedAmbientOcclusion,
     ];
 
@@ -617,6 +621,8 @@ impl EnumType {
             EnumType::DepthOfField => "DepthOfField",
             EnumType::MotionBlur => "MotionBlur",
             EnumType::RayTracedShadows => "RayTracedShadows",
+            EnumType::ParticleEmitterShape => "ParticleEmitterShape",
+            EnumType::ParticleEmitterShapeStyle => "ParticleEmitterShapeStyle",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
@@ -707,6 +713,9 @@ impl EnumType {
             // (Phase 80).
             EnumType::ModelStreamingMode => axcenity_core::streaming::STREAMING_MODES.to_vec(),
             EnumType::StreamingState => vec!["StreamedIn", "StreamedOut"],
+            // Where a ParticleEmitter's particles are born (roadmap R17.2).
+            EnumType::ParticleEmitterShape => vec!["Box", "Sphere", "Cylinder", "Disc"],
+            EnumType::ParticleEmitterShapeStyle => vec!["Volume", "Surface"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -849,7 +858,9 @@ impl LuaEnumItem {
             | EnumType::EffectOperation
             | EnumType::NormalId
             | EnumType::ModelStreamingMode
-            | EnumType::StreamingState => None,
+            | EnumType::StreamingState
+            | EnumType::ParticleEmitterShape
+            | EnumType::ParticleEmitterShapeStyle => None,
         }
     }
 }

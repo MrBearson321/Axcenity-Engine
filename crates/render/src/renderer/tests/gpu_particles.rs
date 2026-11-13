@@ -3,7 +3,7 @@
 //! while the list has their emitter and the device runs compute shaders.
 
 use super::*;
-use crate::{ParticleEmitter, ParticleLook};
+use crate::{ParticleEmitter, ParticleLook, SpawnShape};
 
 const SIZE: u32 = 64;
 
@@ -29,6 +29,7 @@ fn emitter(at: Vec3, spread_out: f32, births: u32, capacity: u32) -> ParticleEmi
         acceleration: Vec3::ZERO,
         drag: 0.0,
         air: Vec3::ZERO,
+        shape: SpawnShape::default(),
         look: ParticleLook {
             color: [[1.0, 0.0, 0.0]; 2],
             transparency: [0.0; 2],
@@ -284,4 +285,149 @@ fn without_compute_shaders_gpu_emitters_draw_nothing_and_keep_nothing() {
     assert!(renderer.scene.gpu_particles.is_none());
     assert_eq!(renderer.stats().gpu_particles, 0);
     assert_eq!(pixel(&renderer.read_pixels(), SIZE / 2, SIZE / 2)[0], 0);
+}
+
+/// R17.2: every spawn shape's points stay in the cube, inside the shape,
+/// or on its surface when only the surface is asked for; a box's volume is
+/// born as before, and its surface spreads over the faces by their area.
+#[test]
+fn spawn_shapes_stay_inside_their_shape_or_on_its_surface() {
+    use crate::SpawnKind;
+    let steps = [0.0, 0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95, 0.999_999];
+    let randoms: Vec<[f32; 3]> = steps
+        .iter()
+        .flat_map(|&a| steps.iter().flat_map(move |&b| steps.map(|c| [a, b, c])))
+        .collect();
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    for kind in [
+        SpawnKind::Box,
+        SpawnKind::Sphere,
+        SpawnKind::Cylinder,
+        SpawnKind::Disc,
+    ] {
+        for surface in [false, true] {
+            let shape = SpawnShape { kind, surface };
+            for &random in &randoms {
+                let point = shape.point(random, Vec3::new(4.0, 1.0, 2.0));
+                assert!(
+                    point.abs().max_element() <= 0.5 + 1e-5,
+                    "{shape:?} {random:?} → {point}"
+                );
+                let round = point.x.hypot(point.z);
+                match (kind, surface) {
+                    (SpawnKind::Box, false) => {
+                        assert_eq!(point, Vec3::from(random) - 0.5)
+                    }
+                    (SpawnKind::Box, true) => assert!(close(point.abs().max_element(), 0.5)),
+                    (SpawnKind::Sphere, false) => assert!(point.length() <= 0.5 + 1e-5),
+                    (SpawnKind::Sphere, true) => assert!(close(point.length(), 0.5)),
+                    (SpawnKind::Cylinder, false) => assert!(round <= 0.5 + 1e-5),
+                    (SpawnKind::Cylinder, true) => assert!(close(round, 0.5)),
+                    (SpawnKind::Disc, false) => {
+                        assert!(point.y == 0.0 && round <= 0.5 + 1e-5)
+                    }
+                    (SpawnKind::Disc, true) => assert!(point.y == 0.0 && close(round, 0.5)),
+                }
+            }
+        }
+    }
+    // A 4 × 1 × 1 box: its two square ends are a ninth of its surface.
+    let surface = SpawnShape {
+        kind: SpawnKind::Box,
+        surface: true,
+    };
+    let ends = (0..900)
+        .map(|n| {
+            surface.point(
+                [(n as f32 + 0.5) / 900.0, 0.5, 0.5],
+                Vec3::new(4.0, 1.0, 1.0),
+            )
+        })
+        .filter(|point| close(point.x.abs(), 0.5))
+        .count();
+    assert_eq!(ends, 100);
+}
+
+/// R17.2: born on a disc's rim facing the camera, GPU particles leave its
+/// middle empty; born anywhere on the disc, they fill it.
+#[test]
+fn gpu_particles_are_born_in_their_spawn_shape() {
+    let Some(mut renderer) = renderer() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let at = Vec3::new(0.0, 0.0, -10.0);
+    let mut rim = emitter(at, 0.0, 3000, 4096);
+    // A disc 5 studs across, turned to face the camera.
+    rim.spawn = Mat4::from_scale_rotation_translation(
+        Vec3::splat(5.0),
+        glam::Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+        at,
+    );
+    rim.look.size = [0.3; 2];
+    rim.shape = SpawnShape {
+        kind: crate::SpawnKind::Disc,
+        surface: true,
+    };
+    let mut list = list_of(Vec::new());
+    list.particle_emitters = vec![rim.clone()];
+    let red = |pixel: [u8; 4]| pixel[0] > 100 && pixel[1] < 60;
+    assert!(!red(pixel_at(&mut renderer, &list, at)));
+    for side in [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y] {
+        assert!(
+            red(pixel_at(&mut renderer, &list, at + side * 2.5)),
+            "{side}"
+        );
+    }
+    let mut filled = rim;
+    filled.key = 8;
+    filled.shape.surface = false;
+    list.particle_emitters = vec![filled];
+    assert!(red(pixel_at(&mut renderer, &list, at)));
+}
+
+/// R17.2: a speed curve scales how far GPU particles move each step, read
+/// at their age, as the CPU's `curve_at` does.
+#[test]
+fn gpu_particles_move_at_their_speed_curve() {
+    let Some(mut renderer) = renderer() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut curves = crate::ParticleCurves::from_fn(|_| ([1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0]));
+    curves.speed = [0.5; crate::CURVE_ENTRIES];
+    assert_eq!(crate::curve_at(&curves.speed, 0.0), 0.5);
+    let mut moving = emitter(Vec3::new(-3.0, 0.0, -8.0), 0.0, 20, 1024);
+    moving.direction = Vec3::X;
+    moving.speed = 10.0;
+    moving.look.curves = Some(std::sync::Arc::new(curves));
+    let mut list = list_of(Vec::new());
+    list.particle_emitters = vec![moving.clone()];
+    let red = |pixel: [u8; 4]| pixel[0] > 100;
+    assert!(red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(-3.0, 0.0, -8.0)
+    )));
+    // A third of a second at half of 10 studs a second: x = -1.5, not 0.
+    moving.step = 2;
+    moving.born = 20;
+    moving.births = 0;
+    moving.seconds = 0.3;
+    list.particle_emitters = vec![moving];
+    assert!(red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(-1.5, 0.0, -8.0)
+    )));
+    assert!(!red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(0.0, 0.0, -8.0)
+    )));
+    assert!(!red(pixel_at(
+        &mut renderer,
+        &list,
+        Vec3::new(-3.0, 0.0, -8.0)
+    )));
 }
