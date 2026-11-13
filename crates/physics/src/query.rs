@@ -834,6 +834,46 @@ impl Solid {
             normal: to_vector3(top.normal),
         })
     }
+
+    /// Whether `point` is inside this solid: inside a part's collider, or
+    /// anywhere under a Terrain's ground (roadmap R18.2's invalid probes).
+    pub fn contains(&self, point: Vector3) -> bool {
+        let inside_box = point.x >= self.min.x
+            && point.x <= self.max.x
+            && point.z >= self.min.z
+            && point.z <= self.max.z
+            && point.y <= self.max.y
+            && (self.open_below || point.y >= self.min.y);
+        if !inside_box {
+            return false;
+        }
+        if self.open_below {
+            return self
+                .column(point.x, point.z)
+                .is_some_and(|column| point.y < column.top);
+        }
+        self.collider
+            .shape()
+            .contains_point(self.collider.position(), to_vec3(point))
+    }
+}
+
+/// For each of `points`, whether it's inside a solid collider (a part with
+/// `CanCollide` on, colliding foliage, or under a Terrain's ground), not
+/// counting the parts in `skip`. The editor marks light probes baked there
+/// invalid (roadmap R18.2). Does not create a physics world or change the
+/// tree.
+pub fn inside_solids(
+    world: &World,
+    assets: &Assets,
+    points: &[Vector3],
+    skip: &[InstanceId],
+) -> Vec<bool> {
+    let solids = solids(world, assets, skip);
+    points
+        .iter()
+        .map(|&point| solids.iter().any(|solid| solid.contains(point)))
+        .collect()
 }
 
 /// Every solid collider in the Workspace: Parts and MeshParts with

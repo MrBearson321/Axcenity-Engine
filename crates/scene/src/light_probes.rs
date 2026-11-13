@@ -93,6 +93,7 @@ pub(crate) fn light_probe_volume_of(
             key: probes.key(),
             counts: probes.counts,
             probes: probes.probes.clone(),
+            invalid: probes.invalid.clone(),
         },
     })
 }

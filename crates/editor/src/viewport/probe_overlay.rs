@@ -6,7 +6,9 @@
 //! legend counts probes, bakes and the renderer's buffer. The probes'
 //! places are `scene::light_probe_points`, the same the bake uses, and
 //! their light is the bake's (`docs/rendering/sky.md`); with real-time GI on,
-//! the renderer's live values aren't read back.
+//! the renderer's live values aren't read back. A probe the bake found
+//! inside a solid (roadmap R18.2), which surfaces leave out, is a magenta
+//! cross.
 
 use axcenity_assets::{Assets, LightProbes, ProbeLight};
 use axcenity_core::{ClassName, InstanceId, Value, World};
@@ -25,6 +27,8 @@ const STALE_COLOR: Color32 = Color32::from_rgb(255, 170, 60);
 const UNBAKED_COLOR: Color32 = Color32::from_rgb(150, 150, 165);
 /// A volume whose `Bake` names a file that can't be read.
 const MISSING_COLOR: Color32 = Color32::from_rgb(240, 80, 80);
+/// A probe baked inside a solid part or under the ground (R18.2).
+const INVALID_COLOR: Color32 = Color32::from_rgb(230, 70, 220);
 /// At most this many probes are drawn, the nearest first.
 const MAX_PROBES: usize = 4000;
 /// A probe's disc, in studs across, before it's projected.
@@ -177,6 +181,23 @@ pub(super) fn paint(
         };
         let radius = (PROBE_SIZE / 2.0 / screen.studs_per_point(point)).clamp(2.0, 14.0);
         let fill = volume.light.as_ref().and_then(|light| light.probes.get(p));
+        let invalid = volume
+            .light
+            .as_ref()
+            .is_some_and(|light| light.invalid.binary_search(&(p as u32)).is_ok());
+        if invalid {
+            let stroke = egui::Stroke::new(2.0_f32, INVALID_COLOR);
+            let arm = egui::vec2(radius, radius) * 0.8;
+            painter.line_segment([center - arm, center + arm], stroke);
+            painter.line_segment(
+                [
+                    center + egui::vec2(-arm.x, arm.y),
+                    center + egui::vec2(arm.x, -arm.y),
+                ],
+                stroke,
+            );
+            continue;
+        }
         match fill {
             Some(probe) => {
                 let toward = (eye - point).normalize_or_zero();
@@ -228,6 +249,21 @@ pub(super) fn legend_lines(volumes: &[VolumeView], eye: Vec3) -> Vec<(Option<Col
                 format!("{} {} {text}", n, if n == 1 { "volume" } else { "volumes" }),
             ));
         }
+    }
+    let invalid: usize = volumes
+        .iter()
+        .filter_map(|volume| volume.light.as_ref())
+        .map(|light| light.invalid.len())
+        .sum();
+    if invalid > 0 {
+        lines.push((
+            Some(INVALID_COLOR),
+            format!(
+                "{} {} inside walls or the ground: left out of the light",
+                thousands(invalid as u64),
+                if invalid == 1 { "probe" } else { "probes" }
+            ),
+        ));
     }
     // The renderer keeps the nearest baked volumes' probes, by their box's
     // middle (close enough for the count).
@@ -331,7 +367,9 @@ mod tests {
         let bake = LightProbes::new([2, 1, 1], 7, vec![[[0.5; 3]; 4]; 2]).unwrap();
         axcenity_assets::write_light_probes(&folder, "assets/probes/a.lightprobes.json", &bake)
             .unwrap();
-        axcenity_assets::write_light_probes(&folder, "assets/probes/b.lightprobes.json", &bake)
+        // R18.2: the stale one's second probe was inside a wall.
+        let walled = bake.clone().with_invalid(vec![1]).unwrap();
+        axcenity_assets::write_light_probes(&folder, "assets/probes/b.lightprobes.json", &walled)
             .unwrap();
         let assets = Assets::new(&folder);
         let mut world = World::new();
@@ -359,6 +397,7 @@ mod tests {
                 "1 volume baked from a different world: Bake Probes again",
                 "1 volume not baked: the sky lights them",
                 "1 volume bake file missing or the wrong size",
+                "1 probe inside walls or the ground: left out of the light",
                 "8 probes. The renderer keeps the nearest 2 baked volumes here: 4 probes, 1 KB.",
             ]
         );

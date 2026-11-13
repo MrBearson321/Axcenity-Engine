@@ -20,7 +20,7 @@ use axcenity_render::{
     LIGHT_PROBE_BAKE_SIZE, LightProbeBaker, PROBE_BAKE_SIZE, TextureRenderer, wgpu,
 };
 
-use super::probes::{ToBake, bake_path};
+use super::probes::{ToBake, bake_path, invalid_probes};
 use super::*;
 
 /// How long one frame may bake before the editor draws again. Each step
@@ -43,6 +43,8 @@ struct VolumeBake {
     points: Vec<Vec3>,
     path: String,
     light: Vec<[[f32; 3]; 4]>,
+    /// The probes inside a solid as the bake started (roadmap R18.2).
+    invalid: Vec<u32>,
 }
 
 /// A ReflectionProbe waiting to be baked.
@@ -201,7 +203,9 @@ impl EditorApp {
                     "LightProbeVolume",
                 );
                 used.insert(path.clone());
+                let invalid = invalid_probes(&self.world, &self.assets, probe.id, &grid.points);
                 Some(VolumeBake {
+                    invalid,
                     probe,
                     counts: grid.counts,
                     light: Vec::with_capacity(grid.points.len()),
@@ -312,8 +316,23 @@ impl EditorApp {
                     &self.graphics,
                 )
             });
+            let index = volume.light.len();
+            // A probe inside a solid is left out anyway: no need to draw it.
+            if volume.invalid.binary_search(&(index as u32)).is_ok() {
+                volume.light.push([[0.0; 3]; 4]);
+                bake.light_done += 1;
+                if volume.light.len() == volume.points.len() {
+                    let volume = bake.volumes.pop_front().expect("the front volume");
+                    bake.volumes_baked += 1;
+                    self.save_light_probes(bake, volume);
+                }
+                if bake.volumes.is_empty() {
+                    bake.baker = None;
+                }
+                return;
+            }
             let started = Instant::now();
-            let point = volume.points[volume.light.len()];
+            let point = volume.points[index];
             match baker.bake(point) {
                 Ok(light) => {
                     volume.light.push(light);
@@ -384,6 +403,7 @@ impl EditorApp {
         let path = &volume.path;
         let Some(probes) =
             axcenity_assets::LightProbes::new(volume.counts, bake.fingerprint, volume.light)
+                .and_then(|probes| probes.with_invalid(volume.invalid))
         else {
             self.output.error(format!(
                 "Could not bake the light probes in {part_name}: the light came back \

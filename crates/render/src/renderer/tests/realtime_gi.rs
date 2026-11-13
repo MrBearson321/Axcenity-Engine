@@ -101,6 +101,7 @@ pub(super) fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawLi
             key: 1,
             counts: COUNTS,
             probes: Arc::new(probes),
+            invalid: Arc::default(),
         },
     });
     list.camera = Camera {

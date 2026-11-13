@@ -703,18 +703,27 @@ fn surrounding_diffuse(position: vec3<f32>, n: vec3<f32>, environment: f32) -> v
         var c1 = vec3<f32>(0.0);
         var c2 = vec3<f32>(0.0);
         var c3 = vec3<f32>(0.0);
+        // A probe baked inside a solid (its first w is 1, R18.2) is left
+        // out and the others' shares made up to the whole again.
+        var valid = 0.0;
         for (var corner = 0u; corner < 8u; corner++) {
             let far = vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u);
             let at = select(low, high, far);
             let shares = select(1.0 - t, t, far);
-            let share = shares.x * shares.y * shares.z;
             let probe = 4u * (volume.grid.w + at.x + volume.grid.x * (at.y + volume.grid.y * at.z));
-            c0 += share * light_probes[probe].rgb;
+            let first = light_probes[probe];
+            let share = shares.x * shares.y * shares.z * (1.0 - first.w);
+            valid += share;
+            c0 += share * first.rgb;
             c1 += share * light_probes[probe + 1u].rgb;
             c2 += share * light_probes[probe + 2u].rgb;
             c3 += share * light_probes[probe + 3u].rgb;
         }
-        let light = c0 * 0.282095 + (c1 * n.y + c2 * n.z + c3 * n.x) * 0.488603;
+        // All eight inside solids: what's around the volume lights it.
+        if valid <= 0.0001 {
+            continue;
+        }
+        let light = (c0 * 0.282095 + (c1 * n.y + c2 * n.z + c3 * n.x) * 0.488603) / valid;
         color += weight * max(light, vec3<f32>(0.0));
         left -= weight;
         if left <= 0.001 {
