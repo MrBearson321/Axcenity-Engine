@@ -2493,6 +2493,46 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The project folder its heights and painted materials are saved in, such as \"assets/terrain/Terrain\". The editor picks it.",
     ),
     (
+        ClassName::Terrain,
+        "Water",
+        "Floods the terrain's hollows up to WaterLevel with water that has waves, foam and reflections.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaterLevel",
+        "The world Y of the water's surface at rest. Ground below it is under water.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaterColor",
+        "The color deep water shows.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaterClarity",
+        "How many studs of water light crosses before only about a third of what's under it still shows. Bigger is clearer.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveHeight",
+        "How high the biggest wave rises above the water's surface at rest, in studs.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveLength",
+        "How long the biggest wave is from crest to crest, in studs.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveSpeed",
+        "How fast the waves roll, as a share of how fast real waves of their length would. 0 stills them.",
+    ),
+    (
+        ClassName::Terrain,
+        "WaveDirection",
+        "Which way the waves roll, in degrees: 0 toward +X, 90 toward +Z.",
+    ),
+    (
         ClassName::TerrainLayer,
         "Color",
         "Tints the layer's color map, or is its color without one.",

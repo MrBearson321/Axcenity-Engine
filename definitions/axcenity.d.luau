@@ -4522,6 +4522,22 @@ declare extern type Terrain extends Instance with
 	CanCollide: boolean
 	--- The project folder its heights and painted materials are saved in, such as "assets/terrain/Terrain". The editor picks it.
 	DataFolder: string
+	--- Floods the terrain's hollows up to WaterLevel with water that has waves, foam and reflections.
+	Water: boolean
+	--- The world Y of the water's surface at rest. Ground below it is under water.
+	WaterLevel: number
+	--- The color deep water shows.
+	WaterColor: Color3
+	--- How many studs of water light crosses before only about a third of what's under it still shows. Bigger is clearer.
+	WaterClarity: number
+	--- How high the biggest wave rises above the water's surface at rest, in studs.
+	WaveHeight: number
+	--- How long the biggest wave is from crest to crest, in studs.
+	WaveLength: number
+	--- How fast the waves roll, as a share of how fast real waves of their length would. 0 stills them.
+	WaveSpeed: number
+	--- Which way the waves roll, in degrees: 0 toward +X, 90 toward +Z.
+	WaveDirection: number
 	[string]: any
 end
 
