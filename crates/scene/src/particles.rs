@@ -123,6 +123,7 @@ impl GpuEmitter {
                 shape: SpawnShape::default(),
                 in_out: ShapeInOut::default(),
                 inherit: Vec3::ZERO,
+                collision: None,
                 look: ParticleLook::default(),
             },
             pending: 0,

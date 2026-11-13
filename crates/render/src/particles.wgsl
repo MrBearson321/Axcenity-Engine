@@ -38,6 +38,10 @@ struct Emitter {
     // The velocity each starts with besides its heading (the emitter's,
     // times VelocityInheritance), and the flipbook's frames a second.
     inherit: vec4<f32>,
+    // 1 while its particles land on what the prepass shows, how much of
+    // their speed into a surface they keep, and how much of their life a
+    // landing takes (roadmap R17.4b).
+    collision: vec4<f32>,
     // Size, its envelope, transparency and its envelope over life, and
     // sRGB colors with the speed multiplier in w, at 32 even times from
     // birth to death (`ParticleCurves`).
@@ -48,6 +52,19 @@ struct Emitter {
 struct Particle {
     position_age: vec4<f32>,
     velocity_life: vec4<f32>,
+    // Seconds since it last met a surface (colliding emitters only).
+    extra: vec4<f32>,
+};
+
+// Must match `SceneDepthUniform` in renderer/gpu_particles.rs: the camera
+// this frame's prepass was drawn from.
+struct SceneDepth {
+    view_proj: mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    // Turns the prepass's view-space normals back to the world.
+    inv_view: mat4x4<f32>,
+    // Its size in pixels, and 1 while there is one.
+    size: vec4<f32>,
 };
 
 struct Key {
@@ -74,6 +91,9 @@ struct SortStep {
 @group(0) @binding(2) var<storage, read_write> keys: array<Key>;
 @group(0) @binding(3) var<storage, read_write> sprites_out: array<SpriteOut>;
 @group(1) @binding(0) var<uniform> sort_step: SortStep;
+@group(2) @binding(0) var<uniform> scene: SceneDepth;
+@group(2) @binding(1) var scene_depth: texture_depth_2d;
+@group(2) @binding(2) var scene_normals: texture_2d<f32>;
 
 const TAU: f32 = 6.28318530718;
 
@@ -229,7 +249,75 @@ fn born(index: u32) -> Particle {
     var particle: Particle;
     particle.position_age = vec4<f32>(position, 0.0);
     particle.velocity_life = vec4<f32>(heading * flip * emitter.air.w + emitter.inherit.xyz, life);
+    particle.extra = vec4<f32>(1e9, 0.0, 0.0, 0.0);
     return particle;
+}
+
+// As `scene`'s colliding particles (scene/src/particles/collisions.rs):
+// how far above a surface a landed particle rests, the speed below which
+// it rests rather than bounces, and how long it must be off surfaces
+// before meeting one is landing again.
+const SKIN: f32 = 0.02;
+const REST_SPEED: f32 = 1.0;
+const LANDING_GAP: f32 = 0.1;
+
+// Lands `particle`, moved this step from `before`, on what the prepass
+// shows where it now is, if it went from in front of that surface to
+// behind it (roadmap R17.4b). Only what the camera sees stops particles,
+// and only a little behind it, so one passing behind a far wall doesn't.
+fn collide(particle: ptr<function, Particle>, before: vec3<f32>, seconds: f32) {
+    (*particle).extra.x = (*particle).extra.x + seconds;
+    if emitter.collision.x < 0.5 || scene.size.z < 0.5 {
+        return;
+    }
+    let position = (*particle).position_age.xyz;
+    let clip = scene.view_proj * vec4<f32>(position, 1.0);
+    if clip.w <= 0.0 {
+        return;
+    }
+    let ndc = clip.xyz / clip.w;
+    if abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z > 1.0 {
+        return;
+    }
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let pixel = vec2<i32>(clamp(uv * scene.size.xy, vec2<f32>(0.0), scene.size.xy - 1.0));
+    let depth = textureLoad(scene_depth, pixel, 0);
+    if depth >= 1.0 {
+        return;
+    }
+    // Compared by distance from the camera, which keeps its precision far
+    // away where depth doesn't.
+    let found = scene.inv_view_proj * vec4<f32>(ndc.xy, depth, 1.0);
+    let surface = found.xyz / found.w;
+    let surface_w = (scene.view_proj * vec4<f32>(surface, 1.0)).w;
+    let before_w = (scene.view_proj * vec4<f32>(before, 1.0)).w;
+    let travelled = length(position - before);
+    if clip.w <= surface_w || before_w > surface_w + SKIN
+        || distance(position, surface) > max(1.0, travelled * 2.0) {
+        return;
+    }
+    var normal = (scene.inv_view * vec4<f32>(textureLoad(scene_normals, pixel, 0).xyz, 0.0)).xyz;
+    if dot(normal, normal) < 0.25 {
+        return;
+    }
+    normal = normalize(normal);
+    if dot(normal, before - surface) < 0.0 {
+        normal = -normal;
+    }
+    (*particle).position_age = vec4<f32>(surface + normal * SKIN, (*particle).position_age.w);
+    var velocity = (*particle).velocity_life.xyz;
+    let into = dot(velocity, normal);
+    if into < 0.0 {
+        let along = velocity - normal * into;
+        let back = -into * emitter.collision.y;
+        velocity = select(along + normal * back, along, back < REST_SPEED);
+    }
+    (*particle).velocity_life = vec4<f32>(velocity, (*particle).velocity_life.w);
+    if (*particle).extra.x > LANDING_GAP {
+        (*particle).position_age.w = (*particle).position_age.w
+            + (*particle).velocity_life.w * emitter.collision.z;
+    }
+    (*particle).extra.x = 0.0;
 }
 
 @compute @workgroup_size(256)
@@ -254,10 +342,15 @@ fn simulate(@builtin(global_invocation_id) id: vec3<u32>) {
         particle.velocity_life = vec4<f32>(moved, particle.velocity_life.w);
         // SpeedOverLife scales how far they go, at the age they start at.
         let speed = speed_at(particle.position_age.w / max(particle.velocity_life.w, 1e-6));
+        let before = particle.position_age.xyz;
         particle.position_age = vec4<f32>(
             particle.position_age.xyz + moved * seconds * speed,
-            particle.position_age.w + seconds,
+            particle.position_age.w,
         );
+        if seconds > 0.0 {
+            collide(&particle, before, seconds);
+        }
+        particle.position_age.w = particle.position_age.w + seconds;
     }
     particles[slot] = particle;
     var key: Key;

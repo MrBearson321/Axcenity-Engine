@@ -10,11 +10,16 @@
 //!
 //! Buffers exist only for emitters in the frame's list, and the whole of
 //! this only while there's one.
+//!
+//! An emitter with a `collision` lands its particles on what the depth and
+//! normal prepass shows in front of them (roadmap R17.4b): `simulate`
+//! reads this frame's prepass (the renderer keeps it alive while such an
+//! emitter is drawn), so they meet only what the camera sees.
 
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 use super::gpu::{PARTICLE_SHADER, shader_module};
 use crate::draw_list::{CURVE_ENTRIES, DrawList, ParticleEmitter};
@@ -49,15 +54,41 @@ struct EmitterUniform {
     /// The velocity every new particle starts with besides its heading
     /// (`ParticleEmitter::inherit`), and the flipbook's frames a second.
     inherit: [f32; 4],
+    /// 1 while it collides, its bounce and its lifetime loss (roadmap
+    /// R17.4b).
+    collision: [f32; 4],
     /// Size, transparency and color over life while `look[3]` is 1
     /// (`ParticleCurves`; colors' fourth number is the speed multiplier).
     shape: [[f32; 4]; CURVE_ENTRIES],
     colors: [[f32; 4]; CURVE_ENTRIES],
 }
 
+/// Must match `SceneDepth` in particles.wgsl: the camera the prepass was
+/// drawn from, for colliding particles.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SceneDepthUniform {
+    view_proj: [[f32; 4]; 4],
+    inv_view_proj: [[f32; 4]; 4],
+    /// Turns the prepass's view-space normals back to the world.
+    inv_view: [[f32; 4]; 4],
+    /// The prepass's size in pixels, 1 while there is one, and 0.
+    size: [f32; 4],
+}
+
+/// The camera a frame's prepass was drawn from, and its targets' size in
+/// pixels.
+#[derive(Clone, Copy)]
+pub(super) struct PrepassView {
+    pub(super) view_proj: Mat4,
+    pub(super) inv_view_proj: Mat4,
+    pub(super) view: Mat4,
+    pub(super) size: (u32, u32),
+}
+
 /// Bytes per particle: one `Particle`, one `Key` and one `SpriteOut` in
 /// particles.wgsl.
-const PARTICLE_BYTES: u64 = 32;
+const PARTICLE_BYTES: u64 = 48;
 const KEY_BYTES: u64 = 8;
 const SPRITE_BYTES: u64 = 48;
 
@@ -84,6 +115,13 @@ pub(super) struct EmitterDraw {
 
 pub(super) struct GpuParticles {
     layout: wgpu::BindGroupLayout,
+    /// The prepass's depth and normals with the camera, for collisions.
+    scene_layout: wgpu::BindGroupLayout,
+    scene_uniform: wgpu::Buffer,
+    scene_group: wgpu::BindGroup,
+    /// Stand-ins bound while there's no prepass: nothing collides then.
+    no_depth: wgpu::TextureView,
+    no_normals: wgpu::TextureView,
     simulate: wgpu::ComputePipeline,
     sort: wgpu::ComputePipeline,
     write: wgpu::ComputePipeline,
@@ -120,6 +158,56 @@ impl GpuParticles {
             label: Some("GPU particles"),
             entries: &[uniform(false), storage(1), storage(2), storage(3)],
         });
+        let texture = |binding, sample_type| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                sample_type,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let scene_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("GPU particle collisions"),
+            entries: &[
+                uniform(false),
+                texture(1, wgpu::TextureSampleType::Depth),
+                texture(2, wgpu::TextureSampleType::Float { filterable: false }),
+            ],
+        });
+        let stand_in = |label, format| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let no_depth = stand_in("no particle collision depth", super::DEPTH_FORMAT);
+        let no_normals = stand_in("no particle collision normals", super::NORMAL_FORMAT);
+        let scene_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("GPU particle collisions"),
+            size: size_of::<SceneDepthUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let scene_group = scene_group(
+            device,
+            &scene_layout,
+            &scene_uniform,
+            (&no_depth, &no_normals),
+        );
         let steps_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("GPU particle sort steps"),
             entries: &[uniform(true)],
@@ -182,10 +270,19 @@ impl GpuParticles {
             })
         };
         Self {
-            simulate: pipeline("simulate particles", &[&layout], "simulate"),
+            simulate: pipeline(
+                "simulate particles",
+                &[&layout, &steps_layout, &scene_layout],
+                "simulate",
+            ),
             sort: pipeline("sort particles", &[&layout, &steps_layout], "sort"),
             write: pipeline("write particles", &[&layout], "write"),
             layout,
+            scene_layout,
+            scene_uniform,
+            scene_group,
+            no_depth,
+            no_normals,
             steps_group,
             steps_buffer,
             kept: HashMap::new(),
@@ -196,14 +293,43 @@ impl GpuParticles {
     /// Makes buffers for `list`'s new emitters (and those whose capacity
     /// changed), frees those of emitters it no longer has, and writes each
     /// one's step. `textures` are the emitters' texture keys as the sprite
-    /// pass will draw them, in the list's order.
+    /// pass will draw them, in the list's order. Colliding emitters land
+    /// on `prepass` (its depth and normals) as seen from `view`; without
+    /// it, nothing collides.
     pub(super) fn prepare(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
         list: &DrawList,
         textures: &[Option<u64>],
+        view: PrepassView,
+        prepass: Option<(&wgpu::TextureView, &wgpu::TextureView)>,
     ) {
+        let collides = list
+            .particle_emitters
+            .iter()
+            .any(|emitter| emitter.collision.is_some());
+        let prepass = prepass.filter(|_| collides);
+        queue.write_buffer(
+            &self.scene_uniform,
+            0,
+            bytemuck::bytes_of(&SceneDepthUniform {
+                view_proj: view.view_proj.to_cols_array_2d(),
+                inv_view_proj: view.inv_view_proj.to_cols_array_2d(),
+                inv_view: view.view.inverse().to_cols_array_2d(),
+                size: [
+                    view.size.0 as f32,
+                    view.size.1 as f32,
+                    if prepass.is_some() { 1.0 } else { 0.0 },
+                    0.0,
+                ],
+            }),
+        );
+        self.scene_group = scene_group(
+            device,
+            &self.scene_layout,
+            &self.scene_uniform,
+            prepass.unwrap_or((&self.no_depth, &self.no_normals)),
+        );
         let emitters = &list.particle_emitters;
         self.kept
             .retain(|key, _| emitters.iter().any(|emitter| emitter.key == *key));
@@ -321,6 +447,8 @@ impl GpuParticles {
             let groups = kept.capacity.div_ceil(WORKGROUP);
             pass.set_bind_group(0, &kept.group, &[]);
             pass.set_pipeline(&self.simulate);
+            pass.set_bind_group(1, &self.steps_group, &[0]);
+            pass.set_bind_group(2, &self.scene_group, &[]);
             pass.dispatch_workgroups(groups, 1, 1);
             pass.set_pipeline(&self.sort);
             let levels = kept.capacity.trailing_zeros();
@@ -411,6 +539,14 @@ fn uniform_of(
                 book.grid.clamp(1, 8) | book.mode.code() << 8 | u32::from(book.start_random) << 16
             }),
         ],
+        collision: emitter.collision.map_or([0.0; 4], |collision| {
+            [
+                1.0,
+                collision.bounce.clamp(0.0, 1.0),
+                collision.lifetime_loss.clamp(0.0, 1.0),
+                0.0,
+            ]
+        }),
         inherit: finite(emitter.inherit)
             .extend(look.flipbook.map_or(0.0, |book| {
                 if book.framerate.is_finite() {
@@ -434,4 +570,32 @@ fn uniform_of(
                 })
             }),
     }
+}
+
+/// The bind group colliding particles read: the camera and the prepass's
+/// `depth` and `normals` (or the stand-ins).
+fn scene_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    uniform: &wgpu::Buffer,
+    (depth, normals): (&wgpu::TextureView, &wgpu::TextureView),
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("GPU particle collisions"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(depth),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(normals),
+            },
+        ],
+    })
 }
