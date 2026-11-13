@@ -58,7 +58,7 @@ In particular (status checked on main `5143a5a`):
 
 | Existing item | Work | Status |
 |---|---|---|
-| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238. Gaps: dragging a card into the Assets panel, sound preview playback, Freesound |
+| G1 | Toolbox foundation | **Implemented** (#90, #92, #96, #107, #139, #142, #147, #152, #179). Dragging a result card into the scene: #238, and onto the Assets panel. Listening to a sound result before getting it. Gaps: Freesound |
 | G2 | Scripts inside objects | **Implemented** (#91, #111, #114, #115, #117, #120; Code/Blocks switch #230) |
 | G3 | Physics interpolation | **Implemented** (#110) |
 | G4 | Script completion and diagnostics | **Implemented** (#145 via #153; go to definition #239) |
@@ -208,7 +208,7 @@ Use `luau-lsp` as a child process for diagnostics, following the existing archit
 
 **Priority:** Critical
 **Existing reference:** G1 and Toolbox integration documentation
-**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Gaps: dragging a card into the Assets panel, sound preview playback, and Freesound (later, with a user's own key, as decided in G1).
+**Status:** Partial. The provider trait, ambientCG, Poly Haven and Openverse, the central asset directory, `metadata.db` (SQLite), MD5-verified downloads, previews, search and filters, favourites, collections, history, licences, credits, the project snapshot `.axcenity/asset-sources.json`, offline library views, the CLI and the Blender drop-in are built (`crates/toolbox`, `crates/editor-toolbox`, `docs/editor/assets.md`). Dragging a result card into the scene is built (#238: it gets the asset and places it where it's dropped, a sound inside the part under the pointer). Dragging one onto the Assets panel gets it into the project and shows it there. A sound result can be listened to before Get (its source's preview, played on its own). Gap: Freesound (later, with a user's own key, as decided in G1).
 
 Complete the centralized Toolbox architecture.
 
@@ -632,7 +632,7 @@ Improve large-world authoring and environmental systems.
 ## 6.6 Model Studio improvements
 
 **Priority:** Medium-High
-**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. Improving the sculpting tools is still open.
+**Status:** Partial (R15). Modeling operations, modifiers, UVs, paint, rigging, weights and pose, LOD generation and `.glb` round trips exist (`docs/editor/model-studio.md`). Sculpting, retopology and baking were removed by Phase 90 on 12 Nov 2026; Paul then chose to bring sculpting and baking back (section 2.1), and #271 restored them: Sculpt mode with its brushes, symmetry, masks, Voxel Remesh and Subdivide, and a Bake fold with Make Low Poly and maps baked from the sculpt. Retopology by hand (Poly Build, snapping) stays out. R15.1 adds seven sculpt brushes (Layer, Blob, Scrape, Fill, Draw Sharp, Nudge, Elastic Grab) and a Mesh Filter over the whole object. The eleven requirements are checked in [model-studio-r15.md](model-studio-r15.md): seven are met; collision shapes (R15.2), LOD management (R15.3) and the Blender round trip (R15.4) are the stages left.
 
 Develop Model Studio into a stronger integrated asset-authoring environment.
 
@@ -1069,7 +1069,7 @@ Checked on main `5143a5a` (12 Nov 2026). Peer columns are claimed capabilities (
 
 | Feature | Axcenity | Unreal | Godot | s&box | Unity | Reference | Priority | Dependencies | Decision |
 |---|---|---|---|---|---|---|---|---|---|
-| Built-in asset discovery | Partial: card drag into the scene (#238); no sound preview | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
+| Built-in asset discovery | Partial: card drag into the scene (#238) and the Assets panel, sound previews; no Freesound | Fab | Asset Library | sbox.game assets | Asset Store | `crates/toolbox`, `crates/editor-toolbox` (G1) | Critical | toolbox | Improve |
 | Licence and attribution tracking | Implemented | Fab licences | Per asset | Platform | Asset Store EULA | `toolbox` `license.rs`, `provenance.rs`, CREDITS.txt | Critical | toolbox | Keep |
 | Missing and broken references | Implemented | Reference viewer, map check | Dependency editor | Editor | Missing reference warnings | `project::check_assets` | High | project | Keep |
 | Unused asset report | Implemented (never deletes) | Size map, audit | Orphan explorer | — | Third-party | `project::unused_assets` | High | project | Keep |
@@ -1140,7 +1140,7 @@ The following is the recommended order for execution. **Status** is on main `514
 |---|---|---|---|---|
 | 1 | Physics interpolation | G3 | Implemented (#110) | Nothing; hand check at 120–240 fps on the PC |
 | 2 | Scripts inside objects | G2 | Implemented (#111–#120, #230) | Nothing |
-| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238) | Drag into Assets; sound preview |
+| 3 | Complete Toolbox integration | G1 | Partial (card drag into the scene #238 and the Assets panel, sound previews) | Freesound, later |
 | 4 | Script completion and diagnostics | G4 | Implemented (#153, #239) | Nothing |
 | 5 | Memory profiler | G7 | Implemented (#241) | Nothing |
 | 6 | Audio occlusion and roll-off | G8 | Implemented (#128) | Nothing |
@@ -1152,7 +1152,7 @@ The following is the recommended order for execution. **Status** is on main `514
 | 12 | Advanced asset management | New (R12) | Implemented (#260, #262) | Mesh presets later, if needed |
 | 13 | Build pipeline improvements | New (R13) | Implemented (#268) | Build profiles and reports done |
 | 14 | Temporal upscaling | G9 | Partial | Stage 2 inside TAA |
-| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271) | Improve the sculpting tools |
+| 15 | Advanced Model Studio workflows | New (R15) | Partial: sculpting and baking back (#271), seven more sculpt brushes and the Mesh Filter (R15.1); audit and stages in [model-studio-r15.md](model-studio-r15.md) | R15.2 collision, R15.3 LODs, R15.4 Blender round trip |
 | 16 | Large-world rendering and authoring | New (R16) | Partial: Streaming overlay built | Region management and data layers where justified |
 | 17 | Visual effects editor | New (R17) | Implemented: curves over life (R17.1), spawn shapes and speed over life (R17.2), bursts, inherited velocity and headings (R17.2b), flipbooks (R17.2c), the Effect tab and effect assets (R17.3), collisions and sub-emitters (R17.4, R17.4b), environment and presets (R17.5; the stack kept, no node graph); design in [vfx-editor.md](vfx-editor.md) | None |
 | 18 | Global illumination improvements | New (R18) | Stages R18.1–R18.4 done; options and stages in [global-illumination.md](global-illumination.md) | PC numbers from `bench_light_probes`; probe visibility only if leaks remain; RT2 in the ray tracing thread |

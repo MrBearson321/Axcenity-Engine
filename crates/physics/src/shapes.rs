@@ -62,14 +62,17 @@ impl Form {
     }
 }
 
-/// How closely a model's collider follows it: a UnionOperation's
-/// `CollisionFidelity` (Phase 50). MeshParts collide as their hull.
+/// How closely a model's collider follows it: a MeshPart's or
+/// UnionOperation's `CollisionFidelity` (Phase 50, R15.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Fidelity {
+    /// The model's own collision pieces (its `_COL` objects, see
+    /// `assets::Model::collision`) when it has any, else its hull.
+    #[default]
+    Default,
     /// Its box.
     Box,
     /// The convex hull of its corners, hollows filled in.
-    #[default]
     Hull,
     /// Convex pieces that follow its hollows (parry's convex
     /// decomposition), so a doorway can be walked through.
@@ -77,12 +80,14 @@ pub enum Fidelity {
 }
 
 impl Fidelity {
-    /// The fidelity a `CollisionFidelity` item names; Hull for anything else.
+    /// The fidelity a `CollisionFidelity` item names; Default for anything
+    /// else.
     pub fn named(item: &str) -> Self {
         match item {
             "Box" => Fidelity::Box,
+            "Hull" => Fidelity::Hull,
             "PreciseConvexDecomposition" => Fidelity::Precise,
-            _ => Fidelity::Hull,
+            _ => Fidelity::Default,
         }
     }
 }
@@ -150,6 +155,7 @@ pub fn collider(form: &Form, size: Vec3) -> Collider {
             ColliderBuilder::capsule_x(reach, radius)
         }
         Form::Mesh(Some(model), Fidelity::Hull) => hull(model, half),
+        Form::Mesh(Some(model), Fidelity::Default) => own_pieces(model, half),
         Form::Mesh(Some(model), Fidelity::Precise) => decomposed(model, half),
         Form::Terrain(terrain) => heightfield(&terrain.data, size),
     };
@@ -174,7 +180,15 @@ pub fn wireframe(form: &Form, size: Vec3) -> Vec<(Vec3, Vec3)> {
         Form::Primitive(PartType::CornerWedge) => corner_wedge_edges(half),
         Form::Primitive(PartType::Capsule) => capsule_edges(half),
         Form::Mesh(Some(model), Fidelity::Hull) => hull_edges(model, half),
-        Form::Mesh(Some(model), Fidelity::Precise) => decomposed_edges(model, half),
+        Form::Mesh(Some(model), Fidelity::Default) if model.collision.is_empty() => {
+            hull_edges(model, half)
+        }
+        Form::Mesh(Some(model), Fidelity::Default) => {
+            compound_edges(&own_pieces(model, half).build(), half)
+        }
+        Form::Mesh(Some(model), Fidelity::Precise) => {
+            compound_edges(&decomposed(model, half).build(), half)
+        }
         Form::Terrain(_) => Vec::new(),
     }
 }
@@ -541,9 +555,9 @@ pub fn prepare_precise(model: &Model, size: Vector3) {
     let _ = decomposed(model, half);
 }
 
-/// The edges of each convex piece of [`decomposed`].
-fn decomposed_edges(model: &Model, half: Vec3) -> Vec<(Vec3, Vec3)> {
-    let collider = decomposed(model, half).build();
+/// The edges of each convex piece of a collider made of them
+/// ([`decomposed`], [`own_pieces`]): its box's if it isn't.
+fn compound_edges(collider: &Collider, half: Vec3) -> Vec<(Vec3, Vec3)> {
     let Some(compound) = collider.shape().as_compound() else {
         return cuboid_edges(half);
     };
@@ -557,6 +571,52 @@ fn decomposed_edges(model: &Model, half: Vec3) -> Vec<(Vec3, Vec3)> {
         }
     }
     edges
+}
+
+/// A model's own collision pieces (R15.2: its `_COL` objects), each the
+/// convex hull of its corners, stretched like the hull. A model without
+/// any, or whose pieces are all too flat to make one, collides as its hull.
+/// Kept by model and size, like the hull.
+fn own_pieces(model: &Model, half: Vec3) -> ColliderBuilder {
+    if model.collision.is_empty() {
+        return hull(model, half);
+    }
+    let key = (model.key(), half.to_array().map(f32::to_bits));
+    static PIECES: LazyLock<Mutex<HashMap<ShapeKey, Option<SharedShape>>>> =
+        LazyLock::new(Mutex::default);
+    let kept = PIECES
+        .lock()
+        .ok()
+        .and_then(|pieces| pieces.get(&key).cloned());
+    let shape = match kept {
+        Some(shape) => shape,
+        None => {
+            let shapes: Vec<(Pose, SharedShape)> = model
+                .collision
+                .iter()
+                .filter_map(|piece| {
+                    let corners: Vec<Vec3> = piece
+                        .iter()
+                        .map(|&corner| Vec3::from(corner) * half * 2.0)
+                        .collect();
+                    SharedShape::convex_hull(&corners)
+                })
+                .map(|shape| (Pose::IDENTITY, shape))
+                .collect();
+            let shape = (!shapes.is_empty()).then(|| SharedShape::compound(shapes));
+            if let Ok(mut pieces) = PIECES.lock() {
+                if pieces.len() >= KEPT_HULLS {
+                    pieces.clear();
+                }
+                pieces.insert(key, shape.clone());
+            }
+            shape
+        }
+    };
+    match shape {
+        Some(shape) => ColliderBuilder::new(shape),
+        None => hull(model, half),
+    }
 }
 
 /// A model's triangles stretched to `half` (it fills the 1×1×1 cube), with

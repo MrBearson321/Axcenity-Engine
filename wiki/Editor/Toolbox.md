@@ -20,9 +20,13 @@ tags: [system/editor, assets, toolbox]
 
 Textures and skies search **All sources** by default: `search` in `editor-toolbox`'s `lib.rs` asks each source on its own thread (`std::thread::scope`), interleaves their pages, and reports a source that fails while others answered (`Found::failed`) instead of failing the search. Results are deduplicated by `provider:id` only; assets from two sources are never merged. The Sounds tab carries a licence notice (`SOUND_LICENCE_NOTICE`) above Openverse's results; each card keeps its own licence.
 
+## Listening to a sound
+
+A Sounds card and its drawer have a listen button (G1's last built gap; `editor-toolbox/src/listen.rs`). The panel fetches `AssetRecord::preview_url` on a thread and hands the bytes back as `ToolboxAction::PlaySound`; the editor plays them with `AudioEngine::play_file` on its existing `sound_preview` engine (one file at a time, not kept), and `StopSound` stops it. Each frame before drawing the tab, `toolbox_pane` calls `ToolboxPanel::sound_ended` when the engine isn't playing a file, so a preview that ends, Play starting (which drops the preview engine) or a missing audio device all reset the button.
+
 ## Dragging a card into the scene
 
-A result card's picture is a drag handle when Get would work (competitive roadmap item 3, G1's gap): `editor-toolbox` sets a `CardDrag` payload; the editor's frame (`app.rs`, beside Assets-panel drops) hands one let go over the viewport to `EditorApp::drop_toolbox_card`, which calls `ToolboxPanel::get_dropped` with `Target::Drop(Spot)`. The Get runs as usual on its thread; `installed_action` gives the drop to the texture set or sound it installed, and `app/toolbox.rs` places it through `drop_asset`, the same path as a tile. A sky or model uses the drop up (the sky asks, the model opens the Import dialog), so it never places a later Get.
+A result card's picture is a drag handle when Get would work (competitive roadmap item 3, G1's gap): `editor-toolbox` sets a `CardDrag` payload; the editor's frame (`app.rs`, beside Assets-panel drops) hands one let go over the viewport to `EditorApp::drop_toolbox_card`, which calls `ToolboxPanel::get_dropped` with `Target::Drop(Spot)`. The Get runs as usual on its thread; `installed_action` gives the drop to the texture set or sound it installed, and `app/toolbox.rs` places it through `drop_asset`, the same path as a tile. A sky or model uses the drop up (the sky asks, the model opens the Import dialog), so it never places a later Get. Let go over the Assets panel instead, `assets_pane` (`app/chrome/panes.rs`) takes the payload from a hover-only zone over the whole panel and calls `drop_toolbox_card_on_assets` with `Target::Assets`; the installed texture set or sound is then revealed in the panel rather than placed.
 
 ## Where its assets show
 

@@ -713,7 +713,9 @@ impl EnumType {
             EnumType::RaycastFilterType => vec!["Exclude", "Include"],
             // How a Fracture's pieces are spread (Phase 42).
             EnumType::FracturePattern => vec!["Uniform", "Impact"],
-            EnumType::CollisionFidelity => vec!["Box", "Hull", "PreciseConvexDecomposition"],
+            EnumType::CollisionFidelity => {
+                vec!["Default", "Box", "Hull", "PreciseConvexDecomposition"]
+            }
             // The room a ReverbZone sounds like (Phase 52).
             EnumType::ReverbType => axcenity_core::sound::REVERB_TYPES.to_vec(),
             EnumType::RollOffMode => axcenity_core::sound::ROLL_OFF_MODES.to_vec(),

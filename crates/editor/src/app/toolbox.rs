@@ -27,6 +27,15 @@ impl EditorApp {
     /// The Toolbox tab.
     pub(in crate::app) fn toolbox_pane(&mut self, ui: &mut egui::Ui) {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
+        // A preview that ended (or a player that's gone: Play started, no
+        // audio output) shows the listen button again.
+        if !self
+            .sound_preview
+            .as_ref()
+            .is_some_and(|engine| engine.file_playing())
+        {
+            self.toolbox.sound_ended();
+        }
         let actions = self.toolbox.show(ui, folder.as_deref(), !self.playing());
         for action in actions {
             self.toolbox_action(action);
@@ -73,6 +82,29 @@ impl EditorApp {
         }
     }
 
+    /// A Toolbox card was dragged onto the Assets panel: the Toolbox gets
+    /// it into the project, and the panel shows it once it's in (G1).
+    pub(in crate::app) fn drop_toolbox_card_on_assets(
+        &mut self,
+        ctx: &egui::Context,
+        card: &CardDrag,
+    ) {
+        if self.playing() {
+            self.output
+                .error("Press Stop to get assets from the Toolbox.");
+            return;
+        }
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            self.output
+                .error("Open a project to get assets from the Toolbox.");
+            return;
+        };
+        if !self.toolbox.get_dropped(ctx, &folder, card, Target::Assets) {
+            self.output
+                .error(format!("Could not get {} from the Toolbox now.", card.name));
+        }
+    }
+
     pub(in crate::app) fn toolbox_action(&mut self, action: ToolboxAction) {
         // Whatever the Toolbox did may have downloaded or installed something.
         self.inventory.refresh();
@@ -91,6 +123,7 @@ impl EditorApp {
                         self.terrain_action(TerrainAction::UseTextureSet(layer, entry));
                     }
                     Some(Target::Drop(spot)) => self.drop_asset(&entry, Some(drop_target(spot))),
+                    Some(Target::Assets) => self.asset_browser.reveal(&entry.path),
                     None => {}
                 }
             }
@@ -100,13 +133,17 @@ impl EditorApp {
             }
             ToolboxAction::Sound { path, target } => {
                 self.asset_browser.refresh();
-                if let Some(Target::Drop(spot)) = target {
-                    let entry = AssetEntry {
-                        kind: AssetKind::Audio,
-                        name: display_name(&path),
-                        path,
-                    };
-                    self.drop_asset(&entry, Some(drop_target(spot)));
+                match target {
+                    Some(Target::Drop(spot)) => {
+                        let entry = AssetEntry {
+                            kind: AssetKind::Audio,
+                            name: display_name(&path),
+                            path,
+                        };
+                        self.drop_asset(&entry, Some(drop_target(spot)));
+                    }
+                    Some(Target::Assets) => self.asset_browser.reveal(&path),
+                    _ => {}
                 }
             }
             ToolboxAction::ImportModel { file, key, variant } => {
@@ -131,6 +168,35 @@ impl EditorApp {
                 }
                 self.layout.open(Pane::Plugins);
             }
+            ToolboxAction::PlaySound { name, bytes } => self.listen_to_sound(&name, bytes),
+            ToolboxAction::StopSound => {
+                if let Some(engine) = &mut self.sound_preview {
+                    engine.stop_file();
+                }
+            }
+        }
+    }
+
+    /// Plays a Toolbox sound's preview on its own, on the editor's preview
+    /// player (the one Properties' Sound preview uses), G1. Not in Play,
+    /// where the game's audio plays.
+    fn listen_to_sound(&mut self, name: &str, bytes: Vec<u8>) {
+        if self.playing() {
+            return;
+        }
+        if self.sound_preview.is_none() {
+            match axcenity_audio::AudioEngine::new() {
+                Ok(engine) => self.sound_preview = Some(engine),
+                Err(err) => {
+                    self.output.error(format!("Audio is unavailable: {err}"));
+                    return;
+                }
+            }
+        }
+        if let Some(engine) = &mut self.sound_preview
+            && let Err(err) = engine.play_file(name, bytes)
+        {
+            self.output.error(format!("Could not play {name}: {err}"));
         }
     }
 
@@ -234,6 +300,16 @@ mod tests {
             path: "assets/audio/rain-1a2b.ogg".to_owned(),
             target: None,
         });
+        assert_eq!(app.world.get(part).unwrap().children().len(), children);
+
+        // Dragged onto the Assets panel: shown there, nothing placed.
+        let selected = app.selected;
+        app.toolbox_action(ToolboxAction::Sound {
+            path: "assets/audio/rain-1a2b.ogg".to_owned(),
+            target: Some(Target::Assets),
+        });
+        assert_eq!(app.asset_browser.picked(), ["assets/audio/rain-1a2b.ogg"]);
+        assert_eq!(app.selected, selected);
         assert_eq!(app.world.get(part).unwrap().children().len(), children);
         let _ = std::fs::remove_dir_all(&temp);
     }

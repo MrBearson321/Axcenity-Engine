@@ -178,6 +178,30 @@ impl EditorApp {
             self.asset_browser
                 .show(ui, !self.playing(), can_save, picking.as_ref())
         };
+        // A Toolbox card let go over the panel is got into the project and
+        // shown here (G1).
+        let rect = ui.max_rect();
+        let zone = ui.interact(
+            rect,
+            ui.id().with("toolbox-card-drop"),
+            egui::Sense::hover(),
+        );
+        if zone
+            .dnd_hover_payload::<crate::toolbox_panel::CardDrag>()
+            .is_some()
+        {
+            let palette = theme::palette(ui.ctx());
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                4,
+                egui::Stroke::new(1.5_f32, palette.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if let Some(card) = zone.dnd_release_payload::<crate::toolbox_panel::CardDrag>() {
+            self.drop_toolbox_card_on_assets(ui.ctx(), &card);
+            ui.ctx().request_repaint();
+        }
         match action {
             Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
             Some(BrowserAction::Pick(entry)) if picking_foliage => {
