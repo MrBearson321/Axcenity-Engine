@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Model Studio's sculpting and baking are back"
+details = "Sculpt mode returns with its brushes (Draw, Clay Strips, Smooth, Grab, Inflate, Crease, Flatten, Pinch, Snake Hook, Mask), symmetry, masks, Voxel Remesh and Subdivide. The Bake fold returns too: pick a reference object, Make Low Poly (decimate, relax, Smart UV Project) and Bake normal, occlusion, curvature and base color maps as one undo step. Retopology by hand stays out."
+features = ["editor.model-studio"]
+fixes = []
+introduces_issues = []
+prs = [271]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
