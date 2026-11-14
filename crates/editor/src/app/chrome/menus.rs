@@ -445,6 +445,16 @@ impl EditorApp {
             {
                 self.open_graphics_benchmark();
             }
+            if ui
+                .button(item(ui, icons::BONE, "Animator Inspector…"))
+                .on_hover_text(
+                    "During Play, watch the selected Animator live: its state, blends, \
+                         layers, tracks, parameters and the events it fires.",
+                )
+                .clicked()
+            {
+                self.open_animator_inspector();
+            }
             // Only in debug builds (`cargo run`), never in a release.
             if cfg!(debug_assertions) {
                 ui.separator();

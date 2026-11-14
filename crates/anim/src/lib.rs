@@ -48,8 +48,8 @@ pub mod sequence;
 mod threads;
 
 pub use animators::{
-    AnimatorEvent, Animators, LoadedClip, Poses, load_clip, read_retarget_profile,
-    read_state_machine,
+    AnimatorEvent, AnimatorView, Animators, FadeView, FiredView, LayerView, LoadedClip,
+    MachineView, PlayingView, Poses, load_clip, read_retarget_profile, read_state_machine,
 };
 pub use blend_space::{blend_space_weights, triangulate};
 pub use bones::{

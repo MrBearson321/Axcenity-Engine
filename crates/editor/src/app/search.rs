@@ -510,6 +510,9 @@ fn command_description(command: &Command) -> String {
         Command::GraphicsBenchmark => {
             "Measure how this computer draws the viewport and get recommended editor graphics settings."
         }
+        Command::AnimatorInspector => {
+            "During Play: the selected Animator's state, blends, layers, tracks, parameters and events, live."
+        }
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
         Command::PauseOnErrors => {
             "Turn on or off: a script error pauses Play where it happened, with its variables."

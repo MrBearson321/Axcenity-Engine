@@ -51,6 +51,9 @@ use crate::ragdoll;
 use crate::retarget::RetargetProfile;
 use crate::threads::{ThreadTimes, Threads};
 
+mod inspect;
+pub use inspect::{AnimatorView, FadeView, FiredView, LayerView, MachineView, PlayingView};
+
 /// Each animated MeshPart's posed model, by the MeshPart. The draw list
 /// uses these in place of the model's still triangles.
 pub type Poses = HashMap<InstanceId, Arc<Posed>>;
@@ -133,6 +136,8 @@ pub struct Animators {
     /// How foot placement finds the ground. Without one, feet stay where
     /// the animation has them.
     ground: Option<GroundProbe>,
+    /// Seconds of updates so far, to time what the inspector lists.
+    clock: f64,
     /// Where poses are worked out (unified Phase 93).
     threads: Threads,
     /// How long each thread spent posing in the last update.
@@ -206,6 +211,12 @@ struct Running {
     ragdoll: RagdollRun,
     /// Each IKControl's progress.
     ik: HashMap<InstanceId, ik_control::Run>,
+    /// Its Animator at the last update, for the inspector.
+    animator: Option<InstanceId>,
+    /// What it played over the state machine at the last update.
+    layers: Vec<Layer>,
+    /// What it fired lately, newest last ([`inspect::RECENT`] at most).
+    recent: std::collections::VecDeque<inspect::Fired>,
     /// The skeleton's legs (found again for a new model), if it has them.
     legs: Option<Legs>,
     feet: feet::Run,
@@ -234,11 +245,16 @@ struct RunningMachine {
     machine: Machine,
     /// Where each of its layers is, in the file's order.
     layers: Vec<Machine>,
+    /// How far root motion moved it at the last update (in the rig's space).
+    motion: RootMotion,
 }
 
 /// Something playing over the state machine this frame.
 #[derive(Clone)]
 struct Layer {
+    /// The Animation or AnimationTrack playing it, and its clip's path.
+    source: InstanceId,
+    path: String,
     clip: Arc<Clip>,
     /// Phase in the clip (0 to 1, or more for a loop's later passes).
     phase: f64,
@@ -427,11 +443,13 @@ impl Animators {
         self.running.retain(|owner, _| alive.contains(owner));
         let changed = self.readable_changes(assets);
 
+        self.clock += dt;
         let mut events = Vec::new();
         let mut posed = HashSet::new();
         let mut jobs = Vec::new();
         for (owner, parts) in owners {
-            if self.update_one(
+            let fired = events.len();
+            let posed_one = self.update_one(
                 world,
                 assets,
                 owner,
@@ -440,8 +458,12 @@ impl Animators {
                 dt,
                 &mut events,
                 &mut jobs,
-            ) {
+            );
+            if posed_one {
                 posed.insert(owner);
+            }
+            if let Some(running) = self.running.get_mut(&owner) {
+                inspect::remember(world, running, &events[fired..], self.clock);
             }
         }
         // The poses that need nothing more from the World, across threads.
@@ -597,6 +619,7 @@ impl Animators {
                             .map(|layer| Machine::new(&layer.machine))
                             .collect(),
                         compiled,
+                        motion: RootMotion::default(),
                     }
                 });
         }
@@ -669,6 +692,8 @@ impl Animators {
             }
         }
         layers.sort_by_key(|layer| layer.order);
+        running.animator = parts.animator;
+        running.layers.clone_from(&layers);
 
         // Properties: the state machine's, then each layer over them.
         if let Some(machine) = &running.machine {
@@ -907,6 +932,7 @@ impl Animators {
         if enabled {
             let advanced = running.machine.advance(&compiled, rig, &parameters, dt);
             markers = advanced.events;
+            running.motion = advanced.motion;
             if let Some(rig) = rig {
                 move_by_root_motion(world, owner, rig, advanced.motion);
             }
@@ -1068,6 +1094,8 @@ impl Animators {
             events.push(AnimatorEvent::AnimationCompleted { animation });
         }
         Some(Layer {
+            source: animation,
+            path,
             phase: phase_at(time, duration, looping),
             clip,
             weight: 1.0,
@@ -1171,6 +1199,8 @@ impl Animators {
             events.push(AnimatorEvent::TrackStopped { track });
         }
         (weight > 0.0).then(|| Layer {
+            source: track,
+            path,
             phase: phase_at(time, duration, looping),
             clip,
             weight,

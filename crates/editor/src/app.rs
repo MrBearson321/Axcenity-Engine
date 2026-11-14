@@ -22,6 +22,7 @@
 //! - `assets.rs` — Assets panel drops, prefabs, and imported files
 //! - `asset_fixes.rs` — the Asset Check scan and its fixes
 
+mod animator_inspector;
 mod asset_fixes;
 mod asset_refs;
 mod assets;
@@ -218,6 +219,8 @@ pub struct EditorApp {
     input_settings: input_settings::InputWindow,
     /// Model ▸ Build ▸ Collision Groups.
     collision_groups: collision_groups::CollisionGroupsWindow,
+    /// Debug › Animator Inspector… (AP6).
+    animator_inspector: animator_inspector::AnimatorInspector,
     /// Where the main window is, in physical pixels, for dropping a panel
     /// back onto it.
     main_window_pixels: Option<egui::Rect>,
@@ -852,6 +855,7 @@ const OVERLAY_BODIES_KEY: &str = "overlay bodies";
 const OVERLAY_STREAMING_KEY: &str = "overlay streaming";
 const STREAM_EDITING_KEY: &str = "stream while editing";
 const OVERLAY_LIGHT_PROBES_KEY: &str = "overlay light probes";
+const OVERLAY_SKELETONS_KEY: &str = "overlay skeletons";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -988,6 +992,7 @@ impl EditorApp {
             version_history: Default::default(),
             input_settings: Default::default(),
             collision_groups: Default::default(),
+            animator_inspector: Default::default(),
             main_window_pixels: None,
             pending_main_dock: None,
             pending_close_scene: false,
@@ -1231,6 +1236,8 @@ impl EditorApp {
                 storage.get_string(STREAM_EDITING_KEY).as_deref() == Some("on");
             self.overlays.light_probes =
                 storage.get_string(OVERLAY_LIGHT_PROBES_KEY).as_deref() == Some("on");
+            self.overlays.skeletons =
+                storage.get_string(OVERLAY_SKELETONS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(welcome::RecentTabs::KEY) {
                 self.recent_tabs = welcome::RecentTabs::from_text(&text);
             }
@@ -1391,6 +1398,10 @@ impl eframe::App for EditorApp {
         storage.set_string(
             OVERLAY_LIGHT_PROBES_KEY,
             flag(self.overlays.light_probes).to_owned(),
+        );
+        storage.set_string(
+            OVERLAY_SKELETONS_KEY,
+            flag(self.overlays.skeletons).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(welcome::RecentTabs::KEY, self.recent_tabs.to_text());
@@ -1955,6 +1966,7 @@ impl EditorApp {
         }
         self.input_window(ctx);
         self.collision_groups_window(ctx);
+        self.animator_inspector_window(ctx);
         self.probe_bake_window(ctx);
         self.custom_material_window(ctx);
         self.save_layout_dialog(ctx);
@@ -2032,6 +2044,8 @@ mod agent_tests;
 mod anim_drawer_tests;
 #[cfg(test)]
 mod anim_transport_tests;
+#[cfg(test)]
+mod animator_inspector_tests;
 #[cfg(test)]
 mod asset_fix_tests;
 #[cfg(test)]
