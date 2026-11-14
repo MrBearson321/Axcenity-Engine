@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Move a character's face with FaceControls: blinks, brows, smiles, eyes and jaw"
+details = "Insert > Face Controls in a MeshPart gives it 48 standard facial controls (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Eye_Look_Up, Jaw_Open …), 0 to 1, which scripts and tweens can set. A face profile maps them to the model's blend shapes: built-in ones for Axcenity's own naming, ARKit's 52 shapes and VRoid characters, or a *.face.json file of the project's own. Eye and jaw bones are found by name and turned within limits. The Import dialog says how many controls a model's face gets."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = [377]
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

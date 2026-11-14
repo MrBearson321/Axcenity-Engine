@@ -1473,6 +1473,80 @@ fn animator_layer_weights_are_set_faded_and_read() {
 }
 
 #[test]
+fn face_controls_methods_set_expressions_overrides_and_layers() {
+    let mut world = World::new();
+    let face = world.create(ClassName::FaceControls).unwrap();
+    world.set_parent(face, Some(world.workspace())).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_assets(axcenity_assets::Assets::default());
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/face.server.lua",
+        "local face = workspace.FaceControls
+         face:SetExpression('Happy', 0.5, 0.2, { Priority = 2, Asymmetry = -1 })
+         face:SetExpression('sad')
+         face:SetExpression('Happy', 1)
+         for _, shown in face:GetExpressions() do
+             print(shown.Name, shown.Intensity, shown.Priority, shown.Asymmetry)
+         end
+         face:ClearExpression('Sad', 0.5)
+         print(#face:GetExpressions())
+         print(pcall(face.SetExpression, face, 'Smug'))
+         print(pcall(face.SetExpression, face, 'Happy', 3))
+         face:SetOverride('Jaw_Open', 0.4)
+         face:SetOverride('Mouth_Pucker', 1)
+         face:SetOverride('Mouth_Pucker')
+         print(pcall(face.SetOverride, face, 'Nose', 1))
+         face:SetLayer('Expression', 0.5, 'Additive', { 'Mouth', 'Eyes' })
+         face:SetLayer('procedural', 1, nil, 'Blink_Left')
+         face:SetLayer('Override')
+         print(pcall(face.SetLayer, face, 'Top', 1))
+         print(pcall(face.SetLayer, face, 'Base', 1, nil, 'Ears'))",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(
+        output[0], "Happy\t1\t0\t0",
+        "set again: options back to defaults"
+    );
+    assert_eq!(output[1], "sad\t1\t0\t0");
+    assert_eq!(output[2], "1");
+    assert!(output[3].contains("no expression `Smug`"), "{}", output[3]);
+    assert!(output[3].contains("Sleepy"), "lists them: {}", output[3]);
+    assert!(output[4].contains("intensity"), "{}", output[4]);
+    assert!(output[5].contains("isn't a face control"), "{}", output[5]);
+    assert!(output[6].contains("isn't a face layer"), "{}", output[6]);
+    assert!(output[7].contains("`Ears`"), "{}", output[7]);
+
+    let state = world.face(face).unwrap();
+    let sad = &state.expressions[1];
+    assert_eq!((sad.target_presence, sad.transition), (0.0, Some(0.5)));
+    let happy = &state.expressions[0];
+    assert!(happy.order > sad.order, "set last, it goes over equal ones");
+    let jaw = axcenity_core::face::face_control("Jaw_Open").unwrap();
+    assert_eq!(state.overrides.iter().collect::<Vec<_>>(), [(&jaw, &0.4)]);
+    use axcenity_core::face::{FaceBlend, FaceLayer};
+    let expression = state.layer(FaceLayer::Expression);
+    assert_eq!(
+        (expression.weight, expression.blend),
+        (0.5, FaceBlend::Additive)
+    );
+    let mask = expression.mask.unwrap();
+    let smile = axcenity_core::face::face_control("Mouth_Smile_Left").unwrap();
+    assert!(mask.contains(&smile) && !mask.contains(&jaw), "{mask:?}");
+    assert_eq!(
+        state.layer(FaceLayer::Procedural).mask,
+        Some(vec![
+            axcenity_core::face::face_control("Blink_Left").unwrap()
+        ])
+    );
+    assert!(
+        !state.layers.contains_key(&FaceLayer::Override),
+        "back to defaults"
+    );
+}
+
+#[test]
 fn animators_take_play_requests_and_report_their_state() {
     let mut world = World::new();
     let animator = world.create(ClassName::Animator).unwrap();

@@ -224,3 +224,11 @@ UserGameSettings.RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
 
 Ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, the rays are traced in software instead: slower (Low suits it), with leaves' holes guessed. Only a GPU without compute shaders keeps the bakes (or real-time GI, as set).
 
+#### RayTracedReflections
+
+```luau
+UserGameSettings.RayTracedReflections: EnumRayTracedReflections
+```
+
+Hardware ray traced reflections on glossy surfaces: Off, Low (surfaces smoother than 0.15 roughness, traced at half size), Medium (smoother than 0.3) or High (smoother than 0.5). Off at every preset. On, a smooth part mirrors what's around it, even off the screen, fading into the reflection probes as it gets rougher; see-through parts, water and terrain keep the probes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only the reflection probes are used.
+

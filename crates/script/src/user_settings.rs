@@ -16,8 +16,8 @@
 use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
     GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, RayTracedAmbientOcclusion,
-    RayTracedGlobalIllumination, RayTracedShadows, ReflectionQuality, ShadowQuality,
-    TextureQuality,
+    RayTracedGlobalIllumination, RayTracedReflections, RayTracedShadows, ReflectionQuality,
+    ShadowQuality, TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -97,6 +97,12 @@ pub(crate) fn ray_traced_ambient_occlusion_names() -> Vec<&'static str> {
 pub(crate) fn ray_traced_global_illumination_names() -> Vec<&'static str> {
     RayTracedGlobalIllumination::ALL
         .map(RayTracedGlobalIllumination::label)
+        .to_vec()
+}
+
+pub(crate) fn ray_traced_reflections_names() -> Vec<&'static str> {
+    RayTracedReflections::ALL
+        .map(RayTracedReflections::label)
         .to_vec()
 }
 
@@ -526,6 +532,23 @@ impl UserData for LuaUserGameSettings {
                 Ok(())
             },
         );
+
+        fields.add_field_method_get("RayTracedReflections", |lua, _| {
+            let name = settings(lua).ray_traced_reflections().label();
+            Ok(item(EnumType::RayTracedReflections, name))
+        });
+        fields.add_field_method_set("RayTracedReflections", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "RayTracedReflections",
+                EnumType::RayTracedReflections,
+                &RayTracedReflections::ALL,
+                RayTracedReflections::label,
+                value,
+            )?;
+            change(lua, |settings, _| settings.ray_traced_reflections = chosen);
+            Ok(())
+        });
 
         // Hardware ray tracing opens the GPU with ray queries, so a change
         // is saved now and takes effect at the game's next start (RL2).

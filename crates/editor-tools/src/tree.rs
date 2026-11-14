@@ -111,6 +111,8 @@ pub enum Insertable {
     BuildingGenerator,
     /// Inverse kinematics during the game for the selected skinned MeshPart.
     IKControl,
+    /// The face of the selected MeshPart: its facial controls.
+    FaceControls,
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
     /// makes its bodies and joints.
     Ragdoll,
@@ -277,11 +279,12 @@ impl Insertable {
     /// Animators (skeletal) and Animations (property clips).
     /// Ragdolls go in a skinned MeshPart too.
     /// A Sequence plays a cutscene, from the Workspace.
-    pub const ANIMATION: [Insertable; 5] = [
+    pub const ANIMATION: [Insertable; 6] = [
         Insertable::Animator,
         Insertable::Animation,
         Insertable::Ragdoll,
         Insertable::IKControl,
+        Insertable::FaceControls,
         Insertable::Sequence,
     ];
     /// Fractures, which shatter the part they're inside.
@@ -425,6 +428,7 @@ impl Insertable {
             Insertable::Animator => "Animator",
             Insertable::Ragdoll => "Ragdoll",
             Insertable::IKControl => "IK Control",
+            Insertable::FaceControls => "Face Controls",
             Insertable::Fracture => "Fracture",
             Insertable::Animation => "Animation",
             Insertable::Sequence => "Sequence",
@@ -511,6 +515,7 @@ impl Insertable {
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
             Insertable::IKControl => ClassName::IKControl,
+            Insertable::FaceControls => ClassName::FaceControls,
             Insertable::Fracture => ClassName::Fracture,
             Insertable::Animation => ClassName::Animation,
             Insertable::Sequence => ClassName::Sequence,
@@ -1139,6 +1144,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::Animator
                         | Insertable::Ragdoll
                         | Insertable::IKControl
+                        | Insertable::FaceControls
                         | Insertable::Fracture
                         | Insertable::Animation
                         | Insertable::ThirdPersonController

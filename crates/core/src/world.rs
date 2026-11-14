@@ -338,6 +338,8 @@ pub struct World {
     property_animations: FxHashMap<InstanceId, PropertyAnimationState>,
     /// Each AnimationTrack's live playback, made by `LoadAnimation`.
     animation_tracks: FxHashMap<InstanceId, AnimationTrackState>,
+    /// Each FaceControls' live state (see [`crate::face::FaceState`]).
+    faces: FxHashMap<InstanceId, crate::face::FaceState>,
     /// Each Terrain's heightfield and paint. Every Terrain has one, made
     /// with it. Shared with copies of the world until one changes it.
     terrains: FxHashMap<InstanceId, Arc<TerrainData>>,
@@ -517,6 +519,7 @@ impl World {
             animators: FxHashMap::default(),
             property_animations: FxHashMap::default(),
             animation_tracks: FxHashMap::default(),
+            faces: FxHashMap::default(),
             terrains: FxHashMap::default(),
             strings: Arc::default(),
             language: String::new(),
@@ -642,6 +645,20 @@ impl World {
             return None;
         }
         Some(self.animators.entry(id).or_default())
+    }
+
+    /// The live state of the FaceControls `id`, if it has any yet.
+    pub fn face(&self, id: InstanceId) -> Option<&crate::face::FaceState> {
+        self.faces.get(&id)
+    }
+
+    /// The live state of the FaceControls `id`, made (empty) the first
+    /// time. `None` if `id` isn't a FaceControls.
+    pub fn face_mut(&mut self, id: InstanceId) -> Option<&mut crate::face::FaceState> {
+        if self.get(id)?.class != ClassName::FaceControls {
+            return None;
+        }
+        Some(self.faces.entry(id).or_default())
     }
 
     /// The live playback of the property Animation `id`, if any yet.
@@ -1450,12 +1467,14 @@ impl World {
             self.animators.remove(&descendant);
             self.property_animations.remove(&descendant);
             self.animation_tracks.remove(&descendant);
+            self.faces.remove(&descendant);
             self.terrains.remove(&descendant);
         }
         self.instances.remove(id.0);
         self.animators.remove(&id);
         self.property_animations.remove(&id);
         self.animation_tracks.remove(&id);
+        self.faces.remove(&id);
         self.terrains.remove(&id);
         Ok(())
     }

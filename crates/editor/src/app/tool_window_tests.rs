@@ -29,7 +29,7 @@ type Window = (&'static str, fn(&mut EditorApp), fn(&EditorApp) -> bool);
 
 #[test]
 fn every_tool_window_opens_and_escape_closes_it() {
-    let windows: [Window; 9] = [
+    let windows: [Window; 10] = [
         (
             "Settings",
             |app| app.settings.open = true,
@@ -66,6 +66,11 @@ fn every_tool_window_opens_and_escape_closes_it() {
             |app| app.references.is_some(),
         ),
         ("Learn", |app| app.learn_open = true, |app| app.learn_open),
+        (
+            "Animator Inspector",
+            |app| app.animator_inspector.open = true,
+            |app| app.animator_inspector.open,
+        ),
         (
             "New Tab",
             |app| app.ribbon_tabs.edit(None),

@@ -68,6 +68,10 @@ pub struct Entry {
     /// (`plugin:AddAssetAction`), as of its last call.
     pub importers: Vec<axcenity_plugins::Importer>,
     pub asset_actions: Vec<axcenity_plugins::AssetAction>,
+    /// Its commands (`plugin:CreateAction`) and Explorer items
+    /// (`plugin:AddExplorerAction`), as of its last call (API 3).
+    pub actions: Vec<axcenity_plugins::Action>,
+    pub explorer_actions: Vec<axcenity_plugins::ExplorerAction>,
 }
 
 /// How many of a plugin's errors the panel keeps.
@@ -128,9 +132,41 @@ pub struct Plugins {
     new_plugin: Option<NewPlugin>,
     /// A status line under the toolbar (scaffold / import / export).
     pub notice: Option<String>,
+    /// What an import just made, while plugins hear of it
+    /// (`plugin.ModelImported`): their changes to it aren't recorded on
+    /// their own, as they're part of the import's undo step.
+    pub importing: std::collections::HashSet<InstanceId>,
 }
 
 impl Plugins {
+    /// The running plugins' commands, each with its plugin's place in the
+    /// list.
+    pub fn actions(&self) -> Vec<(usize, axcenity_plugins::Action)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.running.is_some())
+            .flat_map(|(index, entry)| entry.actions.iter().map(move |a| (index, a.clone())))
+            .collect()
+    }
+
+    /// The running plugins' Explorer items, each with its plugin's place in
+    /// the list and name.
+    pub fn explorer_actions(&self) -> Vec<(usize, String, axcenity_plugins::ExplorerAction)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.running.is_some())
+            .flat_map(|(index, entry)| {
+                let name = entry.found.name();
+                entry
+                    .explorer_actions
+                    .iter()
+                    .map(move |a| (index, name.clone(), a.clone()))
+            })
+            .collect()
+    }
+
     /// The running plugins' Assets panel items, each with its plugin's
     /// place in the list.
     pub fn asset_actions(&self) -> Vec<(usize, axcenity_plugins::AssetAction)> {
