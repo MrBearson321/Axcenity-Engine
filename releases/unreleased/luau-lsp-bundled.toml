@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "scripting"
+title = "Script tabs type-check out of the box: the editor ships the Luau language server"
+details = "Every package now includes luau-lsp 1.70.1 in a tools folder beside the editor, so type errors and lints are underlined in script tabs as you type without installing anything. An editor built from source offers to download the same version (checked against its pinned SHA-256) from a bar above a script tab or Settings > External tools. AXCENITY_LUAU_LSP still names another one."
+features = ["scripting.scripts"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

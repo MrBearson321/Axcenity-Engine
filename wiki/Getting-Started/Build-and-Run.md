@@ -17,7 +17,7 @@ The commands, tools and settings for working on the engine. The detailed referen
 
 - Rust **1.97.0** (pinned in `rust-toolchain.toml`; rustup picks it up), a C/C++ compiler (Luau, ufbx and meshoptimizer build from source with `cc`), and on Linux `libudev-dev` (gamepads) and ALSA headers (audio).
 - `cargo install cargo-nextest --locked` and `cargo install cargo-hakari --locked`.
-- Optional: Tracy (profiler), `luau-lsp` and `selene` (script tooling), Python 3 (package checks).
+- Optional: Tracy (profiler), `selene` (script tooling), Python 3 (package checks). `luau-lsp` comes with packages; a source build's editor downloads the pinned version when a script tab or Settings > External tools asks (`packaging/luau-lsp.toml`).
 
 ## Everyday commands
 

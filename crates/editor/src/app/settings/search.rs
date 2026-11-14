@@ -153,6 +153,18 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
             "The Blender program Edit in Blender opens models in.",
         ),
         setting(
+            Tools,
+            "Luau language server",
+            &[
+                "luau-lsp",
+                "Type checking",
+                "Script errors",
+                "Download language server",
+                "Diagnostics",
+            ],
+            "Underlines type errors and lints in script tabs. Packages include it.",
+        ),
+        setting(
             Viewport,
             "Show every light's cone",
             &["Light cones", "Spotlight"],
