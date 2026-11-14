@@ -24,7 +24,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 - Overlapping see-through items can blend in the wrong order (sorted by center).
 - AMD/Vulkan/Windows: the sky clear isn't sRGB-encoded through an sRGB view (`docs/rendering/pipeline.md`).
 - Lights are tiled in 2D, not clustered; rect lights use a representative point.
-- No vertex colors or `KHR_materials_emissive_strength` from glTF; FBX uses the first UV set; glTF animation isn't read.
+- No vertex colors or `KHR_materials_emissive_strength` from glTF; FBX uses the first UV set; glTF animations are read as bone takes, but their morph target weight channels aren't.
 - Humanoid retargeting finds roles by bone names only: a skeleton with unusual names can't be mapped by hand yet; fingers aren't retargeted (`docs/rendering/animation.md`).
 
 ## Physics
