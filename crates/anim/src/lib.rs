@@ -51,7 +51,7 @@ pub mod sequence;
 mod threads;
 
 pub use animators::{
-    AnimatorEvent, Animators, FaceStats, LoadedClip, Poses, load_clip, read_retarget_profile,
+    AnimatorEvent, Animators, LoadedClip, Poses, load_clip, read_retarget_profile,
     read_state_machine,
 };
 pub use blend_space::{blend_space_weights, triangulate};
@@ -98,6 +98,10 @@ pub use retarget::{
     is_retarget_profile, rest_arm_angle,
 };
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
+
+// Facial LOD's counters (F7a), kept apart from the list above so pull
+// requests that add to that list don't conflict with this one.
+pub use animators::FaceStats;
 
 #[cfg(test)]
 mod face_tests;
