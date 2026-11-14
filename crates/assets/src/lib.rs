@@ -106,11 +106,11 @@ pub use material::{
 pub use memory::{AssetMemory, CacheUse, model_bytes};
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
-    LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model,
-    ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
-    Primitive, PrimitiveReport, Rig, Take, TextureRole, Track, cached_meshes, cooked_models,
-    embedded_files, is_collision_piece, list_objects, load_model, load_models, load_takes,
-    lod_level, tangents, texture_pack_name, texture_roles,
+    LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MODEL_EXTENSIONS,
+    MapSlot, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed,
+    PosedPrimitive, Primitive, PrimitiveReport, Rig, Take, TextureRole, Track, cached_meshes,
+    cooked_models, embedded_files, is_collision_piece, list_objects, load_model, load_models,
+    load_takes, lod_level, tangents, texture_pack_name, texture_roles,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{
@@ -923,7 +923,7 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
         "MeshId must be a path inside the project folder, such as \"assets/models/chair.glb\"",
     )?;
     let format = ModelFormat::of(&relative)
-        .ok_or("MeshId must name a model file: a .gltf, .glb or .fbx file")?;
+        .ok_or("MeshId must name a model file: a .gltf, .glb, .fbx or .obj file")?;
     let relative_text = relative.to_string_lossy().replace('\\', "/");
     let objects = mesh_id.split_once('#').map_or("", |(_, objects)| objects);
     if let Some(model) = model::cooked_model::read(folder, &relative_text, objects) {
@@ -943,7 +943,12 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     let model = model::load_models_in(&bytes, base, Some(in_project), format, &[pick])
         .map(|mut models| models.remove(0))
         .map_err(|err| with_causes(&err))?;
-    model::cooked_model::write(folder, &relative_text, objects, &bytes, &model);
+    // An OBJ file's materials are in its `.mtl` file, which the cooked
+    // copy's stamp doesn't cover, so one that has a library isn't kept
+    // (such files are small; FBX and glTF keep their materials inside).
+    if format != ModelFormat::Obj || model::obj_library_name(&bytes).is_none() {
+        model::cooked_model::write(folder, &relative_text, objects, &bytes, &model);
+    }
     Ok(model)
 }
 
@@ -1180,7 +1185,7 @@ mod tests {
     fn only_model_files_are_loaded() {
         let assets = Assets::new(std::env::temp_dir());
         assert!(assets.model_blocking("assets/notes.txt").is_none());
-        assert!(assets.take_errors()[0].contains(".gltf, .glb or .fbx"));
+        assert!(assets.take_errors()[0].contains(".gltf, .glb, .fbx or .obj"));
     }
 
     #[test]

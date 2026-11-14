@@ -38,12 +38,22 @@ pub fn save(folder: &Path, settings: &GraphicsSettings) -> std::io::Result<()> {
 /// default (Automatic: High, or Low on a software adapter), which is then
 /// saved so there's a file to change. Saved Automatic settings pick their
 /// quality for this machine again. `folder` is `None` when the player has
-/// no data folder, and nothing is saved.
-pub fn start(folder: Option<&Path>, capabilities: &Capabilities) -> GraphicsSettings {
+/// no data folder, and nothing is saved. With `ray_traced` (the project's
+/// `ray_traced_by_default`), a first start on a GPU opened with ray
+/// queries takes the ray traced look on top; elsewhere it's left out, so
+/// the next start opens the GPU without ray tracing.
+pub fn start(
+    folder: Option<&Path>,
+    capabilities: &Capabilities,
+    ray_traced: bool,
+) -> GraphicsSettings {
     if let Some(settings) = folder.and_then(load) {
         return fit_machine(settings, capabilities);
     }
-    let settings = GraphicsSettings::default_for(capabilities);
+    let mut settings = GraphicsSettings::default_for(capabilities);
+    if ray_traced && capabilities.ray_queries {
+        settings = settings.ray_traced();
+    }
     if let Some(folder) = folder {
         keep(folder, &settings);
     }
@@ -142,7 +152,7 @@ mod tests {
     fn a_first_start_saves_high_or_low_on_a_software_adapter() {
         let folder = temp_folder("first-start");
         let card = Capabilities::default();
-        assert_eq!(start(Some(&folder), &card).quality, Quality::High);
+        assert_eq!(start(Some(&folder), &card, false).quality, Quality::High);
         assert_eq!(load(&folder).unwrap().quality, Quality::High);
 
         // That's Automatic, so on another machine it picks for that one.
@@ -151,17 +161,51 @@ mod tests {
             software: true,
             ..card
         };
-        assert_eq!(start(Some(&folder), &software).quality, Quality::Low);
+        assert_eq!(start(Some(&folder), &software, false).quality, Quality::Low);
         // A picked quality wins over the machine's default.
         save(&folder, &GraphicsSettings::preset(Quality::Ultra)).unwrap();
-        assert_eq!(start(Some(&folder), &software).quality, Quality::Ultra);
+        assert_eq!(
+            start(Some(&folder), &software, false).quality,
+            Quality::Ultra
+        );
         fs::remove_dir_all(&folder).unwrap();
-        assert_eq!(start(Some(&folder), &software).quality, Quality::Low);
+        assert_eq!(start(Some(&folder), &software, false).quality, Quality::Low);
 
         fs::write(folder.join(FILE_NAME), "not json").unwrap();
-        assert_eq!(start(Some(&folder), &card).quality, Quality::High);
-        assert_eq!(start(None, &software).quality, Quality::Low);
+        assert_eq!(start(Some(&folder), &card, false).quality, Quality::High);
+        assert_eq!(start(None, &software, false).quality, Quality::Low);
         fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_ray_traced_first_start_takes_the_look_only_where_the_gpu_ray_traces() {
+        let folder = temp_folder("ray-traced-start");
+        let tracing = Capabilities {
+            ray_queries: true,
+            ray_tracing_offered: true,
+            ..Capabilities::default()
+        };
+        let first = start(Some(&folder), &tracing, true);
+        assert!(first.ray_tracing());
+        assert_eq!(first.ray_traced_shadows(), RayTracedShadows::Medium);
+        assert_eq!(load(&folder), Some(first.clone()), "saved");
+        // After that the saved settings win, whatever the project asks.
+        let picked = first.without_ray_traced_effects();
+        save(&folder, &picked).unwrap();
+        assert_eq!(start(Some(&folder), &tracing, true), picked);
+        fs::remove_dir_all(&folder).unwrap();
+
+        // A GPU that can't: plain defaults, so the next start opens it
+        // without ray tracing.
+        let plain = start(Some(&folder), &Capabilities::default(), true);
+        assert!(!plain.ray_tracing());
+        assert_eq!(
+            plain,
+            GraphicsSettings::default_for(&Capabilities::default())
+        );
+        fs::remove_dir_all(&folder).unwrap();
+        // Without the project's ask, a ray tracing GPU starts plain too.
+        assert!(!start(None, &tracing, false).ray_tracing());
     }
 
     #[test]

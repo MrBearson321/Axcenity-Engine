@@ -32,6 +32,10 @@ fn a_prop_or_model_tile_is_a_foliage_source() {
 fn files_are_sorted_into_kinds_by_extension_and_folder() {
     assert_eq!(kind_of("assets/models/chair.glb"), Some(AssetKind::Model));
     assert_eq!(
+        kind_of("assets/models/scan/statue.obj"),
+        Some(AssetKind::Model)
+    );
+    assert_eq!(
         kind_of("assets/models/robot/robot.FBX"),
         Some(AssetKind::Model)
     );

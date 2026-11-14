@@ -26,7 +26,7 @@ use mlua::{Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
 use crate::events::{LuaSignal, Owner};
 use crate::instance::{LuaInstance, world_mut};
-use crate::players::{pick_spawn, stand_at, top_of};
+use crate::players::{free_spot, pick_spawn, stand_at, top_of};
 use crate::types::type_name;
 use crate::{OutputKind, push_output, save};
 
@@ -345,7 +345,7 @@ fn place_characters(lua: &Lua, world: &mut World, spawn: Option<&str>) {
                 .get(id)
                 .and_then(|instance| instance.property("Position"))
                 .and_then(Value::as_vector3),
-            None => pick_spawn(lua, world, player).map(|spawn| top_of(world, spawn)),
+            None => pick_spawn(lua, world, player).map(|spawn| free_spot(world, spawn, player)),
         };
         if let Some(at) = at {
             stand_at(world, character, at);

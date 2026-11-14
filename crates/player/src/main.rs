@@ -290,15 +290,20 @@ fn main() -> Result<()> {
     // LocalScripts see the saved graphics settings from the start. The
     // GPU's own capabilities replace these guesses once the window opens.
     let unknown_gpu = Capabilities::default();
+    let loaded_graphics = data_folder.as_deref().and_then(graphics::load);
+    // The game's first start may ask for the ray traced look (RL2), unless
+    // `--quality` or `--graphics` holds this run to its own settings.
+    let ray_traced_start = fixed_graphics.is_none()
+        && loaded_graphics.is_none()
+        && project.manifest.ray_traced_by_default;
     let saved_graphics = fixed_graphics.clone().unwrap_or_else(|| {
-        data_folder
-            .as_deref()
-            .and_then(graphics::load)
-            .unwrap_or_else(|| GraphicsSettings::default_for(&unknown_gpu))
+        loaded_graphics.unwrap_or_else(|| GraphicsSettings::default_for(&unknown_gpu))
     });
     scripts.set_graphics(&saved_graphics, &unknown_gpu);
-    // The GPU is opened with hardware ray tracing only if it's turned on.
-    axcenity_render::adapters::want_ray_tracing(saved_graphics.ray_tracing());
+    // The GPU is opened with hardware ray tracing only if it's turned on
+    // (or this first start asks for it; a GPU that can't just opens
+    // without it).
+    axcenity_render::adapters::want_ray_tracing(saved_graphics.ray_tracing() || ray_traced_start);
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::with_ground(axcenity_character::foot_ground);
@@ -376,6 +381,7 @@ fn main() -> Result<()> {
     app.loading_screen = loading;
     app.audio = audio;
     app.data_folder = data_folder;
+    app.ray_traced_start = ray_traced_start;
     app.watcher = watcher;
     app.network = network;
     app.console_allowed = console_allowed;
@@ -720,6 +726,9 @@ struct App {
     /// The player's data for this game (saves and `graphics.json`), if
     /// there's a place for it.
     data_folder: Option<PathBuf>,
+    /// The game's first start, with the project asking for the ray traced
+    /// look where the GPU can (`Manifest::ray_traced_by_default`).
+    ray_traced_start: bool,
     error: Option<anyhow::Error>,
     camera: FlyCamera,
     /// What scripts did to the camera last frame (`ScriptRuntime::step_camera`).
@@ -845,6 +854,7 @@ impl App {
             window: None,
             renderer: None,
             data_folder: None,
+            ray_traced_start: false,
             error: None,
             camera,
             game_camera: GameCamera::default(),

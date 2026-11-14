@@ -93,10 +93,10 @@ local v = Vector3.new(1, 2, 3)
 print(v.Magnitude + n)
 game:GetService(\"Players\").PlayerAdded:Connect(function(player) print(player.Name) end)
 ";
-    checker.check("scripts/a.server.lua", text);
+    let key = checker.check_text("scripts/a.server.lua", text);
     let checked = checker.wait(Duration::from_secs(30)).unwrap();
     assert_eq!(checked.path, "scripts/a.server.lua");
-    assert_eq!(checked.hash, text_hash(text));
+    assert_eq!(checked.key, key);
     let found = checked.result.unwrap();
     let errors: Vec<(usize, &str)> = found
         .iter()
@@ -114,7 +114,7 @@ game:GetService(\"Players\").PlayerAdded:Connect(function(player) print(player.N
     );
 
     // A clean script: the engine's API is all known.
-    checker.check(
+    checker.check_text(
         "scripts/a.server.lua",
         "workspace.Gravity = 50\nprint(math.floor(2.5))\n",
     );
