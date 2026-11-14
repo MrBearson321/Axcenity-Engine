@@ -34,6 +34,10 @@ const TOLERANCE: f64 = 1.15;
 /// The most distance saved up, in seconds of movement, plus [`SLACK`].
 const BURST: f64 = 0.25;
 const SLACK: f64 = 2.0;
+/// Movement smaller than this is the wire's rounding (positions go to
+/// 1/128 stud), not the character's: it costs nothing, so a character
+/// standing still is never moved back, even on its first update.
+const ROUNDING: f64 = 1.0 / 64.0;
 /// The Workspace's default gravity, at which `JumpHeight` is measured.
 const GRAVITY: f64 = 196.2;
 /// A device sends all of its parts this often, in seconds, besides the
@@ -161,7 +165,9 @@ impl CharacterCheck {
         owned: &Owned,
         now: f64,
     ) {
-        let dt = self.last.map_or(0.0, |last| (now - last).max(0.0));
+        // The first update has a full burst to spend, as if the character
+        // had stood still before it.
+        let dt = self.last.map_or(BURST, |last| (now - last).max(0.0));
         self.last = Some(now);
         let character = character_of(world, player);
         let parts: BTreeSet<InstanceId> = character_parts(world, player).into_iter().collect();
@@ -232,7 +238,10 @@ impl CharacterCheck {
             return false;
         };
         let to = state.position();
-        let jump = crate::motion::distance(was, to);
+        // Falling is never a teleport: a character falls faster the longer
+        // it falls (off the edge of a map, as far as it likes), so only
+        // going across or up counts.
+        let jump = horizontal(was, to).hypot(f64::from((to.y - was.y).max(0.0)));
         if jump > TELEPORT_DISTANCE {
             return false;
         }
@@ -260,8 +269,8 @@ impl CharacterCheck {
         self.rise = (self.rise + launch * TOLERANCE * dt).min(jump_height * 1.5 + SLACK);
         // What it stands on carried it this far; the rest is its own.
         let (carried_across, carried_up) = self.carried(world, was);
-        let across = (horizontal(was, to) - carried_across * TOLERANCE).max(0.0);
-        let up = (f64::from((to.y - was.y).max(0.0)) - carried_up * TOLERANCE).max(0.0);
+        let across = (horizontal(was, to) - carried_across * TOLERANCE - ROUNDING).max(0.0);
+        let up = (f64::from((to.y - was.y).max(0.0)) - carried_up * TOLERANCE - ROUNDING).max(0.0);
         if across > self.across || up > self.rise {
             return false;
         }

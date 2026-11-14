@@ -1357,7 +1357,13 @@ impl EditorApp {
         let previous_source = stylesheet
             .then(|| self.tabs.get(&path).map(|tab| tab.text.clone()))
             .flatten();
+        self.tabs.server = self.luau.note();
         egui::CentralPanel::default().show(ui, |ui| self.tabs.show(ui, &path, &self.world));
+        match self.tabs.server_request.take() {
+            Some(crate::scripts::ServerRequest::Download) => self.luau.start_download(),
+            Some(crate::scripts::ServerRequest::Dismiss) => self.luau.offer_dismissed = true,
+            None => {}
+        }
         if let Some(definition) = self.tabs.take_definition() {
             self.go_to_definition(&ctx, definition);
         }

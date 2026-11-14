@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2–MP7 not started.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -95,3 +95,28 @@ One PR per phase against `main`, opened in merge order. Each updates `docs/archi
 | MP7 | **Scale run report.** G13's numbers from Paul's machines, with what they change (MaxPlayers default, budgets). | Paul's machines |
 
 MP6b, MP6c and anything hosted wait for Paul.
+
+## 6. Results
+
+### MP1: 32 bots on one machine (cloud container, 2026-11-14)
+
+`python3 scripts/net-scale.py run examples/hello-spawn --bots 32 --bot-processes 2 --seconds 60`, release build, the server and both bot processes on the same 4-vCPU container (about 2.5× slower than Paul's desktop, [benchmarks.md](../benchmarks.md)):
+
+| | |
+|---|---|
+| Players at once | 32 (all joined; join p50 0.08 s) |
+| Server frames a second at peak | 59 (lowest 5 s report) |
+| Server frame time at peak | p95 7.2 ms; worst single frame 16.5 ms |
+| Server sends | 1.02 MB/s in all, 32 KB/s per player |
+| Each bot sends | 13.4 KB/s |
+| Round trip | p50 20 ms, max 34 ms (loopback; renet's measure rounds to its tick) |
+| Corrections | 0 |
+
+**Found by the bots and fixed in MP1** (each has a test in `net`'s `character_tests`):
+
+1. Characters spawned on one SpawnLocation stood in the same spot, pushed each other apart on their devices, and the server moved them back every frame (or they fell through the floor). Characters now take a free spot on the top (`players::free_spot`).
+2. A character's first update had nothing saved up to spend, so its first step was refused.
+3. A character that walked off the edge of a map fell further each update than the 30-stud teleport limit, and was moved back every frame from then on. Falling no longer counts toward the limit.
+
+Before these, 32 walking bots were moved back about 87,500 times in a minute.
+

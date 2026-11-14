@@ -93,7 +93,8 @@ const REGION_WAIT_SECONDS: f64 = 5.0;
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
-                     [--password text] [--bench frames] [--size WxH] [--quality preset] [--replay file] \
+                     [--password text] [--bench frames] [--size WxH] [--quality preset] [--graphics file.json] \
+                     [--replay file] \
                      [project-folder | game.axgame]  (or --version [--json])\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
@@ -102,6 +103,8 @@ const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | -
                      --bench measures that many frames' steps, prints them and quits\n\
                      --size sets the window's size in pixels, such as 2560x1440\n\
                      --quality draws with that preset (Low, Medium, High, Ultra) for this run only\n\
+                     --graphics draws with the graphics settings in that file (as graphics.json \
+                     holds them, including hardware ray tracing) for this run only\n\
                      --replay watches a .replay of the game (Space pauses, Left/Right jump, \
                      Up/Down speed, Tab follows a player)";
 
@@ -133,6 +136,8 @@ fn main() -> Result<()> {
 
     // `args_os` instead of `args` so folder names that aren't valid Unicode still work.
     let arguments = watch::Arguments::parse(std::env::args_os().skip(1))?;
+    // `--quality` or `--graphics` hold the run to their settings.
+    let fixed_graphics = arguments.fixed_graphics()?;
     let watcher = arguments.watched_folder().map(watch::start);
     // A project folder is a development run; a `.axgame` file (or one
     // bundled next to the player) is a built game.
@@ -285,11 +290,15 @@ fn main() -> Result<()> {
     // LocalScripts see the saved graphics settings from the start. The
     // GPU's own capabilities replace these guesses once the window opens.
     let unknown_gpu = Capabilities::default();
-    let saved_graphics = data_folder.as_deref().and_then(graphics::load);
-    // The game's first start may ask for the ray traced look (RL2).
-    let ray_traced_start = saved_graphics.is_none() && project.manifest.ray_traced_by_default;
-    let saved_graphics =
-        saved_graphics.unwrap_or_else(|| GraphicsSettings::default_for(&unknown_gpu));
+    let loaded_graphics = data_folder.as_deref().and_then(graphics::load);
+    // The game's first start may ask for the ray traced look (RL2), unless
+    // `--quality` or `--graphics` holds this run to its own settings.
+    let ray_traced_start = fixed_graphics.is_none()
+        && loaded_graphics.is_none()
+        && project.manifest.ray_traced_by_default;
+    let saved_graphics = fixed_graphics.clone().unwrap_or_else(|| {
+        loaded_graphics.unwrap_or_else(|| GraphicsSettings::default_for(&unknown_gpu))
+    });
     scripts.set_graphics(&saved_graphics, &unknown_gpu);
     // The GPU is opened with hardware ray tracing only if it's turned on
     // (or this first start asks for it; a GPU that can't just opens
@@ -388,7 +397,7 @@ fn main() -> Result<()> {
         );
     }
     app.window_size = arguments.size;
-    app.quality = arguments.quality;
+    app.fixed_graphics = fixed_graphics;
     app.bench_scene = axcenity_core::bench::scene_name(&project.folder);
     app.launched = launched;
     app.preload = Some(preload);
@@ -804,9 +813,9 @@ struct App {
     bench_counts: Option<String>,
     /// `--size`: the window's size in physical pixels.
     window_size: Option<(u32, u32)>,
-    /// `--quality`: the preset drawn with for this run, whatever
-    /// `graphics.json` or a LocalScript says.
-    quality: Option<axcenity_render::Quality>,
+    /// `--quality` or `--graphics`: the settings drawn with for this run,
+    /// whatever `graphics.json` or a LocalScript says.
+    fixed_graphics: Option<GraphicsSettings>,
     /// When the player started, for `--bench`'s launch times.
     launched: Instant,
     /// The Workspace's assets being read ahead; `None` when nothing was
@@ -892,7 +901,7 @@ impl App {
             bench_scene: String::new(),
             bench_counts: None,
             window_size: None,
-            quality: None,
+            fixed_graphics: None,
             launched: Instant::now(),
             preload: None,
         }

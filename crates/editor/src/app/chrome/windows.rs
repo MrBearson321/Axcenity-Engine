@@ -88,30 +88,95 @@ pub(in crate::app) fn paused_panel(
         .auto_shrink(false)
         .show(ui, |ui| {
             watches_section(ui, watches);
+            let mut coroutine = 0;
             for (index, frame) in pause.frames.iter().enumerate() {
-                let file = frame.path.rsplit('/').next().unwrap_or(&frame.path);
-                let title = match &frame.function {
-                    Some(function) => format!("{function}  ·  {file}:{}", frame.line),
-                    None => format!("{file}:{}", frame.line),
-                };
-                egui::CollapsingHeader::new(title)
-                    .id_salt(("paused frame", index))
-                    .default_open(index == 0)
-                    .icon(widgets::chevron)
-                    .show(ui, |ui| {
-                        if frame.locals.is_empty() && frame.upvalues.is_empty() {
-                            ui.weak("No local variables here yet.");
-                            return;
-                        }
-                        variables(ui, ("paused locals", index), &frame.locals);
-                        if !frame.upvalues.is_empty() {
-                            ui.weak("From outside this function");
-                            variables(ui, ("paused upvalues", index), &frame.upvalues);
-                        }
-                    });
+                if frame.coroutine != coroutine {
+                    coroutine = frame.coroutine;
+                    ui.add_space(4.0);
+                    ui.weak(theme::with_icon(
+                        icons::ARROW_BEND_LEFT_DOWN,
+                        "Resumed from the coroutine below",
+                    ))
+                    .on_hover_text(
+                        "The functions above run in a coroutine that the function below \
+                         resumed with coroutine.resume or a wrapped function.",
+                    );
+                }
+                frame_section(ui, ("paused frame", index), frame, index == 0);
             }
+            coroutines_section(ui, &pause.coroutines);
         });
     resume
+}
+
+/// One script function on a call stack: its name, file and line, and
+/// (open) its locals and the variables it uses from outside.
+fn frame_section(
+    ui: &mut egui::Ui,
+    id: (&'static str, usize),
+    frame: &axcenity_script::PausedFrame,
+    open: bool,
+) {
+    let file = frame.path.rsplit('/').next().unwrap_or(&frame.path);
+    let title = match &frame.function {
+        Some(function) => format!("{function}  ·  {file}:{}", frame.line),
+        None => format!("{file}:{}", frame.line),
+    };
+    egui::CollapsingHeader::new(title)
+        .id_salt(id)
+        .default_open(open)
+        .icon(widgets::chevron)
+        .show(ui, |ui| {
+            if frame.locals.is_empty() && frame.upvalues.is_empty() {
+                ui.weak("No local variables here yet.");
+                return;
+            }
+            variables(ui, (id, "locals"), &frame.locals);
+            if !frame.upvalues.is_empty() {
+                ui.weak("From outside this function");
+                variables(ui, (id, "upvalues"), &frame.upvalues);
+            }
+        });
+}
+
+/// The scripts' other coroutines that wait to be resumed, each with where
+/// it waits and the functions under that.
+fn coroutines_section(ui: &mut egui::Ui, coroutines: &[axcenity_script::CoroutineView]) {
+    if coroutines.is_empty() {
+        return;
+    }
+    ui.add_space(4.0);
+    egui::CollapsingHeader::new(theme::with_icon(
+        icons::TREE_STRUCTURE,
+        &format!("Waiting coroutines ({})", coroutines.len()),
+    ))
+    .id_salt("paused coroutines")
+    .default_open(false)
+    .icon(widgets::chevron)
+    .show(ui, |ui| {
+        for (number, coroutine) in coroutines.iter().enumerate() {
+            let waits = coroutine.frames.first().map(|frame| {
+                let file = frame.path.rsplit('/').next().unwrap_or(&frame.path);
+                format!("{file}:{}", frame.line)
+            });
+            let title = match waits {
+                Some(at) => format!("Coroutine {}  ·  {}  ·  {at}", number + 1, coroutine.status),
+                None => format!("Coroutine {}  ·  {}", number + 1, coroutine.status),
+            };
+            egui::CollapsingHeader::new(title)
+                .id_salt(("paused coroutine", number))
+                .icon(widgets::chevron)
+                .show(ui, |ui| {
+                    if coroutine.frames.is_empty() {
+                        ui.weak("It hasn't started yet.");
+                    }
+                    for (index, frame) in coroutine.frames.iter().enumerate() {
+                        let id = ("coroutine frame", number * 1000 + index);
+                        frame_section(ui, id, frame, index == 0);
+                    }
+                });
+        }
+    });
 }
 
 /// Names and values, one per row. A table's row has a chevron that opens
@@ -535,7 +600,7 @@ impl EditorApp {
 
 #[cfg(test)]
 mod tests {
-    use axcenity_script::{Local, Pause, PausedFrame};
+    use axcenity_script::{CoroutineView, Local, Pause, PausedFrame};
 
     use super::*;
     use crate::watches::Watches;
@@ -556,6 +621,7 @@ mod tests {
                     line: 7,
                     locals: vec![local("angle", "90"), local("door", "Door")],
                     upvalues: vec![local("speed", "4")],
+                    coroutine: 0,
                 },
                 PausedFrame {
                     function: None,
@@ -563,10 +629,22 @@ mod tests {
                     line: 12,
                     locals: vec![local("speed", "4")],
                     upvalues: Vec::new(),
+                    coroutine: 1,
                 },
             ],
             error: error.map(str::to_owned),
             breakpoint: error.is_none(),
+            coroutines: vec![CoroutineView {
+                status: "suspended".to_owned(),
+                frames: vec![PausedFrame {
+                    function: Some("blink".to_owned()),
+                    path: "scripts/lamp.server.lua".to_owned(),
+                    line: 4,
+                    locals: vec![local("on", "true")],
+                    upvalues: Vec::new(),
+                    coroutine: 0,
+                }],
+            }],
         }
     }
 
@@ -607,7 +685,7 @@ mod tests {
         ] {
             crate::snapshot::snapshot(
                 &std::path::PathBuf::from(&folder).join(name),
-                egui::vec2(520.0, 330.0),
+                egui::vec2(520.0, 480.0),
                 vec![Vec::new(); 3],
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {

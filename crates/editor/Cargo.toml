@@ -59,6 +59,7 @@ regex.workspace = true
 rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 zip.workspace = true
 profiling.workspace = true
 axcenity-workspace-hack.workspace = true

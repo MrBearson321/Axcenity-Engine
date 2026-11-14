@@ -1,0 +1,41 @@
+# The Luau language server (luau-lsp, MIT licensed) the editor ships with:
+# its type checking and lints underline errors in script tabs
+# (`crates/editor/src/luau_check.rs`). Every package carries this version in
+# `tools/` beside the editor (`packaging/fetch-luau-lsp.py`, called by
+# release.yml), and a source build downloads the same file into the editor's
+# data folder when asked (`crates/editor/src/luau_lsp.rs`). Both check the
+# SHA-256 below before using it.
+#
+# To move to a newer luau-lsp: change `version` and every asset's `sha256`
+# and `size` (GitHub's release page shows each asset's digest), then run the
+# editor's luau-lsp tests with it (docs/editor/scripts.md, Errors and
+# warnings).
+
+version = "1.70.1"
+url = "https://github.com/JohnnyMorganz/luau-lsp/releases/download/{version}/{file}"
+
+[assets.windows-x86_64]
+file = "luau-lsp-win64.zip"
+size = 5358589
+sha256 = "64225b9738102a30de6ee09fb28e5a3827edc402ecf2a6364af570312468159f"
+
+# One universal binary for Apple silicon and Intel.
+[assets.macos-aarch64]
+file = "luau-lsp-macos.zip"
+size = 7700771
+sha256 = "7d3936e8dec6dc77547abd061d2e950da392562a5f94858b880f23dba50d84cd"
+
+[assets.macos-x86_64]
+file = "luau-lsp-macos.zip"
+size = 7700771
+sha256 = "7d3936e8dec6dc77547abd061d2e950da392562a5f94858b880f23dba50d84cd"
+
+[assets.linux-x86_64]
+file = "luau-lsp-linux-x86_64.zip"
+size = 4475341
+sha256 = "1a2ea1ae4f98f8946cefd970a4b54853e11ab4775e6932faa7f60cf920346567"
+
+[assets.linux-aarch64]
+file = "luau-lsp-linux-arm64.zip"
+size = 4216137
+sha256 = "6062345b95124ca937b8c324b74bc3fddb1d6919ba133c58f8b17945ce1acbc2"

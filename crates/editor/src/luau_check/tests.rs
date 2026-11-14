@@ -79,7 +79,7 @@ fn the_newest_luau_extension_in_vs_code_is_found() {
 /// lines. Without it, there's nothing to check.
 #[test]
 fn luau_lsp_checks_a_script_against_the_engine_api() {
-    let Some(program) = find() else {
+    let Some((program, _)) = find() else {
         eprintln!("skipped: no luau-lsp");
         return;
     };
@@ -93,10 +93,10 @@ local v = Vector3.new(1, 2, 3)
 print(v.Magnitude + n)
 game:GetService(\"Players\").PlayerAdded:Connect(function(player) print(player.Name) end)
 ";
-    checker.check("scripts/a.server.lua", text);
+    let key = checker.check_text("scripts/a.server.lua", text);
     let checked = checker.wait(Duration::from_secs(30)).unwrap();
     assert_eq!(checked.path, "scripts/a.server.lua");
-    assert_eq!(checked.hash, text_hash(text));
+    assert_eq!(checked.key, key);
     let found = checked.result.unwrap();
     let errors: Vec<(usize, &str)> = found
         .iter()
@@ -105,13 +105,58 @@ game:GetService(\"Players\").PlayerAdded:Connect(function(player) print(player.N
         .collect();
     assert_eq!(errors.len(), 2, "{found:#?}");
     assert_eq!(errors[0].0, 3);
-    assert_eq!(errors[1], (4, "Unknown global 'undefinedThing'"));
+    // luau-lsp 1.70 adds "; consider assigning to it first".
+    assert_eq!(errors[1].0, 4);
+    assert!(
+        errors[1].1.starts_with("Unknown global 'undefinedThing'"),
+        "{}",
+        errors[1].1
+    );
 
     // A clean script: the engine's API is all known.
-    checker.check(
+    checker.check_text(
         "scripts/a.server.lua",
         "workspace.Gravity = 50\nprint(math.floor(2.5))\n",
     );
     let checked = checker.wait(Duration::from_secs(30)).unwrap();
     assert_eq!(checked.result.unwrap(), Vec::new());
+}
+
+/// The variable wins; then the shipped server, then a downloaded one
+/// (both the pinned version), before the PATH's and VS Code's.
+#[test]
+fn the_shipped_luau_lsp_is_used_before_the_paths() {
+    let folder = std::env::temp_dir().join(format!("axcenity-lsp-find-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    let name = crate::luau_lsp::program_name();
+    let make = |relative: &str| {
+        let program = folder.join(relative).join(name);
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::write(&program, "").unwrap();
+        program
+    };
+    let on_path = make("bin");
+    let bundled = make("editor/tools");
+    let downloaded = make("data/Tools/luau-lsp-1");
+    let mut places = Places {
+        variable: None,
+        bundled: Some(bundled.clone()),
+        downloaded: Some(downloaded.clone()),
+        path: Some(std::env::join_paths([folder.join("bin")]).unwrap()),
+        vs_code_extensions: None,
+    };
+    assert_eq!(find_in(&places), Some((bundled.clone(), Source::Bundled)));
+    std::fs::remove_file(&bundled).unwrap();
+    assert_eq!(
+        find_in(&places),
+        Some((downloaded.clone(), Source::Downloaded))
+    );
+    std::fs::remove_file(&downloaded).unwrap();
+    assert_eq!(find_in(&places), Some((on_path.clone(), Source::Path)));
+    // A variable naming nothing finds nothing, rather than another one.
+    places.variable = Some(folder.join("missing"));
+    assert_eq!(find_in(&places), None);
+    places.variable = Some(on_path.clone());
+    assert_eq!(find_in(&places), Some((on_path, Source::Variable)));
+    std::fs::remove_dir_all(&folder).unwrap();
 }

@@ -184,15 +184,122 @@ fn a_script_that_spawned_the_paused_one_waits_for_it() {
     assert_eq!(lines(&mut runtime), ["child", "parent"]);
 }
 
+/// The scripts' own coroutines (scripting priority 2): `wrap`ped and
+/// `coroutine.resume`d ones pause at their breakpoints, listing the frames
+/// of the coroutines that resumed them.
+const OWN_COROUTINE: &str = "\
+local step = coroutine.wrap(function()
+  for i = 1, 2 do
+    print('in', i)
+    coroutine.yield()
+  end
+end)
+print('a')
+step()
+print('b')
+step()
+print('c')";
+
 #[test]
-fn a_breakpoint_in_a_scripts_own_coroutine_is_passed_and_reported_once() {
+fn a_breakpoint_in_a_scripts_own_coroutine_pauses_there() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[3]);
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        OWN_COROUTINE,
+    );
+    assert_eq!(lines(&mut runtime), ["a"]);
+    let pause = runtime.pause().expect("paused inside the coroutine");
+    assert_eq!(pause.line, 3);
+    assert_eq!(local(&pause, "i"), "1");
+    assert_eq!(pause.frames[0].coroutine, 0);
+    // The script's main code resumed it, on line 8.
+    let resumer = pause
+        .frames
+        .iter()
+        .find(|frame| frame.coroutine == 1)
+        .expect("the resuming coroutine's frames are listed");
+    assert_eq!((resumer.function.as_deref(), resumer.line), (None, 8));
+    assert!(resumer.locals.iter().any(|local| local.name == "step"));
+
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(lines(&mut runtime), ["in\t1", "b"]);
+    let pause = runtime.pause().expect("paused on the second pass");
+    assert_eq!((pause.line, local(&pause, "i")), (3, "2"));
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(lines(&mut runtime), ["in\t2", "c"]);
+    assert_eq!(runtime.pause(), None);
+}
+
+#[test]
+fn a_pause_inside_nested_coroutines_holds_them_all_and_carries_on_in_order() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[3]);
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local inner = coroutine.create(function(x)\n  local doubled = x * 2\n  print('inner', doubled)\n  return doubled\nend)\nlocal outer = coroutine.create(function()\n  local ok, got = coroutine.resume(inner, 21)\n  print('outer', ok, got)\nend)\ncoroutine.resume(outer)\nprint('main')",
+    );
+    let pause = runtime.pause().expect("paused in the inner coroutine");
+    assert_eq!(pause.line, 3);
+    assert_eq!(local(&pause, "doubled"), "42");
+    let lines_by_coroutine: Vec<(usize, usize)> = pause
+        .frames
+        .iter()
+        .map(|frame| (frame.coroutine, frame.line))
+        .collect();
+    assert_eq!(lines_by_coroutine, [(0, 3), (1, 7), (2, 10)]);
+    // While paused, nothing after the resumes has run.
+    assert!(lines(&mut runtime).is_empty());
+    // A watch reads the frame of a resuming coroutine too.
+    assert_eq!(runtime.evaluate(&mut world, 0, "x"), Ok("21".to_owned()));
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(
+        lines(&mut runtime),
+        ["inner\t42", "outer\ttrue\t42", "main"]
+    );
+    assert_eq!(runtime.pause(), None);
+}
+
+#[test]
+fn a_pause_lists_the_scripts_other_coroutines_and_where_they_wait() {
+    let mut world = World::new();
+    let mut runtime = debugging(&[6]);
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local worker = coroutine.create(function()\n  local job = 'sweep'\n  coroutine.yield()\nend)\ncoroutine.resume(worker)\nprint('main')",
+    );
+    let pause = runtime.pause().expect("paused in the main code");
+    assert_eq!(pause.line, 6);
+    assert_eq!(pause.coroutines.len(), 1, "{:?}", pause.coroutines);
+    let worker = &pause.coroutines[0];
+    assert_eq!(worker.status, "suspended");
+    assert_eq!(worker.frames[0].line, 3);
+    assert!(
+        worker.frames[0]
+            .locals
+            .iter()
+            .any(|local| local.name == "job" && local.value == "\"sweep\""),
+        "{worker:?}"
+    );
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(lines(&mut runtime), ["main"]);
+}
+
+#[test]
+fn a_coroutine_resumed_where_lua_cant_yield_is_passed_and_reported_once() {
     let mut world = World::new();
     let mut runtime = debugging(&[2]);
     start(
         &mut runtime,
         &mut world,
         "scripts/test.server.lua",
-        "local step = coroutine.wrap(function()\n  for i = 1, 2 do print(i) coroutine.yield() end\nend)\nstep()\nstep()",
+        "local co = coroutine.create(function()\n  print('inside')\nend)\nlocal t = { 2, 1 }\ntable.sort(t, function(a, b)\n  if coroutine.status(co) == 'suspended' then coroutine.resume(co) end\n  return a < b\nend)\nprint('done')",
     );
     assert_eq!(runtime.pause(), None);
     let output = lines(&mut runtime);
@@ -202,7 +309,7 @@ fn a_breakpoint_in_a_scripts_own_coroutine_is_passed_and_reported_once() {
             .starts_with("error: scripts/test.server.lua:2: Play can't pause at this breakpoint"),
         "{output:?}"
     );
-    assert_eq!(output[1..], ["1", "2"]);
+    assert_eq!(output[1..], ["inside", "done"]);
 }
 
 #[test]
