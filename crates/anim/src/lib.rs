@@ -70,8 +70,9 @@ pub use property_clip::{
     target_path, value_from_numbers,
 };
 pub use retarget::{
-    Digit, HumanBone, HumanoidMap, ROLE_COUNT, RigProblem, RigReport, Segment, Severity, Side,
-    check_pair, check_rig, rest_arm_angle,
+    Digit, HipsTravel, HumanBone, HumanoidMap, RETARGET_EXTENSION, ROLE_COUNT, RetargetProfile,
+    RigProblem, RigReport, RoleSetting, Segment, Severity, Side, check_pair, check_rig,
+    is_retarget_profile, rest_arm_angle,
 };
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
 

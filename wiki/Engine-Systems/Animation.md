@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [anim, assets, render]
-source: [crates/anim/src/lib.rs, crates/anim/src/retarget.rs, crates/anim/src/retarget/roles.rs, crates/anim/src/retarget/check.rs, crates/assets/src/rig_definition.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
+source: [crates/anim/src/lib.rs, crates/anim/src/retarget.rs, crates/anim/src/retarget/roles.rs, crates/anim/src/retarget/check.rs, crates/anim/src/retarget/profile.rs, crates/assets/src/rig_definition.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
 docs: [docs/rendering/animation.md, docs/scripting/api-animation.md, docs/project/animation-files.md, docs/project/sequences.md, crates/anim/CLAUDE.md]
 verified: 2026-11-14
 verified_commit: f6d5427f
@@ -35,7 +35,7 @@ flowchart LR
 
 - Live state (`AnimatorState`, `AnimationTrackState`, `PropertyAnimationState`) is in the World, not saved properties.
 - Property tracks animate Parts, Model pivots and UI elements; reduced motion (a game UI setting) holds GUI animations.
-- A take for another humanoid skeleton (Mixamo on an Unreal mannequin, Blender, Biped …) is **retargeted** (G16, `retarget.rs`): bones are matched to 52 humanoid roles (22 body, 30 finger; AP1) by a fitting **rig definition** (`assets/rigs/*.rig.json`, reusable bone maps found by fit, `Assets::rig_definitions`) or by name, the body's facing and up are measured in both rest poses, and each mapped bone's world turn from its rest is carried over; the hips' travel is scaled by leg length. Name binding still wins whenever any humanoid bone binds by name. `check_rig`/`check_pair` report missing or misplaced roles, swapped sides, rest pose (T/A) and finger coverage before binding.
+- A take for another humanoid skeleton (Mixamo on an Unreal mannequin, Blender, Biped …) is **retargeted** (G16, `retarget.rs`): bones are matched to 52 humanoid roles (22 body, 30 finger; AP1) by a fitting **rig definition** (`assets/rigs/*.rig.json`, reusable bone maps found by fit, `Assets::rig_definitions`) or by name, the body's facing and up are measured in both rest poses, and each mapped bone's world turn from its rest is carried over; the hips' travel is scaled by leg length. Name binding still wins whenever any humanoid bone binds by name. `check_rig`/`check_pair` report missing or misplaced roles, swapped sides, rest pose (T/A) and finger coverage before binding. A clip's link can name a **retarget profile** (`*.retarget.json`, AP2): match rest poses (T-pose takes on A-pose models, on by default), hips Scaled/Unscaled/InPlace, plant feet and match hands with two-bone IK, finger strength, per-role weight and offset.
 - `Posed::primitive` skins on the CPU only on request (tests, tools, the Model Studio's pose test), per LOD level.
 
 ## Dependencies
@@ -55,7 +55,7 @@ flowchart LR
 - Format 1 clip files still read (converted).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
-- Retargeting has rig definitions and fingers (AP1) but no profiles yet: rest poses must match (T vs A pose plays as motion) and nothing corrects feet sliding when leg shapes differ (foot IK helps). Plan: `docs/research/animation-production.md` (AP2-AP7).
+- Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Plan: `docs/research/animation-production.md` (AP3-AP7).
 
 ## Development guidance
 

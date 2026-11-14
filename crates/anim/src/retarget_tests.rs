@@ -219,7 +219,7 @@ fn a_take_plays_on_a_skeleton_with_other_names_axes_and_proportions() {
     // Z up: the target's world is the source's turned -90° about X.
     let world_turn = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
     let rig = unreal(world_turn);
-    let retarget = Retarget::new(&take, &rig, &RigDefinitions::default()).unwrap();
+    let retarget = Retarget::new(&take, &rig, &RigDefinitions::default(), None).unwrap();
     assert_eq!(retarget.targets().collect::<Vec<_>>(), [0, 8]);
 
     let mut source_pose = source.rest_pose();
@@ -470,7 +470,7 @@ fn a_take_retargets_onto_a_skeleton_only_its_rig_definition_maps() {
         definitions: vec![("assets/rigs/odd.rig.json".into(), definition)],
         problems: Vec::new(),
     };
-    let clip = Clip::bind_with(file, Some(takes), Some(&rig), &rigs).unwrap();
+    let clip = Clip::bind_with(file, Some(takes), Some(&rig), &rigs, None).unwrap();
     let mut pose = rig.rest_pose();
     clip.sample(1.0, &rig, &mut pose);
     assert_ne!(pose[8], rig.bones[8].rest, "the forearm turned");
@@ -532,7 +532,7 @@ fn fingers_retarget_like_any_other_bone() {
         }],
         skeleton: Arc::new(source),
     };
-    let retarget = Retarget::new(&take, &target, &RigDefinitions::default()).unwrap();
+    let retarget = Retarget::new(&take, &target, &RigDefinitions::default(), None).unwrap();
     let mut pose = target.rest_pose();
     retarget.sample(&take, 0.0, &target, &mut pose);
     assert!(pose[22].rotation.abs_diff_eq(curl, 1e-5), "{:?}", pose[22]);
@@ -646,4 +646,284 @@ fn comparing_skeletons_finds_different_rest_poses_and_proportions() {
         "{messages:?}"
     );
     assert!(check_pair(&mixamo(), &mixamo(), &rigs).is_empty());
+}
+
+/// [`BODY`] named Unreal's way, resting in an A-pose (arms 45° down from
+/// the shoulders), `size` times as big.
+fn unreal_a_pose(size: f32) -> Rig {
+    let names: Vec<String> = UNREAL.iter().map(|name| (*name).to_owned()).collect();
+    let down = |side: f32| Quat::from_rotation_z(-side * std::f32::consts::FRAC_PI_4);
+    let world: Vec<(Vec3, Quat)> = BODY
+        .iter()
+        .enumerate()
+        .map(|(index, &(_, _, at))| {
+            let at = Vec3::from_array(at);
+            let (shoulder, side) = match index {
+                7..=9 => (Vec3::from_array(BODY[7].2), 1.0),
+                11..=13 => (Vec3::from_array(BODY[11].2), -1.0),
+                _ => return (at * size, Quat::IDENTITY),
+            };
+            (
+                (shoulder + down(side) * (at - shoulder)) * size,
+                Quat::IDENTITY,
+            )
+        })
+        .collect();
+    Rig {
+        bones: skeleton(&names, &world),
+        joints: Vec::new(),
+        fit: Mat4::IDENTITY,
+    }
+}
+
+/// A take on [`mixamo`] that keys every bone where it rests, and moves the
+/// hips by `hips` over its second.
+fn hold(hips: Vec3) -> Take {
+    let skeleton = Arc::new(mixamo());
+    let tracks = skeleton
+        .iter()
+        .enumerate()
+        .map(|(index, bone)| Track {
+            bone: bone.name.clone(),
+            rotation: Keys {
+                times: vec![0.0],
+                values: vec![bone.rest.rotation],
+            },
+            translation: Keys {
+                times: vec![0.0, 1.0],
+                values: if index == 0 {
+                    vec![bone.rest.translation, bone.rest.translation + hips]
+                } else {
+                    vec![bone.rest.translation; 2]
+                },
+            },
+            ..Track::default()
+        })
+        .collect();
+    Take {
+        name: "Hold".into(),
+        duration: 1.0,
+        frame_rate: 30.0,
+        tracks,
+        skeleton,
+    }
+}
+
+fn arm_direction(rig: &Rig, pose: &Pose) -> Vec3 {
+    // Unreal order: upperarm_l 7, lowerarm_l 8.
+    (world_position(rig, pose, 8) - world_position(rig, pose, 7)).normalize()
+}
+
+#[test]
+fn matching_rest_poses_plays_a_t_pose_take_right_on_an_a_pose_model() {
+    let take = hold(Vec3::ZERO);
+    let rig = unreal_a_pose(1.0);
+    let rigs = RigDefinitions::default();
+    // Matched (the default): the take's own pose is a T-pose, so the arms
+    // come up level.
+    let retarget = Retarget::new(&take, &rig, &rigs, None).unwrap();
+    let mut pose = rig.rest_pose();
+    retarget.sample(&take, 0.5, &rig, &mut pose);
+    let level = arm_direction(&rig, &pose);
+    assert!(level.abs_diff_eq(Vec3::X, 1e-4), "{level}");
+    // The hand follows its forearm instead of keeping the A-pose's bend.
+    let hand = (world_position(&rig, &pose, 9) - world_position(&rig, &pose, 8)).normalize();
+    assert!(hand.abs_diff_eq(Vec3::X, 1e-4), "{hand}");
+    // Not matched: the difference plays as motion, so the arms stay down.
+    let unmatched = RetargetProfile {
+        match_rest_pose: false,
+        ..RetargetProfile::default()
+    };
+    let retarget = Retarget::new(&take, &rig, &rigs, Some(&unmatched)).unwrap();
+    let mut pose = rig.rest_pose();
+    retarget.sample(&take, 0.5, &rig, &mut pose);
+    let down = arm_direction(&rig, &pose);
+    assert!(down.y < -0.6, "{down}");
+}
+
+#[test]
+fn a_profile_sets_how_the_hips_travel_and_each_roles_weight_and_offset() {
+    let take = hold(Vec3::new(0.0, -0.1, 0.5));
+    let rig = unreal(Quat::IDENTITY);
+    let rigs = RigDefinitions::default();
+    let hips_at = |profile: &RetargetProfile| {
+        let retarget = Retarget::new(&take, &rig, &rigs, Some(profile)).unwrap();
+        let mut pose = rig.rest_pose();
+        retarget.sample(&take, 1.0, &rig, &mut pose);
+        world_position(&rig, &pose, 0)
+    };
+    let rest = Vec3::new(0.0, 1.2, 0.0);
+    let scaled = hips_at(&RetargetProfile::default());
+    assert!(
+        scaled.abs_diff_eq(rest + Vec3::new(0.0, -0.12, 0.6), 1e-4),
+        "{scaled}"
+    );
+    let unscaled = hips_at(&RetargetProfile {
+        hips: HipsTravel::Unscaled,
+        ..RetargetProfile::default()
+    });
+    assert!(
+        unscaled.abs_diff_eq(rest + Vec3::new(0.0, -0.1, 0.5), 1e-4),
+        "{unscaled}"
+    );
+    // In place: the hips still bob, but don't travel.
+    let in_place = hips_at(&RetargetProfile {
+        hips: HipsTravel::InPlace,
+        ..RetargetProfile::default()
+    });
+    assert!(
+        in_place.abs_diff_eq(rest + Vec3::new(0.0, -0.12, 0.0), 1e-4),
+        "{in_place}"
+    );
+
+    // A role with no weight is left to other layers; an offset turns the
+    // bone about its own axes.
+    let walk = walk();
+    let mut profile = RetargetProfile::default();
+    profile.set_role(
+        HumanBone::LeftLowerArm,
+        RoleSetting {
+            weight: 0.0,
+            ..RoleSetting::default()
+        },
+    );
+    let retarget = Retarget::new(&walk, &rig, &rigs, Some(&profile)).unwrap();
+    assert_eq!(retarget.targets().collect::<Vec<_>>(), [0]);
+    let mut pose = rig.rest_pose();
+    retarget.sample(&walk, 1.0, &rig, &mut pose);
+    assert_eq!(pose[8], rig.bones[8].rest);
+
+    let mut turned = RetargetProfile::default();
+    turned.set_role(
+        HumanBone::LeftLowerArm,
+        RoleSetting {
+            offset: [0.0, 0.0, 90.0],
+            ..RoleSetting::default()
+        },
+    );
+    let plain = Retarget::new(&walk, &rig, &rigs, None).unwrap();
+    let offset = Retarget::new(&walk, &rig, &rigs, Some(&turned)).unwrap();
+    let (mut a, mut b) = (rig.rest_pose(), rig.rest_pose());
+    plain.sample(&walk, 1.0, &rig, &mut a);
+    offset.sample(&walk, 1.0, &rig, &mut b);
+    let extra = a[8].rotation.inverse() * b[8].rotation;
+    assert!(
+        extra.abs_diff_eq(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), 1e-4),
+        "{extra:?}"
+    );
+}
+
+#[test]
+fn planted_feet_stay_put_when_the_legs_are_another_shape() {
+    // The take crouches: its hips drop 0.2 and its feet stay on the ground.
+    let crouch = {
+        let mut take = hold(Vec3::new(0.0, -0.2, 0.0));
+        // Bend the knees so the feet stay where they were: the thigh turns
+        // forward and the shin back, by IK on the take's own skeleton.
+        let source = Rig {
+            bones: take.skeleton.to_vec(),
+            joints: Vec::new(),
+            fit: Mat4::IDENTITY,
+        };
+        let mut pose = source.rest_pose();
+        pose[0].translation.y -= 0.2;
+        for (foot, chain) in [(16, [15, 14]), (20, [19, 18])] {
+            let at = world_position(&source, &source.rest_pose(), foot);
+            // Bend toward +Z so the knees go forward.
+            let pole = at + Vec3::new(0.0, 0.5, 1.0);
+            crate::ik::reach_toward(&source, &mut pose, &chain, foot, at, Some(pole));
+        }
+        for track in &mut take.tracks {
+            let bone = source.bone(&track.bone).unwrap();
+            track.rotation.values = vec![pose[bone].rotation];
+        }
+        take
+    };
+    // Longer shins, shorter thighs: the same leg length, another shape.
+    let mut rig = unreal(Quat::IDENTITY);
+    for knee in [15, 19] {
+        rig.bones[knee].rest.translation *= 0.7;
+    }
+    for foot in [16, 20] {
+        rig.bones[foot].rest.translation *= 1.3;
+    }
+    let rigs = RigDefinitions::default();
+    let rest = rig.rest_pose();
+    let foot_drift = |profile: &RetargetProfile| {
+        let retarget = Retarget::new(&crouch, &rig, &rigs, Some(profile)).unwrap();
+        let mut pose = rig.rest_pose();
+        retarget.sample(&crouch, 1.0, &rig, &mut pose);
+        (world_position(&rig, &pose, 16) - world_position(&rig, &rest, 16)).length()
+    };
+    let loose = foot_drift(&RetargetProfile::default());
+    let planted = foot_drift(&RetargetProfile {
+        plant_feet: true,
+        ..RetargetProfile::default()
+    });
+    assert!(loose > 0.02, "without IK the foot moves: {loose}");
+    assert!(planted < 1e-3, "planted: {planted}");
+}
+
+#[test]
+fn a_clip_with_a_profile_retargets_even_onto_a_skeleton_named_like_its_own() {
+    let take = walk();
+    let rig = Rig {
+        bones: take.skeleton.to_vec(),
+        joints: Vec::new(),
+        fit: Mat4::IDENTITY,
+    };
+    let mut file = ClipFile::linked("assets/anims/walk.fbx", "Walk", 0.0, 1.0);
+    file.looping = false;
+    file.link.as_mut().unwrap().retarget = Some("assets/rigs/InPlace.retarget.json".into());
+    let profile = RetargetProfile {
+        hips: HipsTravel::InPlace,
+        ..RetargetProfile::default()
+    };
+    let rigs = RigDefinitions::default();
+    let takes = Some(Arc::new(vec![take]));
+    let clip = Clip::bind_with(file, takes, Some(&rig), &rigs, Some(&profile)).unwrap();
+    let mut pose = rig.rest_pose();
+    clip.sample(1.0, &rig, &mut pose);
+    // By name the hips would be 0.5 forward; in place they aren't.
+    let hips = world_position(&rig, &pose, 0);
+    assert!(hips.abs_diff_eq(Vec3::new(0.0, 1.0, 0.0), 1e-4), "{hips}");
+}
+
+#[test]
+fn load_clip_reads_the_links_retarget_profile_or_says_why_it_cant() {
+    let project =
+        std::env::temp_dir().join(format!("axcenity-retarget-profile-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(project.join("assets/rigs")).unwrap();
+    std::fs::create_dir_all(project.join("assets/animations")).unwrap();
+    let mut file = ClipFile::linked("assets/models/x.fbx", "Walk", 0.0, 1.0);
+    file.link.as_mut().unwrap().retarget = Some("assets/rigs/Hero.retarget.json".into());
+    std::fs::write(
+        project.join("assets/animations/Walk.anim.json"),
+        file.to_json(),
+    )
+    .unwrap();
+    let assets = axcenity_assets::Assets::new(&project);
+    let error = crate::load_clip(&assets, "assets/animations/Walk.anim.json").unwrap_err();
+    assert!(
+        error.contains("`assets/rigs/Hero.retarget.json` can't be read"),
+        "{error}"
+    );
+    let profile = RetargetProfile {
+        plant_feet: true,
+        ..RetargetProfile::default()
+    };
+    std::fs::write(
+        project.join("assets/rigs/Hero.retarget.json"),
+        profile.to_json(),
+    )
+    .unwrap();
+    let loaded = crate::load_clip(&assets, "assets/animations/Walk.anim.json").unwrap();
+    assert_eq!(loaded.profile.as_deref(), Some(&profile));
+    // The link keeps its profile through saving.
+    assert_eq!(
+        ClipFile::from_json(&loaded.file.to_json()).unwrap(),
+        loaded.file
+    );
+    let _ = std::fs::remove_dir_all(&project);
 }
