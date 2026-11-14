@@ -74,3 +74,13 @@ RaycastParams.new(fields: {[string]: any}?): RaycastParams
 
 Params that find every part scripts can query. `fields` sets some at once: `RaycastParams.new({FilterDescendantsInstances = {character}})`.
 
+```lua
+local params = RaycastParams.new()
+params.FilterDescendantsInstances = { workspace.Hero }
+params.FilterType = Enum.RaycastFilterType.Exclude
+local result = workspace:Raycast(workspace.Hero.Head.Position, Vector3.new(0, -50, 0), params)
+if result then
+	print("Standing on", result.Instance.Name)
+end
+```
+

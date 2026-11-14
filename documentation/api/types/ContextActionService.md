@@ -16,6 +16,16 @@ ContextActionService:BindAction(name: string, handler: (string, EnumUserInputSta
 
 Calls `handler(actionName, inputState, inputObject)` for `inputs` (`Enum.KeyCode` or `Enum.UserInputType` items), at the default priority (2000). Binding a name again replaces it. `createTouchButton` is kept, but no touch button is drawn yet.
 
+```lua
+local ContextActionService = game:GetService("ContextActionService")
+local function reload(actionName, inputState)
+	if inputState == Enum.UserInputState.Begin then
+		print("Reloading")
+	end
+end
+ContextActionService:BindAction("Reload", reload, true, Enum.KeyCode.R)
+```
+
 #### BindActionAtPriority
 
 ```luau

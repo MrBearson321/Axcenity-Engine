@@ -173,7 +173,7 @@ fn connections_that_never_say_who_they_are_are_dropped_and_players_get_in_after(
 }
 
 #[test]
-fn junk_and_spam_dont_keep_players_out_or_slow_the_server() {
+fn junk_is_refused_and_spammers_are_kicked_while_players_play_on() {
     let folder = scratch("spam");
     let game = example("hello-spawn");
     let stats = folder.join("server.jsonl");
@@ -205,7 +205,34 @@ fn junk_and_spam_dont_keep_players_out_or_slow_the_server() {
         5,
     );
 
-    // Two connections that join, then send all the junk they can.
+    // Remote messages with tables nested 200,000 deep, which overflowed
+    // the server's stack before MP3: unreadable, flagged, kicked.
+    let deep = folder.join("deep.jsonl");
+    let running = bots(
+        &game,
+        server.port,
+        &deep,
+        &["--flood", "deep", "--count", "1", "--seconds", "10"],
+    );
+    let (_, summary) = finish(running, &deep);
+    assert_eq!(summary["joined"], 1, "{summary}");
+    assert_eq!(
+        summary["ended"]["The server closed the connection."], 1,
+        "{summary}"
+    );
+    server.wait_for("Kicked Spam1", 5);
+
+    // Two players walking about, then two connections that join and
+    // send all the junk they can (MP3): the server drops what's over each
+    // budget, flags them and kicks them, and the players don't notice.
+    let report = folder.join("bots.jsonl");
+    let running = bots(
+        &game,
+        server.port,
+        &report,
+        &["--count", "2", "--seconds", "10", "--user-id", "9300"],
+    );
+    std::thread::sleep(Duration::from_secs(3));
     let spam = folder.join("spam.jsonl");
     let spamming = bots(
         &game,
@@ -213,37 +240,36 @@ fn junk_and_spam_dont_keep_players_out_or_slow_the_server() {
         &spam,
         &["--flood", "spam", "--count", "2", "--seconds", "12"],
     );
-    std::thread::sleep(Duration::from_secs(2));
-    let report = folder.join("bots.jsonl");
-    let running = bots(
-        &game,
-        server.port,
-        &report,
-        &["--count", "2", "--seconds", "6", "--user-id", "9300"],
+    let said = server.wait_for_all(&["Kicked Spam1", "Kicked Spam2"], 15);
+    assert!(
+        said.iter()
+            .any(|line| line.contains("was flagged: their device")),
+        "{said:?}"
+    );
+    let (_, spammed) = finish(spamming, &spam);
+    assert_eq!(spammed["joined"], 2, "{spammed}");
+    assert_eq!(
+        spammed["ended"]["The server closed the connection."], 2,
+        "{spammed}"
+    );
+    // Kicked within a few seconds of joining.
+    assert!(
+        spammed["ended_after_max_s"].as_f64().unwrap() < 8.0,
+        "{spammed}"
     );
     let (ok, summary) = finish(running, &report);
     assert!(ok, "{summary}");
-    assert_eq!(summary["joined"], 2, "{summary}");
     assert_eq!(summary["connected"], 2, "{summary}");
-    // Not yet: no corrections and no loss. The junk fills the server's
-    // socket between frames, so about a fifth of the players' packets are
-    // lost (and the odd correction follows) until MP3's budgets drop a
-    // connection that sends this much.
-    assert!(summary["join_max_s"].as_f64().unwrap() < 2.0, "{summary}");
-    let (_, spammed) = finish(spamming, &spam);
-    assert_eq!(spammed["joined"], 2, "{spammed}");
-    // The server took the junk in and kept its frame rate.
+    // In the second or three before the spammers are kicked, their junk
+    // fills the server's socket between frames and the players lose some
+    // packets (renet's loss figure, a slow average, shows it for a while
+    // after), so the odd correction can follow.
+    assert!(summary["corrections"].as_u64().unwrap() <= 3, "{summary}");
     let lines = json_lines(&stats);
-    let busiest = lines
-        .iter()
-        .max_by(|a, b| {
-            let received = |l: &serde_json::Value| l["received_bytes_per_s"].as_f64().unwrap();
-            received(a).total_cmp(&received(b))
-        })
-        .unwrap();
     assert!(
-        busiest["received_bytes_per_s"].as_f64().unwrap() > 500_000.0,
-        "{busiest}"
+        lines.last().unwrap()["flags"].as_u64().unwrap() >= 2,
+        "{:?}",
+        lines.last()
     );
     for line in &lines[1..] {
         assert!(line["fps"].as_f64().unwrap() > 50.0, "{line}");
