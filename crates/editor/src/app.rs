@@ -169,7 +169,7 @@ use eframe::egui_wgpu::RenderState;
 use egui_dock::DockState;
 
 /// The hover text of Import…, in the File menu and the ribbon.
-const IMPORT_HOVER: &str = "Import models (.gltf, .glb or .fbx), images, sounds and prefabs. A \
+const IMPORT_HOVER: &str = "Import models (.gltf, .glb, .fbx or .obj), images, sounds and prefabs. A \
     model opens the Import dialog and is inserted at the camera's focus point; images and \
     sounds are copied into the project's assets and reported in the Console. You can also \
     drop files onto the editor.";
@@ -505,6 +505,9 @@ pub struct EditorApp {
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
     view_cube: bool,
+    /// Whether the viewport shows the ray tracing badge (Viewport > Ray
+    /// Tracing Badge). On unless turned off; saved between runs.
+    ray_badge: bool,
     /// Settings > AI connections: MCP clients working in this window
     /// (`mcp/live.rs`).
     ai: mcp::AiConnections,
@@ -810,10 +813,14 @@ const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
 const VIEW_CUBE_KEY: &str = "view cube";
+const RAY_BADGE_KEY: &str = "ray tracing badge";
 const AI_CONNECTIONS_KEY: &str = "ai connections";
 const GRID_KEY: &str = "grid";
 const MOVE_GUIDE_KEY: &str = "movement guide";
 /// What the Movement Guide toggle does, for its menu item and Settings row.
+/// What Viewport > Ray Tracing Badge and its setting say on hover.
+const RAY_BADGE_HINT: &str = "The badge in the viewport's corner that says which ray traced \
+    effects are drawing and how many items rays see. Off hides it, even when a restart is due.";
 const MOVE_GUIDE_HINT: &str = "While a part is moved, resized or turned: the line along the \
     change, the snap points near it and how far it has gone. Off, moving, snapping and the \
     handles work the same; only the guide isn't drawn.";
@@ -1095,6 +1102,7 @@ impl EditorApp {
             template_draft: None,
             light_cones: false,
             view_cube: true,
+            ray_badge: true,
             ai: Default::default(),
             move_guide: true,
             grid: true,
@@ -1169,6 +1177,7 @@ impl EditorApp {
                 self.blender_path = text;
             }
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
+            self.ray_badge = storage.get_string(RAY_BADGE_KEY).as_deref() != Some("off");
             self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(team_panel::TEAM_CREATE_KEY) {
                 self.team_panel.read_text(&text);
@@ -1313,6 +1322,8 @@ impl eframe::App for EditorApp {
         storage.set_string(BLENDER_KEY, self.blender_path.clone());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
+        let badge = if self.ray_badge { "on" } else { "off" };
+        storage.set_string(RAY_BADGE_KEY, badge.to_owned());
         let ai = if self.ai.allowed { "on" } else { "off" };
         storage.set_string(AI_CONNECTIONS_KEY, ai.to_owned());
         storage.set_string(team_panel::TEAM_CREATE_KEY, self.team_panel.to_text());

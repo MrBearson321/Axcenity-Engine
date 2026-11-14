@@ -137,6 +137,9 @@ pub(super) const RAY_SWAY_SHADER: &str = concat!(
     include_str!("../sway.wgsl"),
     include_str!("../ray_sway.wgsl")
 );
+/// Moves posed characters' corners for their own BLASes (`ray_skin.wgsl`,
+/// renderer/ray_sway.rs).
+pub(super) const RAY_SKIN_SHADER: &str = include_str!("../ray_skin.wgsl");
 /// Ray traced ambient occlusion's pass (`ray_ao.wgsl`, renderer/ray_ao.rs):
 /// ray queries turned on first, then cut-outs' holes.
 pub(super) const RAY_AO_SHADER: &str = concat!(

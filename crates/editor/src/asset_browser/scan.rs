@@ -1,11 +1,9 @@
 //! Finding the project's asset files and what kind each one is.
 
-use axcenity_assets::{AUDIO_EXTENSIONS, TEXTURE_EXTENSIONS};
+use axcenity_assets::{AUDIO_EXTENSIONS, MODEL_EXTENSIONS, TEXTURE_EXTENSIONS};
 use axcenity_blocks::behavior_tree::BEHAVIOR_TREE_SUFFIX;
 
 use super::*;
-
-const MODEL_EXTENSIONS: [&str; 3] = ["gltf", "glb", "fbx"];
 
 /// What kind of asset the file at `path` (in the project, with `/`
 /// between folders) is, if it's one.

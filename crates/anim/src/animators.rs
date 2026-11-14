@@ -27,7 +27,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Slot, Take};
+use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, RigDefinitions, Slot, Take};
 use axcenity_core::{
     ClassName, InstanceId, LayerWeight, Parameter, PlayRequest, Value, Vector3, World,
 };
@@ -273,7 +273,7 @@ impl Animators {
         let file = path.split('#').next().unwrap_or(path);
         if path.ends_with(CLIP_EXTENSION)
             || path.ends_with(STATE_MACHINE_EXTENSION)
-            || is_model_file(file)
+            || rebinds_everything(file)
         {
             self.changed.insert(file.to_owned());
         }
@@ -297,7 +297,7 @@ impl Animators {
     fn readable_changes(&mut self, assets: &Assets) -> HashSet<String> {
         let mut changed = std::mem::take(&mut self.changed);
         changed.retain(|path| {
-            if !is_model_file(path) && !self.plays(path) {
+            if !rebinds_everything(path) && !self.plays(path) {
                 return false;
             }
             let problem = if path.ends_with(CLIP_EXTENSION) {
@@ -469,8 +469,9 @@ impl Animators {
             was_in = running.machine.take().map(RunningMachine::where_it_is);
         }
         if !changed.is_empty() {
-            // A changed model file has new takes for its linked clips.
-            let models = changed.iter().any(|path| is_model_file(path));
+            // A changed model file has new takes for its linked clips; a
+            // changed rig definition can change how any take retargets.
+            let models = changed.iter().any(|path| rebinds_everything(path));
             if models {
                 running.clips.clear();
             } else {
@@ -1122,7 +1123,7 @@ impl Animators {
             return clip.clone();
         }
         let clip = load_clip(assets, path)
-            .and_then(|(file, takes)| Clip::bind(file, takes, rig))
+            .and_then(|loaded| loaded.bind(rig))
             .map(Arc::new);
         let clip = match clip {
             Ok(clip) => Some(clip),
@@ -1446,6 +1447,13 @@ fn is_model_file(path: &str) -> bool {
     ModelFormat::of(std::path::Path::new(path)).is_some()
 }
 
+/// Whether a change to the file at `path` can change how any clip binds:
+/// a model file (its takes and skeleton) or a rig definition (its bone
+/// map, for retargeting).
+fn rebinds_everything(path: &str) -> bool {
+    is_model_file(path) || axcenity_assets::is_rig_definition(path)
+}
+
 /// Reads the state machine file at `path`.
 pub fn read_state_machine(assets: &Assets, path: &str) -> Result<StateMachineFile, String> {
     let bytes = assets.read_file(path)?;
@@ -1453,19 +1461,46 @@ pub fn read_state_machine(assets: &Assets, path: &str) -> Result<StateMachineFil
     StateMachineFile::from_json(&text).map_err(|err| err.0)
 }
 
-/// A clip file and the takes of the model file it's linked to (`None` if it
-/// isn't linked, or that file can't be read).
-pub type LoadedClip = (ClipFile, Option<Arc<Vec<Take>>>);
+/// A clip file read with what binding it needs: the takes of the model
+/// file it's linked to (`None` if it isn't linked, or that file can't be
+/// read) and the project's rig definitions, for retargeting.
+#[derive(Clone, Debug)]
+pub struct LoadedClip {
+    pub file: ClipFile,
+    pub takes: Option<Arc<Vec<Take>>>,
+    pub rigs: Arc<RigDefinitions>,
+}
 
-/// Reads the clip file at `path`, and the takes of the model file it's
-/// linked to.
+impl LoadedClip {
+    /// A clip read from somewhere else (a test, an editor's open document),
+    /// with no rig definitions.
+    pub fn new(file: ClipFile, takes: Option<Arc<Vec<Take>>>) -> Self {
+        Self {
+            file,
+            takes,
+            rigs: Arc::default(),
+        }
+    }
+
+    /// Binds it to `rig` ([`Clip::bind_with`]).
+    pub fn bind(self, rig: Option<&Rig>) -> Result<Clip, String> {
+        Clip::bind_with(self.file, self.takes, rig, &self.rigs)
+    }
+}
+
+/// Reads the clip file at `path`, the takes of the model file it's
+/// linked to, and the project's rig definitions.
 pub fn load_clip(assets: &Assets, path: &str) -> Result<LoadedClip, String> {
     let bytes = assets.read_file(path)?;
     let text = String::from_utf8(bytes).map_err(|_| "it isn't text".to_owned())?;
-    let clip = ClipFile::from_json(&text).map_err(|err| err.0)?;
-    let takes = clip
+    let file = ClipFile::from_json(&text).map_err(|err| err.0)?;
+    let takes = file
         .link
         .as_ref()
         .and_then(|link| assets.takes(&link.source));
-    Ok((clip, takes))
+    Ok(LoadedClip {
+        file,
+        takes,
+        rigs: assets.rig_definitions(),
+    })
 }

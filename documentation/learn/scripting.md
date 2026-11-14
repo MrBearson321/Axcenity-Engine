@@ -24,7 +24,7 @@ While you type, the tab helps:
 
 - **Completion**: typing `.` or `:` lists what can follow, and **Ctrl+Space** lists what fits the word you're typing (keywords, your locals, globals). Up and Down pick, **Enter** or **Tab** puts it in, **Escape** closes the list. It follows types through chains such as `game:GetService("Players").LocalPlayer` and a part found by name in the Workspace, and through your own locals.
 - **Signature hints**: typing `(` or `,` in an engine call shows its parameters, with the current one highlighted.
-- **Errors and warnings**: if **luau-lsp** is installed (on the PATH, or inside VS Code's Luau extension), each script is checked a moment after you stop typing. Errors get a red underline and warnings, such as an unused local, an amber one; hover for the message. A line above the code counts them, and a saved script's errors also show in Output. Without luau-lsp there are no underlines.
+- **Errors and warnings**: each script is type-checked by **luau-lsp**, the Luau language server that comes with the editor, a moment after you stop typing. (An editor built from source asks to download it the first time you open a script.) Errors get a red underline and warnings, such as an unused local, an amber one; hover for the message. A line above the code counts them, and a saved script's errors also show in Output. Without luau-lsp there are no underlines.
 
 To work in VS Code instead, **File > Set Up VS Code Autocomplete** sets the project up for VS Code (or any editor that runs luau-lsp) with the engine's API definitions; the editor picks up changes saved there.
 

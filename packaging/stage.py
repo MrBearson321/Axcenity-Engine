@@ -3,6 +3,9 @@
 The editor looks for the current-OS player beside itself, and other OS players
 under `players/<os>/` beside itself. This layout matches that, on every package.
 
+`tools/` holds the Luau language server the editor's script tabs check with
+(`fetch_luau_lsp.py`, pinned by `luau-lsp.toml`), beside its license.
+
 `install.json` says how the copy was installed, so the editor knows whether it
 can update itself (`crates/release/src/install.rs`). The stage gets its OS's
 main kind; `packaging/linux/build-packages.sh` rewrites it for the AppImage and
@@ -13,9 +16,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
 import stat
 from pathlib import Path
+
+import fetch_luau_lsp
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDES = Path(__file__).resolve().parent / "guides"
@@ -67,6 +73,16 @@ def stage(args: argparse.Namespace) -> None:
             continue
         copy_file(Path(source), out / "players" / os_name / name, executable=os_name != "windows")
 
+    if args.no_luau_lsp:
+        # Only a local check offline leaves it out.
+        print("no luau-lsp: script tabs won't type-check until it's downloaded in the editor")
+    else:
+        # The release builds are x86_64 (macOS's luau-lsp is universal);
+        # a local check on an Arm machine stages its own kind.
+        same_os = {"windows": "Windows", "macos": "Darwin", "linux": "Linux"}[args.os] == platform.system()
+        arch = fetch_luau_lsp.host_arch() if same_os else "x86_64"
+        fetch_luau_lsp.fetch(args.os, out / "tools", arch)
+
     shutil.copy2(ROOT / "LICENSE", out / "LICENSE")
     shutil.copy2(ROOT / "NOTICE", out / "NOTICE")
     guide = GUIDES / f"{args.os}.txt"
@@ -93,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--install-kind",
         choices=INSTALL_KINDS,
         help="what install.json records (default: the OS's main package)",
+    )
+    p.add_argument(
+        "--no-luau-lsp",
+        action="store_true",
+        help="leave out the Luau language server (offline local checks; releases ship it)",
     )
     p.add_argument(
         "--allow-missing-players",
