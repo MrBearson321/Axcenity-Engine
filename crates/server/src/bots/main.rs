@@ -16,9 +16,11 @@
 //! that long and a new one (a new install) join in its place, for leak
 //! checks; `--flood silent|junk|spam|deep` opens misbehaving connections
 //! instead of bots (`flood.rs`). A bot that loses its connection tries to
-//! rejoin for a minute, as a player's device does.
+//! rejoin for a minute, as a player's device does. MP3b: `--cheat
+//! speed|noclip|fly` makes every bot a modified client (`cheat.rs`).
 
 mod bot;
+mod cheat;
 mod flood;
 mod stats;
 
@@ -34,12 +36,13 @@ use anyhow::{Result, bail};
 
 use axcenity_net::GameInfo;
 use bot::{Bot, BotSettings};
+use cheat::Cheat;
 use flood::{Flood, FloodConnection};
 use stats::{BotSample, Summary};
 
 const USAGE: &str = "usage: axcenity-bots <project-folder> --join <address:port> [--count <n>] [--seconds <s>] \
                      [--threads <n>] [--stagger <ms>] [--password <text>] [--no-scripts] [--idle] [--roam <studs>] \
-                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood silent|junk|spam|deep]\n\
+                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood silent|junk|spam|deep] [--cheat speed|noclip|fly]\n\
                      example: cargo run -p axcenity-server --bin axcenity-bots -- examples/hello-character --join 127.0.0.1:47800 --count 16";
 
 /// Each frame is this long.
@@ -65,6 +68,7 @@ struct Arguments {
     /// Each bot leaves after about this long and a new one takes its place.
     churn: Option<f64>,
     flood: Option<Flood>,
+    cheat: Option<Cheat>,
 }
 
 impl Default for Arguments {
@@ -85,6 +89,7 @@ impl Default for Arguments {
             first_user_id: None,
             churn: None,
             flood: None,
+            cheat: None,
         }
     }
 }
@@ -158,6 +163,9 @@ impl Arguments {
                     }
                     parsed.churn = Some(seconds);
                 }
+                "--cheat" => {
+                    parsed.cheat = Some(Cheat::parse(&value("--cheat", "a kind")?)?);
+                }
                 "--flood" => {
                     parsed.flood = Some(Flood::parse(&value("--flood", "a kind")?)?);
                 }
@@ -207,6 +215,7 @@ fn main() -> Result<()> {
         scripts: arguments.scripts,
         idle: arguments.idle,
         roam: arguments.roam,
+        cheat: arguments.cheat,
         first_user_id,
     };
     // A flood's connections only need the game's name and version.
@@ -563,6 +572,9 @@ mod tests {
             err.to_string().contains("silent, junk, spam or deep"),
             "{err}"
         );
+        let parsed = parse(&["castle", "--cheat", "noclip"]).unwrap();
+        assert_eq!(parsed.cheat, Some(Cheat::Noclip));
+        assert!(parse(&["castle", "--cheat", "aimbot"]).is_err());
         let err = parse(&["castle", "--churn", "0.5"]).unwrap_err();
         assert!(err.to_string().contains("at least 1 second"), "{err}");
     }

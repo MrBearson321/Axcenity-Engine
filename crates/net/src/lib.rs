@@ -22,6 +22,7 @@ mod game;
 mod handshake;
 pub mod limits;
 mod motion;
+mod movement;
 mod ownership;
 mod replay;
 mod replicate;
@@ -36,7 +37,9 @@ pub use handshake::{GameInfo, Message, Peer, Refusal, class_defaults};
 pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
 };
-pub use ownership::{CharacterCheck, Owned, OwnedSender, TELEPORT_DISTANCE};
+pub use ownership::{
+    ASSEMBLY_SPEED, CharacterCheck, Owned, OwnedSender, Sender, TELEPORT_DISTANCE,
+};
 pub use replay::{
     BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
     ReplayFrame, Replays, WirePose, eyes_of,
@@ -79,6 +82,8 @@ mod character_tests;
 mod data_layer_tests;
 #[cfg(test)]
 mod lag_tests;
+#[cfg(test)]
+mod movement_tests;
 #[cfg(test)]
 mod multiplayer_tests;
 #[cfg(test)]

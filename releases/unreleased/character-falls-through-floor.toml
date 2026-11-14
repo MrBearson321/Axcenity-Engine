@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "gameplay"
+title = "Characters no longer fall through the floor after brushing a ledge or another player"
+details = "A falling character steered into the side of a ledge lower than a step, or pushed into another player's character, could find no ground under its feet and fall through the floor. It now lands on the ledge (as on a step), or on whatever is below the other character."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

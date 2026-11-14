@@ -19,9 +19,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 
 use crate::motion::{Motion, PartState, exact_motion};
+use crate::movement::{
+    IN_THE_AIR, PART_TOO_FAST, Strikes, THROUGH_WALL, TOO_FAST, highest, supported, through_wall,
+};
 use crate::replicate::{Op, Update};
 
 /// The first byte of an owned-parts packet on the unreliable channel.
@@ -30,7 +34,7 @@ pub const OWNED_TAG: u8 = b'O';
 pub const TELEPORT_DISTANCE: f64 = 30.0;
 /// How much faster than its speed a character may seem to go, for
 /// packets that arrive bunched together.
-const TOLERANCE: f64 = 1.15;
+pub(crate) const TOLERANCE: f64 = 1.15;
 /// The most distance saved up, in seconds of movement, plus [`SLACK`].
 const BURST: f64 = 0.25;
 const SLACK: f64 = 2.0;
@@ -98,7 +102,7 @@ pub fn character_of(world: &World, player: InstanceId) -> Option<InstanceId> {
 
 /// The part a character is checked by: its PrimaryPart, else its
 /// HumanoidRootPart, else its first part.
-fn root_of(world: &World, character: InstanceId) -> Option<InstanceId> {
+pub(crate) fn root_of(world: &World, character: InstanceId) -> Option<InstanceId> {
     world
         .get(character)?
         .property("PrimaryPart")
@@ -133,6 +137,32 @@ fn horizontal(a: Vector3, b: Vector3) -> f64 {
     f64::from((a.x - b.x).hypot(a.z - b.z))
 }
 
+/// How fast an owned part may go across or up, in studs a second: faster
+/// than any car or thrown part a game makes, slower than a teleport.
+pub const ASSEMBLY_SPEED: f64 = 400.0;
+
+/// Whose update [`CharacterCheck::receive`] takes in.
+#[derive(Clone, Copy)]
+pub struct Sender<'a> {
+    pub player: InstanceId,
+    /// The parts the server gives that player.
+    pub assemblies: &'a BTreeSet<InstanceId>,
+    /// Every player's character.
+    pub characters: &'a [InstanceId],
+}
+
+/// What [`CharacterCheck::allows`] checks a move with.
+struct Move<'a> {
+    assets: &'a Assets,
+    character: InstanceId,
+    controller: InstanceId,
+    /// Every player's character: a path through one isn't through a wall.
+    characters: &'a [InstanceId],
+    running: bool,
+    dt: f64,
+    now: f64,
+}
+
 /// The server's check of one player's character.
 #[derive(Default)]
 pub struct CharacterCheck {
@@ -151,20 +181,33 @@ pub struct CharacterCheck {
     seat: Option<Option<u64>>,
     /// Where each part a SplineFollower moves was at the last update.
     carriers: BTreeMap<InstanceId, Vector3>,
+    /// The height and time the character last stood on something, or
+    /// `None` until it next does (or the server moved it).
+    ground: Option<(f64, f64)>,
+    /// When each owned assembly last moved.
+    assembly_at: BTreeMap<InstanceId, f64>,
+    /// Refused moves.
+    strikes: Strikes,
 }
 
 impl CharacterCheck {
-    /// Takes in `owned` from `player`'s device at `now` on the server's
-    /// clock: what it may move goes in `world`. `assemblies` are the parts
-    /// the server gives that player.
+    /// Takes in `owned` from `from`'s device at `now` on the server's
+    /// clock: what it may move goes in `world`. Returns why the player is
+    /// to be flagged, when it keeps making moves that are refused.
     pub fn receive(
         &mut self,
         world: &mut World,
-        player: InstanceId,
-        assemblies: &BTreeSet<InstanceId>,
+        assets: &Assets,
+        from: &Sender,
         owned: &Owned,
         now: f64,
-    ) {
+    ) -> Option<&'static str> {
+        let Sender {
+            player,
+            assemblies,
+            characters,
+        } = *from;
+        let mut refused = None;
         // The first update has a full burst to spend, as if the character
         // had stood still before it.
         let dt = self.last.map_or(BURST, |last| (now - last).max(0.0));
@@ -184,39 +227,57 @@ impl CharacterCheck {
                 self.seat = Some(owned.seat);
                 self.sit(world, controller, owned.seat);
             }
+            let check = Move {
+                assets,
+                character,
+                controller,
+                characters,
+                running: owned.running,
+                dt,
+                now,
+            };
             let ok =
                 match root_of(world, character).and_then(|root| Some((root, states.get(&root)?))) {
-                    Some((root, state)) => {
-                        self.allows(world, controller, root, state, owned.running, dt)
-                    }
+                    Some((root, state)) => self.allows(world, &check, root, state),
                     // Only some parts came: they're checked with the root's next.
-                    None => true,
+                    None => Ok(()),
                 };
-            if ok {
+            if let Err(reason) = ok {
+                refused = Some(reason);
+                self.correct = true;
+            } else {
                 for (&id, state) in &states {
                     if parts.contains(&id) {
                         place(world, id, state);
                         self.applied.insert(id, *state);
                     }
                 }
-            } else {
-                self.correct = true;
             }
         }
         // Owned assemblies: they go where the device says, unless that's a
-        // jump no simulation makes.
+        // jump no simulation makes, or faster than parts go.
         for (&id, state) in &states {
             if parts.contains(&id) || !assemblies.contains(&id) {
                 continue;
             }
-            let Some(now) = PartState::of(world, id) else {
+            let Some(was) = PartState::of(world, id) else {
                 continue;
             };
-            if crate::motion::distance(now.position(), state.position()) <= TELEPORT_DISTANCE * 2.0
-            {
+            let (from, to) = (was.position(), state.position());
+            let jump = crate::motion::distance(from, to);
+            let seconds = self.assembly_at.get(&id).map_or(BURST, |&at| now - at);
+            let across = horizontal(from, to).hypot(f64::from((to.y - from.y).max(0.0)));
+            let reach = ASSEMBLY_SPEED * TOLERANCE * seconds.clamp(0.0, 1.0) + SLACK;
+            if jump <= TELEPORT_DISTANCE * 2.0 && across <= reach {
                 place(world, id, state);
+                self.assembly_at.insert(id, now);
+            } else {
+                refused = Some(PART_TOO_FAST);
             }
         }
+        self.assembly_at.retain(|id, _| assemblies.contains(id));
+        let reason = refused?;
+        self.strikes.strike(now).then_some(reason)
     }
 
     /// Whether the character's root may go to `state`, spending what it
@@ -224,26 +285,39 @@ impl CharacterCheck {
     fn allows(
         &mut self,
         world: &World,
-        controller: InstanceId,
+        check: &Move,
         root: InstanceId,
         state: &PartState,
-        running: bool,
-        dt: f64,
-    ) -> bool {
+    ) -> Result<(), &'static str> {
+        let Move {
+            controller,
+            running,
+            dt,
+            now,
+            ..
+        } = *check;
         let Some(was) = world
             .get(root)
             .and_then(|i| i.property("Position"))
             .and_then(Value::as_vector3)
         else {
-            return false;
+            return Err(TOO_FAST);
         };
+        // The server moved it (or it's new): it stands where it was put.
+        let moved = self
+            .applied
+            .get(&root)
+            .is_some_and(|applied| applied.position() != was);
+        if moved || self.ground.is_none() {
+            self.ground = Some((f64::from(was.y), now));
+        }
         let to = state.position();
         // Falling is never a teleport: a character falls faster the longer
         // it falls (off the edge of a map, as far as it likes), so only
         // going across or up counts.
         let jump = horizontal(was, to).hypot(f64::from((to.y - was.y).max(0.0)));
         if jump > TELEPORT_DISTANCE {
-            return false;
+            return Err(TOO_FAST);
         }
         let movement = world
             .get(controller)
@@ -261,7 +335,7 @@ impl CharacterCheck {
             _ => None,
         };
         let Some(speed) = speed else {
-            return true;
+            return Ok(());
         };
         let jump_height = number(world, controller, "JumpHeight").unwrap_or(7.2);
         let launch = (2.0 * GRAVITY * jump_height).sqrt();
@@ -272,11 +346,34 @@ impl CharacterCheck {
         let across = (horizontal(was, to) - carried_across * TOLERANCE - ROUNDING).max(0.0);
         let up = (f64::from((to.y - was.y).max(0.0)) - carried_up * TOLERANCE - ROUNDING).max(0.0);
         if across > self.across || up > self.rise {
-            return false;
+            return Err(TOO_FAST);
+        }
+        let group = world
+            .get(root)
+            .and_then(|i| i.property("CollisionGroup"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if through_wall(
+            world,
+            check.assets,
+            group,
+            check.characters.to_vec(),
+            was,
+            to,
+        ) {
+            return Err(THROUGH_WALL);
+        }
+        if supported(world, check.assets, check.character, to) {
+            self.ground = Some((f64::from(to.y), now));
+        } else if let Some((height, since)) = self.ground
+            && highest(world, height, jump_height, now - since)
+                .is_some_and(|highest| f64::from(to.y) > highest)
+        {
+            return Err(IN_THE_AIR);
         }
         self.across -= across;
         self.rise -= up;
-        true
+        Ok(())
     }
 
     /// How far across and up the SplineFollower-moved part under `at` (a
@@ -357,6 +454,9 @@ impl CharacterCheck {
         self.applied.retain(|id, _| parts.contains(id));
         if !(self.correct || moved) {
             return None;
+        }
+        if moved {
+            self.ground = None;
         }
         self.correct = false;
         let ops: Vec<Op> = parts

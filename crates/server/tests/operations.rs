@@ -276,3 +276,65 @@ fn junk_is_refused_and_spammers_are_kicked_while_players_play_on() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// MP3b: modified clients that move their characters too fast, through
+/// the floor or into the air are held back, flagged and kicked, each for
+/// what it did, while two honest players walk and jump about untouched.
+#[test]
+fn cheating_clients_are_held_back_and_kicked_while_players_play_on() {
+    let folder = scratch("cheats");
+    let game = example("hello-spawn");
+    let server = server_with(&game, 0, &["--max-players", "8"], &[]);
+    let report = folder.join("bots.jsonl");
+    let running = bots(
+        &game,
+        server.port,
+        &report,
+        &["--count", "2", "--seconds", "25", "--user-id", "9400"],
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    let cheats = [
+        ("speed", "moved its character faster than it can go"),
+        ("noclip", "moved its character through a wall"),
+        ("fly", "kept its character in the air"),
+    ];
+    let cheating: Vec<_> = cheats
+        .iter()
+        .enumerate()
+        .map(|(n, (cheat, _))| {
+            let path = folder.join(format!("{cheat}.jsonl"));
+            let user_id = (9500 + n).to_string();
+            let running = bots(
+                &game,
+                server.port,
+                &path,
+                &[
+                    "--cheat",
+                    cheat,
+                    "--count",
+                    "1",
+                    "--seconds",
+                    "20",
+                    "--user-id",
+                    &user_id,
+                ],
+            );
+            (running, path)
+        })
+        .collect();
+    for ((running, path), (cheat, reason)) in cheating.into_iter().zip(cheats) {
+        let (_, summary) = finish(running, &path);
+        assert_eq!(summary["joined"], 1, "{cheat}: {summary}");
+        let kicked = format!("Your device {reason}.");
+        assert_eq!(summary["ended"][&kicked], 1, "{cheat}: {summary}");
+        assert!(
+            summary["corrections"].as_u64().unwrap() > 0,
+            "{cheat}: {summary}"
+        );
+    }
+    let (ok, summary) = finish(running, &report);
+    assert!(ok, "{summary}");
+    assert_eq!(summary["connected"], 2, "{summary}");
+    assert_eq!(summary["corrections"], 0, "{summary}");
+    let _ = std::fs::remove_dir_all(&folder);
+}

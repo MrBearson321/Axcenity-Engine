@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "gameplay"
+title = "Characters spawned with no SpawnLocation no longer stand inside each other"
+details = "In a game with no SpawnLocation, every character stood at the origin, so two players' characters pushed each other apart and one could fall through the floor. Characters now spread out around the origin as they do on a SpawnLocation."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

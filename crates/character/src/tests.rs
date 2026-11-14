@@ -441,6 +441,60 @@ fn walking_off_a_ledge_falls_to_the_floor_below() {
     assert!((landed.y - 1.0).abs() < 1e-3, "{landed:?}");
 }
 
+/// Found by the server's wall check (multiplayer readiness MP3b): a
+/// character pushed into another player's character on its device fell
+/// through the floor under both, since its landing probes started inside
+/// the other and found no ground.
+#[test]
+fn a_character_falling_inside_another_body_lands_on_the_floor_under_it() {
+    let (mut world, _, body) = standing();
+    // Wider than the character, and taller above its feet than a step.
+    solid(
+        &mut world,
+        PartType::Block,
+        Vector3::new(4.0, 3.0, 4.0),
+        Vector3::new(0.0, 1.5, 0.0),
+    );
+    world
+        .set_property(
+            body,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 2.5, 0.0)),
+        )
+        .unwrap();
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 60);
+    let landed = pos(&world, body);
+    assert!((landed.y - 1.0).abs() < 1e-3, "on the floor: {landed:?}");
+}
+
+/// Found the same way: a character falling past a ledge's side and
+/// steered into it (a face lower than a step isn't a wall) fell on inside
+/// it and through the floor. It climbs onto the ledge, as a step.
+#[test]
+fn a_character_falling_into_a_ledges_side_lands_on_its_top() {
+    let (mut world, _, body) = standing();
+    // 4 studs tall, its near face at z = -2.
+    solid(
+        &mut world,
+        PartType::Block,
+        Vector3::new(8.0, 4.0, 20.0),
+        Vector3::new(0.0, 2.0, -12.0),
+    );
+    world
+        .set_property(
+            body,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 4.6, 0.0)),
+        )
+        .unwrap();
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, forward(), 60);
+    let landed = pos(&world, body);
+    assert!(landed.z < -3.0, "{landed:?}");
+    assert!((landed.y - 5.0).abs() < 1e-3, "on the ledge: {landed:?}");
+}
+
 #[test]
 fn a_step_under_the_limit_is_climbed_and_a_taller_one_stops_the_character() {
     let (mut world, _, body) = standing();

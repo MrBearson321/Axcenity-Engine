@@ -1228,7 +1228,7 @@ fn move_slice(
             }
         }
     }
-    fly(world, assets, body, fall, ahead, dt);
+    fly(world, assets, body, fall, ahead, limits.step, dt);
 }
 
 /// The first solid hit along a ray, passing through sensors (`CanCollide`
@@ -1248,6 +1248,47 @@ fn solid_hit(
         ..QueryParams::default()
     };
     raycast(world, assets, origin, direction, &params)
+}
+
+/// The first solid under a falling body's foot at `origin`. A foot
+/// already inside a part lands on its top when that's no more than `step`
+/// above (it fell past a ledge's side and drifted into it), and otherwise
+/// passes it by (another player's character it was pushed into on this
+/// device). Before, the probe stopped there, found no ground, and the
+/// character fell through the floor (MP3b's bots).
+fn landing_hit(
+    world: &World,
+    assets: &Assets,
+    body: &Body,
+    origin: Vector3,
+    direction: Vector3,
+    step: f32,
+) -> Option<RayHit> {
+    let mut params = QueryParams {
+        filter: body.parts.clone(),
+        collision_group: Some(body.group.clone()),
+        respect_can_collide: true,
+        ..QueryParams::default()
+    };
+    for _ in 0..4 {
+        let hit = raycast(world, assets, origin, direction, &params)?;
+        if hit.distance > 0.0 {
+            return Some(hit);
+        }
+        let only = QueryParams {
+            filter: vec![hit.instance],
+            include: true,
+            ..QueryParams::default()
+        };
+        let above = Vector3::new(origin.x, origin.y + step, origin.z);
+        if let Some(top) = raycast(world, assets, above, Vector3::new(0.0, -step, 0.0), &only)
+            && top.distance > 0.0
+        {
+            return Some(top);
+        }
+        params.filter.push(hit.instance);
+    }
+    None
 }
 
 /// A horizontal ray from the middle of the body at height `y`, reaching the
@@ -1408,6 +1449,7 @@ fn fly(
     body: &mut Body,
     fall: &mut Fall,
     ahead: Option<(f32, f32)>,
+    step: f32,
     dt: f32,
 ) {
     let start = fall.velocity;
@@ -1434,9 +1476,7 @@ fn fly(
         for (x, z) in body.ground_points(ahead) {
             let origin = Vector3::new(x, body.feet_y + SKIN, z);
             let direction = Vector3::new(0.0, dy - SKIN, 0.0);
-            if let Some(hit) = solid_hit(world, assets, body, origin, direction)
-                && hit.distance > 0.0
-            {
+            if let Some(hit) = landing_hit(world, assets, body, origin, direction, step) {
                 let to = hit.position.y - body.feet_y;
                 landing = Some(landing.map_or(to, |landing| landing.max(to)));
             }

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Servers stop players' characters going through walls or flying"
+details = "A dedicated server or host now refuses a joined player's character move that passes through (or ends inside) an anchored solid part or Terrain, or keeps it off the ground longer and higher than a jump allows, and an owned part moved faster than 400 studs a second; the device is moved back. A device that keeps making such moves is flagged and kicked like one over its budgets. axcenity-bots --cheat speed|noclip|fly runs modified clients to check it (multiplayer readiness MP3b)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

@@ -82,14 +82,14 @@ fn arena() -> World {
 }
 
 /// One device, run as the player runs it.
-struct Device {
-    world: World,
-    scripts: ScriptRuntime,
-    network: Network,
+pub(crate) struct Device {
+    pub(crate) world: World,
+    pub(crate) scripts: ScriptRuntime,
+    pub(crate) network: Network,
     characters: Controllers,
     physics: Physics,
     assets: Assets,
-    log: Vec<String>,
+    pub(crate) log: Vec<String>,
 }
 
 impl Device {
@@ -119,12 +119,12 @@ impl Device {
         self.log.extend(self.network.take_log());
     }
 
-    fn character(&self, player: InstanceId) -> Option<InstanceId> {
+    pub(crate) fn character(&self, player: InstanceId) -> Option<InstanceId> {
         self.world.get(player)?.property("Character")?.as_instance()
     }
 
     /// The first part of `player`'s character, where this device has it.
-    fn character_at(&self, player: InstanceId) -> Option<Vector3> {
+    pub(crate) fn character_at(&self, player: InstanceId) -> Option<Vector3> {
         let character = self.character(player)?;
         let root = self
             .world
@@ -135,7 +135,7 @@ impl Device {
     }
 }
 
-fn position(world: &World, id: InstanceId) -> Option<Vector3> {
+pub(crate) fn position(world: &World, id: InstanceId) -> Option<Vector3> {
     world.get(id)?.property("Position")?.as_vector3()
 }
 
@@ -158,7 +158,11 @@ fn game(players: usize, latency: Duration) -> (Device, Vec<Device>) {
 }
 
 /// [`game`] in the world `make` makes, on every device.
-fn game_in(make: fn() -> World, players: usize, latency: Duration) -> (Device, Vec<Device>) {
+pub(crate) fn game_in(
+    make: fn() -> World,
+    players: usize,
+    latency: Duration,
+) -> (Device, Vec<Device>) {
     let mut world = make();
     let mut scripts = ScriptRuntime::new();
     scripts.set_dedicated();
@@ -188,7 +192,12 @@ fn game_in(make: fn() -> World, players: usize, latency: Duration) -> (Device, V
 }
 
 /// `count` frames, with each player's input (none for those left out).
-fn frames(server: &mut Device, players: &mut [Device], count: usize, inputs: &[MoveInput]) {
+pub(crate) fn frames(
+    server: &mut Device,
+    players: &mut [Device],
+    count: usize,
+    inputs: &[MoveInput],
+) {
     for _ in 0..count {
         server.frame(MoveInput::default());
         for (n, player) in players.iter_mut().enumerate() {
@@ -197,7 +206,7 @@ fn frames(server: &mut Device, players: &mut [Device], count: usize, inputs: &[M
     }
 }
 
-fn forward() -> MoveInput {
+pub(crate) fn forward() -> MoveInput {
     MoveInput {
         forward: true,
         ..MoveInput::default()
@@ -532,7 +541,7 @@ fn a_ping_pong_lift_carries_a_joined_players_character_smoothly_without_correcti
 }
 
 /// A floor with one 12-stud SpawnLocation in the middle.
-fn spawn_arena() -> World {
+pub(crate) fn spawn_arena() -> World {
     let mut world = World::new();
     for (class, name, position, size) in [
         (
