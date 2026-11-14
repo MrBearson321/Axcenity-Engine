@@ -601,8 +601,11 @@ impl EditorApp {
             ui.separator();
             self.loading_screen_menu(ui);
             ui.separator();
-            if let Some(project) = &self.project {
-                let mut on = project.developer_console;
+            let switches = self
+                .project
+                .as_ref()
+                .map(|project| (project.developer_console, project.ray_traced_by_default));
+            if let Some((mut on, mut ray_traced)) = switches {
                 if ui
                     .checkbox(&mut on, "Developer Console (F9)")
                     .on_hover_text(
@@ -612,6 +615,17 @@ impl EditorApp {
                     .changed()
                 {
                     self.set_developer_console(on);
+                }
+                if ui
+                    .checkbox(&mut ray_traced, "Ray Traced Look by Default")
+                    .on_hover_text(
+                        "A built game's first start on a GPU that can ray trace turns on \
+                         hardware ray tracing with ray traced shadows and ambient occlusion. \
+                         Players can change it after (UserGameSettings.HardwareRayTracing).",
+                    )
+                    .changed()
+                {
+                    self.set_ray_traced_by_default(ray_traced);
                 }
             }
         });
