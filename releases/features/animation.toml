@@ -47,3 +47,15 @@ docs = "docs/rendering/animation.md"
 version = "unreleased"
 evidence = "reconstructed"
 source = "commit 5a030375 (Animation Layers and Blend Spaces), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "animation.facial"
+name = "Facial animation"
+subsystem = "animation"
+description = "Blend shapes (morph targets) from glTF and FBX, drawn on the GPU, toward faces with expressions, blinking, eye tracking and lip sync."
+status = "experimental"
+docs = "docs/research/facial-animation.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "PR #360"
