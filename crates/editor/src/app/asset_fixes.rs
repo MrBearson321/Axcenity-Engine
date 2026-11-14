@@ -228,7 +228,7 @@ impl EditorApp {
         }
         let extensions: &[&str] = match kind {
             AssetKind::Folder => return dialog.set_title("Locate the folder").pick_folder(),
-            AssetKind::Model => &["gltf", "glb", "fbx"],
+            AssetKind::Model => &axcenity_assets::MODEL_EXTENSIONS,
             AssetKind::Texture => &axcenity_assets::TEXTURE_EXTENSIONS,
             AssetKind::Audio => &axcenity_assets::AUDIO_EXTENSIONS,
             AssetKind::Clip | AssetKind::StateMachine | AssetKind::Material | AssetKind::Prefab => {

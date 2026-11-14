@@ -234,6 +234,7 @@ impl Primitive {
             material: like.material.clone(),
             joints: Vec::new(),
             weights: Vec::new(),
+            morphs: Vec::new(),
             lods: Vec::new(),
             level: like.level,
         }
@@ -273,6 +274,7 @@ impl Primitive {
             material: self.material.clone(),
             joints: pick(&self.joints, &used),
             weights: pick(&self.weights, &used),
+            morphs: super::morph::remapped(&self.morphs, &remap),
             lods: Vec::new(),
             level: self.level,
         }
@@ -310,6 +312,7 @@ impl Primitive {
         );
         join(&mut self.joints, other.joints, before, added, [0; 4]);
         join(&mut self.weights, other.weights, before, added, [0.0; 4]);
+        super::morph::append(&mut self.morphs, other.morphs, before as u32);
         self.positions.extend(other.positions);
         self.indices
             .extend(other.indices.into_iter().map(|index| index + before as u32));
@@ -334,6 +337,7 @@ mod tests {
             material: Default::default(),
             joints: Vec::new(),
             weights: Vec::new(),
+            morphs: Vec::new(),
             lods: Vec::new(),
             level: 0,
         };
@@ -389,6 +393,28 @@ mod tests {
             assert!(copy.positions.iter().all(|p| full.positions.contains(p)));
             assert!(copy.lods.is_empty());
             assert_ne!(copy.key(), full.key());
+        }
+    }
+
+    #[test]
+    fn a_simpler_copy_keeps_the_blend_shapes_of_the_corners_it_keeps() {
+        let mut grid = wavy_grid(40);
+        // A shape raising every corner by its own X, so each move can be
+        // told apart.
+        let corners = grid.positions.len() as u32;
+        grid.morphs = vec![super::super::PrimitiveMorph {
+            target: 0,
+            corners: (0..corners).collect(),
+            positions: grid.positions.iter().map(|p| [0.0, p[0], 0.0]).collect(),
+            normals: vec![[0.0; 3]; corners as usize],
+        }];
+        let [full] = attach(vec![grid], None).try_into().ok().unwrap();
+        for copy in &full.lods {
+            let morph = &copy.morphs[0];
+            assert_eq!(morph.corners.len(), copy.positions.len());
+            for (corner, delta) in morph.corners.iter().zip(&morph.positions) {
+                assert_eq!(delta[1], copy.positions[*corner as usize][0]);
+            }
         }
     }
 

@@ -162,6 +162,8 @@ pub(super) enum Command {
     WaitForScript,
     /// File ▸ Build Game's Developer Console switch (Phase 71).
     DeveloperConsole,
+    /// File ▸ Build Game's Ray Traced Look by Default switch (RL2).
+    RayTracedByDefault,
     OpenStylesheet,
     NewStylesheet,
     CheckAssets,
@@ -549,6 +551,14 @@ impl EditorApp {
                 "Developer Console in Built Games",
                 "File › Build Game",
                 &["Developer Console (F9)"],
+                None,
+                Ok(()),
+            );
+            add(
+                Command::RayTracedByDefault,
+                "Ray Traced Look by Default in Built Games",
+                "File › Build Game",
+                &["Ray Traced Look by Default"],
                 None,
                 Ok(()),
             );
@@ -1197,6 +1207,12 @@ impl EditorApp {
                 if let Some(project) = &self.project {
                     let on = !project.developer_console;
                     self.set_developer_console(on);
+                }
+            }
+            Command::RayTracedByDefault => {
+                if let Some(project) = &self.project {
+                    let on = !project.ray_traced_by_default;
+                    self.set_ray_traced_by_default(on);
                 }
             }
             Command::WaitForScript => {

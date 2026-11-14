@@ -113,8 +113,9 @@ impl EditorApp {
         if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
             return;
         }
-        const MODELS: [&str; 3] = ["gltf", "glb", "fbx"];
-        let mut everything: Vec<&str> = MODELS.to_vec();
+        let mut models: Vec<&str> = axcenity_assets::MODEL_EXTENSIONS.to_vec();
+        models.extend(axcenity_convert::CONVERTED_EXTENSIONS);
+        let mut everything = models.clone();
         everything.extend(axcenity_assets::TEXTURE_EXTENSIONS);
         everything.extend(axcenity_assets::AUDIO_EXTENSIONS);
         everything.extend(axcenity_assets::HDR_SKY_EXTENSIONS);
@@ -136,7 +137,7 @@ impl EditorApp {
                 "Models, images, skies, sounds, prefabs and packages",
                 &everything,
             )
-            .add_filter("3D model", &MODELS)
+            .add_filter("3D model", &models)
             .add_filter("Image", &axcenity_assets::TEXTURE_EXTENSIONS)
             .add_filter("Sky (EXR or HDR)", &axcenity_assets::HDR_SKY_EXTENSIONS)
             .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
@@ -320,15 +321,17 @@ impl EditorApp {
             }
             Err(err) => {
                 let err = chain(&err);
+                let shown = self.converted.get(file).map_or(file, PathBuf::as_path);
                 self.output
-                    .error(format!("Could not import `{}`: {err}", file.display()));
+                    .error(format!("Could not import `{}`: {err}", shown.display()));
                 return;
             }
         };
         let materials = surface::materials_maps(model.primitives.iter().map(|p| &p.material));
         let animation = AnimationImport::new(model.rig.as_deref(), &takes, &model_name);
-        let dialog =
+        let mut dialog =
             ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
+        dialog.source = self.converted.get(file).cloned();
         if dialog.worth_asking() {
             // The model already loaded is what the dialog's preview draws.
             self.importing = Some(dialog.with_preview(model, takes));
@@ -420,6 +423,8 @@ impl EditorApp {
         }
         let before = asset_files(&project.folder);
         let file = &dialog.file;
+        // The file picked, for Output: the one converted, if it was.
+        let shown = dialog.shown_file();
         let chosen = dialog.chosen();
         let path = |i: usize| dialog.objects[i].path.clone();
         let picks: Vec<Pick> = match dialog.placement {
@@ -435,16 +440,17 @@ impl EditorApp {
             Err(err) => {
                 let err = chain(&err);
                 self.output
-                    .error(format!("Could not import `{}`: {err}", file.display()));
+                    .error(format!("Could not import `{}`: {err}", shown.display()));
                 return;
             }
         };
         let (copy, _) = Pick::of_mesh_id(&imported[0].0);
         self.output.info(format!(
             "Imported `{}` into the project as `{copy}`.",
-            file.display()
+            shown.display()
         ));
         let copy_path = copy.to_owned();
+        self.note_converted(dialog, &copy_path);
         self.toolbox_imported(file, &copy_path);
         self.plugins_asset_imported(&copy_path);
         let animation = dialog

@@ -157,9 +157,15 @@ fn seconds_arg(lua: &Lua, function: &str, value: Value) -> mlua::Result<f64> {
 }
 
 /// A new coroutine that will run `callback`.
-fn new_thread(lua: &Lua, function: &str, callback: Value) -> mlua::Result<Thread> {
+fn new_thread(lua: &Lua, function: &'static str, callback: Value) -> mlua::Result<Thread> {
     match callback {
-        Value::Function(callback) => lua.create_thread(callback),
+        Value::Function(callback) => {
+            let thread = lua.create_thread(callback.clone())?;
+            let kind = crate::profile::WorkKind::Task;
+            let what = || function.to_owned();
+            crate::profile::label(lua, &thread, kind, what, Some(&callback), None);
+            Ok(thread)
+        }
         other => Err(mlua::Error::runtime(format!(
             "{function} takes a function, not a {}",
             type_name(lua, &other)

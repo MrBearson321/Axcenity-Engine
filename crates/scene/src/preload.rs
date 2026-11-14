@@ -122,7 +122,7 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
             }
             ClassName::Terrain => {
                 if let Some(data) = world.terrain(id) {
-                    for instance in data.foliage() {
+                    for instance in data.all_foliage() {
                         if let FoliageSource::Model(path) = &instance.source {
                             add(AssetFile::Model(path.clone()));
                         }

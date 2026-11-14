@@ -191,7 +191,7 @@ pub enum AssetKind {
 impl AssetKind {
     pub fn expected(self) -> &'static str {
         match self {
-            Self::Model => "a .gltf, .glb or .fbx file",
+            Self::Model => "a .gltf, .glb, .fbx or .obj file",
             Self::Texture => "a PNG, JPEG, TGA or BMP file",
             Self::Audio => "a WAV, OGG, MP3 or FLAC file",
             Self::Clip => "a .anim.json clip",

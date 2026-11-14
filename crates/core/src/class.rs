@@ -450,10 +450,15 @@ pub enum ClassName {
     /// together, hidden or locked in the editor and turned on and off in a
     /// game.
     DataLayer,
+    /// Inside a Terrain (or a Biome): a rule that places plants, props or
+    /// models over the ground by itself, by height, slope, material layer
+    /// and noise (procedural worlds PW1). What it places is made on every
+    /// device from the rule and the terrain, never saved.
+    ScatterRule,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 135] = [
+    pub const ALL: [ClassName; 136] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -589,6 +594,7 @@ impl ClassName {
         ClassName::ObjectValue,
         ClassName::DataLayerService,
         ClassName::DataLayer,
+        ClassName::ScatterRule,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -728,6 +734,7 @@ impl ClassName {
             ClassName::ObjectValue => "ObjectValue",
             ClassName::DataLayerService => "DataLayerService",
             ClassName::DataLayer => "DataLayer",
+            ClassName::ScatterRule => "ScatterRule",
         }
     }
 
@@ -2481,6 +2488,46 @@ impl ClassName {
                 ("RuleNoise", Value::Number(0.3)),
                 ("NoiseScale", Value::Number(24.0)),
             ],
+            ClassName::ScatterRule => vec![
+                ("Enabled", Value::Bool(true)),
+                // What it places, separated by `;`: model files such as
+                // "assets/models/tree.glb", or built-in plants and props as
+                // "plant:Tree" and "prop:Crate". Each spot picks one.
+                ("Models", Value::String(String::new())),
+                // The same seed, terrain and settings give the same layout.
+                ("Seed", Value::Number(1.0)),
+                // About how far apart two of its spots are, in studs, and
+                // how many it places per 100 square studs (at most one per
+                // Spacing by Spacing square).
+                ("Spacing", Value::Number(8.0)),
+                ("Density", Value::Number(1.0)),
+                // Where it places: heights are studs above the terrain's
+                // bottom and slopes degrees from flat, as on a
+                // TerrainLayer. The fades soften each edge.
+                ("MinHeight", Value::Number(0.0)),
+                ("MaxHeight", Value::Number(10000.0)),
+                ("HeightFade", Value::Number(4.0)),
+                ("MinSlope", Value::Number(0.0)),
+                ("MaxSlope", Value::Number(35.0)),
+                ("SlopeFade", Value::Number(5.0)),
+                // Only on ground this TerrainLayer (by name) covers at least
+                // LayerThreshold of. Empty for any ground.
+                ("Layer", Value::String(String::new())),
+                ("LayerThreshold", Value::Number(0.5)),
+                // 0 to 1: gathers it into clumps ClumpSize studs across.
+                ("Clumping", Value::Number(0.0)),
+                ("ClumpSize", Value::Number(48.0)),
+                // Studs it keeps from what the rules before it placed.
+                ("AvoidRadius", Value::Number(0.0)),
+                // Whether it may stand under the terrain's water.
+                ("Underwater", Value::Bool(false)),
+                // Each is turned round its up a random number of degrees
+                // between these and scaled between these.
+                ("RotationRange", Value::Vector2(Vector2::new(0.0, 360.0))),
+                ("ScaleRange", Value::Vector2(Vector2::new(0.85, 1.15))),
+                // Whether parts and characters bump into what it places.
+                ("CanCollide", Value::Bool(false)),
+            ],
             ClassName::ThirdPersonController => {
                 let mut properties = movement_properties();
                 properties.extend([
@@ -3016,6 +3063,7 @@ impl ClassName {
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer
+            | ClassName::ScatterRule
             | ClassName::Checkpoint
             | ClassName::Spline
             | ClassName::SplinePoint

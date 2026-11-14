@@ -652,6 +652,11 @@ impl EditorApp {
         if asset_browser::kind_of(&name).is_none() && self.import_with_plugin(file) {
             return;
         }
+        // Formats converted to a `.glb` first (USD, ADR-0027).
+        if axcenity_convert::is_converted(file) {
+            self.import_converted(file);
+            return;
+        }
         let result = match asset_browser::kind_of(&name) {
             Some(AssetKind::Model) => {
                 self.import_model(file);

@@ -1,5 +1,6 @@
-//! Reading FBX models (binary or ASCII, any version) with `ufbx`, into the
-//! same triangles and materials as glTF.
+//! Reading FBX models (binary or ASCII, any version) and OBJ models (with
+//! their `.mtl` material library) with `ufbx`, into the same triangles and
+//! materials as glTF.
 //!
 //! `ufbx` converts the file to glTF's space as it loads: Y up, right-handed,
 //! 1 unit = 1 meter (= 1 stud), whatever axes and units the file was saved
@@ -23,7 +24,7 @@ use super::objects::{self, Listed, Siblings};
 use super::{
     AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, InProject, Joint, Keys,
     MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take,
-    Track, cooked_texture, decode_image, file_origin, fit, fit_matrix, missing, new_key,
+    Track, cooked_texture, decode_image, file_origin, fit, fit_matrix, missing, morph, new_key,
     smooth_normals, want,
 };
 
@@ -35,11 +36,12 @@ const DEFAULT_FRAME_RATE: f64 = 30.0;
 /// the model is in.
 pub(super) fn load(
     bytes: &[u8],
+    source: Source<'_>,
     folder: &Path,
     in_project: Option<InProject<'_>>,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
-    let scene = parse(bytes)?;
+    let scene = parse(bytes, source)?;
     let mut reader = Reader {
         animated: animated_nodes(&scene),
         joints: Vec::new(),
@@ -56,12 +58,14 @@ pub(super) fn load(
         warnings: Vec::new(),
         level: 0,
         pieces: super::collision::Pieces::default(),
+        morph_names: morph::MorphNames::default(),
     };
     let mut models = Vec::new();
     for pick in picks {
         // Each model notes its own materials' problems.
         reader.materials.clear();
         reader.joints.clear();
+        reader.morph_names.clear();
         let wanted = pick.paths();
         let mut found = HashSet::new();
         reader.children(&scene.root_node, "", &wanted, &mut found);
@@ -76,6 +80,8 @@ pub(super) fn load(
         if !reader.joints.is_empty() {
             model.rig = Some(Arc::new(rig(&scene, &reader.joints, fit_matrix(&model))));
         }
+        model.morph_targets = std::mem::take(&mut reader.morph_names.targets);
+        reader.morph_names.clear();
         // A texture that can't be used is noted by the first model that has it.
         model.warnings = std::mem::take(&mut reader.warnings);
         models.push(model);
@@ -141,7 +147,7 @@ fn unlinked_textures(scene: &ufbx::Scene) -> Vec<&ufbx::Texture> {
 /// The image files embedded in an FBX file, as file names (made safe, and
 /// unique) and their bytes as they are, for copying out on import.
 pub(super) fn embedded_textures(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
-    let scene = parse(bytes)?;
+    let scene = parse(bytes, Source::Fbx)?;
     Ok(embedded_files(&scene)
         .into_iter()
         .map(|(name, content, _)| (name, content.to_vec()))
@@ -185,8 +191,8 @@ fn embedded_files(scene: &ufbx::Scene) -> Vec<(String, &[u8], Vec<u32>)> {
 
 /// The objects in an FBX file: its visible nodes with meshes, and the
 /// nodes they're in.
-pub(super) fn list(bytes: &[u8]) -> Result<Vec<ModelObject>, ModelError> {
-    let scene = parse(bytes)?;
+pub(super) fn list(bytes: &[u8], source: Source<'_>) -> Result<Vec<ModelObject>, ModelError> {
+    let scene = parse(bytes, source)?;
     fn children(node: &ufbx::Node, path: &str, depth: usize) -> Vec<Listed> {
         let mut siblings = Siblings::default();
         node.children
@@ -246,15 +252,27 @@ fn material_names(node: &ufbx::Node, mesh: &ufbx::Mesh) -> Vec<String> {
     names
 }
 
-/// The texture files an FBX file in `folder` uses that are there, as paths
-/// inside `folder`.
-pub(super) fn files_used(bytes: &[u8], folder: &Path) -> Result<Vec<PathBuf>, ModelError> {
-    let scene = parse(bytes)?;
-    let mut files: Vec<PathBuf> = scene
-        .textures
-        .iter()
-        .filter(|texture| texture.content.is_empty())
-        .filter_map(|texture| texture_path(texture, folder))
+/// The texture files an FBX or OBJ file in `folder` uses that are there,
+/// as paths inside `folder`, and an OBJ file's material library.
+pub(super) fn files_used(
+    bytes: &[u8],
+    source: Source<'_>,
+    folder: &Path,
+) -> Result<Vec<PathBuf>, ModelError> {
+    let scene = parse(bytes, source)?;
+    let library = match source {
+        Source::Obj { library, .. } => library.map(|(path, _)| path.to_path_buf()),
+        Source::Fbx => None,
+    };
+    let mut files: Vec<PathBuf> = library
+        .into_iter()
+        .chain(
+            scene
+                .textures
+                .iter()
+                .filter(|texture| texture.content.is_empty())
+                .filter_map(|texture| texture_path(texture, folder)),
+        )
         .collect();
     files.sort();
     files.dedup();
@@ -263,7 +281,7 @@ pub(super) fn files_used(bytes: &[u8], folder: &Path) -> Result<Vec<PathBuf>, Mo
 
 /// Every take (animation stack) in an FBX file's `bytes`, baked into keys.
 pub(super) fn load_takes(bytes: &[u8]) -> Result<Vec<Take>, ModelError> {
-    let scene = parse(bytes)?;
+    let scene = parse(bytes, Source::Fbx)?;
     Ok(takes(&scene))
 }
 
@@ -520,23 +538,63 @@ fn skin_weights(
     (joints, weights)
 }
 
-fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
+/// What `ufbx` is reading: an FBX file, or an OBJ file with its material
+/// library's bytes, if it names one that's there.
+#[derive(Clone, Copy)]
+pub(super) enum Source<'a> {
+    Fbx,
+    Obj {
+        /// The `.mtl` file named by the OBJ's `mtllib` line: its path inside
+        /// the model's folder and its bytes.
+        library: Option<(&'a Path, &'a [u8])>,
+    },
+}
+
+/// The material library an OBJ file names (`mtllib materials.mtl`), as a
+/// path inside the model's folder, if it names one that's a safe path.
+/// Only the first is used, as `ufbx` reads one.
+pub(super) fn obj_library(bytes: &[u8]) -> Option<PathBuf> {
+    let text = String::from_utf8_lossy(bytes);
+    text.lines().find_map(|line| {
+        let name = line.trim_start().strip_prefix("mtllib")?;
+        // `mtllib` followed by a space or tab, then the file name (which
+        // may itself have spaces in it).
+        if !name.starts_with([' ', '\t']) {
+            return None;
+        }
+        crate::safe_path(&name.trim().replace('\\', "/"))
+    })
+}
+
+fn parse(bytes: &[u8], source: Source<'_>) -> Result<ufbx::SceneRoot, ModelError> {
+    // glTF's space: +X right, +Y up, +Z front, in meters.
+    let gltf_axes = CoordinateAxes {
+        right: CoordinateAxis::PositiveX,
+        up: CoordinateAxis::PositiveY,
+        front: CoordinateAxis::PositiveZ,
+    };
+    let (file_format, library) = match source {
+        Source::Fbx => (ufbx::FileFormat::Fbx, None),
+        Source::Obj { library } => (ufbx::FileFormat::Obj, library.map(|(_, bytes)| bytes)),
+    };
     let opts = ufbx::LoadOpts {
-        // Only the bytes given, and only as FBX (not OBJ).
+        // Only the bytes given (and an OBJ's library, read here), in the
+        // format its extension says.
         load_external_files: false,
-        file_format: ufbx::FileFormat::Fbx,
+        file_format,
+        obj_mtl_data: library.map_or(ufbx::BlobOpt::Unset, ufbx::BlobOpt::Ref),
+        // An OBJ file doesn't say its axes or units: take them as glTF's
+        // (Y up, 1 unit = 1 meter = 1 stud), as Blender and most tools
+        // export it. A Z-up export is turned when it's imported.
+        obj_axes: gltf_axes,
+        obj_unit_meters: 1.0,
         ignore_animation: false,
         generate_missing_normals: true,
         // Blender saves its Principled BSDF's metalness and roughness in
         // its own properties.
         use_blender_pbr_material: true,
         node_depth_limit: MAX_NODE_DEPTH as u32,
-        // glTF's space: +X right, +Y up, +Z front, in meters.
-        target_axes: CoordinateAxes {
-            right: CoordinateAxis::PositiveX,
-            up: CoordinateAxis::PositiveY,
-            front: CoordinateAxis::PositiveZ,
-        },
+        target_axes: gltf_axes,
         target_unit_meters: 1.0,
         ..Default::default()
     };
@@ -546,11 +604,90 @@ fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
         if !info.is_empty() {
             message.push_str(&format!(" ({info})"));
         }
-        ModelError::Fbx(message)
+        match source {
+            Source::Fbx => ModelError::Fbx(message),
+            Source::Obj { .. } => ModelError::Obj(message),
+        }
     })
 }
 
 /// Collects each mesh's triangles in model space.
+/// One blend shape of an FBX mesh, placed as the mesh is.
+struct Shape {
+    name: String,
+    default_weight: f32,
+    /// Each moved file vertex's position and normal change, at weight 1.
+    offsets: HashMap<u32, (Vec3, Vec3)>,
+    has_normals: bool,
+}
+
+/// The blend shapes of `mesh` (its blend deformers' channels), placed by
+/// `transform`. A channel with in-between shapes uses its full one (target
+/// weight 1, or the highest).
+fn blend_shapes(mesh: &ufbx::Mesh, transform: DMat4, normal_matrix: DMat3) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    for deformer in &mesh.blend_deformers {
+        for channel in &deformer.channels {
+            let full = channel.target_shape.as_deref().or_else(|| {
+                channel
+                    .keyframes
+                    .iter()
+                    .max_by(|a, b| a.target_weight.total_cmp(&b.target_weight))
+                    .map(|keyframe| &*keyframe.shape)
+            });
+            let Some(shape) = full else {
+                continue;
+            };
+            // Some exporters write all-zero normal offsets for "not
+            // worked out": those are worked out from the moved triangles.
+            let has_normals = shape.normal_offsets.len() == shape.num_offsets
+                && shape
+                    .normal_offsets
+                    .iter()
+                    .any(|n| n.x != 0.0 || n.y != 0.0 || n.z != 0.0);
+            let mut offsets = HashMap::with_capacity(shape.num_offsets);
+            for at in 0..shape.num_offsets {
+                let (Some(&vertex), Some(position)) = (
+                    shape.offset_vertices.get(at),
+                    shape.position_offsets.get(at),
+                ) else {
+                    continue;
+                };
+                let weight = shape.offset_weights.get(at).copied().unwrap_or(1.0);
+                let position = transform
+                    .transform_vector3(dvec3(*position) * weight)
+                    .as_vec3();
+                let normal = match has_normals {
+                    true => (normal_matrix * (dvec3(shape.normal_offsets[at]) * weight)).as_vec3(),
+                    false => Vec3::ZERO,
+                };
+                offsets.insert(vertex, (position, normal));
+            }
+            let name = if channel.element.name.is_empty() {
+                shape.element.name.to_string()
+            } else {
+                channel.element.name.to_string()
+            };
+            shapes.push(Shape {
+                name: shape_name(&name),
+                default_weight: channel.weight as f32,
+                offsets,
+                has_normals,
+            });
+        }
+    }
+    shapes
+}
+
+/// A blend channel's name without the deformer's prefix some exporters
+/// add (Maya writes `blendShape1.Smile`).
+fn shape_name(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((_, last)) if !last.is_empty() => last.to_owned(),
+        _ => name.to_owned(),
+    }
+}
+
 struct Reader<'a> {
     /// The nodes some take moves (see [`animated_nodes`]).
     animated: HashSet<u32>,
@@ -578,6 +715,8 @@ struct Reader<'a> {
     level: u8,
     /// The collision pieces read (see [`super::collision`]).
     pieces: super::collision::Pieces,
+    /// The blend shapes' names so far (see [`super::morph`]).
+    morph_names: morph::MorphNames,
 }
 
 impl Reader<'_> {
@@ -669,6 +808,9 @@ impl Reader<'_> {
             rigid_joint = Some(index);
         }
 
+        let shapes = blend_shapes(mesh, transform, normal_matrix);
+        let has_shapes = !shapes.is_empty();
+
         for part in &mesh.material_parts {
             if part.num_triangles == 0 {
                 continue;
@@ -691,6 +833,8 @@ impl Reader<'_> {
             let mut indices = Vec::new();
             let mut joints = Vec::new();
             let mut weights = Vec::new();
+            // The file's vertex each corner is, for its blend shapes.
+            let mut file_vertices: Vec<u32> = Vec::new();
             // Corners with the same position, normal and UV become one
             // vertex. The bit patterns compare exactly. Skin weights belong
             // to the file's vertices, so skinned corners of different ones
@@ -722,7 +866,7 @@ impl Reader<'_> {
                     };
                     let vertex_index = mesh.vertex_indices.get(index).copied().unwrap_or(0);
                     let mut key = [0; 9];
-                    if skin.is_some() {
+                    if skin.is_some() || has_shapes {
                         key[8] = vertex_index;
                     }
                     for (slot, value) in key.iter_mut().zip(
@@ -736,6 +880,7 @@ impl Reader<'_> {
                     }
                     let next = positions.len() as u32;
                     let vertex = *vertices.entry(key).or_insert_with(|| {
+                        file_vertices.push(vertex_index);
                         positions.push(position.to_array());
                         normals.push(normal.to_array());
                         if want_uvs {
@@ -762,6 +907,7 @@ impl Reader<'_> {
             if !mesh.vertex_normal.exists {
                 normals = smooth_normals(&positions, &indices);
             }
+            let morphs = self.morphs(&shapes, &file_vertices, (&positions, &normals, &indices));
             // A texture needs coordinates to be placed by.
             if uvs.is_empty() {
                 material.remove_textures();
@@ -776,10 +922,55 @@ impl Reader<'_> {
                 material,
                 joints,
                 weights,
+                morphs,
                 lods: Vec::new(),
                 level: self.level,
             });
         }
+    }
+
+    /// The blend shapes of one part of a mesh, whose corners are the file's
+    /// vertices `file_vertices` (already placed: `positions`, `normals`,
+    /// `indices`). `shapes` are the mesh's, each its name, default weight
+    /// and offsets by file vertex, already placed.
+    fn morphs(
+        &mut self,
+        shapes: &[Shape],
+        file_vertices: &[u32],
+        (positions, normals, indices): (&[[f32; 3]], &[[f32; 3]], &[u32]),
+    ) -> Vec<super::PrimitiveMorph> {
+        let mut morphs = Vec::new();
+        for shape in shapes {
+            let Some(target) = self.morph_names.target(&shape.name, shape.default_weight) else {
+                break;
+            };
+            let deltas: Vec<Vec3> = file_vertices
+                .iter()
+                .map(|vertex| {
+                    shape
+                        .offsets
+                        .get(vertex)
+                        .map_or(Vec3::ZERO, |(position, _)| *position)
+                })
+                .collect();
+            let normal_deltas: Option<Vec<Vec3>> = shape.has_normals.then(|| {
+                file_vertices
+                    .iter()
+                    .map(|vertex| shape.offsets.get(vertex).map_or(Vec3::ZERO, |(_, n)| *n))
+                    .collect()
+            });
+            if let Some(morph) = morph::sparse(
+                target,
+                positions,
+                normals,
+                indices,
+                &deltas,
+                normal_deltas.as_deref(),
+            ) {
+                morphs.push(morph);
+            }
+        }
+        morphs
     }
 
     /// Whether a take moves `node` or a node above it.
@@ -1221,5 +1412,7 @@ fn mat4(m: &ufbx::Matrix) -> DMat4 {
     ])
 }
 
+#[cfg(test)]
+mod obj_tests;
 #[cfg(test)]
 pub(crate) mod tests;

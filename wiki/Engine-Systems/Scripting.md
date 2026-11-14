@@ -40,7 +40,8 @@ flowchart TB
 3. **Events.** Handlers run immediately when an event fires, each in its own coroutine; a coroutine whose handler finished without pausing is reset and reused (M6, `handler_threads.rs`).
 4. **Changes.** World changes are logged and fired by `fire_changes` before and after every entry point that runs scripts, at most 10 rounds per call ([ADR-0005](../Architecture/Architecture-Decisions/ADR-0005-Deferred-Change-Events.md)). Destroyed scripts stop and cloned scripts start there.
 5. **Safety nets.** The watchdog interrupt counts in a `Cell` and checks the clock every 1,000 interrupts; past 3 s it yields the coroutine forever and reports `path:line: this script ran for 3 seconds without pausing`. Errors in one script never stop another.
-6. **Debugger** (editor only): Luau's step hook pauses at breakpoints and steps (Over, Into, Out), and holds the scheduler; a failed coroutine can pause Play too, and watches run in a paused frame (`debugger.rs`, the workspace's only `unsafe`; roadmap G6).
+6. **Debugger** (editor only): Luau's step hook pauses at breakpoints and steps (Over, Into, Out), and holds the scheduler; a failed coroutine can pause Play too, and watches run in a paused frame (`debugger.rs`, the workspace's only `unsafe`; roadmap G6). Scripts' own coroutines pause too: the sandbox's `coroutine.resume`/`wrap` relay a stop down to the scheduler's coroutine and resume it in order, and a pause lists the waiting coroutines.
+7. **Script profiler** (editor only, off until the Profiler's Scripts tab records): each resume timed by the work it runs (handler, script body, task) and the stack sampled from the watchdog's interrupt for per-function time (`profile.rs`; scripting P2 PR 4).
 
 ## Dependencies
 

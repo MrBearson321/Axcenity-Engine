@@ -1202,6 +1202,10 @@ pub struct Capabilities {
     /// (and the device was opened with them), so ray traced effects can
     /// be turned on.
     pub ray_queries: bool,
+    /// Whether the GPU could trace rays in hardware, whether or not the
+    /// device was opened with them: a game can offer Hardware ray tracing
+    /// (taking effect at its next start) only where this is true.
+    pub ray_tracing_offered: bool,
 }
 
 impl Capabilities {
@@ -1225,6 +1229,7 @@ impl Default for Capabilities {
             compute_shaders: true,
             // An optional feature: wgpu's defaults have none.
             ray_queries: false,
+            ray_tracing_offered: false,
         }
     }
 }
@@ -2172,6 +2177,7 @@ mod tests {
                 msaa_samples: 1 | 2 | 4 | 8,
                 compute_shaders: true,
                 ray_queries: true,
+                ray_tracing_offered: true,
             },
             Capabilities {
                 max_texture_size: 1024,
@@ -2186,6 +2192,7 @@ mod tests {
                 msaa_samples: 1,
                 compute_shaders: false,
                 ray_queries: false,
+                ray_tracing_offered: false,
             },
         ];
         let modes = AntiAliasing::ALL.map(Some).into_iter().chain([None]);

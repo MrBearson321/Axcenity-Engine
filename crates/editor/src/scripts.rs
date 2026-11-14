@@ -306,6 +306,11 @@ impl ScriptTabs {
     }
 
     /// Every open tab.
+    pub fn iter(&self) -> impl Iterator<Item = &ScriptTab> {
+        self.tabs.iter()
+    }
+
+    /// Every open tab.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ScriptTab> {
         self.tabs.iter_mut()
     }

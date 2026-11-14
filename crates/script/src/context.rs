@@ -53,6 +53,7 @@ impl Context {
         watchdog::install(&lua).expect("setting a hook only fails when out of memory");
         // Which side this is, for `sides::check`.
         lua.set_app_data(side);
+        crate::profile::set_client(&lua, side == Side::Client);
         // The slot `with_world` lends the World through.
         crate::lent::install(&lua);
         lua.set_app_data(Output::default());
@@ -216,6 +217,18 @@ impl Context {
     }
 
     /// Where this side is paused at a breakpoint, if it is.
+    pub fn set_profiling(&self, on: bool) {
+        crate::profile::set_recording(&self.lua, on);
+    }
+
+    pub fn clear_profile(&self) {
+        crate::profile::clear(&self.lua);
+    }
+
+    pub fn profile(&self) -> crate::profile::ScriptProfile {
+        crate::profile::profile(&self.lua)
+    }
+
     pub fn pause(&self) -> Option<debugger::Pause> {
         debugger::pause(&self.lua)
     }
@@ -254,7 +267,12 @@ impl Context {
         };
         with_world(&self.lua, world, || {
             match self.load_script(ids, path, source) {
-                Ok(thread) => scheduler::resume_as(&self.lua, &thread, (), Some(script)),
+                Ok(thread) => {
+                    let name = || path.rsplit('/').next().unwrap_or(path).to_owned();
+                    let kind = crate::profile::WorkKind::Script;
+                    crate::profile::label(&self.lua, &thread, kind, name, None, Some(path));
+                    scheduler::resume_as(&self.lua, &thread, (), Some(script));
+                }
                 Err(err) => push_error(&self.lua, &err),
             }
         });

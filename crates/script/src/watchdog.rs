@@ -118,7 +118,18 @@ pub fn install(lua: &Lua) -> mlua::Result<()> {
         finishing: None,
         ever_stopped,
     });
+    let sampling = crate::profile::install(lua, false);
     lua.set_interrupt(move |lua| {
+        // The script profiler, while recording (see `profile`).
+        if sampling.on.get() {
+            let count = sampling.count.get() + 1;
+            if count >= crate::profile::SAMPLE_EVERY {
+                sampling.count.set(0);
+                crate::profile::sample(lua);
+            } else {
+                sampling.count.set(count);
+            }
+        }
         if quick.counting_only.get() {
             let interrupts = quick.interrupts.get() + 1;
             if interrupts < CHECK_EVERY {
@@ -293,8 +304,39 @@ fn check(lua: &Lua) -> mlua::Result<VmState> {
 /// the watchdog's error when it's stopped while they run it. Errors come
 /// back as plain strings (`clean`), as with `pcall`, and `wrap` doesn't add
 /// a second location to messages that already have one.
-const COROUTINE_FUNCTIONS: &str = r#"
-local create, resume, status, close, error, clean, ever_stopped = ...
+const COROUTINE_FUNCTIONS: &str = r##"
+local create, resume, status, close, error, clean, ever_stopped, yield, isyieldable, debugging = ...
+local made, enter, leave, relay_failed = debugging.made, debugging.enter, debugging.leave, debugging.relay_failed
+
+-- With the editor's debugger on (`debugger.rs`), a coroutine a script made
+-- can pause at a breakpoint: its yield comes back here, so this yields the
+-- coroutine that resumed it, down to the scheduler, and resumes it again
+-- once that one is resumed.
+local function pack(...)
+    return select("#", ...), { ... }
+end
+
+local function debugged_resume(co, ...)
+    enter(co)
+    local count, results = pack(resume(co, ...))
+    while leave(co) do
+        if isyieldable() then
+            yield()
+        else
+            relay_failed()
+        end
+        enter(co)
+        count, results = pack(resume(co))
+    end
+    return table.unpack(results, 1, count)
+end
+
+local function run(co, ...)
+    if debugging.on then
+        return debugged_resume(co, ...)
+    end
+    return resume(co, ...)
+end
 
 local function finish_resume(co, ok, ...)
     if not ok then
@@ -312,7 +354,7 @@ local function safe_resume(co, ...)
     if message then
         return false, "cannot resume dead coroutine"
     end
-    return finish_resume(co, resume(co, ...))
+    return finish_resume(co, run(co, ...))
 end
 
 local function finish_wrap(co, ok, ...)
@@ -326,13 +368,21 @@ local function finish_wrap(co, ok, ...)
     return ...
 end
 
-local function safe_wrap(f)
+local function safe_create(f)
     local co = create(f)
+    if debugging.on then
+        made[co] = true
+    end
+    return co
+end
+
+local function safe_wrap(f)
+    local co = safe_create(f)
     return function(...)
         if ever_stopped[co] or status(co) == "dead" then
             error("cannot resume dead coroutine", 2)
         end
-        return finish_wrap(co, resume(co, ...))
+        return finish_wrap(co, run(co, ...))
     end
 end
 
@@ -351,8 +401,8 @@ local function safe_close(co)
     return close(co)
 end
 
-return { resume = safe_resume, wrap = safe_wrap, status = safe_status, close = safe_close }
-"#;
+return { create = safe_create, resume = safe_resume, wrap = safe_wrap, status = safe_status, close = safe_close }
+"##;
 
 /// Creates the `coroutine` functions in [`COROUTINE_FUNCTIONS`], as a table
 /// to copy into every script's `coroutine`. `clean` turns engine error
@@ -371,6 +421,9 @@ pub fn coroutine_functions(lua: &Lua, clean: &Function) -> mlua::Result<Table> {
         lua.globals().raw_get::<Function>("error")?,
         clean.clone(),
         ever_stopped,
+        coroutine.raw_get::<Function>("yield")?,
+        coroutine.raw_get::<Function>("isyieldable")?,
+        crate::debugger::coroutine_state(lua)?,
     ))
 }
 

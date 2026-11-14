@@ -311,3 +311,26 @@ fn step_out_pauses_on_the_callers_line_while_it_has_more_to_run() {
     runtime.continue_from_pause(&mut world);
     assert_eq!(printed(&mut runtime), ["4"]);
 }
+
+/// Step Into on a line that resumes a script's own coroutine pauses at the
+/// first line it runs; stepping over its `coroutine.yield` carries on in
+/// the code that resumed it.
+#[test]
+fn step_into_enters_a_scripts_own_coroutine_and_its_yield_steps_back_out() {
+    let (mut runtime, mut world) = paused_in(
+        &[8],
+        "local step = coroutine.wrap(function()\n  local n = 1\n  coroutine.yield()\n  print('second')\nend)\n\nprint('a')\nstep()\nprint('b')",
+    );
+    assert_eq!(runtime.pause().map(|pause| pause.line), Some(8));
+    step(&mut runtime, &mut world, Resume::StepInto);
+    let pause = runtime.pause().expect("paused inside the coroutine");
+    assert_eq!((pause.line, pause.frames[0].coroutine), (2, 0));
+    step(&mut runtime, &mut world, Resume::StepOver);
+    assert_eq!(runtime.pause().map(|pause| pause.line), Some(3));
+    // Over the yield: back in the main code, after the call.
+    step(&mut runtime, &mut world, Resume::StepOver);
+    let pause = runtime.pause().expect("paused back in the main code");
+    assert_eq!((pause.line, pause.frames.len()), (9, 1));
+    runtime.continue_from_pause(&mut world);
+    assert_eq!(runtime.pause(), None);
+}

@@ -1,4 +1,4 @@
-//! Reading glTF and FBX models into plain triangles, materials and
+//! Reading glTF, FBX and OBJ models into plain triangles, materials and
 //! textures. glTF is read here; FBX in [`fbx`].
 //!
 //! A model is fitted into the 1×1×1 cube centered on the origin, like the
@@ -14,6 +14,7 @@ mod lod;
 mod lod_cache;
 mod lod_report;
 mod maps;
+mod morph;
 mod objects;
 mod rig;
 mod stamped;
@@ -24,6 +25,7 @@ pub use collision::is_piece as is_collision_piece;
 pub use lod::level_of as lod_level;
 pub use lod_report::{LevelReport, LodReport, LodWarning, PrimitiveReport};
 pub use maps::{MapSlot, TextureRole, texture_pack_name, texture_roles};
+pub use morph::{MorphTarget, PrimitiveMorph, apply as apply_morphs};
 pub use objects::{ModelObject, Pick};
 pub use rig::{
     Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedPrimitive, Rig, Take, Track,
@@ -72,7 +74,13 @@ pub enum ModelFormat {
     Gltf,
     /// FBX, binary or ASCII: a `.fbx` file.
     Fbx,
+    /// Wavefront OBJ: a `.obj` file, with the `.mtl` material library it
+    /// names next to it.
+    Obj,
 }
+
+/// The extensions of the model files the engine reads, lowercase.
+pub const MODEL_EXTENSIONS: [&str; 4] = ["gltf", "glb", "fbx", "obj"];
 
 impl ModelFormat {
     /// The format of the file at `path`, by its extension (in any case), or
@@ -82,6 +90,7 @@ impl ModelFormat {
         match extension.as_str() {
             "gltf" | "glb" => Some(Self::Gltf),
             "fbx" => Some(Self::Fbx),
+            "obj" => Some(Self::Obj),
             _ => None,
         }
     }
@@ -114,6 +123,10 @@ pub struct Model {
     /// FBX file with a skin or animation, or a glTF file with a skin). See
     /// [`Model::pose`].
     pub rig: Option<Arc<Rig>>,
+    /// Its blend shapes, which [`Primitive::morphs`] name by their place
+    /// here. Shapes of one name in several meshes are one target, so a
+    /// face split into meshes moves as one. Empty when it has none.
+    pub morph_targets: Vec<MorphTarget>,
 }
 
 impl Model {
@@ -159,6 +172,7 @@ impl Model {
                     material,
                     joints: primitive.joints.clone(),
                     weights: primitive.weights.clone(),
+                    morphs: primitive.morphs.clone(),
                     lods: Vec::new(),
                     level: primitive.level,
                 }
@@ -173,6 +187,7 @@ impl Model {
             collision: self.collision.clone(),
             warnings: Vec::new(),
             rig: self.rig.clone(),
+            morph_targets: self.morph_targets.clone(),
         }
     }
 
@@ -225,6 +240,10 @@ pub struct Primitive {
     /// moves). Empty when the model isn't animated.
     pub joints: Vec<[u16; 4]>,
     pub weights: Vec<[f32; 4]>,
+    /// The corners each of the model's blend shapes
+    /// ([`Model::morph_targets`]) moves here, one entry per shape that moves
+    /// any. Empty when none does.
+    pub morphs: Vec<PrimitiveMorph>,
     /// Simpler copies with the same material, each with fewer triangles
     /// than the one before, to draw far away: the file's own `_LOD1` and
     /// `_LOD2` objects, or simplified when the model was loaded (see
@@ -245,6 +264,11 @@ impl Primitive {
             + std::mem::size_of_val(self.indices.as_slice())
             + std::mem::size_of_val(self.joints.as_slice())
             + std::mem::size_of_val(self.weights.as_slice())
+            + self
+                .morphs
+                .iter()
+                .map(PrimitiveMorph::heap_bytes)
+                .sum::<usize>()
             + self.lods.iter().map(Primitive::heap_bytes).sum::<usize>()
     }
 
@@ -296,6 +320,7 @@ impl Primitive {
             material,
             joints: Vec::new(),
             weights: Vec::new(),
+            morphs: Vec::new(),
             lods: Vec::new(),
             level: 0,
         }
@@ -703,6 +728,9 @@ pub enum ModelError {
     /// `ufbx`'s explanation, such as "Truncated file".
     #[error("it isn't a valid FBX file: {0}")]
     Fbx(String),
+    /// `ufbx`'s explanation of a bad OBJ file.
+    #[error("it isn't a valid OBJ file: {0}")]
+    Obj(String),
     #[error("it uses `{0}`, which isn't inside its folder; keep the files a model uses next to it")]
     OutsideFolder(String),
     #[error("it uses `{0}`, which isn't there; put it next to the model")]
@@ -772,7 +800,20 @@ pub(crate) fn load_models_in(
 ) -> Result<Vec<Model>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => read(bytes, folder, in_project, picks),
-        ModelFormat::Fbx => fbx::load(bytes, folder, in_project, picks),
+        ModelFormat::Fbx => fbx::load(bytes, fbx::Source::Fbx, folder, in_project, picks),
+        ModelFormat::Obj => {
+            let library = obj_library(bytes, folder);
+            let source = fbx::Source::Obj {
+                library: library.found(),
+            };
+            let mut models = fbx::load(bytes, source, folder, in_project, picks)?;
+            if let Some(warning) = library.missing() {
+                for model in &mut models {
+                    model.warnings.push(warning.clone());
+                }
+            }
+            Ok(models)
+        }
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -831,6 +872,7 @@ pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelE
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => Ok(Vec::new()),
         ModelFormat::Fbx => fbx::load_takes(bytes),
+        ModelFormat::Obj => Ok(Vec::new()),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -840,7 +882,10 @@ pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelE
 pub fn list_objects(bytes: &[u8], format: ModelFormat) -> Result<Vec<ModelObject>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => list(bytes),
-        ModelFormat::Fbx => fbx::list(bytes),
+        ModelFormat::Fbx => fbx::list(bytes, fbx::Source::Fbx),
+        // Material names come from its `usemtl` lines, so the library
+        // isn't needed to list it.
+        ModelFormat::Obj => fbx::list(bytes, fbx::Source::Obj { library: None }),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -861,7 +906,14 @@ pub(crate) fn files_used(
                 .map(|uri| uri_path(&uri))
                 .collect()
         }
-        ModelFormat::Fbx => fbx::files_used(bytes, folder),
+        ModelFormat::Fbx => fbx::files_used(bytes, fbx::Source::Fbx, folder),
+        ModelFormat::Obj => {
+            let library = obj_library(bytes, folder);
+            let source = fbx::Source::Obj {
+                library: library.found(),
+            };
+            fbx::files_used(bytes, source, folder)
+        }
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -876,8 +928,50 @@ pub fn embedded_files(
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => gltf_embedded_files(bytes),
         ModelFormat::Fbx => fbx::embedded_textures(bytes),
+        // OBJ files can't embed anything.
+        ModelFormat::Obj => Ok(Vec::new()),
     }))
     .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// The material library an OBJ file names, read from its folder.
+struct ObjLibrary {
+    /// The `mtllib` path inside the folder, if the file names one.
+    path: Option<PathBuf>,
+    /// Its bytes, if it's there.
+    bytes: Option<Vec<u8>>,
+}
+
+impl ObjLibrary {
+    fn found(&self) -> Option<(&Path, &[u8])> {
+        Some((self.path.as_deref()?, self.bytes.as_deref()?))
+    }
+
+    /// The warning for a library the file names that isn't there.
+    fn missing(&self) -> Option<String> {
+        match (&self.path, &self.bytes) {
+            (Some(path), None) => Some(format!(
+                "uses the material library `{}`, which isn't next to it, so it's drawn without its materials",
+                path.to_string_lossy().replace('\\', "/")
+            )),
+            _ => None,
+        }
+    }
+}
+
+/// The material library an OBJ file's `bytes` name (`mtllib`), as a path
+/// inside its folder, whether or not it's there.
+pub(crate) fn obj_library_name(bytes: &[u8]) -> Option<PathBuf> {
+    fbx::obj_library(bytes)
+}
+
+/// Reads the `.mtl` file an OBJ file in `folder` names, if it's there.
+fn obj_library(bytes: &[u8], folder: &Path) -> ObjLibrary {
+    let path = fbx::obj_library(bytes);
+    let bytes = path
+        .as_ref()
+        .and_then(|path| std::fs::read(folder.join(path)).ok());
+    ObjLibrary { path, bytes }
 }
 
 fn gltf_embedded_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
@@ -1000,6 +1094,7 @@ fn read(
         pieces: collision::Pieces::default(),
         joints: Vec::new(),
         skins: HashMap::new(),
+        morph_names: morph::MorphNames::default(),
     };
     let mut models = Vec::new();
     for pick in picks {
@@ -1008,6 +1103,7 @@ fn read(
         reader.found.clear();
         reader.joints.clear();
         reader.skins.clear();
+        reader.morph_names.clear();
         reader.walk(&document)?;
         if let Some(path) = missing(&reader.wanted, &reader.found) {
             return Err(ModelError::NoObject(path));
@@ -1024,6 +1120,8 @@ fn read(
                 fit_matrix(&model),
             )));
         }
+        model.morph_targets = std::mem::take(&mut reader.morph_names.targets);
+        reader.morph_names.clear();
         models.push(model);
     }
     Ok(models)
@@ -1304,6 +1402,8 @@ struct Reader<'a> {
     /// and where each skin's start in them.
     joints: Vec<(usize, Mat4)>,
     skins: HashMap<usize, u16>,
+    /// The blend shapes' names so far (see [`morph`]).
+    morph_names: morph::MorphNames,
 }
 
 impl Reader<'_> {
@@ -1506,6 +1606,25 @@ impl Reader<'_> {
                 }
             }
 
+            // Each morph target's moves and normal changes, placed as the
+            // corners are.
+            let targets: Vec<(Vec<Vec3>, Option<Vec<Vec3>>)> = reader
+                .read_morph_targets()
+                .map(|(moved, turned, _)| {
+                    let moved = moved
+                        .map(|deltas| {
+                            deltas
+                                .map(|d| transform.transform_vector3(Vec3::from(d)))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let turned = turned
+                        .map(|deltas| deltas.map(|d| normal_matrix * Vec3::from(d)).collect());
+                    (moved, turned)
+                })
+                .collect();
+            let morphs = self.morphs(mesh, targets, (&positions, &normals, &indices));
+
             self.primitives.push(Primitive {
                 key: new_key(),
                 positions,
@@ -1516,11 +1635,72 @@ impl Reader<'_> {
                 material,
                 joints,
                 weights,
+                morphs,
                 lods: Vec::new(),
                 level: self.level,
             });
         }
         Ok(())
+    }
+
+    /// The blend shapes (glTF morph targets) of one primitive of `mesh`,
+    /// each `targets` entry its moves and normal changes per corner, whose
+    /// corners are `positions`, `normals` and `indices`, all placed alike.
+    /// A shape's name is the mesh's `extras.targetNames` entry (Blender
+    /// writes its shape keys' names there), else `<mesh>.<n>`.
+    fn morphs(
+        &mut self,
+        mesh: &gltf::Mesh,
+        targets: Vec<(Vec<Vec3>, Option<Vec<Vec3>>)>,
+        (positions, normals, indices): (&[[f32; 3]], &[[f32; 3]], &[u32]),
+    ) -> Vec<PrimitiveMorph> {
+        #[derive(serde::Deserialize)]
+        struct Extras {
+            #[serde(rename = "targetNames")]
+            target_names: Option<Vec<String>>,
+        }
+        let names = mesh
+            .extras()
+            .as_ref()
+            .and_then(|raw| serde_json::from_str::<Extras>(raw.get()).ok())
+            .and_then(|extras| extras.target_names)
+            .unwrap_or_default();
+        let defaults = mesh.weights().unwrap_or(&[]);
+        let count = positions.len();
+        let mut morphs = Vec::new();
+        for (index, (deltas, normal_deltas)) in targets.into_iter().enumerate() {
+            let name = names
+                .get(index)
+                .filter(|name| !name.is_empty())
+                .cloned()
+                .unwrap_or_else(|| {
+                    let mesh_name = mesh.name().unwrap_or("Mesh");
+                    format!("{mesh_name}.{index}")
+                });
+            let Some(target) = self
+                .morph_names
+                .target(&name, defaults.get(index).copied().unwrap_or(0.0))
+            else {
+                break;
+            };
+            let deltas = if deltas.len() == count {
+                deltas
+            } else {
+                vec![Vec3::ZERO; count]
+            };
+            let normal_deltas = normal_deltas.filter(|deltas| deltas.len() == count);
+            if let Some(morph) = morph::sparse(
+                target,
+                positions,
+                normals,
+                indices,
+                &deltas,
+                normal_deltas.as_deref(),
+            ) {
+                morphs.push(morph);
+            }
+        }
+        morphs
     }
 
     /// The material and the texture coordinate set its textures use: the
@@ -1950,6 +2130,10 @@ fn fit_with(
                 hull_points.push(fitted.to_array());
             }
         }
+        if !primitive.morphs.is_empty() {
+            let before = primitive.normals.clone();
+            morph::fit(primitive, &before, scale, normal_scale);
+        }
         for normal in &mut primitive.normals {
             *normal = (Vec3::from(*normal) * normal_scale)
                 .normalize_or_zero()
@@ -1989,6 +2173,7 @@ fn fit_with(
         collision,
         warnings: Vec::new(),
         rig: None,
+        morph_targets: Vec::new(),
     })
 }
 
