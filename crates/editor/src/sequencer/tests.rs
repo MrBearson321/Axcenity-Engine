@@ -100,3 +100,43 @@ fn names_and_paths() {
         "Intro"
     );
 }
+
+#[test]
+fn edit_points_are_section_ends_cuts_and_events() {
+    let mut doc = doc();
+    doc.keys.playhead = 2.0;
+    let fade = doc.add(Row::Fade, String::new(), "");
+    doc.set_span(fade, 2.0, 3.5);
+    doc.keys.playhead = 4.0;
+    doc.add(Row::Camera, "Workspace/A".into(), "");
+    doc.keys.file.events.push(ClipEvent {
+        time: 3.5,
+        name: "Boom".into(),
+    });
+    doc.keys.file.events.push(ClipEvent {
+        time: 7.25,
+        name: "Done".into(),
+    });
+    assert_eq!(doc.edit_points(), [0.0, 2.0, 3.5, 4.0, 7.25, 10.0]);
+}
+
+#[test]
+fn the_sequencer_plays_its_range_round_and_round() {
+    let mut doc = doc();
+    let mut mode = transport::PlayMode {
+        looping: true,
+        backwards: false,
+        range: Some((2.0, 4.0)),
+    };
+    transport::apply_with(&mut doc.keys, &mut mode, &[], transport::Command::PlayPause);
+    assert_eq!(doc.keys.playhead, 2.0);
+    for _ in 0..30 {
+        doc.tick(0.1, &mode);
+    }
+    assert!(doc.keys.playing);
+    assert!(
+        (doc.keys.playhead - 3.0).abs() < 1e-6,
+        "{}",
+        doc.keys.playhead
+    );
+}
