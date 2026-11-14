@@ -3105,8 +3105,10 @@ impl ClassName {
             // once when its Health reaches 0.
             ClassName::Humanoid => &["MoveToFinished", "StateChanged", "Died"],
             // Each with the Player, as they join (Phase 47) and as they
-            // leave a hosted game (Phase 63).
-            ClassName::Players => &["PlayerAdded", "PlayerRemoving"],
+            // leave a hosted game (Phase 63); `PlayerFlagged` with the
+            // Player and why, when the server catches what they sent
+            // breaking a rule (multiplayer readiness MP3).
+            ClassName::Players => &["PlayerAdded", "PlayerRemoving", "PlayerFlagged"],
             // With the message: `Text`, and `Player` (nil for a system
             // message), on each device once it arrives (Phase 67).
             ClassName::TextChatService => &["MessageReceived"],

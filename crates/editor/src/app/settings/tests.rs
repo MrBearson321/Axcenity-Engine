@@ -397,6 +397,15 @@ fn the_in_use_line_lists_each_ray_traced_effect() {
     use axcenity_render::{EffectiveGraphics, RayTracedAmbientOcclusion};
     let mut effective = EffectiveGraphics::default();
     assert!(ray_tracing_in_use(&effective).contains("off"));
+    effective.ray_traced_global_illumination = axcenity_render::RayTracedGlobalIllumination::Low;
+    effective.ray_traced_gi_in_software = true;
+    let line = ray_tracing_in_use(&effective);
+    assert!(
+        line.contains("off") && line.contains("GI Low traced in software"),
+        "{line}"
+    );
+    effective.ray_traced_global_illumination = axcenity_render::RayTracedGlobalIllumination::Off;
+    effective.ray_traced_gi_in_software = false;
     effective.ray_queries = true;
     effective.ray_tracing_distance = 400.0;
     assert!(ray_tracing_in_use(&effective).contains("no ray traced effects"));

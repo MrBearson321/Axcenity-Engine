@@ -484,11 +484,11 @@ impl RayTracedAmbientOcclusion {
     }
 }
 
-/// Hardware ray traced global illumination (`docs/rendering/ray-tracing.md`):
-/// light probe volumes' probes traced with rays each frame, in place of
-/// real-time GI's drawn faces, so bounced light follows the sun, lamps,
-/// sky and moving things within a second. Needs a GPU that can ray trace
-/// and a world with light probe volumes. Ordered from cheapest to dearest.
+/// Ray traced global illumination (`docs/rendering/ray-tracing.md`): light
+/// probes traced with rays each frame, in place of real-time GI's drawn
+/// faces, so bounced light follows the sun, lamps, sky and moving things
+/// within a second. Traced with the GPU's ray queries, or in software on a
+/// GPU without them (RL3; slower). Ordered from cheapest to dearest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum RayTracedGlobalIllumination {
     /// Light probes keep their bakes, or real-time GI's drawn faces (as its
@@ -1130,14 +1130,29 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
-        let ray_traced_global_illumination = if capabilities.ray_queries {
-            self.ray_traced_global_illumination()
-        } else {
-            RayTracedGlobalIllumination::Off
-        };
-        if ray_traced_global_illumination != self.ray_traced_global_illumination() {
+        // Without ray queries, GI's rays are traced in software (RL3), in a
+        // compute shader.
+        let wanted_gi = self.ray_traced_global_illumination();
+        let ray_traced_gi_in_software = wanted_gi != RayTracedGlobalIllumination::Off
+            && !capabilities.ray_queries
+            && capabilities.compute_shaders;
+        let ray_traced_global_illumination =
+            if capabilities.ray_queries || ray_traced_gi_in_software {
+                wanted_gi
+            } else {
+                RayTracedGlobalIllumination::Off
+            };
+        if ray_traced_global_illumination != wanted_gi {
             notes.push(
-                "Ray traced GI is off: Hardware ray tracing is off or this GPU can't ray trace. Light probes keep their bakes, or real-time GI as set."
+                "Ray traced GI is off: this GPU can't ray trace or run compute shaders. Light \
+                 probes keep their bakes."
+                    .to_owned(),
+            );
+        }
+        if ray_traced_gi_in_software {
+            notes.push(
+                "Ray traced GI is traced in software: Hardware ray tracing is off or this GPU \
+                 can't ray trace. It costs more GPU time, and cut-outs' holes are guessed."
                     .to_owned(),
             );
         }
@@ -1177,6 +1192,7 @@ impl GraphicsSettings {
             ray_traced_shadows,
             ray_traced_ambient_occlusion,
             ray_traced_global_illumination,
+            ray_traced_gi_in_software,
             notes,
         }
     }
@@ -1281,8 +1297,12 @@ pub struct EffectiveGraphics {
     pub ray_traced_shadows: RayTracedShadows,
     /// Ray traced ambient occlusion (Off on a GPU without ray queries).
     pub ray_traced_ambient_occlusion: RayTracedAmbientOcclusion,
-    /// Ray traced global illumination (Off on a GPU without ray queries).
+    /// Ray traced global illumination (Off on a GPU that can neither ray
+    /// trace nor run compute shaders).
     pub ray_traced_global_illumination: RayTracedGlobalIllumination,
+    /// Whether ray traced GI's rays are traced in software (RL3): it's on
+    /// and the GPU has no ray queries (or Hardware ray tracing is off).
+    pub ray_traced_gi_in_software: bool,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -2074,7 +2094,7 @@ mod tests {
     }
 
     #[test]
-    fn ray_traced_global_illumination_is_off_at_every_preset_and_without_ray_queries() {
+    fn ray_traced_global_illumination_is_off_at_every_preset_and_in_software_without_ray_queries() {
         for quality in Quality::ALL {
             let preset = GraphicsSettings::preset(quality);
             assert_eq!(
@@ -2096,12 +2116,36 @@ mod tests {
             RayTracedGlobalIllumination::Medium
         );
         assert!(effective.notes.is_empty(), "{:?}", effective.notes);
-        let without = asked.effective(&Capabilities::default());
+        assert!(!effective.ray_traced_gi_in_software);
+        // Without ray queries its rays are traced in software (RL3).
+        let software = asked.effective(&Capabilities::default());
+        assert_eq!(
+            software.ray_traced_global_illumination,
+            RayTracedGlobalIllumination::Medium
+        );
+        assert!(software.ray_traced_gi_in_software);
+        assert!(
+            software
+                .notes
+                .iter()
+                .any(|note| note.contains("in software"))
+        );
+        // Without compute shaders either, it's off.
+        let without = asked.effective(&Capabilities {
+            compute_shaders: false,
+            ..Capabilities::default()
+        });
         assert_eq!(
             without.ray_traced_global_illumination,
             RayTracedGlobalIllumination::Off
         );
+        assert!(!without.ray_traced_gi_in_software);
         assert!(without.notes.iter().any(|note| note.contains("GI is off")));
+        assert!(
+            !GraphicsSettings::default()
+                .effective(&Capabilities::default())
+                .ray_traced_gi_in_software
+        );
         assert_eq!(
             RayTracedGlobalIllumination::ALL.map(RayTracedGlobalIllumination::rays),
             [0, 64, 128, 256]
@@ -2284,7 +2328,8 @@ mod tests {
                                 + usize::from(
                                     effective.ray_traced_global_illumination
                                         != settings.ray_traced_global_illumination(),
-                                );
+                                )
+                                + usize::from(effective.ray_traced_gi_in_software);
                         assert_eq!(effective.notes.len(), lowered);
                     }
                 }
