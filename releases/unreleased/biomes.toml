@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Biomes split a terrain into forest, meadow, alpine and beach areas, each with its own ground and scatter rules"
+details = "Terrain Studio > Biomes adds Biome objects from presets (Lowland Forest, Meadow, Alpine, Beach or an empty one). Each brings its ground layer and its scatter rules, and covers ground by itself between its heights, below its steepest slope and between its driest and wettest ground, with soft, ragged edges; later biomes win where they overlap. Paint this biome spreads it by hand with the Paint tool on its ground layer, and changing a biome's settings never loses that paint. Scatter rules inside a biome place only there, thinning out at its edges; with a biome selected, Add rule adds into it."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

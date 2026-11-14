@@ -26,6 +26,7 @@ mod level_of_detail;
 mod light_probe_volumes;
 mod outlines;
 mod point_and_contact_shadows;
+mod ray_reflections;
 mod ray_tracing;
 mod realtime_gi;
 mod reflection_probes;
@@ -984,6 +985,7 @@ fn stats_time_each_pass_the_frame_draws() {
             FramePass::AccelerationStructures
                 | FramePass::RayTracedShadows
                 | FramePass::RayTracedGi
+                | FramePass::RayTracedReflections
                 | FramePass::Ui
                 | FramePass::VolumetricFog
                 | FramePass::Particles

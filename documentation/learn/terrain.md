@@ -43,9 +43,18 @@ The **Foliage** tool scatters the selected item from the Assets panel (a built-i
 
 Instead of painting by hand, a **scatter rule** (a ScatterRule object inside the terrain) covers the whole terrain for you. In the Terrain Studio, open **Scatter Rules** and pick **Add rule**: the **Forest set** adds trees, undergrowth and grass tufts at once, or add one preset. Select a rule to set how far apart things stand, how many, the heights and slopes they grow on, the material layer they need, how much they gather into patches, and how far they keep from what rules above them placed. With a rule selected, click plants, props or models in the Assets panel to add or remove them. The layout follows the ground as you sculpt and paint, and the same seed gives the same layout every time. It isn't saved: it's made again when the world opens. **Bake** turns what the rules placed into painted foliage, so you can brush and erase it by hand.
 
+## Biomes
+
+A **biome** (a Biome object inside the terrain) is an area such as a forest, a meadow or alpine turf, with its own ground material and its own scatter rules. In the Terrain Studio, open **Biomes** and pick **Add biome**: each preset brings its ground layer and its rules. A biome covers ground by itself between its heights, below its steepest slope and between its driest and wettest ground, with soft, ragged edges; where biomes overlap, the lower one in the list wins. Select a biome and click **Paint this biome** to spread it by hand (Shift erases back to the automatic biomes). With a biome selected, **Add rule** adds the rule inside it, so it only places there.
+
+## World presets
+
+A **world preset** sets up a whole landscape at once: its shape, materials, biomes, scatter rules and water. Pick the **Generate** tool, choose one under **World Presets** (Temperate Forest, Alpine, Desert, Tropical Island, Tundra or Meadow) and click **Generate with it**; **Apply** keeps the result, all as one undo step. **Only its materials and rules** keeps your terrain's shape. To reuse your own setup, type a name and click **Save as preset**: it's saved in the project's `presets` folder and listed with the others.
+
 ## Roads and parts into terrain
 
 - A **SplineMesh** lays a road or fence along a spline, and **Flatten Terrain Along** levels the ground under it. See the **hello-roads** sample.
+- A **Terrain Path** (Insert ▸ Terrain Path, into the selected spline) makes the spline a road on the terrain. Scatter rules keep off it straight away, wherever you drag its points. In its Properties, set its **Width**, the **Layer** to paint it with and how far it blends in (**Falloff**), then click **Apply to Terrain** to flatten and paint the ground under it. **Route** lays the spline's points over the terrain from its first point to its last without climbing steeper than **Max Grade**, so the road winds round or up a hill. Both are one undo step each.
 - **Solid Modeling ▸ To Terrain** turns a selected part into ground: the terrain under it is raised to its top and painted.
 
 ## How it's saved

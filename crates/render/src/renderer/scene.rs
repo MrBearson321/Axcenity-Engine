@@ -58,6 +58,7 @@ impl ScenePipeline {
         let probes = probes::Probes::new(&device, &queue);
         let light_probes = light_probes::LightProbes::new(&device);
         let no_ray_shadows = ray_shadows::stand_in(&device);
+        let no_ray_reflections = ray_reflections::stand_in(&device);
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
@@ -68,6 +69,7 @@ impl ScenePipeline {
                 &skinning.joints,
                 light_probes.buffer(),
                 &no_ray_shadows,
+                &no_ray_reflections,
             ],
             [
                 &empty_shadow_view,
@@ -378,6 +380,8 @@ impl ScenePipeline {
             ray_scene: None,
             ray_shadows: None,
             no_ray_shadows,
+            ray_reflections: None,
+            no_ray_reflections,
             ray_ao: None,
             ray_gi: None,
             soft_scene: None,
@@ -941,6 +945,35 @@ impl ScenePipeline {
                 self.ray_ao = None;
                 None
             };
+        // Ray traced reflections, while drawn (renderer/ray_reflections.rs):
+        // what their rays find is bound in the frame's place 18.
+        let ray_reflection_uniform =
+            if ray_reflections::traced(&self.graphics) && self.frame_targets.occlusion.is_some() {
+                let size = self.frame_targets.size;
+                let downscale = self.graphics.ray_traced_reflections.downscale();
+                if !self
+                    .ray_reflections
+                    .as_ref()
+                    .is_some_and(|pass| pass.fits(size, downscale))
+                {
+                    self.ray_reflections = Some(Box::new(ray_reflections::RayReflections::new(
+                        &self.device,
+                        &self.frame_entries,
+                        (size, downscale),
+                    )));
+                    self.bind_frame();
+                }
+                let view = glam::Mat4::from_cols_array_2d(&frame_uniform.view);
+                self.ray_reflections.as_ref().map(|pass| {
+                    frame_uniform.ray_reflections = pass.frame_values(&self.graphics);
+                    pass.uniform(&self.graphics, drawn_view_proj.inverse(), view)
+                })
+            } else {
+                if self.ray_reflections.take().is_some() {
+                    self.bind_frame();
+                }
+                None
+            };
         let cascade_drawn = self.schedule_cascades(list, &mut frame_uniform);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
@@ -1323,6 +1356,7 @@ impl ScenePipeline {
             ray_shadow_uniform.is_some()
                 || ray_ao_uniform.is_some()
                 || ray_gi_batch.is_some()
+                || ray_reflection_uniform.is_some()
                 || water_rays,
         );
         // Times this frame unless the last measurement is still being read.
@@ -1351,7 +1385,10 @@ impl ScenePipeline {
                 self.frame,
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
-                ray_gi_batch.is_some() || water_rays || path_traced,
+                ray_gi_batch.is_some()
+                    || water_rays
+                    || path_traced
+                    || ray_reflection_uniform.is_some(),
                 frame_uniform.clock,
             ),
             &draws,
@@ -1627,6 +1664,33 @@ impl ScenePipeline {
         } else {
             false
         };
+        mark(&mut encoder, FramePass::RayTracedReflections);
+        let ray_reflections_drawn = match (
+            &self.ray_reflections,
+            &ray_reflection_uniform,
+            &self.ray_scene,
+            &self.frame_targets.occlusion,
+        ) {
+            (Some(pass), Some(uniform), Some(rays), Some(prepass)) => {
+                rays.surfaces.as_ref().is_some_and(|surfaces| {
+                    pass.trace(
+                        (&self.device, &self.queue),
+                        &mut encoder,
+                        (rays, &surfaces.buffer, prepass),
+                        uniform,
+                    )
+                })
+            }
+            _ => false,
+        };
+        if ray_reflection_uniform.is_some() && !ray_reflections_drawn {
+            // Nothing traced this frame: the reflection probes stay.
+            self.queue.write_buffer(
+                &self.frame_buffer,
+                std::mem::offset_of!(FrameUniform, ray_reflections) as u64,
+                bytemuck::bytes_of(&[0.0f32; 4]),
+            );
+        }
         mark(&mut encoder, FramePass::VolumetricFog);
         if let Some(fog) = &self.volumetric_fog {
             fog.scatter(&mut encoder);
@@ -1963,6 +2027,7 @@ impl ScenePipeline {
                     prepass && ambient_occlusion,
                     ray_shadows_drawn,
                     ray_gi_drawn,
+                    ray_reflections_drawn,
                     self.volumetric_fog.is_some(),
                     self.gpu_particles.is_some(),
                     true,
@@ -2164,6 +2229,10 @@ impl ScenePipeline {
             .ray_shadows
             .as_ref()
             .map_or(&self.no_ray_shadows, |shadows| &shadows.mask);
+        let ray_reflections = self
+            .ray_reflections
+            .as_ref()
+            .map_or(&self.no_ray_reflections, |reflections| &reflections.buffer);
         let bind = |layout, prepass_depth, occlusion| {
             create_frame_bind_group(
                 &self.device,
@@ -2175,6 +2244,7 @@ impl ScenePipeline {
                     &self.skinning.joints,
                     self.light_probes.buffer(),
                     ray_shadow_mask,
+                    ray_reflections,
                 ],
                 [
                     sun,
@@ -2215,6 +2285,13 @@ impl ScenePipeline {
         }
         if let Some(gi) = &mut self.ray_gi {
             gi.frame_group = ray_gi_group;
+        }
+        let ray_reflections_group = self
+            .ray_reflections
+            .as_ref()
+            .map(|pass| self.frame_subset(&pass.frame_layout, &ray_gi::FRAME_BINDINGS));
+        if let Some(pass) = &mut self.ray_reflections {
+            pass.frame_group = ray_reflections_group;
         }
         #[cfg(feature = "debug-views")]
         self.bind_path_tracer();
@@ -2399,6 +2476,7 @@ impl ScenePipeline {
                 + self.probes.bytes()
                 + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
                 + self.ray_gi.as_ref().map_or(0, |gi| gi.bytes())
+                + self.ray_reflections.as_ref().map_or(0, |pass| pass.bytes())
                 + self.soft_scene.as_ref().map_or(0, |soft| soft.bytes())
                 + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
                 + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
@@ -3236,6 +3314,7 @@ fn frame_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
         storage_entry(4),
         storage_entry(16),
         storage_entry(17),
+        storage_entry(18),
         skinning::joints_entry(),
         wgpu::BindGroupLayoutEntry {
             binding: 6,
@@ -3344,6 +3423,7 @@ fn targets_used(
         anti_aliasing == crate::AntiAliasing::Fxaa,
         graphics.ambient_occlusion != crate::AmbientOcclusion::Off
             || ray_ao::traced(graphics)
+            || ray_reflections::traced(graphics)
             || graphics.contact_shadows
             || graphics.volumetric_fog
             || graphics.ray_traced_shadows != crate::RayTracedShadows::Off

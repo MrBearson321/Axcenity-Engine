@@ -71,6 +71,7 @@ impl EditorApp {
             Action::KeepPlayChanges(_) => {}
             Action::SetLocked(id, on) => self.set_locked(id, on),
             Action::ReportBug(id) => self.report_bug_about(id),
+            Action::Plugin { plugin, action } => self.plugin_explorer_action(plugin, action),
         }
     }
     /// Turns `Locked` on or off for `id`, and for the rest of the selection
@@ -203,7 +204,10 @@ impl EditorApp {
             self.insert_spline();
             return;
         }
-        if matches!(what, Insertable::SplineMesh | Insertable::SplineScatter) {
+        if matches!(
+            what,
+            Insertable::SplineMesh | Insertable::SplineScatter | Insertable::TerrainPath
+        ) {
             self.insert_spline_generator(what, near.or(self.selected));
             return;
         }
