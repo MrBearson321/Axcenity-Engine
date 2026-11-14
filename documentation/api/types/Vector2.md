@@ -146,3 +146,8 @@ Vector2.new(x: number?, y: number?): Vector2
 
 A new Vector2. Left-out components are 0.
 
+```lua
+local center = Vector2.new(400, 300)
+print(center.X, center.Y)
+```
+
