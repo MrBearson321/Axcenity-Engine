@@ -370,7 +370,8 @@ fn call_action(lua: &Lua, input: LuaInputObject) {
         return;
     };
     let state = LuaEnumItem::find(EnumType::UserInputState, input.state.as_str());
-    crate::handler_threads::run(lua, handler, (name, state, input), script);
+    let event = format!("Action \"{name}\"");
+    crate::handler_threads::run(lua, handler, (name, state, input), script, || event);
 }
 
 fn input_type(kind: UserInputType) -> Option<LuaEnumItem> {

@@ -3,8 +3,9 @@
 //! already take. The panel only reads them, so closing it changes nothing
 //! in the game.
 //!
-//! Three tabs: **Game** (frame rate, memory, physics, audio, scripts and
-//! the network), **Graphics** (frame and pass times, draws, culling,
+//! Four tabs: **Game** (frame rate, memory, physics, audio, scripts and
+//! the network), **Scripts** (which handlers and functions cost the most,
+//! while recording; `profiler/scripts.rs`), **Graphics** (frame and pass times, draws, culling,
 //! levels of detail, GPU memory and shaders, all from [`RenderStats`]) and
 //! **Memory** (roadmap G7: what the game holds by kind, from
 //! `Session::memory`, the GPU's share, and the Instances by class; how the
@@ -28,6 +29,8 @@ use crate::responsive;
 use crate::theme::{self, type_scale};
 use crate::widgets;
 
+mod scripts;
+
 /// How many frames the readings average over: about two seconds at 60 fps.
 const WINDOW: usize = 120;
 /// Asking the OS for the process's memory every frame would be wasted
@@ -40,6 +43,8 @@ const MEMORY_HISTORY: usize = 240;
 const MEMORY_ROWS: usize = 7;
 /// How many classes the Memory tab lists, the most bytes first.
 const MEMORY_CLASSES: usize = 12;
+/// The width the four tabs need side by side.
+const TABS_WIDTH: f32 = 290.0;
 /// How many shader messages the Graphics tab keeps, newest last.
 const SHADER_MESSAGES: usize = 20;
 
@@ -163,6 +168,7 @@ enum State {
 pub enum Tab {
     #[default]
     Game,
+    Scripts,
     Graphics,
     Memory,
 }
@@ -179,6 +185,8 @@ pub struct Readout {
 #[derive(Default)]
 pub struct Profiler {
     pub tab: Tab,
+    /// The Scripts tab: whether it's recording, and what it recorded.
+    scripts: scripts::ScriptTab,
     samples: VecDeque<Sample>,
     state: State,
     last_frame: Option<Instant>,
@@ -233,6 +241,7 @@ impl Profiler {
         *self = Profiler {
             state: State::Live,
             tab: self.tab,
+            scripts: self.scripts.for_next_play(),
             shader_messages: std::mem::take(&mut self.shader_messages),
             budget: self.budget,
             ..Profiler::default()
@@ -473,18 +482,37 @@ impl Profiler {
             State::Live => ("Live", palette.success),
             State::Frozen => ("Stopped: last Play's readings", palette.text_weak),
         };
+        let tabs = [
+            (Tab::Game, None, "Game"),
+            (Tab::Scripts, None, "Scripts"),
+            (Tab::Graphics, None, "Graphics"),
+            (Tab::Memory, None, "Memory"),
+        ];
         ui.horizontal_wrapped(|ui| {
-            widgets::segmented(
-                ui,
-                &mut self.tab,
-                &[
-                    (Tab::Game, None, "Game"),
-                    (Tab::Graphics, None, "Graphics"),
-                    (Tab::Memory, None, "Memory"),
-                ],
-            );
+            // Four tabs don't fit a narrow column; a list does.
+            if ui.available_width() >= TABS_WIDTH {
+                widgets::segmented(ui, &mut self.tab, &tabs);
+            } else {
+                let shown = tabs
+                    .iter()
+                    .find(|tab| tab.0 == self.tab)
+                    .map_or("", |tab| tab.2);
+                egui::ComboBox::from_id_salt("profiler tab")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        for (tab, _, label) in tabs {
+                            ui.selectable_value(&mut self.tab, tab, label);
+                        }
+                    });
+            }
             ui.label(RichText::new(theme::with_icon(theme::icons::CIRCLE, status)).color(color));
         });
+        if self.tab == Tab::Scripts {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.scripts_tab(ui));
+            return;
+        }
         let summary = self.summary();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -506,7 +534,7 @@ impl Profiler {
                 ui.add_space(4.0);
                 history(ui, &summary.history);
                 match self.tab {
-                    Tab::Game => self.game(ui, summary),
+                    Tab::Game | Tab::Scripts => self.game(ui, summary),
                     Tab::Graphics => self.graphics(ui, summary),
                     Tab::Memory => self.memory(ui, summary),
                 }
@@ -1305,10 +1333,13 @@ mod tests {
             column: None,
             message: "no definition in scope for identifier: `scrolled_uv_coordinates`".to_owned(),
         }]);
+        profiler.scripts.recording = true;
+        profiler.record_scripts(script_profile());
         let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from);
         let size = egui::vec2(260.0, 1400.0);
         for (tab, name) in [
             (Tab::Game, "game"),
+            (Tab::Scripts, "scripts"),
             (Tab::Graphics, "graphics"),
             (Tab::Memory, "memory"),
         ] {
@@ -1588,5 +1619,114 @@ mod tests {
                 "{expected} in {texts:?}"
             );
         }
+    }
+
+    fn script_profile() -> axcenity_script::ScriptProfile {
+        use axcenity_script::{FunctionCost, ScriptProfile, WorkCost, WorkKind};
+        let work = |kind, what: &str, function: Option<&str>, line, calls, ms| WorkCost {
+            kind,
+            what: what.to_owned(),
+            function: function.map(str::to_owned),
+            path: "scripts/a-rather-long-script-name.server.lua".to_owned(),
+            line,
+            calls,
+            resumes: calls,
+            time: Duration::from_millis(ms),
+            longest: Duration::from_millis(ms / calls.max(1) as u64 + 1),
+            client: false,
+        };
+        let function = |name: Option<&str>, line, hottest_line, own, with| FunctionCost {
+            name: name.map(str::to_owned),
+            path: "scripts/a-rather-long-script-name.server.lua".to_owned(),
+            line,
+            self_time: Duration::from_millis(own),
+            total_time: Duration::from_millis(with),
+            hottest_line,
+            client: false,
+        };
+        ScriptProfile {
+            work: vec![
+                work(
+                    WorkKind::Handler,
+                    "RunService.Heartbeat",
+                    Some("updateEnemies"),
+                    12,
+                    120,
+                    84,
+                ),
+                work(
+                    WorkKind::Handler,
+                    "CoinPart.Touched",
+                    Some("collect"),
+                    30,
+                    9,
+                    6,
+                ),
+                work(WorkKind::Task, "task.spawn", Some("spawnWave"), 44, 1, 3),
+                work(
+                    WorkKind::Script,
+                    "a-rather-long-script-name.server.lua",
+                    None,
+                    0,
+                    1,
+                    2,
+                ),
+            ],
+            functions: vec![
+                function(Some("findPath"), 60, 71, 70, 74),
+                function(Some("updateEnemies"), 12, 18, 9, 83),
+                function(None, 30, 31, 5, 5),
+            ],
+            total: Duration::from_millis(95),
+        }
+    }
+
+    #[test]
+    fn the_scripts_tab_lists_the_costliest_handlers_and_functions_and_opens_them() {
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.tab = Tab::Scripts;
+        let text = shown_text(&mut profiler);
+        assert!(text.contains("Press Record"), "{text}");
+        assert!(!profiler.scripts_recording());
+
+        profiler.scripts.recording = true;
+        assert!(profiler.scripts_recording() && profiler.scripts_due());
+        profiler.record_scripts(script_profile());
+        assert!(!profiler.scripts_due(), "fetched just now");
+        let texts = shown_texts(&mut profiler);
+        for expected in [
+            "RunService.Heartbeat",
+            "84.00 ms · 88% of script time · 0.70 ms a call",
+            "CoinPart.Touched",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == expected),
+                "{expected} in {texts:?}"
+            );
+        }
+        profiler.scripts.view = scripts::ScriptView::Functions;
+        let texts = shown_texts(&mut profiler);
+        for expected in [
+            "findPath",
+            "function on line 30",
+            "70.00 ms own (74%) · 74.00 ms with calls",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == expected),
+                "{expected} in {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|t| t.contains("busiest line 71")),
+            "{texts:?}"
+        );
+
+        // Recording carries over to the next Play, with nothing recorded.
+        profiler.stop();
+        assert!(!profiler.scripts_recording(), "not while stopped");
+        profiler.start();
+        assert!(profiler.scripts_recording());
+        assert!(profiler.scripts.profile.work.is_empty());
     }
 }

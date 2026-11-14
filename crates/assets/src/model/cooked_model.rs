@@ -23,7 +23,7 @@ use glam::{Mat4, Quat, Vec3};
 use super::stamped::Cache;
 use super::{
     AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, ImageOrigin, Joint, Model,
-    ModelMaterial, Primitive, Rig, new_key,
+    ModelMaterial, MorphTarget, Primitive, PrimitiveMorph, Rig, new_key,
 };
 use crate::cooked::{self, SourceStamp, content_hash};
 
@@ -127,6 +127,7 @@ fn encode(model: &Model) -> Option<Vec<u8>> {
         collision,
         warnings,
         rig,
+        morph_targets,
     } = model;
     if !warnings.is_empty() {
         return None;
@@ -152,6 +153,15 @@ fn encode(model: &Model) -> Option<Vec<u8>> {
             encode_rig(&mut body, rig);
         }
         None => body.u8(0),
+    }
+    body.u32(morph_targets.len() as u32);
+    for MorphTarget {
+        name,
+        default_weight,
+    } in morph_targets
+    {
+        body.text(name);
+        body.floats(&[*default_weight]);
     }
     out.u32(images.list.len() as u32);
     for image in &images.list {
@@ -189,6 +199,7 @@ fn encode_primitive(out: &mut Output, images: &mut Images, primitive: &Primitive
         material,
         joints,
         weights,
+        morphs,
         lods,
         level,
     } = primitive;
@@ -204,6 +215,19 @@ fn encode_primitive(out: &mut Output, images: &mut Images, primitive: &Primitive
         }
     }
     out.array(weights);
+    out.u32(morphs.len() as u32);
+    for PrimitiveMorph {
+        target,
+        corners,
+        positions,
+        normals,
+    } in morphs
+    {
+        out.u32(u32::from(*target));
+        out.u32s(corners);
+        out.array(positions);
+        out.array(normals);
+    }
     encode_material(out, images, material)?;
     out.u8(*level);
     out.u32(lods.len() as u32);
@@ -529,6 +553,22 @@ fn decode(input: &mut Input<'_>, project: &Path, relative: &str) -> Option<Model
         1 => Some(Arc::new(decode_rig(input)?)),
         _ => return None,
     };
+    let target_count = input.count(8)?;
+    let mut morph_targets = Vec::with_capacity(target_count);
+    for _ in 0..target_count {
+        morph_targets.push(MorphTarget {
+            name: input.text()?,
+            default_weight: input.f32()?,
+        });
+    }
+    if primitives
+        .iter()
+        .flat_map(|primitive| std::iter::once(primitive).chain(&primitive.lods))
+        .flat_map(|primitive| &primitive.morphs)
+        .any(|morph| usize::from(morph.target) >= target_count)
+    {
+        return None;
+    }
     if input.at != input.bytes.len()
         || !primitives
             .iter()
@@ -546,6 +586,7 @@ fn decode(input: &mut Input<'_>, project: &Path, relative: &str) -> Option<Model
         collision,
         warnings: Vec::new(),
         rig,
+        morph_targets,
     })
 }
 
@@ -582,6 +623,28 @@ fn decode_primitive(input: &mut Input<'_>, images: &[Arc<Image>]) -> Option<Prim
         joints.push(joint);
     }
     let weights = input.array()?;
+    // Each shape is at least its four counts.
+    let morph_count = input.count(16)?;
+    let mut morphs = Vec::with_capacity(morph_count);
+    for _ in 0..morph_count {
+        let target = u16::try_from(input.u32()?).ok()?;
+        let morph = PrimitiveMorph {
+            target,
+            corners: input.u32s()?,
+            positions: input.array()?,
+            normals: input.array()?,
+        };
+        let fits = morph.positions.len() == morph.corners.len()
+            && morph.normals.len() == morph.corners.len()
+            && morph
+                .corners
+                .iter()
+                .all(|&corner| (corner as usize) < corners);
+        if !fits {
+            return None;
+        }
+        morphs.push(morph);
+    }
     let material = decode_material(input, images)?;
     let level = input.u8()?;
     let lod_count = input.count(1)?;
@@ -599,6 +662,7 @@ fn decode_primitive(input: &mut Input<'_>, images: &[Arc<Image>]) -> Option<Prim
         material,
         joints,
         weights,
+        morphs,
         lods,
         level,
     })
@@ -829,11 +893,13 @@ mod tests {
             for copy in &primitive.lods {
                 describe_primitive(out, copy);
             }
+            out.push_str(&format!("{:?}\n", primitive.morphs));
         }
         let mut out = format!(
             "{:?} {:?} {:?} {:?} {:?} {:?}\n",
             model.size, model.center, model.hull_points, model.collision, model.warnings, model.rig
         );
+        out.push_str(&format!("{:?}\n", model.morph_targets));
         for each in &model.primitives {
             describe_primitive(&mut out, each);
         }
@@ -885,6 +951,27 @@ mod tests {
         let again = Assets::new(&project).model_blocking(model).unwrap();
         assert_eq!(describe(&again), describe(&first));
         assert_eq!(again.collision, first.collision);
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn a_cooked_model_keeps_its_blend_shapes() {
+        let project = std::env::temp_dir().join(format!(
+            "axcenity-cooked-model-morphs-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&project);
+        let folder = project.join("assets/models");
+        let gltf = crate::model::tests::blinking_face(&folder);
+        fs::write(folder.join("face.gltf"), gltf).unwrap();
+        let model = "assets/models/face.gltf";
+        let first = Assets::new(&project).model_blocking(model).unwrap();
+        assert_eq!(first.morph_targets.len(), 2);
+        assert!(read(&project, model, "").is_some());
+        let again = Assets::new(&project).model_blocking(model).unwrap();
+        assert_eq!(describe(&again), describe(&first));
+        assert_eq!(again.morph_targets, first.morph_targets);
+        assert_eq!(again.primitives[0].morphs, first.primitives[0].morphs);
         let _ = fs::remove_dir_all(project);
     }
 

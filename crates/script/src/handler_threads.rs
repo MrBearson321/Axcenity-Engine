@@ -76,8 +76,18 @@ pub fn running(lua: &Lua) -> mlua::Result<Function> {
 }
 
 /// Calls `callback` with `args` as event handler code of `script`, in a
-/// coroutine of its own (a reused one when possible).
-pub fn run(lua: &Lua, callback: Function, args: impl IntoLuaMulti, script: Option<InstanceId>) {
+/// coroutine of its own (a reused one when possible). `event` names what
+/// fired it (`Door.Touched`) for the script profiler, which only asks while
+/// recording.
+pub fn run(
+    lua: &Lua,
+    callback: Function,
+    args: impl IntoLuaMulti,
+    script: Option<InstanceId>,
+    event: impl FnOnce() -> String,
+) {
+    // The profiler reads where the handler is; it needs its own handle.
+    let profiled = crate::profile::is_recording(lua).then(|| callback.clone());
     let reused = lua
         .app_data_mut::<HandlerThreads>()
         .and_then(|mut threads| threads.free.pop());
@@ -90,6 +100,10 @@ pub fn run(lua: &Lua, callback: Function, args: impl IntoLuaMulti, script: Optio
     };
     match thread {
         Ok(thread) => {
+            if let Some(callback) = profiled {
+                let kind = crate::profile::WorkKind::Handler;
+                crate::profile::label(lua, &thread, kind, event, Some(&callback), None);
+            }
             scheduler::resume_as(lua, &thread, args, script);
             give_back(lua, thread);
         }

@@ -2384,3 +2384,43 @@ fn recording_and_unkeyed_moves_are_said_above_the_timeline() {
     assert!(shows(&frame(&mut app, Vec::new()), "Not keyed yet").is_none());
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn the_profilers_scripts_tab_finds_the_slow_heartbeat_handler_in_play() {
+    let folder = copy_of_example("hello-events", "script-profiler");
+    let slow = r#"local RunService = game:GetService("RunService")
+
+local function spin()
+    local stop = os.clock() + 0.002
+    while os.clock() < stop do
+    end
+end
+
+RunService.Heartbeat:Connect(spin)
+"#;
+    std::fs::write(folder.join("scripts/slow.server.lua"), slow).unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    app.profiler.set_scripts_recording(true);
+    app.play();
+    assert!(app.playing());
+    play_for(&mut app, 1.0);
+    // Stop hands over everything recorded since the panel last looked.
+    app.stop();
+    let profile = app.profiler.script_profile().clone();
+    let top = &profile.work[0];
+    assert_eq!(top.what, "RunService.Heartbeat");
+    assert_eq!(top.function.as_deref(), Some("spin"));
+    assert_eq!(
+        (top.path.as_str(), top.line),
+        ("scripts/slow.server.lua", 3)
+    );
+    assert!(top.calls >= 50, "{}", top.calls);
+    let hottest = &profile.functions[0];
+    assert_eq!(hottest.name.as_deref(), Some("spin"));
+    assert_eq!(hottest.hottest_line, 5);
+
+    // Clicking its row opens the script at the line.
+    app.open_script(&top.path, Some(top.line as usize));
+    assert_eq!(app.tabs.active_path(), Some("scripts/slow.server.lua"));
+    let _ = std::fs::remove_dir_all(folder);
+}

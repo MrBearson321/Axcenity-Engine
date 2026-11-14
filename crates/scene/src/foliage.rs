@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model, Slot};
 use axcenity_core::{
-    FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData, Vector3,
+    FoliageInstance, FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData,
+    Vector3,
 };
 use axcenity_render::glam::{Mat4, Quat, Vec2, Vec3};
 use axcenity_render::{DrawItem, ItemChunk, Material, Shape, Sway};
@@ -408,6 +409,18 @@ pub(crate) struct PaintedFoliage {
     /// The models painted, to find out whether one was loaded or reloaded.
     paths: Vec<String>,
     chunks: Vec<ItemChunk>,
+    /// What scatter rules placed, kept per terrain chunk: a chunk's groups
+    /// are built again only when its list does (procedural worlds PW1).
+    generated: Vec<GeneratedGroups>,
+    /// Where the terrain was and the models scatter rules place, when the
+    /// generated groups were built: any change builds them all again.
+    generated_key: (Vec<String>, FoliageKey),
+}
+
+/// One terrain chunk's generated foliage and its groups.
+struct GeneratedGroups {
+    instances: Arc<[FoliageInstance]>,
+    chunks: Vec<ItemChunk>,
 }
 
 /// What a terrain's foliage is built from.
@@ -454,15 +467,46 @@ pub(crate) fn draw_terrain(
     assets: &Assets,
     chunks: &mut Vec<ItemChunk>,
 ) {
-    if let Some(foliage) = kept.as_ref()
-        && foliage.key == FoliageKey::of(placement, data, &foliage.paths, assets)
-    {
-        chunks.extend_from_slice(&foliage.chunks);
-        return;
+    let painted_fresh = kept.as_ref().is_some_and(|foliage| {
+        foliage.key == FoliageKey::of(placement, data, &foliage.paths, assets)
+    });
+    if !painted_fresh {
+        let paths = model_paths(data.foliage().iter());
+        let built = built_groups(
+            placement,
+            data,
+            assets,
+            data.foliage()
+                .iter()
+                .enumerate()
+                .map(|(index, instance)| (draw_id((terrain, index)), instance)),
+        );
+        let key = FoliageKey::of(placement, data, &paths, assets);
+        match kept {
+            Some(foliage) => {
+                foliage.key = key;
+                foliage.paths = paths;
+                foliage.chunks = built;
+            }
+            None => {
+                *kept = Some(PaintedFoliage {
+                    key,
+                    paths,
+                    chunks: built,
+                    generated: Vec::new(),
+                    generated_key: (Vec::new(), FoliageKey::of(placement, data, &[], assets)),
+                });
+            }
+        }
     }
-    let mut paths: Vec<String> = data
-        .foliage()
-        .iter()
+    let foliage = kept.as_mut().expect("kept above");
+    chunks.extend_from_slice(&foliage.chunks);
+    draw_generated(foliage, terrain, placement, data, assets, chunks);
+}
+
+/// The models in `foliage`, each once, sorted.
+fn model_paths<'a>(foliage: impl Iterator<Item = &'a FoliageInstance>) -> Vec<String> {
+    let mut paths: Vec<String> = foliage
         .filter_map(|instance| match &instance.source {
             FoliageSource::Model(path) => Some(path.clone()),
             _ => None,
@@ -470,28 +514,84 @@ pub(crate) fn draw_terrain(
         .collect();
     paths.sort();
     paths.dedup();
-    let foliage = PaintedFoliage {
-        key: FoliageKey::of(placement, data, &paths, assets),
-        chunks: built_groups(terrain, placement, data, assets),
-        paths,
-    };
-    chunks.extend_from_slice(&foliage.chunks);
-    *kept = Some(foliage);
+    paths
+}
+
+/// Adds what the terrain's scatter rules placed, building again only the
+/// terrain chunks whose lists changed (all of them if the terrain moved or
+/// a model they place loaded).
+fn draw_generated(
+    kept: &mut PaintedFoliage,
+    terrain: InstanceId,
+    placement: &Placement,
+    data: &Arc<TerrainData>,
+    assets: &Assets,
+    chunks: &mut Vec<ItemChunk>,
+) {
+    let lists: Vec<&Arc<[FoliageInstance]>> = data.generated_chunks().collect();
+    let (paths, key) = &kept.generated_key;
+    // The data's address and revision don't matter here: each chunk's list
+    // is compared itself.
+    let unchanged_look = key.placement == FoliageKey::of(placement, data, &[], assets).placement
+        && key.models == FoliageKey::of(placement, data, paths, assets).models;
+    let same_lists = kept.generated.len() == lists.len()
+        && kept
+            .generated
+            .iter()
+            .zip(&lists)
+            .all(|(old, new)| Arc::ptr_eq(&old.instances, new));
+    if !(unchanged_look && same_lists) {
+        if !unchanged_look || kept.generated.len() != lists.len() {
+            kept.generated.clear();
+        }
+        let paths = model_paths(lists.iter().flat_map(|list| list.iter()));
+        for (index, list) in lists.iter().enumerate() {
+            if kept
+                .generated
+                .get(index)
+                .is_some_and(|old| Arc::ptr_eq(&old.instances, list))
+            {
+                continue;
+            }
+            let built = built_groups(
+                placement,
+                data,
+                assets,
+                list.iter()
+                    .enumerate()
+                    .map(|(i, instance)| (draw_id((terrain, "generated", index, i)), instance)),
+            );
+            let groups = GeneratedGroups {
+                instances: Arc::clone(list),
+                chunks: built,
+            };
+            if index < kept.generated.len() {
+                kept.generated[index] = groups;
+            } else {
+                kept.generated.push(groups);
+            }
+        }
+        let key = FoliageKey::of(placement, data, &paths, assets);
+        kept.generated_key = (paths, key);
+    }
+    for generated in &kept.generated {
+        chunks.extend_from_slice(&generated.chunks);
+    }
 }
 
 /// Every plant, model and prop of a terrain, grouped by where it stands.
-fn built_groups(
-    terrain: InstanceId,
+fn built_groups<'a>(
     placement: &Placement,
     data: &TerrainData,
     assets: &Assets,
+    foliage: impl Iterator<Item = (u64, &'a FoliageInstance)>,
 ) -> Vec<ItemChunk> {
     // Each model is looked up once (a lock and a lookup by path), not once
     // per instance painted from it.
     let mut models: HashMap<&str, Option<PaintedModel>> = HashMap::new();
     // In a set order, so the same terrain gives the same list every time.
     let mut groups: BTreeMap<(i32, i32, bool), Vec<DrawItem>> = BTreeMap::new();
-    for (index, instance) in data.foliage().iter().enumerate() {
+    for (id, instance) in foliage {
         let scale = instance.scale.max(0.01);
         let xz = placement.to_world_xz(data, Vec2::new(instance.x, instance.z));
         let (cull_distance, model) = match &instance.source {
@@ -499,7 +599,7 @@ fn built_groups(
                 let model = models.entry(path.as_str()).or_insert_with(|| {
                     // A model still loading is left out; the key above
                     // changes when it's in, which builds the groups again.
-                    match assets.model_slot(path) {
+                    match assets.model_slot(path.as_str()) {
                         Slot::Ready(model) => {
                             let pieces = model_pieces(&model);
                             Some((model, pieces))
@@ -537,13 +637,7 @@ fn built_groups(
                     turn,
                     ground + Vec3::new(0.0, size.y.abs() * 0.5, 0.0),
                 );
-                push_model(
-                    pieces,
-                    model_transform,
-                    draw_id((terrain, index)),
-                    cull_distance,
-                    items,
-                );
+                push_model(pieces, model_transform, id, cull_distance, items);
             }
             (source, _) => {
                 let transform =
@@ -780,6 +874,90 @@ mod tests {
         changed.foliage_mut().clear();
         world.set_terrain(terrain, std::sync::Arc::new(changed));
         assert!(drawn(&world, &mut kept).is_empty(), "built again");
+    }
+
+    #[test]
+    fn what_scatter_rules_place_is_drawn_and_rebuilt_when_it_changes() {
+        let (mut world, terrain) = grass_and_crate();
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let assets = Assets::default();
+        let mut kept = None;
+        let count = |world: &axcenity_core::World, kept: &mut Option<PaintedFoliage>| {
+            let mut chunks = Vec::new();
+            let data = world.terrain(terrain).unwrap();
+            draw_terrain(kept, terrain, &placement, data, &assets, &mut chunks);
+            chunks.iter().map(|chunk| chunk.items.len()).sum::<usize>()
+        };
+        // Two grass wedges and a crate.
+        assert_eq!(count(&world, &mut kept), 3);
+        // A rule places another crate in the same terrain data (no new
+        // revision: it isn't saved), and the groups are built again.
+        let generated = FoliageInstance {
+            source: FoliageSource::Prop(FoliageProp::Crate),
+            x: 2.0,
+            z: 2.0,
+            yaw: 0.0,
+            scale: 1.0,
+            collide: false,
+        };
+        let data = world.terrain_mut(terrain).unwrap();
+        let revision = data.revision();
+        data.set_generated(0, 0, 7, vec![generated]);
+        assert_eq!(world.terrain(terrain).unwrap().revision(), revision);
+        assert_eq!(count(&world, &mut kept), 4);
+    }
+
+    #[test]
+    fn only_the_terrain_chunks_whose_generated_lists_changed_are_built_again() {
+        let mut world = axcenity_core::World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        // 64 cells a side: two chunks by two.
+        let data = TerrainData::flat(65, 65, 0.25).unwrap();
+        world.set_terrain(terrain, std::sync::Arc::new(data));
+        let crate_at = |x, z| FoliageInstance {
+            source: FoliageSource::Prop(FoliageProp::Crate),
+            x,
+            z,
+            yaw: 0.0,
+            scale: 1.0,
+            collide: false,
+        };
+        let data = world.terrain_mut(terrain).unwrap();
+        data.set_generated(0, 0, 1, vec![crate_at(4.0, 4.0)]);
+        data.set_generated(1, 1, 2, vec![crate_at(40.0, 40.0)]);
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let assets = Assets::default();
+        let mut kept = None;
+        let mut drawn = |world: &axcenity_core::World| {
+            let mut chunks = Vec::new();
+            let data = world.terrain(terrain).unwrap();
+            draw_terrain(&mut kept, terrain, &placement, data, &assets, &mut chunks);
+            chunks
+        };
+        let first = drawn(&world);
+        assert_eq!(first.len(), 2, "{first:?}");
+        // A stroke near the second crate remakes only its chunk.
+        let data = world.terrain_mut(terrain).unwrap();
+        data.set_generated(1, 1, 3, vec![crate_at(40.0, 40.0), crate_at(44.0, 40.0)]);
+        let second = drawn(&world);
+        assert_eq!(second.len(), 3, "the new crate stands apart");
+        let near = |chunks: &[ItemChunk], x: f32| {
+            chunks
+                .iter()
+                .find(|chunk| (chunk.items[0].transform.w_axis.x - x).abs() < 2.0)
+                .cloned()
+                .expect("a group there")
+        };
+        let x0 = first[0].items[0].transform.w_axis.x;
+        assert!(
+            std::sync::Arc::ptr_eq(&near(&first, x0).items, &near(&second, x0).items),
+            "the untouched chunk is kept"
+        );
+        assert_eq!(
+            second.iter().map(|chunk| chunk.items.len()).sum::<usize>(),
+            3
+        );
     }
 
     #[test]

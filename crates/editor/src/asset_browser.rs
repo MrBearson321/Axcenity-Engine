@@ -88,6 +88,10 @@ pub enum Picking {
     /// The models the selected SplineMesh or SplineScatter uses (Phase
     /// 74): a click on a model uses it (or, for a scatter, takes it out).
     SplineModels(Vec<String>),
+    /// What the selected ScatterRule places (procedural worlds PW1), as
+    /// its `Models` entries: a click on a prop or model adds it or takes
+    /// it out.
+    ScatterModels(Vec<String>),
 }
 
 impl Picking {
@@ -96,6 +100,7 @@ impl Picking {
         match self {
             Picking::Foliage(_) => matches!(entry.kind, AssetKind::Prop | AssetKind::Model),
             Picking::SplineModels(_) => entry.kind == AssetKind::Model,
+            Picking::ScatterModels(_) => matches!(entry.kind, AssetKind::Prop | AssetKind::Model),
         }
     }
 
@@ -106,6 +111,9 @@ impl Picking {
             Picking::SplineModels(models) => {
                 entry.kind == AssetKind::Model && models.contains(&entry.path)
             }
+            Picking::ScatterModels(entries) => entry.foliage_source().is_some_and(|source| {
+                entries.contains(&axcenity_procedural::terrain_scatter::entry(&source))
+            }),
         }
     }
 
@@ -113,6 +121,9 @@ impl Picking {
         match self {
             Picking::Foliage(_) => "Click to paint this as foliage.",
             Picking::SplineModels(_) => "Click to use this model along the selected spline.",
+            Picking::ScatterModels(_) => {
+                "Click to have the selected scatter rule place this (click again to take it out)."
+            }
         }
     }
 }
