@@ -43,11 +43,16 @@ struct RayAo {
 // them.
 const MASK_SOLID: u32 = 9u;
 const MASK_CUT_OUTS: u32 = 18u;
-// Rays pass through cut-outs' holes (LE7), but a cut-out nearer than this
-// still isn't counted: a leaf card lying on the ground, or a grass clump's
-// foot, would darken the ground it stands in (ray_shadows.wgsl's
-// CUT_OUT_NEAR).
+// Rays pass through cut-outs' holes (LE7), but a cut-out nearer than
+// `cut_out_near` still isn't counted: a little up close, more further
+// away (as ray_shadows.wgsl's, which says why).
+const CUT_OUT_NEAR_CLOSE: f32 = 0.03;
+const CUT_OUT_NEAR_PER_STUD: f32 = 0.005;
 const CUT_OUT_NEAR: f32 = 0.35;
+
+fn cut_out_near(distance: f32) -> f32 {
+    return min(CUT_OUT_NEAR_CLOSE + distance * CUT_OUT_NEAR_PER_STUD, CUT_OUT_NEAR);
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -74,10 +79,11 @@ fn view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 
 // How near what the ray from `origin` along `direction` hits is, as a
 // share of `radius` (1 touching, 0 at the radius or nothing hit).
-fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32) -> f32 {
+// `distance` is how far the surface is from the camera.
+fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32, distance: f32) -> f32 {
     let nearest = min(
         nearest_hit(origin, direction, MASK_SOLID, 0.0, radius),
-        nearest_hit(origin, direction, MASK_CUT_OUTS, min(CUT_OUT_NEAR, radius), radius));
+        nearest_hit(origin, direction, MASK_CUT_OUTS, min(cut_out_near(distance), radius), radius));
     return 1.0 - nearest / radius;
 }
 
@@ -131,7 +137,7 @@ fn fs_ray_occlusion(@builtin(position) position: vec4<f32>) -> @location(0) vec4
         let angle = turn + f32(i) * 2.3999632;
         let side = sqrt(k);
         let direction = t * (cos(angle) * side) + b * (sin(angle) * side) + n * sqrt(1.0 - k);
-        hidden += hidden_along(origin, direction, radius);
+        hidden += hidden_along(origin, direction, radius, distance);
     }
     let open = 1.0 - hidden / f32(count);
     let weight = 1.0 - smoothstep(reach * 0.85, reach, distance);

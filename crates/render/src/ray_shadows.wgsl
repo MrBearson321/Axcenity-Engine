@@ -94,9 +94,14 @@ const TRACED_LAMPS: u32 = 8u;
 // items, and cut-outs.
 const MASK_SOLID: u32 = 1u;
 const MASK_CUT_OUT: u32 = 2u;
-// A cut-out nearer than this to the surface isn't counted: a leaf card
-// lying on the ground, or a grass clump's foot, would shade the ground it
-// stands in, and its own card can graze the point the ray starts from.
+// A cut-out nearer than this to the surface isn't counted
+// (`cut_out_near`): a little up close, so a fern or a grass clump shades
+// the ground at its foot, growing with the distance from the camera to
+// this, where depth is coarser and a card past the bent budget
+// (renderer/ray_sway.rs) is traced at rest while it's drawn swaying, so
+// its own card could graze the point the ray starts from.
+const CUT_OUT_NEAR_CLOSE: f32 = 0.03;
+const CUT_OUT_NEAR_PER_STUD: f32 = 0.005;
 const CUT_OUT_NEAR: f32 = 0.35;
 // The widest a soft edge is smoothed, in pixels each way.
 const MAX_BLUR: i32 = 12;
@@ -178,6 +183,13 @@ fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32, far:
     return max(hit.t, 1e-3);
 }
 
+// How near a cut-out to a ray's `origin` may be and still not be counted
+// (CUT_OUT_NEAR_CLOSE).
+fn cut_out_near(origin: vec3<f32>) -> f32 {
+    let distance = length(origin - rays.camera.xyz);
+    return min(CUT_OUT_NEAR_CLOSE + distance * CUT_OUT_NEAR_PER_STUD, CUT_OUT_NEAR);
+}
+
 // One ray from `origin` along `direction` (normalized), up to `far`: how
 // far to what blocks it, or 0.
 fn blocked_within(origin: vec3<f32>, direction: vec3<f32>, far: f32) -> f32 {
@@ -185,7 +197,7 @@ fn blocked_within(origin: vec3<f32>, direction: vec3<f32>, far: f32) -> f32 {
     if solid > 0.0 {
         return solid;
     }
-    return first_hit(origin, direction, MASK_CUT_OUT, CUT_OUT_NEAR, far);
+    return first_hit(origin, direction, MASK_CUT_OUT, cut_out_near(origin), far);
 }
 
 // One ray toward the sun: how far to what blocks it, or 0.
