@@ -55,6 +55,7 @@ flowchart LR
 - Format 1 clip files still read (converted).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
+- No blend shapes (morph targets) and no facial animation yet: glTF morph targets and FBX blend shapes are dropped on import. Plan: `docs/research/facial-animation.md` (F1–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
 - Retargeting has rig definitions and fingers (AP1) but no profiles yet: rest poses must match (T vs A pose plays as motion) and nothing corrects feet sliding when leg shapes differ (foot IK helps). Plan: `docs/research/animation-production.md` (AP2-AP7).
 
 ## Development guidance
