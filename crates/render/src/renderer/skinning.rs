@@ -53,6 +53,9 @@ struct SkinCorner {
 /// An animated mesh's joints and weights on the GPU.
 pub(super) struct GpuSkin {
     pub(super) bind_group: wgpu::BindGroup,
+    /// The corners' joints and weights (`SkinCorner`s), which ray tracing
+    /// also poses its copy of the mesh by (`ray_skin.wgsl`).
+    pub(super) buffer: wgpu::Buffer,
     /// The box of the corners weighted to each joint, by joint, `None` for
     /// a joint no corner is weighted to; and the box of the corners
     /// weighted to nothing, which never move.
@@ -255,6 +258,7 @@ impl Skinning {
         });
         Some(GpuSkin {
             bind_group: skin_group(device, &self.layout, &buffer),
+            buffer: buffer.clone(),
             joints: joint_bounds,
             still,
             _bytes: bytes.count(buffer.size()),
