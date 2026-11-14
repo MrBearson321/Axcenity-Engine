@@ -1132,10 +1132,76 @@ mod global_illumination {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();
         };
+        red_wall_bounces_red(&device, &queue);
+    }
+
+    #[test]
+    fn traced_in_software_the_red_wall_bounces_red_light_too() {
+        let Some((device, queue)) = test_device() else {
+            return skipped();
+        };
+        let renderer = red_wall_bounces_red(&device, &queue);
+        assert!(renderer.graphics().ray_traced_gi_in_software);
+        let soft = renderer
+            .scene
+            .soft_scene
+            .as_ref()
+            .expect("a software scene");
+        // The yard's floor and wall, both blocks: one mesh.
+        assert_eq!(
+            (soft.stats.items, soft.stats.meshes),
+            (2, 1),
+            "{:?}",
+            soft.stats
+        );
+        assert_eq!((soft.stats.triangles, soft.stats.meshes_waiting), (12, 0));
+        assert!(renderer.scene.ray_scene.is_none(), "no hardware scene");
+        assert_eq!(
+            renderer.stats().ray_tracing,
+            crate::RayTracingStats::default()
+        );
+    }
+
+    #[test]
+    fn traced_in_software_a_mesh_is_traced_with_its_simplest_copy() {
+        let Some((device, queue)) = test_device() else {
+            return skipped();
+        };
+        let mut world = yard(SUN_ON_WALL);
+        let mut square = block(Vec3::new(0.0, 1.0, 0.0), Vec3::ONE, [0.5; 3]);
+        square.shape = Shape::Mesh(Arc::new(super::super::level_of_detail::Detailed {
+            level: 0,
+        }));
+        world.items.push(square);
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Low));
+        renderer.render(&world).unwrap();
+        let soft = renderer
+            .scene
+            .soft_scene
+            .as_ref()
+            .expect("a software scene");
+        // The block's 12, and the square's simplest copy's 16 of its 64.
+        assert_eq!(
+            (soft.stats.items, soft.stats.meshes),
+            (3, 2),
+            "{:?}",
+            soft.stats
+        );
+        assert_eq!(soft.stats.triangles, 12 + 16);
+        // Gone with the setting.
+        renderer.set_graphics(&traced(RayTracedGlobalIllumination::Off));
+        renderer.render(&world).unwrap();
+        assert!(renderer.scene.soft_scene.is_none());
+    }
+
+    /// Traces the yard's probes from nothing with Medium, and checks the
+    /// sunlit red wall's light reaches them.
+    fn red_wall_bounces_red(device: &wgpu::Device, queue: &wgpu::Queue) -> TextureRenderer {
         let lit = yard(SUN_ON_WALL);
         // Starting from nothing, not a bake.
         let world = with_volume(&lit, vec![[[0.0; 3]; 4]; PROBES as usize]);
-        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        let mut renderer = TextureRenderer::new(device, queue, 64, 64);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
         // Three times round the camera's finest probes and the volume's.
         for _ in 0..48 {
@@ -1152,6 +1218,7 @@ mod global_illumination {
             // wall) than -X, and redder than it is green.
             assert!(c3[0] > 0.0 && c3[0] > c3[1], "red from the wall: {probe:?}");
         }
+        renderer
     }
 
     /// The yard with no light probe volume, seen from `camera`, with a
@@ -1186,8 +1253,27 @@ mod global_illumination {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();
         };
+        let renderer = camera_probes_inside_a_block_are_left_out(&device, &queue);
+        assert!(renderer.stats().ray_tracing.instances > 0);
+    }
+
+    #[test]
+    fn traced_in_software_a_probe_inside_a_block_is_left_out_too() {
+        let Some((device, queue)) = test_device() else {
+            return skipped();
+        };
+        let renderer = camera_probes_inside_a_block_are_left_out(&device, &queue);
+        assert!(renderer.scene.soft_scene.is_some());
+    }
+
+    /// Traces the yard with a block and no volume, and checks the camera's
+    /// probe inside the block is left out and one in the open is lit.
+    fn camera_probes_inside_a_block_are_left_out(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> TextureRenderer {
         let world = yard_with_block(Vec3::new(-8.0, 3.0, 0.0));
-        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        let mut renderer = TextureRenderer::new(device, queue, 32, 32);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
         // Medium traces 256 a frame, half of them near: every one of the
         // finest 2,048 within 16.
@@ -1195,7 +1281,6 @@ mod global_illumination {
             renderer.render(&world).unwrap();
         }
         assert_eq!(renderer.scene.probes_ray_traced(), Some(17 * 256));
-        assert!(renderer.stats().ray_tracing.instances > 0);
         let all = texels_held(&renderer);
         assert_eq!(
             all.len(),
@@ -1215,6 +1300,7 @@ mod global_illumination {
             left_out < 64,
             "only the few inside things are left out: {left_out}"
         );
+        renderer
     }
 
     #[test]
@@ -1267,7 +1353,7 @@ mod global_illumination {
     }
 
     #[test]
-    fn without_ray_queries_nothing_is_traced() {
+    fn without_ray_queries_or_compute_shaders_nothing_is_traced() {
         let Some((device, queue)) = test_device() else {
             return skipped();
         };
@@ -1277,8 +1363,13 @@ mod global_illumination {
         ] {
             let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
             renderer.set_graphics(&traced(RayTracedGlobalIllumination::High));
+            renderer.limit_capabilities(&crate::Capabilities {
+                compute_shaders: false,
+                ..*renderer.capabilities()
+            });
             renderer.render(&world).unwrap();
             assert_eq!(renderer.scene.probes_ray_traced(), None);
+            assert!(renderer.scene.soft_scene.is_none());
             let probes = world.light_probe_volumes.len() * PROBES as usize;
             assert_eq!(
                 texels_held(&renderer).len(),

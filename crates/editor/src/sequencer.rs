@@ -11,7 +11,11 @@
 //!
 //! Above the timeline, the Animation tab's transport bar (start, a frame
 //! back, play or pause, a frame on, end, stop, a seek bar, the time and the
-//! preview's rate), with its keys while the mouse is over the tab.
+//! preview's rate), with its keys while the mouse is over the tab, and a
+//! second row of the Sequencer's own (AP5, `transport::sequence_bar`):
+//! play backwards, loop playback, a play range (In and Out, shaded on the
+//! seek bar and the rows) and the previous and next edit point
+//! ([`SequenceDoc::edit_points`]).
 //!
 //! **Preview** shows the sequence in the Scene view at the playhead without
 //! entering Play: a copy of the world put where the sequence has it (by the
@@ -508,9 +512,25 @@ impl SequenceDoc {
         self.keys.playhead = self.keys.playhead.min(duration);
     }
 
-    /// Moves the playhead on while it plays.
-    pub fn tick(&mut self, dt: f64) {
-        self.keys.tick(dt);
+    /// Moves the playhead on while it plays, as `mode` says.
+    pub fn tick(&mut self, dt: f64, mode: &transport::PlayMode) {
+        transport::advance(&mut self.keys, mode, dt);
+    }
+
+    /// Where Previous and Next edit point go: the start and end, every
+    /// section's start and end (camera cuts included) and every event,
+    /// sorted, each once.
+    pub fn edit_points(&self) -> Vec<f64> {
+        let mut points = vec![0.0, self.duration()];
+        for row in Row::ALL {
+            for (start, end, _) in self.sections(row) {
+                points.extend([start, end]);
+            }
+        }
+        points.extend(self.keys.file.events.iter().map(|event| event.time));
+        points.sort_by(f64::total_cmp);
+        points.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        points
     }
 }
 
@@ -541,6 +561,8 @@ pub struct Sequencer {
     preview: Option<Preview>,
     /// How fast the preview plays (the transport's rate).
     pub rate: transport::Rate,
+    /// Loop, backwards and the play range (AP5), kept while the editor runs.
+    pub mode: transport::PlayMode,
     audio: GameAudio,
     /// Errors to show once.
     pub errors: Vec<String>,
@@ -550,6 +572,9 @@ impl Sequencer {
     /// Opens `file` from `path`.
     pub fn open(&mut self, path: String, file: SequenceFile) {
         self.doc = Some(SequenceDoc::open(path, file));
+        // Another sequence's range means nothing here; loop stays.
+        self.mode.range = None;
+        self.mode.backwards = false;
         self.preview = None;
         self.preview_on = true;
     }
@@ -572,7 +597,11 @@ impl Sequencer {
             .doc
             .as_ref()
             .filter(|_| self.preview_on)
-            .map(|doc| (doc.current(), doc.keys.playhead, doc.keys.playing))
+            // Sounds play forwards only.
+            .map(|doc| {
+                let playing = doc.keys.playing && !self.mode.backwards;
+                (doc.current(), doc.keys.playhead, playing)
+            })
         else {
             self.stop_preview();
             return None;
@@ -656,14 +685,15 @@ impl Sequencer {
             && ui.rect_contains_pointer(ui.max_rect())
             && transport::keys_free(ui.ctx())
         {
-            for command in ui.input_mut(transport::keys) {
-                transport::apply(&mut doc.keys, command);
+            let edits = doc.edit_points();
+            for command in ui.input_mut(transport::sequencer_keys) {
+                transport::apply_with(&mut doc.keys, &mut self.mode, &edits, command);
             }
         }
         let dt =
             f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS) * self.rate.0;
         if let Some(doc) = &mut self.doc {
-            doc.tick(dt);
+            doc.tick(dt, &self.mode);
             if doc.keys.playing {
                 ui.ctx().request_repaint();
             }
@@ -742,8 +772,14 @@ impl Sequencer {
             }
         });
 
-        if let Some(command) = transport::bar(ui, &doc.keys, &mut self.rate) {
-            transport::apply(&mut doc.keys, command);
+        let range = self.mode.range.map(|_| self.mode.bounds(doc.duration()));
+        // Both rows draw every frame; a click is on one of them.
+        let main = transport::bar_with(ui, &doc.keys, &mut self.rate, range);
+        let more = transport::sequence_bar(ui, &doc.keys, &self.mode);
+        let command = main.or(more);
+        if let Some(command) = command {
+            let edits = doc.edit_points();
+            transport::apply_with(&mut doc.keys, &mut self.mode, &edits, command);
         }
 
         // The timeline: playhead, events, and the end as the duration.
@@ -782,7 +818,7 @@ impl Sequencer {
         let left = strip.left() + 6.0;
         let width = (ui.available_width().max(120.0) - 12.0).max(1.0);
 
-        sections_view(ui, doc, left, width);
+        sections_view(ui, doc, left, width, range);
         add_menu(ui, doc, scene);
         ui.separator();
         section_inspector(ui, doc, scene);
@@ -940,7 +976,13 @@ fn picked_focus(world: &World, picked: &Picked, by_tag: bool) -> Option<Focus> {
 }
 
 /// The rows of sections, each laid over the timeline's seconds.
-fn sections_view(ui: &mut egui::Ui, doc: &mut SequenceDoc, left: f32, width: f32) {
+fn sections_view(
+    ui: &mut egui::Ui,
+    doc: &mut SequenceDoc,
+    left: f32,
+    width: f32,
+    range: Option<(f64, f64)>,
+) {
     let palette = theme::palette(ui.ctx());
     let duration = doc.duration().max(1e-6);
     let x_of = |seconds: f64| left + (seconds / duration) as f32 * width;
@@ -954,6 +996,17 @@ fn sections_view(ui: &mut egui::Ui, doc: &mut SequenceDoc, left: f32, width: f32
         );
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect.shrink2(egui::vec2(0.0, 1.0)), 3.0, palette.inset);
+        // The play range, shaded behind the sections.
+        if let Some((from, to)) = range {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(x_of(from), rect.top() + 1.0),
+                    egui::pos2(x_of(to), rect.bottom() - 1.0),
+                ),
+                0.0,
+                palette.accent_soft,
+            );
+        }
         let sections = doc.sections(row);
         let mut hit = None;
         for (index, (start, end, label)) in sections.iter().enumerate() {
