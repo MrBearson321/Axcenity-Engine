@@ -240,6 +240,7 @@ impl EditorApp {
                 path,
             }) => self.plugin_asset_action(plugin, action, &path),
             Some(BrowserAction::RenameAsset { from, to }) => self.rename_asset(&from, &to),
+            Some(BrowserAction::OrganizeTexturePacks) => self.organize_texture_packs(),
             Some(BrowserAction::FindUnused(paths)) => self.find_unused_assets(&paths),
             Some(BrowserAction::SetImportPreset { path, preset }) => {
                 self.set_import_preset(&path, preset.as_deref());

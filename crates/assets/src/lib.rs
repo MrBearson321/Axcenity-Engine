@@ -47,6 +47,7 @@ mod probe;
 mod references;
 mod reload;
 mod sky_image;
+mod texture_pack;
 mod texture_set;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -108,7 +109,7 @@ pub use model::{
     ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
     Primitive, PrimitiveReport, Rig, Take, TextureRole, Track, cached_meshes, cooked_models,
     embedded_files, is_collision_piece, list_objects, load_model, load_models, load_takes,
-    lod_level, tangents, texture_roles,
+    lod_level, tangents, texture_pack_name, texture_roles,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{
@@ -124,9 +125,13 @@ pub use sky_image::{
     HDR_SKY_EXTENSIONS, MAX_SKY_WIDTH, SKY_IMAGE_EXTENSIONS, SkyImage, decode_sky_image,
     is_hdr_sky_file, read_sky_image,
 };
+pub use texture_pack::{
+    PackGroup, PackMove, TexturesImport, import_textures, pack_folder, pack_set_file,
+    pack_texture_set, plan_pack_folders, texture_packs,
+};
 pub use texture_set::{
     TEXTURE_SET_SUFFIX, TextureSet, TextureSetError, TextureSetMap, read_texture_set,
-    texture_set_from_files, write_texture_set,
+    texture_set_from_files, texture_set_json, write_texture_set,
 };
 
 /// The project's loaded assets. Cloning gives another handle to the same

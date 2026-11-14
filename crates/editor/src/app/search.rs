@@ -465,6 +465,9 @@ fn command_description(command: &Command) -> String {
         Command::CheckAssets => {
             "Look for missing files, broken references, failed imports and broken dependencies."
         }
+        Command::OrganizeTexturePacks => {
+            "Put each material's loose texture maps in a folder of their own, one tile each."
+        }
         Command::SetUpAutocomplete => {
             "Write the files VS Code needs to complete Axcenity's API in your scripts."
         }

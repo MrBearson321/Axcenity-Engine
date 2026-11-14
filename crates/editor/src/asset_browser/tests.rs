@@ -358,3 +358,81 @@ fn a_plugins_item_in_an_assets_menu_reports_its_path() {
     );
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn loose_texture_maps_offer_organize_and_each_set_is_one_tile_after() {
+    let folder =
+        std::env::temp_dir().join(format!("axcenity-assets-organize-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    let terrain = folder.join("assets/textures/terrain");
+    std::fs::create_dir_all(&terrain).unwrap();
+    let picture = std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/hello-data/assets/textures/sword.png"),
+    )
+    .unwrap();
+    let names = [
+        "brown_mud_leaves_01_ao_2k.png",
+        "brown_mud_leaves_01_diff_2k.png",
+        "brown_mud_leaves_01_nor_gl_2k.png",
+        "brown_mud_leaves_01_rough_2k.png",
+        "Moss002_2K-JPG_Color.png",
+        "Moss002_2K-JPG_NormalGL.png",
+        "Moss002_2K-JPG_Roughness.png",
+    ];
+    for name in names {
+        std::fs::write(terrain.join(name), &picture).unwrap();
+    }
+    let mut browser = AssetBrowser::default();
+    browser.open(Some(&folder));
+    browser.entries();
+    assert_eq!(browser.loose_packs, 2);
+    browser.category = Category::Textures;
+    let ctx = theme::test_context();
+    let draw = |browser: &mut AssetBrowser, file: &str| {
+        let mut action = None;
+        for _ in 0..2 {
+            let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    action = browser.show(ui, true, false, None).or(action.take());
+                });
+            });
+        }
+        if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &PathBuf::from(snapshots).join(file),
+                egui::vec2(900.0, 300.0),
+                vec![Vec::new(); 4],
+                |ui| {
+                    egui::CentralPanel::default()
+                        .show(ui, |ui| browser.show(ui, true, false, None));
+                },
+            );
+        }
+        action
+    };
+    draw(&mut browser, "assets-panel-loose-maps.png");
+
+    // What Organize does to the files (the app also repoints references).
+    for pack in axcenity_assets::plan_pack_folders(&folder, &loose_images(&browser.files)) {
+        let to: Vec<String> = pack.moves.iter().map(|(_, to)| to.clone()).collect();
+        for (from, to) in &pack.moves {
+            std::fs::create_dir_all(folder.join(to).parent().unwrap()).unwrap();
+            std::fs::rename(folder.join(from), folder.join(to)).unwrap();
+        }
+        let (path, set) = axcenity_assets::pack_texture_set(&folder, &pack.folder, &pack.name, &to);
+        axcenity_assets::write_texture_set(&folder.join(path), &set).unwrap();
+    }
+    browser.refresh();
+    browser.entries();
+    assert_eq!(browser.loose_packs, 0);
+    let sets: Vec<String> = browser
+        .files
+        .iter()
+        .filter(|entry| entry.kind != AssetKind::Prop)
+        .map(|entry| entry.name.clone())
+        .collect();
+    assert_eq!(sets, ["brown_mud_leaves_01", "Moss002"]);
+    draw(&mut browser, "assets-panel-organized.png");
+    let _ = std::fs::remove_dir_all(&folder);
+}

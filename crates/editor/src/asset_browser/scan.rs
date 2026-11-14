@@ -83,6 +83,21 @@ pub fn display_name(path: &str) -> String {
         .to_owned()
 }
 
+/// The images among `entries` (from [`scan`]) that could be loose maps of
+/// a material: not in a texture set's folder already (`scan` leaves those
+/// out), nor an imported model's, an animation's, a particle's or a sky.
+pub fn loose_images(entries: &[AssetEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, AssetKind::Texture | AssetKind::Image))
+        .filter(|entry| {
+            let lower = entry.path.to_lowercase();
+            !lower.starts_with("assets/models/") && !lower.starts_with("assets/animations/")
+        })
+        .map(|entry| entry.path.clone())
+        .collect()
+}
+
 /// Every asset file in `folder`'s `assets` folder, sorted by path.
 pub fn scan(folder: &Path) -> Vec<AssetEntry> {
     let mut found = Vec::new();

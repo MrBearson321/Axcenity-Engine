@@ -47,7 +47,7 @@ pub mod thumbnails;
 
 use origin::{Origin, Origins};
 use packages::{Shown, grouped, shown};
-pub use scan::{display_name, kind_of, scan};
+pub use scan::{display_name, kind_of, loose_images, scan};
 use thumbnails::Thumbnails;
 
 /// Where prefabs are saved, in the project folder.
@@ -245,6 +245,9 @@ pub enum BrowserAction {
     View(String),
     /// Rename or move the asset at `from` to `to`, with every reference.
     RenameAsset { from: String, to: String },
+    /// Move each material's loose maps into a folder of their own, with a
+    /// texture set, pointing everything that uses them at the new places.
+    OrganizeTexturePacks,
     /// Give the texture file at `path` the import preset `preset` (R12);
     /// `None` takes away its own pick, so its folder's applies.
     SetImportPreset {
@@ -330,6 +333,10 @@ pub struct AssetBrowser {
     flat: bool,
     /// The sections folded shut.
     folded: HashSet<Origin>,
+    /// How many materials' maps lie loose in the project (a download's
+    /// `_diff`, `_nor_gl`… side by side), for the Organize row; worked out
+    /// with each scan that finds a change.
+    loose_packs: usize,
     /// Running plugins' items for the right-click menu
     /// (`plugin:AddAssetAction`), each with its plugin's place in the
     /// editor's list; the app sets them each frame.
@@ -623,6 +630,14 @@ impl AssetBrowser {
             .collect();
         if files_changed || old_shared != self.shared {
             self.generation += 1;
+        }
+        if files_changed {
+            self.loose_packs = match &self.folder {
+                Some(folder) => {
+                    axcenity_assets::plan_pack_folders(folder, &loose_images(&self.files)).len()
+                }
+                None => 0,
+            };
         }
         if files_changed || sources_changed || old_shared != self.shared || self.origins_stale {
             self.origins_stale = false;
