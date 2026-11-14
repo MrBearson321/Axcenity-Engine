@@ -980,6 +980,18 @@ impl StartScreen {
         }
     }
 
+    /// The code tab the API Reference's examples can be inserted into (its
+    /// file name), or `None` when the active tab isn't Lua code. The editor
+    /// sets it before showing Help > Learn.
+    pub fn set_insert_target(&mut self, tab: Option<String>) {
+        self.reference.insert_into = tab;
+    }
+
+    /// An example whose Insert button was pressed.
+    pub fn take_insert(&mut self) -> Option<String> {
+        self.reference.inserted.take()
+    }
+
     /// Shows the API page (on the start screen, or in Help > Learn) with
     /// the entry called `name` open, as Go to Definition does for an API
     /// member.

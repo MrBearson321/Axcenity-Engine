@@ -892,6 +892,34 @@ pub fn list_objects(bytes: &[u8], format: ModelFormat) -> Result<Vec<ModelObject
     .unwrap_or(Err(ModelError::Damaged))
 }
 
+/// Reads a glTF or GLB file's document, checked as `gltf` checks it,
+/// except that an accessor may have no buffer view and no sparse values.
+/// The glTF spec reads such an accessor as all zeros, and Blender's
+/// exporter writes one for each blend shape that doesn't move a primitive
+/// (its "Try sparse shape keys" option, on by default), but `gltf` refuses
+/// the whole file over it. Its reader gives nothing for such an accessor,
+/// which reading blend shapes takes as no moves.
+fn read_gltf(bytes: &[u8]) -> Result<gltf::Gltf, gltf::Error> {
+    use gltf::json::validation::{Error, Validate};
+    let file = gltf::Gltf::from_slice_without_validation(bytes)?;
+    let root = file.document.as_json();
+    let mut errors = Vec::new();
+    root.validate(root, gltf::json::Path::new, &mut |path, error| {
+        let path = path();
+        let zeros = matches!(error, Error::Missing)
+            && path.as_str().starts_with("accessors[")
+            && path.as_str().ends_with("].bufferView");
+        if !zeros {
+            errors.push((path, error));
+        }
+    });
+    if errors.is_empty() {
+        Ok(file)
+    } else {
+        Err(gltf::Error::Validation(errors))
+    }
+}
+
 /// The files a model in `folder` uses besides itself, as paths inside
 /// `folder`, for copying it with them. A glTF's must all be there; an
 /// FBX's textures are left out when they aren't.
@@ -902,7 +930,7 @@ pub(crate) fn files_used(
 ) -> Result<Vec<PathBuf>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => {
-            let document = gltf::Gltf::from_slice(bytes)?;
+            let document = read_gltf(bytes)?;
             external_files(&document)
                 .into_iter()
                 .map(|uri| uri_path(&uri))
@@ -977,7 +1005,7 @@ fn obj_library(bytes: &[u8], folder: &Path) -> ObjLibrary {
 }
 
 fn gltf_embedded_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
-    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
+    let gltf::Gltf { document, blob } = read_gltf(bytes)?;
     let names = embedded_image_names(&document);
     if names.is_empty() {
         return Ok(Vec::new());
@@ -1072,7 +1100,7 @@ fn read(
     in_project: Option<InProject<'_>>,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
-    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
+    let gltf::Gltf { document, blob } = read_gltf(bytes)?;
     // Checked here, not left to `gltf`, so nothing outside `folder` is read
     // and a missing file is named.
     for uri in external_files(&document) {
@@ -1206,7 +1234,7 @@ fn gltf_bones(
 /// The objects in a glTF file: the default scene's nodes, or every mesh
 /// if it has no scenes.
 fn list(bytes: &[u8]) -> Result<Vec<ModelObject>, ModelError> {
-    let document = gltf::Gltf::from_slice(bytes)?.document;
+    let document = read_gltf(bytes)?.document;
     let mut visits = 0;
     let mut siblings = Siblings::default();
     let tree = match default_scene(&document) {

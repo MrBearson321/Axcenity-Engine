@@ -112,6 +112,14 @@ Sound.Ended: Signal
 
 Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.
 
+```lua
+local music = workspace.Music
+music.Ended:Connect(function()
+	print("The song finished")
+end)
+music:Play()
+```
+
 ### Functions
 
 #### Play

@@ -20,6 +20,7 @@
 mod discovery;
 mod game;
 mod handshake;
+pub mod limits;
 mod motion;
 mod ownership;
 mod replay;
@@ -94,5 +95,7 @@ mod smoothing_tests;
 mod streaming_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod validation_tests;
 #[cfg(test)]
 mod wire_tests;

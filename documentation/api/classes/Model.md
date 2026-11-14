@@ -48,6 +48,12 @@ Model:GetPivot(): CFrame
 
 Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
 
+```lua
+local house = workspace.House
+local where = house:GetPivot()
+house:PivotTo(where * CFrame.new(0, 0, -10)) -- move it 10 studs forward
+```
+
 #### PivotTo
 
 ```luau
