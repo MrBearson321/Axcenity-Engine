@@ -113,11 +113,12 @@ pub(super) fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawLi
     list
 }
 
-/// The volume's probes in the renderer's buffer now: its last `PROBES`
-/// (after the camera's own, with ray traced GI).
+/// The volume's probes in the renderer's buffer now (after the camera's
+/// finest grid, with ray traced GI).
 pub(super) fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
     let texels = texels_held(renderer);
-    texels[texels.len() - PROBES as usize..]
+    let first = renderer.scene.light_probes.first_bake().unwrap_or(0) as usize;
+    texels[first..first + PROBES as usize]
         .iter()
         .map(|probe| probe.map(|[r, g, b, _]| [r, g, b]))
         .collect()

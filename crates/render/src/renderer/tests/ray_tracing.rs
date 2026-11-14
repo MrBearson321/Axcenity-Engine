@@ -975,7 +975,10 @@ mod global_illumination {
     };
     use super::*;
     use crate::RayTracedGlobalIllumination;
-    use crate::renderer::light_probes::{CAMERA_PROBES, CAMERA_SPACING};
+    use crate::renderer::light_probes::{CAMERA_PROBES, CAMERA_SPACINGS};
+
+    /// How far apart the camera's finest probes stand.
+    const CAMERA_SPACING: f32 = CAMERA_SPACINGS[0];
 
     fn traced(gi: RayTracedGlobalIllumination) -> crate::GraphicsSettings {
         crate::GraphicsSettings {
@@ -998,9 +1001,9 @@ mod global_illumination {
         let world = with_volume(&moved, before.clone());
         let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
-        // Medium traces 256 probes a frame, through the camera's 2,048 and
-        // the volume's 8, so each comes round every 8 frames; two seconds
-        // settle them (half a second each time).
+        // Medium traces 256 probes a frame: half through the camera's finest
+        // 2,048 and the volume's 8, so each comes round every 16 frames, and
+        // half through its coarser grids; two seconds settle them.
         for _ in 0..120 {
             renderer.render(&world).unwrap();
         }
@@ -1036,7 +1039,7 @@ mod global_illumination {
         let world = with_volume(&lit, vec![[[0.0; 3]; 4]; PROBES as usize]);
         let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
-        // Six times round the camera's probes and the volume's.
+        // Three times round the camera's finest probes and the volume's.
         for _ in 0..48 {
             renderer.render(&world).unwrap();
         }
@@ -1088,14 +1091,21 @@ mod global_illumination {
         let world = yard_with_block(Vec3::new(-8.0, 3.0, 0.0));
         let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
-        // Medium traces 256 a frame: every one of the 2,048 within 8.
-        for _ in 0..10 {
+        // Medium traces 256 a frame, half of them near: every one of the
+        // finest 2,048 within 16.
+        for _ in 0..17 {
             renderer.render(&world).unwrap();
         }
-        assert_eq!(renderer.scene.probes_ray_traced(), Some(10 * 256));
+        assert_eq!(renderer.scene.probes_ray_traced(), Some(17 * 256));
         assert!(renderer.stats().ray_tracing.instances > 0);
-        let held = texels_held(&renderer);
-        assert_eq!(held.len(), 2048, "the camera's probes and no others");
+        let all = texels_held(&renderer);
+        assert_eq!(
+            all.len(),
+            4 * 2048,
+            "the camera's grids out to High's 400 studs and no others"
+        );
+        // The finest grid first.
+        let held = &all[..2048];
         let middle = Vec3::new(-9.0, 3.0, 0.0);
         let inside = held[camera_probe_at(middle, Vec3::new(-4.5, 4.5, 1.5))];
         assert_eq!(inside[0][3], 2.0, "inside the block: left out: {inside:?}");
@@ -1116,7 +1126,7 @@ mod global_illumination {
         };
         let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
         renderer.set_graphics(&traced(RayTracedGlobalIllumination::Medium));
-        for _ in 0..10 {
+        for _ in 0..17 {
             renderer
                 .render(&yard_with_block(Vec3::new(-8.0, 3.0, 0.0)))
                 .unwrap();
@@ -1143,8 +1153,8 @@ mod global_illumination {
                 }
             }
         }
-        // This frame's batch (256 probes, two layers along Z) was traced
-        // after the move, so those differ.
+        // This frame's batch (128 of the finest grid's probes, a layer
+        // along Z) was traced after the move, so those differ.
         assert!(kept >= 1920 - 256, "kept their light: {kept} of 1920");
         assert!(
             untraced >= 128 - 16,

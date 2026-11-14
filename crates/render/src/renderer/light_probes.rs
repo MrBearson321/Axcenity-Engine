@@ -18,10 +18,12 @@
 //! volume. While the sky is as baked, nothing is added.
 //!
 //! With ray traced GI on (`ray_gi.rs`), the camera brings probes of its own
-//! too: a fine grid around it, first in the buffer and first to be read,
-//! with no bake (each starts unusable until traced). As the camera moves a
-//! spacing, the grid moves with it and its probes are copied along on the
-//! GPU, so only the row it moves into starts again.
+//! too, with no bake (each starts unusable until traced): a fine grid
+//! around it, first in the buffer and first to be read, and coarser grids
+//! (cascades) around that, last, out to the rays' reach, so GI fades out
+//! far away instead of stopping a few spacings from the camera. As the
+//! camera moves a spacing, each grid moves with it and its probes are
+//! copied along on the GPU, so only the row it moves into starts again.
 
 use bytemuck::{Pod, Zeroable};
 use glam::{IVec3, Quat, Vec3};
@@ -43,14 +45,19 @@ const MAX_PROBES_PER_VOLUME: usize = 64 * 64 * 64;
 /// of the first is 1 for a probe that's not to be used (ray_gi.wgsl).
 type ProbeTexels = [[f32; 4]; 4];
 
-/// The camera's probes (with ray traced GI): so many along X, Y and Z.
+/// Each of the camera's grids of probes (with ray traced GI): so many
+/// along X, Y and Z.
 pub(super) const CAMERA_PROBES: [u32; 3] = [16, 8, 16];
-/// How far apart the camera's probes stand, in studs: fine enough for a
-/// room to get its own light.
-pub(super) const CAMERA_SPACING: f32 = 3.0;
-/// How far inside the camera's box, in studs, its light fades in.
-const CAMERA_BLEND: f32 = 6.0;
-/// Stands for the camera's probes among the bakes' keys.
+/// How far apart the probes of each of the camera's grids stand, in
+/// studs, finest first: the finest fine enough for a room to get its own
+/// light, each coarser one four times wider (24, 96, 384 and 1,536 studs
+/// to either side), so GI reaches as far as the rays do (`cascades_for`).
+pub(super) const CAMERA_SPACINGS: [f32; 4] = [3.0, 12.0, 48.0, 192.0];
+/// How far inside each of the camera's boxes, in its spacings, its light
+/// fades in (over the next coarser grid's, or the sky's past the last).
+const CAMERA_BLEND_SPACINGS: f32 = 2.0;
+/// Stands for the camera's grids among the bakes' keys (minus each grid's
+/// place).
 const CAMERA_KEY: u64 = u64::MAX;
 /// A probe with nothing in it yet: unusable until it's traced.
 const UNTRACED: ProbeTexels = [[0.0, 0.0, 0.0, 2.0], [0.0; 4], [0.0; 4], [0.0; 4]];
@@ -82,21 +89,75 @@ struct ProbeGrid {
     counts: [u32; 3],
 }
 
-/// Where the camera's probes stand, and what moving them needs.
-struct CameraProbes {
-    /// The middle of their box, in spacings.
+/// One of the camera's grids of probes: where it stands and how far it
+/// has moved.
+struct Cascade {
+    /// How far apart its probes stand, in studs.
+    spacing: f32,
+    /// The middle of its box, in spacings.
     cell: IVec3,
     /// How many spacings the box has moved since its probes were last
     /// copied along (by `follow_camera`).
     moved: IVec3,
-    /// Untraced probes, copied over the places nothing moves into.
+    /// Where its first probe is in the buffer.
+    first: u32,
+}
+
+impl Cascade {
+    fn new(spacing: f32, camera: Vec3) -> Self {
+        Self {
+            spacing,
+            cell: camera_cell(camera, spacing),
+            moved: IVec3::ZERO,
+            first: 0,
+        }
+    }
+
+    /// Its box: its middle and half its size.
+    fn volume(&self) -> (Vec3, Vec3) {
+        let counts = Vec3::from_array(CAMERA_PROBES.map(|count| count as f32));
+        (
+            self.cell.as_vec3() * self.spacing,
+            counts * self.spacing * 0.5,
+        )
+    }
+
+    /// The volume the shaders read for it.
+    fn raw(&self) -> (ProbeGrid, VolumeRaw) {
+        let (center, half_size) = self.volume();
+        let [x, y, z] = CAMERA_PROBES;
+        let grid = ProbeGrid {
+            center,
+            rotation: Quat::IDENTITY,
+            half_size,
+            counts: CAMERA_PROBES,
+        };
+        let raw = VolumeRaw {
+            to_box: to_box_rows(center, Quat::IDENTITY),
+            extent: half_size
+                .extend(CAMERA_BLEND_SPACINGS * self.spacing)
+                .to_array(),
+            grid: [x, y, z, self.first],
+            sky: [0.0; 4],
+            sky_first: [0; 4],
+        };
+        (grid, raw)
+    }
+}
+
+/// The camera's probes, and what moving them needs.
+struct CameraProbes {
+    /// Finest first.
+    cascades: Vec<Cascade>,
+    /// One grid's worth of untraced probes, copied over the places nothing
+    /// moves into.
     untraced: wgpu::Buffer,
-    /// The probes as they were before a move, copied from.
+    /// One grid's probes as they were before a move, copied from.
     before: wgpu::Buffer,
 }
 
 impl CameraProbes {
-    fn new(device: &wgpu::Device, cell: IVec3) -> Self {
+    fn new(device: &wgpu::Device) -> Self {
         let count = camera_probe_count() as usize;
         let untraced = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera light probes (untraced)"),
@@ -110,30 +171,34 @@ impl CameraProbes {
             mapped_at_creation: false,
         });
         Self {
-            cell,
-            moved: IVec3::ZERO,
+            cascades: Vec::new(),
             untraced,
             before,
         }
     }
-
-    fn volume(&self) -> (Vec3, Vec3) {
-        let counts = Vec3::from_array(CAMERA_PROBES.map(|count| count as f32));
-        (
-            self.cell.as_vec3() * CAMERA_SPACING,
-            counts * CAMERA_SPACING * 0.5,
-        )
-    }
 }
 
-/// How many probes the camera brings.
+/// How many probes each of the camera's grids has.
 fn camera_probe_count() -> u32 {
     CAMERA_PROBES.iter().product()
 }
 
-/// The spacing nearest `camera`: the middle of the camera's probes' box.
-fn camera_cell(camera: Vec3) -> IVec3 {
-    let cell = (camera / CAMERA_SPACING).round();
+/// How many of the camera's grids ray traced GI reaching `reach` studs
+/// uses: the finest, then each coarser one while the one before it stops
+/// short of the reach (most of [`CAMERA_SPACINGS`]).
+fn cascades_for(reach: f32) -> usize {
+    let half_width = |spacing: f32| CAMERA_PROBES[0] as f32 * spacing * 0.5;
+    let coarser = CAMERA_SPACINGS[..CAMERA_SPACINGS.len() - 1]
+        .iter()
+        .take_while(|&&spacing| half_width(spacing) < reach)
+        .count();
+    1 + coarser
+}
+
+/// The spacing nearest `camera`, for a grid `spacing` studs apart: the
+/// middle of that grid's box.
+fn camera_cell(camera: Vec3, spacing: f32) -> IVec3 {
+    let cell = (camera / spacing).round();
     if cell.is_finite() {
         cell.as_ivec3()
     } else {
@@ -141,10 +206,10 @@ fn camera_cell(camera: Vec3) -> IVec3 {
     }
 }
 
-/// The copies, as (from, to, probes), that move the camera's probes along
-/// when their box moves `moved` spacings: each row of probes along X that
-/// stays inside the box goes from where it stood in `before` to where it
-/// stands now. The rest are left untraced.
+/// The copies, as (from, to, probes), that move one of the camera's grids
+/// along when its box moves `moved` spacings: each row of probes along X
+/// that stays inside the box goes from where it stood in `before` to where
+/// it stands now. The rest are left untraced.
 fn moved_rows(moved: IVec3) -> Vec<(u32, u32, u32)> {
     let [nx, ny, nz] = CAMERA_PROBES.map(|count| count as i32);
     let mut rows = Vec::new();
@@ -171,11 +236,13 @@ fn moved_rows(moved: IVec3) -> Vec<(u32, u32, u32)> {
 pub(super) struct LightProbes {
     buffer: wgpu::Buffer,
     /// The bakes (their keys) in the buffer, in the order they're there:
-    /// `CAMERA_KEY` first for the camera's probes.
+    /// `CAMERA_KEY` minus the cascade for each of the camera's grids.
     held: Vec<u64>,
     /// The camera's probes, while ray traced GI asks for them.
     camera: Option<CameraProbes>,
-    /// The volumes drawn this frame, smallest box first.
+    /// The volumes drawn this frame, in the order they're read and in the
+    /// buffer: the camera's finest grid, the bakes smallest box first, then
+    /// the camera's coarser grids.
     drawn: Vec<VolumeRaw>,
     /// Where their probes stand, in the same order.
     grids: Vec<ProbeGrid>,
@@ -203,60 +270,70 @@ impl LightProbes {
         }
     }
 
-    /// Picks the volumes to draw (the nearest `MAX_VOLUMES` to `camera`
-    /// with a usable bake, and the camera's own probes first with
-    /// `camera_probes`) and makes sure the buffer holds their probes,
-    /// writing it only when they've changed. True when the buffer was made
-    /// again, so the frame's bindings must be too.
+    /// Picks the volumes to draw (the nearest to `camera` with a usable
+    /// bake, as many as `MAX_VOLUMES` leaves) and, with `camera_reach`
+    /// (ray traced GI's reach), the camera's own grids of probes, and makes
+    /// sure the buffer holds their probes, writing it only when they've
+    /// changed. True when the buffer was made again, so the frame's
+    /// bindings must be too.
     pub(super) fn prepare(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         volumes: &[LightProbeVolume],
         camera: Vec3,
-        camera_probes: bool,
+        camera_reach: Option<f32>,
     ) -> bool {
+        let cascades = camera_reach.map_or(0, cascades_for);
         let mut chosen: Vec<&LightProbeVolume> =
             volumes.iter().filter(|volume| usable(volume)).collect();
         let distance =
             |v: &LightProbeVolume| box_distance(v.center, v.rotation, v.half_size, camera);
         chosen.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
-        chosen.truncate(MAX_VOLUMES - usize::from(camera_probes));
+        chosen.truncate(MAX_VOLUMES - cascades);
         // The smallest first, so a small box inside a big one wins there.
         let size = |v: &LightProbeVolume| v.half_size.x * v.half_size.y * v.half_size.z;
         chosen.sort_by(|a, b| size(a).total_cmp(&size(b)));
 
-        let keys: Vec<u64> = camera_probes
-            .then_some(CAMERA_KEY)
-            .into_iter()
+        let camera_keys = (0..cascades as u64).map(|cascade| CAMERA_KEY - cascade);
+        let keys: Vec<u64> = camera_keys
+            .clone()
+            .take(1)
             .chain(chosen.iter().map(|volume| volume.probes.key))
+            .chain(camera_keys.skip(1))
             .collect();
-        let cell = camera_cell(camera);
-        if !camera_probes {
+        if cascades == 0 {
             self.camera = None;
         } else if let Some(probes) = &mut self.camera
             && keys == self.held
         {
-            probes.moved += cell - probes.cell;
-            probes.cell = cell;
+            for cascade in &mut probes.cascades {
+                let cell = camera_cell(camera, cascade.spacing);
+                cascade.moved += cell - cascade.cell;
+                cascade.cell = cell;
+            }
         }
+        let per_grid = camera_probe_count();
+        let baked: u32 = chosen
+            .iter()
+            .map(|volume| volume.probes.counts.iter().product::<u32>())
+            .sum();
         let mut rebind = false;
         if keys != self.held {
-            if camera_probes {
-                let probes = self
-                    .camera
-                    .get_or_insert_with(|| CameraProbes::new(device, cell));
-                probes.cell = cell;
-                probes.moved = IVec3::ZERO;
+            if cascades > 0 {
+                let probes = self.camera.get_or_insert_with(|| CameraProbes::new(device));
+                probes.cascades = CAMERA_SPACINGS[..cascades]
+                    .iter()
+                    .map(|&spacing| Cascade::new(spacing, camera))
+                    .collect();
             }
-            let untraced = (0..camera_probe_count())
-                .filter(|_| camera_probes)
-                .map(|_| UNTRACED);
-            let mut texels: Vec<ProbeTexels> = untraced
+            let untraced = |grids: usize| (0..grids * per_grid as usize).map(|_| UNTRACED);
+            let mut texels: Vec<ProbeTexels> = untraced(cascades.min(1))
                 .chain(
                     chosen
                         .iter()
                         .flat_map(|volume| probe_texels(&volume.probes)),
                 )
+                .chain(untraced(cascades.saturating_sub(1)))
                 .collect();
             // Then the sky light of those that keep it apart.
             texels.extend(
@@ -281,31 +358,28 @@ impl LightProbes {
         self.drawn.clear();
         self.grids.clear();
         self.baked_skies.clear();
+        let cascades: &mut [Cascade] = match &mut self.camera {
+            Some(probes) => &mut probes.cascades,
+            None => &mut [],
+        };
+        // Where each grid of the camera's starts: the finest first, the
+        // coarser ones after the bakes.
         let mut first = 0;
-        if let Some(probes) = &self.camera {
-            let (center, half_size) = probes.volume();
-            let [x, y, z] = CAMERA_PROBES;
-            self.grids.push(ProbeGrid {
-                center,
-                rotation: Quat::IDENTITY,
-                half_size,
-                counts: CAMERA_PROBES,
-            });
-            self.drawn.push(VolumeRaw {
-                to_box: to_box_rows(center, Quat::IDENTITY),
-                extent: half_size.extend(CAMERA_BLEND).to_array(),
-                grid: [x, y, z, 0],
-                sky: [0.0; 4],
-                sky_first: [0; 4],
-            });
-            self.baked_skies.push(None);
-            first = x * y * z;
+        for cascade in cascades.iter_mut() {
+            cascade.first = first;
+            first += per_grid;
+            if cascade.first == 0 {
+                first += baked;
+            }
         }
-        let mut sky_first: u32 = first
-            + chosen
-                .iter()
-                .map(|volume| volume.probes.counts.iter().product::<u32>())
-                .sum::<u32>();
+        if let Some(finest) = cascades.first() {
+            let (grid, raw) = finest.raw();
+            self.grids.push(grid);
+            self.drawn.push(raw);
+            self.baked_skies.push(None);
+        }
+        let mut first = cascades.len().min(1) as u32 * per_grid;
+        let mut sky_first = cascades.len() as u32 * per_grid + baked;
         for volume in chosen {
             let [x, y, z] = volume.probes.counts;
             self.grids.push(ProbeGrid {
@@ -328,37 +402,51 @@ impl LightProbes {
             }
             self.baked_skies.push(baked_sky);
         }
+        for cascade in cascades.iter().skip(1) {
+            let (grid, raw) = cascade.raw();
+            self.grids.push(grid);
+            self.drawn.push(raw);
+            self.baked_skies.push(None);
+        }
         rebind
     }
 
-    /// Records copying the camera's probes along into `encoder` if their
-    /// box has moved since: each to its new place, and the places nothing
-    /// moved into back to untraced. Before anything reads them this frame.
+    /// Records copying the camera's probes along into `encoder` for each of
+    /// its grids whose box has moved since: each to its new place, and the
+    /// places nothing moved into back to untraced. Before anything reads
+    /// them this frame.
     pub(super) fn follow_camera(&mut self, encoder: &mut wgpu::CommandEncoder) {
         let Some(probes) = &mut self.camera else {
             return;
         };
-        if probes.moved == IVec3::ZERO {
-            return;
-        }
-        let rows = moved_rows(probes.moved);
-        probes.moved = IVec3::ZERO;
         let size = buffer_size(camera_probe_count() as usize);
-        if !rows.is_empty() {
-            encoder.copy_buffer_to_buffer(&self.buffer, 0, &probes.before, 0, size);
-        }
-        encoder.copy_buffer_to_buffer(&probes.untraced, 0, &self.buffer, 0, size);
         let texels = size_of::<ProbeTexels>() as u64;
-        for (from, to, count) in rows {
-            encoder.copy_buffer_to_buffer(
-                &probes.before,
-                u64::from(from) * texels,
-                &self.buffer,
-                u64::from(to) * texels,
-                u64::from(count) * texels,
-            );
+        let mut moved = false;
+        for cascade in &mut probes.cascades {
+            if cascade.moved == IVec3::ZERO {
+                continue;
+            }
+            let rows = moved_rows(cascade.moved);
+            cascade.moved = IVec3::ZERO;
+            let at = u64::from(cascade.first) * texels;
+            // One grid at a time through `before`: copies in one encoder
+            // happen in order.
+            if !rows.is_empty() {
+                encoder.copy_buffer_to_buffer(&self.buffer, at, &probes.before, 0, size);
+            }
+            encoder.copy_buffer_to_buffer(&probes.untraced, 0, &self.buffer, at, size);
+            for (from, to, count) in rows {
+                encoder.copy_buffer_to_buffer(
+                    &probes.before,
+                    u64::from(from) * texels,
+                    &self.buffer,
+                    at + u64::from(to) * texels,
+                    u64::from(count) * texels,
+                );
+            }
+            moved = true;
         }
-        self.moves += 1;
+        self.moves += u32::from(moved);
     }
 
     /// The frame uniform's volumes, and how many there are, with `sky` the
@@ -386,6 +474,16 @@ impl LightProbes {
             .sum()
     }
 
+    /// How many of the buffer's first probes are near the camera: all but
+    /// the camera's coarser grids, which ray traced GI traces less often.
+    pub(super) fn near_count(&self) -> u32 {
+        let coarser = self
+            .camera
+            .as_ref()
+            .map_or(0, |probes| probes.cascades.len().saturating_sub(1));
+        self.count() - coarser as u32 * camera_probe_count()
+    }
+
     /// Where probe `index` of the buffer stands in the world, if there's
     /// one: the middle of its cell of its volume's box.
     pub(super) fn point(&self, mut index: u32) -> Option<Vec3> {
@@ -403,6 +501,20 @@ impl LightProbes {
             index -= x * y * z;
         }
         None
+    }
+
+    /// Where the first drawn bake's probes start in the buffer, for tests.
+    #[cfg(test)]
+    pub(super) fn first_bake(&self) -> Option<u32> {
+        let after_camera = usize::from(self.camera.is_some());
+        let drawn = self.drawn.get(after_camera)?;
+        let camera_grid = self.camera.as_ref().is_some_and(|probes| {
+            probes
+                .cascades
+                .iter()
+                .any(|cascade| cascade.first == drawn.grid[3])
+        });
+        (!camera_grid).then_some(drawn.grid[3])
     }
 
     /// Writes the bakes into the buffer again on the next `prepare`, over
@@ -522,7 +634,7 @@ mod tests {
         big.half_size = Vec3::splat(20.0);
         big.probes.key = 2;
         let mut probes = LightProbes::new(&device);
-        probes.prepare((&device, &queue), &[big, small], Vec3::ZERO, false);
+        probes.prepare((&device, &queue), &[big, small], Vec3::ZERO, None);
         assert_eq!(probes.count(), 7);
         // The small box comes first. Its first probe is in its corner cell:
         // a quarter of the way along its own X and a sixth along its Z, so
@@ -603,9 +715,78 @@ mod tests {
 
     #[test]
     fn the_camera_probes_box_is_centred_on_the_spacing_nearest_the_camera() {
-        assert_eq!(camera_cell(Vec3::new(-8.0, 3.0, 0.0)), IVec3::new(-3, 1, 0));
-        assert_eq!(camera_cell(Vec3::new(1.4, -1.6, 4.6)), IVec3::new(0, -1, 2));
-        assert_eq!(camera_cell(Vec3::NAN), IVec3::ZERO);
+        assert_eq!(
+            camera_cell(Vec3::new(-8.0, 3.0, 0.0), 3.0),
+            IVec3::new(-3, 1, 0)
+        );
+        assert_eq!(
+            camera_cell(Vec3::new(1.4, -1.6, 4.6), 3.0),
+            IVec3::new(0, -1, 2)
+        );
+        assert_eq!(
+            camera_cell(Vec3::new(-8.0, 30.0, 0.0), 12.0),
+            IVec3::new(-1, 3, 0)
+        );
+        assert_eq!(camera_cell(Vec3::NAN, 3.0), IVec3::ZERO);
+    }
+
+    #[test]
+    fn the_camera_brings_coarser_grids_out_to_the_rays_reach() {
+        assert_eq!(cascades_for(20.0), 1, "the finest reaches 24 studs");
+        assert_eq!(cascades_for(50.0), 2);
+        assert_eq!(cascades_for(250.0), 3);
+        assert_eq!(cascades_for(400.0), 4);
+        assert_eq!(cascades_for(5000.0), 4, "no more than there are");
+    }
+
+    #[test]
+    fn the_cameras_finest_grid_comes_first_and_its_coarser_ones_after_the_bakes() {
+        let Some((device, queue)) = crate::renderer::tests::test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut small = volume([2, 1, 3], 6);
+        small.center = Vec3::new(100.0, 0.0, 0.0);
+        let mut probes = LightProbes::new(&device);
+        // 250 studs: the grids reaching 24, 96 and 384 studs.
+        probes.prepare((&device, &queue), &[small], Vec3::ZERO, Some(250.0));
+        let (volumes, count) = probes.uniform(Vec3::ONE);
+        assert_eq!(count, 4);
+        let grid = |i: usize| volumes[i].grid;
+        let extent = |i: usize| volumes[i].extent;
+        assert_eq!(grid(0), [16, 8, 16, 0]);
+        assert_eq!(extent(0), [24.0, 12.0, 24.0, 6.0]);
+        assert_eq!(grid(1), [2, 1, 3, 2048], "the bake, after the finest");
+        assert_eq!(grid(2), [16, 8, 16, 2054]);
+        assert_eq!(
+            extent(2),
+            [96.0, 48.0, 96.0, 24.0],
+            "fading in over two spacings"
+        );
+        assert_eq!(grid(3), [16, 8, 16, 4102]);
+        assert_eq!(extent(3)[0], 384.0);
+        assert_eq!(probes.count(), 3 * 2048 + 6);
+        assert_eq!(probes.near_count(), 2048 + 6, "the coarser grids are far");
+        assert_eq!(probes.buffer().size(), buffer_size(3 * 2048 + 6));
+        // The first coarse grid's first probe: half a spacing in from its
+        // box's corner.
+        let corner = probes.point(2054).unwrap();
+        assert!(
+            corner.abs_diff_eq(Vec3::new(-90.0, -42.0, -90.0), 1e-3),
+            "{corner}"
+        );
+
+        // With every grid, they leave room for four bakes.
+        let many: Vec<LightProbeVolume> = (0..6)
+            .map(|key| {
+                let mut v = volume([1, 1, 1], 1);
+                v.probes.key = key + 1;
+                v
+            })
+            .collect();
+        probes.prepare((&device, &queue), &many, Vec3::ZERO, Some(5000.0));
+        assert_eq!(probes.uniform(Vec3::ONE).1 as usize, MAX_VOLUMES);
+        assert_eq!(probes.count(), 4 * 2048 + 4);
     }
 
     #[test]

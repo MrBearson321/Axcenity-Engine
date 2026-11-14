@@ -647,12 +647,13 @@ impl ScenePipeline {
             self.bind_frame();
         }
         // And the light probe volumes, each only when it's new, with the
-        // camera's own probes while ray traced GI is on.
+        // camera's own grids of probes, out to the rays' reach, while ray
+        // traced GI is on.
         if self.light_probes.prepare(
             (&self.device, &self.queue),
             &list.light_probe_volumes,
             list.camera.position,
-            ray_gi::wanted(&self.graphics),
+            ray_gi::wanted(&self.graphics).then_some(self.graphics.ray_tracing_distance),
         ) {
             self.bind_frame();
         }
@@ -1347,6 +1348,10 @@ impl ScenePipeline {
             ),
             &draws,
         );
+        if let Some(scene) = &mut self.ray_scene {
+            let [on, _, reach, _] = frame_uniform.ray_shadows;
+            scene.stats.shadow_reach = if on > 0.5 { reach.round() as u32 } else { 0 };
+        }
         let water_scene = self
             .ray_scene
             .as_deref()

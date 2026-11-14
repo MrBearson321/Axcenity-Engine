@@ -67,6 +67,10 @@ pub struct RayTracingStats {
     pub path_traced_paths: u32,
     /// Swaying items bent by the wind into BLASes of their own this frame.
     pub bent: u32,
+    /// How far ray traced sun shadows reach this frame, in studs (0 while
+    /// they're off): the ray tracing distance or the world's
+    /// `ShadowDistance`, whichever is nearer.
+    pub shadow_reach: u32,
 }
 
 struct MeshBlas {
@@ -413,6 +417,7 @@ impl RayScene {
             rebuilt: changed,
             path_traced_paths: 0,
             bent: self.bent.as_ref().map_or(0, BentMeshes::bent_count),
+            shadow_reach: 0,
         };
     }
 

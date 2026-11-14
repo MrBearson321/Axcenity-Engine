@@ -33,18 +33,42 @@ const SETTLE_SECONDS: f32 = 0.5;
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct RayGiUniform {
     /// Probes in the batch, rays from each, a number changing each update,
-    /// unused.
+    /// how many of the batch's first probes are near ones.
     counts: [u32; 4],
-    /// How much of what a probe had is kept, how far rays reach, how far
-    /// shadow rays start off a hit, unused.
+    /// How much of what a far probe had is kept, how far rays reach, how
+    /// far shadow rays start off a hit, how much of what a near probe had
+    /// is kept.
     settings: [f32; 4],
 }
 
 /// This frame's batch: which places of the light probes' buffer it covers,
-/// as one or two runs (the count wraps around to the first probe).
+/// as up to four runs: the near probes' (the camera's finest grid and the
+/// bakes, `LightProbes::near_count`), then the far ones' (the camera's
+/// coarser grids), each wrapping around to its first probe.
 pub(super) struct Batch {
     uniform: RayGiUniform,
-    runs: [(u32, u32); 2],
+    runs: [(u32, u32); 4],
+}
+
+/// Where a cycle through the `len` probes from `start` is: the next to
+/// trace, counted from `start`.
+#[derive(Clone, Copy, Debug, Default)]
+struct Cycle {
+    next: u32,
+}
+
+impl Cycle {
+    /// The next `count` probes of the `len` from `start`, as two runs (the
+    /// second from `start` again once the first reaches the end).
+    fn take(&mut self, start: u32, len: u32, count: u32) -> [(u32, u32); 2] {
+        if len == 0 || count == 0 {
+            return [(start, 0); 2];
+        }
+        let first = self.next % len;
+        self.next = (first + count) % len;
+        let until_end = count.min(len - first);
+        [(start + first, until_end), (start, count - until_end)]
+    }
 }
 
 /// The pass's pipeline and buffers.
@@ -60,8 +84,9 @@ pub(super) struct RayGlobalIllumination {
     batch: wgpu::Buffer,
     /// What the pass found for each probe of the batch, before it's copied.
     traced: wgpu::Buffer,
-    /// The next probe to trace, counting through every drawn volume's.
-    next: u32,
+    /// The next near and far probes to trace (`Batch`).
+    near: Cycle,
+    far: Cycle,
     /// Batches traced so far, which turns the rays.
     updates: u32,
     /// Probes traced so far, for tests.
@@ -172,14 +197,18 @@ impl RayGlobalIllumination {
                 64 * u64::from(MOST_PROBES),
                 wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             ),
-            next: 0,
+            near: Cycle::default(),
+            far: Cycle::default(),
             updates: 0,
             probes_traced: 0,
         }
     }
 
     /// Picks this frame's batch of `probes` for `graphics`' setting and
-    /// writes where they stand: `None` when there are none.
+    /// writes where they stand: `None` when there are none. With far
+    /// probes too, half the batch is near ones, so the camera's finest
+    /// grid and the bakes keep up while the coarser grids around them,
+    /// which hold many more probes, are traced more slowly.
     pub(super) fn plan(
         &mut self,
         queue: &wgpu::Queue,
@@ -192,22 +221,36 @@ impl RayGlobalIllumination {
         if count == 0 {
             return None;
         }
-        let first = self.next % total;
+        let near = probes.near_count().min(total);
+        let far = total - near;
+        let near_count = if far == 0 {
+            count
+        } else {
+            (count / 2).min(near)
+        };
+        let far_count = (count - near_count).min(far);
+        let [a, b] = self.near.take(0, near, near_count);
+        let [c, d] = self.far.take(near, far, far_count);
+        let runs = [a, b, c, d];
         let mut standing = Vec::with_capacity(count as usize);
-        for offset in 0..count {
-            let index = (first + offset) % total;
-            let point = probes.point(index).unwrap_or_default();
-            standing.push([point.x, point.y, point.z, f32::from_bits(index)]);
+        for (first, run) in runs {
+            for index in first..first + run {
+                let point = probes.point(index).unwrap_or_default();
+                standing.push([point.x, point.y, point.z, f32::from_bits(index)]);
+            }
         }
-        self.next = (first + count) % total;
         queue.write_buffer(&self.batch, 0, bytemuck::cast_slice(&standing));
-        let until_end = count.min(total - first);
-        let runs = [(first, until_end), (0, count - until_end)];
         self.updates = self.updates.wrapping_add(1);
+        let traced = near_count + far_count;
         Some(Batch {
             uniform: RayGiUniform {
-                counts: [count, setting.rays(), self.updates, 0],
-                settings: [keep(count, total), graphics.ray_tracing_distance, 0.05, 0.0],
+                counts: [traced, setting.rays(), self.updates, near_count],
+                settings: [
+                    keep(far_count, far),
+                    graphics.ray_tracing_distance,
+                    0.05,
+                    keep(near_count, near),
+                ],
             },
             runs,
         })
@@ -327,5 +370,14 @@ mod tests {
         let rare = keep(32, 32 * 240);
         assert!(rare < 0.01, "{rare}");
         assert!(keep(32, 100) > keep(32, 1000));
+    }
+
+    #[test]
+    fn a_cycle_wraps_round_its_own_probes() {
+        let mut far = Cycle::default();
+        assert_eq!(far.take(100, 10, 6), [(100, 6), (100, 0)]);
+        assert_eq!(far.take(100, 10, 6), [(106, 4), (100, 2)]);
+        assert_eq!(far.take(100, 10, 6), [(102, 6), (100, 0)]);
+        assert_eq!(far.take(100, 0, 6), [(100, 0), (100, 0)], "none to take");
     }
 }

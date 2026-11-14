@@ -294,6 +294,7 @@ mod tests {
                 rebuilt: false,
                 path_traced_paths: 0,
                 bent: 0,
+                shadow_reach: 0,
             },
             ..RenderStats::default()
         };
