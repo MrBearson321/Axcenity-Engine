@@ -156,7 +156,7 @@ ufbx = "0.11"
 openusd = "=0.8.0"
 # Typed UsdGeom and UsdShade views over an `openusd` stage (meshes, primvars,
 # transforms, UsdPreviewSurface). MIT, same project and release as `openusd`.
-openusd-schemas = "=0.8.0"
+openusd-schemas = { version = "=0.8.0", default-features = false, features = ["geom", "shade"] }
 # Simplifies imported models' meshes into levels of detail (graphics Phase 13),
 # MIT OR Apache-2.0. Wraps the `meshoptimizer` C++ library (MIT), compiled from
 # source with `cc`, so it needs the C++ compiler `mlua` already uses.

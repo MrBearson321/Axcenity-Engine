@@ -27,7 +27,7 @@ use std::path::Path;
 
 use glam::{DMat4, DVec3};
 use openusd::{sdf, usd};
-use openusd_schemas::geom::XformCache;
+use openusd_schemas::geom::{StageMetadata, XformCache};
 use openusd_schemas::shade;
 
 use crate::glb::{self, Alpha, EmbeddedImage, Material, Node, Primitive, Scene};
@@ -47,10 +47,15 @@ pub(crate) fn convert(path: &Path) -> Result<Converted, ConvertError> {
     let root = stage
         .prim(sdf::Path::abs_root())
         .map_err(|err| ConvertError::Usd(err.to_string()))?;
+    // The top nodes carry the change to glTF's units and axes.
     let top = reader.root;
-    let roots = reader.children(&root, top, top);
+    let roots = reader.children(&root, top, DMat4::IDENTITY);
     if reader.scene.meshes.is_empty() {
-        return Err(ConvertError::NoMeshes);
+        // Often because the layer holding the meshes isn't there.
+        return Err(match stage.composition_errors().first() {
+            Some(error) => ConvertError::Usd(format!("a layer it uses couldn't be read: {error}")),
+            None => ConvertError::NoMeshes,
+        });
     }
     reader.scene.roots = roots;
     if !reader.skipped.is_empty() {
@@ -109,16 +114,18 @@ const NOT_DRAWN: [&str; 9] = [
 impl<'a> Reader<'a> {
     fn new(stage: &'a usd::Stage, path: &Path) -> Self {
         let time = usd::TimeCode::new(stage.start_time_code());
-        let meters = match stage.stage_metadata("metersPerUnit") {
-            Ok(Some(value)) => number(&value).filter(|meters| *meters > 0.0),
-            _ => None,
-        }
-        // USD's fallback: centimeters.
-        .unwrap_or(0.01);
-        let z_up = matches!(
-            stage.stage_metadata("upAxis"),
-            Ok(Some(value)) if value.as_str().is_some_and(|axis| axis.eq_ignore_ascii_case("z"))
-        );
+        let meters = stage
+            .meters_per_unit()
+            .ok()
+            .flatten()
+            .filter(|meters| *meters > 0.0)
+            // USD's fallback: centimeters.
+            .unwrap_or(0.01);
+        let z_up = stage
+            .up_axis()
+            .ok()
+            .flatten()
+            .is_some_and(|axis| axis.as_str().eq_ignore_ascii_case("z"));
         // Z up to Y up: (x, y, z) -> (x, z, -y).
         let axes = if z_up {
             DMat4::from_rotation_x(-std::f64::consts::FRAC_PI_2)
@@ -565,7 +572,7 @@ impl<'a> Reader<'a> {
                 material.base_color[3] = 1.0;
             }
         } else if let Some((name, bytes, _)) = diffuse {
-            let key = format!("color {:?}", surface.diffuse.texture);
+            let key = as_is(&surface.diffuse);
             material.base_color_texture = self.image(key, || textures::embed(&name, bytes));
             if material.base_color_texture.is_some() {
                 let alpha = material.base_color[3];
@@ -589,8 +596,21 @@ impl<'a> Reader<'a> {
                 .or(rough.as_ref())
                 .map(|(name, _, _)| textures::with_extension(name, "png"))
                 .unwrap_or_default();
-            let key = format!("mr {:?} {:?}", surface.metallic.texture, surface.roughness.texture);
+            // Already glTF's layout (an ORM or ARM map): used as it is.
+            let packed = matches!(
+                (&metal, &rough, &surface.metallic.texture, &surface.roughness.texture),
+                (Some((_, _, Channel::Blue)), Some((_, _, Channel::Green)), Some((a, _)), Some((b, _))) if a == b
+            );
+            let key = if packed {
+                as_is(&surface.metallic)
+            } else {
+                format!("mr {:?} {:?}", surface.metallic.texture, surface.roughness.texture)
+            };
+            let whole = packed.then(|| metal.clone()).flatten();
             material.metallic_roughness_texture = self.image(key, || {
+                if let Some((name, bytes, _)) = whole {
+                    return textures::embed(&name, bytes);
+                }
                 textures::pack_metal_rough(
                     &format!("metallic_roughness_{name}"),
                     metal.as_ref().map(|(_, bytes, channel)| (bytes.as_slice(), *channel)),
@@ -605,18 +625,21 @@ impl<'a> Reader<'a> {
             }
         }
         if let Some((name, bytes, _)) = self.texture_bytes(&surface.normal) {
-            let key = format!("normal {:?}", surface.normal.texture);
+            let key = as_is(&surface.normal);
             material.normal_texture = self.image(key, || textures::embed(&name, bytes));
         }
         if let Some((name, bytes, channel)) = self.texture_bytes(&surface.occlusion) {
-            let key = format!("occlusion {:?}", surface.occlusion.texture);
+            let key = match channel {
+                Channel::Red | Channel::Color => as_is(&surface.occlusion),
+                _ => format!("occlusion {:?}", surface.occlusion.texture),
+            };
             material.occlusion_texture = self.image(key, || match channel {
                 Channel::Red | Channel::Color => textures::embed(&name, bytes),
                 channel => textures::single_channel(&textures::with_extension(&name, "png"), &bytes, channel),
             });
         }
         if let Some((name, bytes, _)) = self.texture_bytes(&surface.emissive) {
-            let key = format!("emissive {:?}", surface.emissive.texture);
+            let key = as_is(&surface.emissive);
             material.emissive_texture = self.image(key, || textures::embed(&name, bytes));
             if material.emissive_texture.is_some() {
                 material.emissive = [1.0; 3];
@@ -665,6 +688,13 @@ impl<'a> Reader<'a> {
         self.images.insert(key, made);
         made
     }
+}
+
+/// The image key of a texture file embedded as it is, so maps that share a
+/// file (an ARM map's occlusion and metal-roughness) share one image.
+fn as_is(input: &Input) -> String {
+    let asset = input.texture.as_ref().map_or("", |(asset, _)| asset.as_str());
+    format!("file {asset}")
 }
 
 /// A `GeomSubset` and the faces it holds.

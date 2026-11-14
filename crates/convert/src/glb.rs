@@ -150,8 +150,8 @@ impl Writer {
                     max[axis] = max[axis].max(value[axis]);
                 }
             }
-            accessor["min"] = json!(min);
-            accessor["max"] = json!(max);
+            accessor["min"] = json!(min.to_vec());
+            accessor["max"] = json!(max.to_vec());
         }
         self.accessors.push(accessor);
         self.accessors.len() - 1

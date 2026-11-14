@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
-use image::{DynamicImage, GenericImageView, ImageFormat, RgbaImage};
+use image::{DynamicImage, ImageFormat, RgbaImage};
 
 use crate::glb::EmbeddedImage;
 
@@ -164,7 +164,7 @@ pub(crate) fn embed(name: &str, bytes: Vec<u8>) -> Option<EmbeddedImage> {
             bytes,
         }),
         _ => {
-            let image = image::load_from_memory(&bytes).ok()?;
+            let image = decode_named(name, &bytes)?;
             Some(png(&with_extension(name, "png"), &image.to_rgba8()))
         }
     }
@@ -234,6 +234,15 @@ pub(crate) fn single_channel(name: &str, bytes: &[u8], channel: Channel) -> Opti
 
 fn decode(bytes: &[u8]) -> Option<RgbaImage> {
     image::load_from_memory(bytes).ok().map(|image| image.to_rgba8())
+}
+
+/// Decodes `bytes`, by their contents or else by `name`'s extension (TGA
+/// files have no signature to recognize them by).
+fn decode_named(name: &str, bytes: &[u8]) -> Option<DynamicImage> {
+    image::load_from_memory(bytes).ok().or_else(|| {
+        let format = ImageFormat::from_path(name).ok()?;
+        image::load_from_memory_with_format(bytes, format).ok()
+    })
 }
 
 fn largest<'a>(images: impl Iterator<Item = &'a RgbaImage>) -> Option<(u32, u32)> {
