@@ -93,6 +93,10 @@ R16's plan for regions and data layers is `docs/research/world-regions-r16.md`: 
 
 R15 is built: sculpt brushes and the Mesh Filter (#317), masks saved (#322), `_COL` collision pieces (#319) and the Collision fold that makes them (#334), the Levels of detail fold (#320) and Edit in Blender (#321).
 
+## Import formats and extensibility (Paul's priority 7, 2026-11-14)
+
+`docs/research/import-formats-and-plugins.md`: OBJ read directly through `ufbx` (P7.1), USD converted to `.glb` on import by an editor-only `convert` crate ([ADR-0026](../Architecture/Architecture-Decisions/ADR-0026-Convert-New-Model-Formats-To-glTF-On-Import.md), P7.2), mesh import presets (P7.3), plugin API 3 (P7.4); Alembic deferred until a geometry-cache workflow needs it (P7.5), USD animation later (P7.6), native extensions deferred.
+
 ## Feature plan (unified plan, Phases 1–93)
 
 | Range | Status |
