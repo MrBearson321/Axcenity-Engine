@@ -40,6 +40,9 @@ mod jobs;
 mod layers;
 mod scatter;
 mod strokes;
+mod world_presets;
+
+pub(super) use world_presets::WorldPresets;
 
 pub(super) use disk::terrain_revisions;
 use disk::*;
@@ -68,6 +71,7 @@ impl EditorApp {
             Vec::new()
         };
         let pictures = self.layer_pictures(ui.ctx());
+        self.refresh_world_presets();
         let actions = self.terrain.show(
             ui,
             &StudioContext {
@@ -77,6 +81,7 @@ impl EditorApp {
                 time,
                 textures: &textures,
                 pictures: &pictures,
+                world_presets: &self.world_presets.list,
             },
         );
         for action in actions {
@@ -249,7 +254,10 @@ impl EditorApp {
             TerrainAction::StartGenerate => self.start_generate(),
             TerrainAction::StartErode => self.start_erode(),
             TerrainAction::ApplyPreview => self.apply_preview(),
-            TerrainAction::CancelPreview => self.terrain.preview = None,
+            TerrainAction::CancelPreview => {
+                self.terrain.preview = None;
+                self.terrain.pending_world = None;
+            }
             TerrainAction::CancelJob => {
                 if let Some(running) = &self.terrain.job {
                     running.job.cancel();
@@ -285,6 +293,17 @@ impl EditorApp {
             TerrainAction::AddScatterRules(presets, label) => {
                 if let Some(terrain) = target {
                     self.add_scatter_rules(terrain, &presets, label);
+                }
+            }
+            TerrainAction::GenerateWorldPreset(index) => self.generate_world_preset(index),
+            TerrainAction::ApplyWorldPreset(index) => {
+                if let Some(terrain) = target {
+                    self.apply_world_preset(terrain, index);
+                }
+            }
+            TerrainAction::SaveWorldPreset(name) => {
+                if let Some(terrain) = target {
+                    self.save_world_preset(terrain, &name);
                 }
             }
             TerrainAction::AddBiome(preset) => {
@@ -401,3 +420,5 @@ mod biome_tests;
 mod scatter_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod world_preset_tests;

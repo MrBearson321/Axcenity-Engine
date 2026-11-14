@@ -504,6 +504,9 @@ pub struct EditorApp {
     templates_folder: Option<PathBuf>,
     /// Save as Template…, while it's open.
     template_draft: Option<save_template::TemplateDraft>,
+    /// The world presets the Terrain Studio offers (procedural worlds PW3):
+    /// built-in, then the project's, read for the project folder named.
+    world_presets: terrain::WorldPresets,
     light_cones: bool,
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
@@ -1112,6 +1115,7 @@ impl EditorApp {
             blender_path: String::new(),
             templates_folder: None,
             template_draft: None,
+            world_presets: Default::default(),
             light_cones: false,
             view_cube: true,
             ray_badge: true,

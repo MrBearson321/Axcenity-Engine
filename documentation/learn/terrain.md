@@ -47,6 +47,10 @@ Instead of painting by hand, a **scatter rule** (a ScatterRule object inside the
 
 A **biome** (a Biome object inside the terrain) is an area such as a forest, a meadow or alpine turf, with its own ground material and its own scatter rules. In the Terrain Studio, open **Biomes** and pick **Add biome**: each preset brings its ground layer and its rules. A biome covers ground by itself between its heights, below its steepest slope and between its driest and wettest ground, with soft, ragged edges; where biomes overlap, the lower one in the list wins. Select a biome and click **Paint this biome** to spread it by hand (Shift erases back to the automatic biomes). With a biome selected, **Add rule** adds the rule inside it, so it only places there.
 
+## World presets
+
+A **world preset** sets up a whole landscape at once: its shape, materials, biomes, scatter rules and water. Pick the **Generate** tool, choose one under **World Presets** (Temperate Forest, Alpine, Desert, Tropical Island, Tundra or Meadow) and click **Generate with it**; **Apply** keeps the result, all as one undo step. **Only its materials and rules** keeps your terrain's shape. To reuse your own setup, type a name and click **Save as preset**: it's saved in the project's `presets` folder and listed with the others.
+
 ## Roads and parts into terrain
 
 - A **SplineMesh** lays a road or fence along a spline, and **Flatten Terrain Along** levels the ground under it. See the **hello-roads** sample.
