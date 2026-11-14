@@ -446,6 +446,8 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         // A SplinePoint's handles and a SplineFollower's ends (Phase 73).
         "SplineTangentMode" => axcenity_core::spline::TangentMode::NAMES.to_vec(),
         "SplineFollowMode" => vec!["Loop", "PingPong", "Once"],
+        // A BuildingGenerator's roof (procedural worlds PW6).
+        "BuildingRoofStyle" => vec!["Flat", "Gable"],
         // How an Effect changes what it changes (Phase 76).
         "EffectOperation" => vec!["Add", "Multiply"],
         // A Decal's face (Phase 75).

@@ -211,6 +211,10 @@ impl EditorApp {
             self.insert_spline_generator(what, near.or(self.selected));
             return;
         }
+        if what == Insertable::BuildingGenerator {
+            self.insert_building(near.or(self.selected));
+            return;
+        }
         if what == Insertable::SplineFollower {
             let spline = crate::splines::splines(&self.world).first().copied();
             self.insert_named(

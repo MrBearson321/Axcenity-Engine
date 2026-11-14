@@ -155,14 +155,15 @@ pub fn show(
                 && ui
                     .button(theme::with_icon(icons::PACKAGE, "Bake"))
                     .on_hover_text(
-                        "Keep what it made as ordinary Instances, in a Model beside the Spline, and remove it. A SplineMesh's bent pieces are saved as <name>.spline.glb.",
+                        "Keep what it made as ordinary Instances, in a Model beside the Spline (or where a building stands), and remove it. A SplineMesh's bent pieces are saved as <name>.spline.glb.",
                     )
                     .clicked()
             {
                 edit = Some(Edit::BakeSpline);
             }
             if !playing
-                && (generator || instance.class() == ClassName::Spline)
+                && ((generator && instance.class() != ClassName::BuildingGenerator)
+                    || instance.class() == ClassName::Spline)
                 && ui
                     .button(theme::with_icon(icons::MOUNTAINS, "Flatten Terrain Along"))
                     .on_hover_text(

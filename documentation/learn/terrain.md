@@ -58,6 +58,12 @@ A **world preset** sets up a whole landscape at once: its shape, materials, biom
 - **Solid Modeling ▸ To Terrain** turns a selected part into ground: the terrain under it is raised to its top and painted.
 - **Solid Modeling ▸ Conform to Terrain** sets the selected parts or models down on the ground (or up out of it), and **Blend into Terrain** levels the ground under them to their bottom and paints it with the Terrain Studio's Paint layer, fading into the slope around. Each is one undo step.
 
+## Buildings
+
+- **Insert ▸ Building** puts a building in front of the camera. Its box is its footprint: drag, turn and stretch it with the Move, Rotate and Scale handles, and it's built again as you go. Inserted into a selected spline, the spline's points are its corners instead, for L-shaped or angled buildings.
+- In its Properties, set **Floors**, **Floor Height**, the **Roof Style** (Flat or Gable), **Window Chance** and the colors. Change the **Seed** for another arrangement of windows; the same seed always gives the same building. Name your own models in **Wall Model**, **Window Model**, **Door Model** and **Corner Model** to build with them instead of plain parts.
+- Its parts aren't saved: they're made again from its settings. Click **Bake** to keep them as an ordinary Model you can edit by hand. Scatter rules keep trees out of it, and **Blend into Terrain** levels the ground under it. See the **hello-buildings** sample.
+
 ## How it's saved
 
 A terrain's data is a folder of images and JSON (`heights.png`, paint maps and `foliage.json`) under `assets/terrain`, named by the Terrain's **DataFolder** property.

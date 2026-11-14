@@ -234,6 +234,12 @@ The choices of `Enum.SplineFollowMode`.
 
 Items: `Loop`, `PingPong`, `Once`
 
+## Enum.BuildingRoofStyle
+
+The choices of `Enum.BuildingRoofStyle`.
+
+Items: `Flat`, `Gable`
+
 ## Enum.EffectOperation
 
 The choices of `Enum.EffectOperation`.

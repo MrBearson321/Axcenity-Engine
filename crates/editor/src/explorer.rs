@@ -1785,6 +1785,12 @@ pub fn insert_hint(what: Insertable) -> String {
              along the curve, or inside a closed one, from a seed. Click models in the Assets \
              panel while it's selected to add them."
         }
+        Insertable::BuildingGenerator => {
+            "Insert a Building: a building made from a footprint, from a seed, floors of walls, \
+             windows and a door under a flat or gable roof. In front of the camera, its box is \
+             the footprint (move, turn and size it with the handles); in a selected Spline, \
+             the points are its corners. Bake keeps it as parts."
+        }
         Insertable::TerrainPath => {
             "Insert a Terrain Path into the selected Spline (or a new one): a road or path on \
              the terrain. Scatter rules keep off it; Apply flattens and paints the ground \

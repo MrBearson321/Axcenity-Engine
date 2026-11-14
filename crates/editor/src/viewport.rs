@@ -552,7 +552,8 @@ struct DragSelection<'a> {
 
 /// The parts the transform tools act on: each selected part, and the parts
 /// inside each selected Model or Folder, once each, with the last selected
-/// one (or the last part inside it) last. A selected Attachment counts,
+/// one (or the last part inside it) last. A BuildingGenerator counts (its
+/// box is its footprint); what a generator made doesn't. A selected Attachment counts,
 /// at its place in the world, unless its part moves too.
 pub fn selected_parts(
     world: &World,
@@ -631,7 +632,9 @@ fn gather(
         }
         let inside = std::iter::once(id).chain(world.descendants(id));
         for part in inside {
-            if world.is_locked(part) {
+            // What a generator made follows the generator (a building's
+            // box moves, and it's made again there).
+            if world.is_locked(part) || axcenity_core::spline::is_generated(world, part) {
                 continue;
             }
             let pose = world
