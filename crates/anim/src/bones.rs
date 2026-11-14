@@ -255,6 +255,7 @@ mod tests {
             start,
             end,
             root_motion: false,
+            retarget: None,
         });
         file
     }
