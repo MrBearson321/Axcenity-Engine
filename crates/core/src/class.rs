@@ -461,6 +461,16 @@ pub enum ClassName {
     /// and noise (procedural worlds PW1). What it places is made on every
     /// device from the rule and the terrain, never saved.
     ScatterRule,
+    /// Inside a Terrain: an area of the ground (a forest, an alpine
+    /// meadow, a beach) with its own ScatterRules and ground layer, where
+    /// its height, slope and moisture conditions hold or its ground layer
+    /// is painted (procedural worlds PW2).
+    Biome,
+    /// Inside a Spline: a road or path on the terrain (procedural worlds
+    /// PW4). Scatter rules keep off its strip while it's there; Apply in
+    /// the editor flattens and paints the ground under it, and Route lays
+    /// its points over the terrain within `MaxGrade`.
+    TerrainPath,
 }
 
 impl ClassName {
@@ -616,6 +626,8 @@ impl ClassName {
         ClassName::DataLayerService,
         ClassName::DataLayer,
         ClassName::ScatterRule,
+        ClassName::Biome,
+        ClassName::TerrainPath,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -757,6 +769,8 @@ impl ClassName {
             ClassName::DataLayerService => "DataLayerService",
             ClassName::DataLayer => "DataLayer",
             ClassName::ScatterRule => "ScatterRule",
+            ClassName::Biome => "Biome",
+            ClassName::TerrainPath => "TerrainPath",
         }
     }
 
@@ -2550,6 +2564,51 @@ impl ClassName {
                 // Whether parts and characters bump into what it places.
                 ("CanCollide", Value::Bool(false)),
             ],
+            ClassName::Biome => vec![
+                ("Enabled", Value::Bool(true)),
+                // The TerrainLayer (by name) that covers its ground. Painting
+                // that layer paints the biome too. Empty for none.
+                ("GroundLayer", Value::String(String::new())),
+                // Whether it also covers, by itself, wherever the conditions
+                // below hold; off, it's only where its ground is painted.
+                ("AutoEnabled", Value::Bool(true)),
+                // Heights are studs above the terrain's bottom and slopes
+                // degrees from flat, as on a TerrainLayer.
+                ("MinHeight", Value::Number(0.0)),
+                ("MaxHeight", Value::Number(10000.0)),
+                ("HeightFade", Value::Number(8.0)),
+                ("MinSlope", Value::Number(0.0)),
+                ("MaxSlope", Value::Number(90.0)),
+                ("SlopeFade", Value::Number(5.0)),
+                // Moisture is noise from 0 (dry) to 1 (wet), one patch
+                // about MoistureScale studs across, the same for every
+                // biome with the same scale.
+                ("MinMoisture", Value::Number(0.0)),
+                ("MaxMoisture", Value::Number(1.0)),
+                ("MoistureFade", Value::Number(0.1)),
+                ("MoistureScale", Value::Number(400.0)),
+                // 0 to 1: breaks its edges up with noise NoiseScale studs across.
+                ("EdgeNoise", Value::Number(0.3)),
+                ("NoiseScale", Value::Number(48.0)),
+            ],
+            ClassName::TerrainPath => vec![
+                ("Enabled", Value::Bool(true)),
+                // Studs across its strip, and studs past each edge over
+                // which Apply's flattening and paint blend into the ground.
+                ("Width", Value::Number(8.0)),
+                ("Falloff", Value::Number(4.0)),
+                // Whether Apply levels the strip to the curve's height.
+                ("Flatten", Value::Bool(true)),
+                // The TerrainLayer (by name) Apply paints the strip with.
+                // Empty paints nothing.
+                ("Layer", Value::String(String::new())),
+                // Whether scatter rules keep off the strip, and how many
+                // studs past its edges they keep.
+                ("ClearScatter", Value::Bool(true)),
+                ("ClearMargin", Value::Number(1.0)),
+                // Route's steepest climb, in degrees.
+                ("MaxGrade", Value::Number(8.0)),
+            ],
             ClassName::ThirdPersonController => {
                 let mut properties = movement_properties();
                 properties.extend([
@@ -3159,6 +3218,8 @@ impl ClassName {
             | ClassName::Terrain
             | ClassName::TerrainLayer
             | ClassName::ScatterRule
+            | ClassName::Biome
+            | ClassName::TerrainPath
             | ClassName::Checkpoint
             | ClassName::Spline
             | ClassName::SplinePoint

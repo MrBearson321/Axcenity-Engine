@@ -880,7 +880,7 @@ impl EditorApp {
     /// bar's Viewport menu.
     pub(in crate::app) fn overlay_items(&mut self, ui: &mut egui::Ui) {
         let overlays = &mut self.overlays;
-        let items: [(&mut bool, &'static str, &'static str, &'static str); 12] = [
+        let items: [(&mut bool, &'static str, &'static str, &'static str); 13] = [
             (
                 &mut overlays.colliders,
                 icons::CUBE,
@@ -952,6 +952,12 @@ impl EditorApp {
                 icons::FRAME_CORNERS,
                 "Culling",
                 "Hold what's drawn to where the camera is now, then fly away to see it: each part's bounds in green where it's drawn and red where it's culled, and the view it was held at.",
+            ),
+            (
+                &mut overlays.skeletons,
+                icons::BONE,
+                "Skeletons",
+                "Draw each rigged MeshPart's bones: where the animation has them during Play and in the Sequencer's preview, at rest while editing. The selected one's are brighter.",
             ),
         ];
         for (on, icon, label, hint) in items {

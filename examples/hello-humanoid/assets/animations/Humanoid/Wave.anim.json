@@ -1,0 +1,13 @@
+{
+  "format_version": 2,
+  "duration": 2.5,
+  "loop": true,
+  "link": {
+    "source": "assets/models/Humanoid/HumanoidAnimations.glb",
+    "take": "Wave",
+    "start": 0.0,
+    "end": 2.5
+  },
+  "tracks": [],
+  "events": []
+}

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "assets"
+title = "Import presets for models: pick or save how a model comes in"
+details = "The Import dialog has a Preset row (Default, Static prop, Building kit, Character, and your own) and a Settings tab with Scale, Up axis, Anchored and Collision. Save as preset… keeps the current choices in the project's import-presets.json, and the next import starts with the preset you used last."
+features = ["assets.model-import"]
+fixes = []
+introduces_issues = []
+prs = [374]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

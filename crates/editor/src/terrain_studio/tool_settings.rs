@@ -381,6 +381,7 @@ impl TerrainStudio {
         terrain: InstanceId,
         actions: &mut Vec<TerrainAction>,
     ) {
+        self.world_presets_section(ui, cx, actions);
         let palette = theme::palette(ui.ctx());
         let before = self.generator.clone();
         let settings = &mut self.generator;

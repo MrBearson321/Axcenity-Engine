@@ -140,15 +140,29 @@ pub const RULE_PRESETS: [RulePreset; 5] = [
 /// of them.
 pub const FOREST_SET: [RulePreset; 3] = [FOREST_TREES, UNDERGROWTH, GRASS_TUFTS];
 
-/// The ScatterRule children of `terrain`, in order (switched off ones too).
+/// The ScatterRules of `terrain`, in order (switched off ones too): its
+/// own, and those inside its Biomes where each Biome stands.
 pub fn scatter_rules(world: &World, terrain: InstanceId) -> Vec<InstanceId> {
-    world
-        .get(terrain)
-        .map(|t| t.children().to_vec())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|&c| world.get(c).map(|i| i.class()) == Some(ClassName::ScatterRule))
-        .collect()
+    let children = |id: InstanceId| {
+        world
+            .get(id)
+            .map(|t| t.children().to_vec())
+            .unwrap_or_default()
+    };
+    let class = |id: InstanceId| world.get(id).map(|i| i.class());
+    let mut rules = Vec::new();
+    for child in children(terrain) {
+        match class(child) {
+            Some(ClassName::ScatterRule) => rules.push(child),
+            Some(ClassName::Biome) => rules.extend(
+                children(child)
+                    .into_iter()
+                    .filter(|&c| class(c) == Some(ClassName::ScatterRule)),
+            ),
+            _ => {}
+        }
+    }
+    rules
 }
 
 /// What a rule's `Models` names, short: "Tree, Bush, Pine.glb".
@@ -202,7 +216,15 @@ impl TerrainStudio {
                     {
                         actions.push(TerrainAction::SetLayer(rule, "Enabled", Value::Bool(on)));
                     }
-                    let name = format!("{}. {}", index + 1, instance.name());
+                    let biome = instance
+                        .parent()
+                        .filter(|&p| p != terrain)
+                        .and_then(|p| world.get(p))
+                        .map(|b| b.name().to_owned());
+                    let name = match biome {
+                        Some(biome) => format!("{}. {} (in {biome})", index + 1, instance.name()),
+                        None => format!("{}. {}", index + 1, instance.name()),
+                    };
                     let row = ui.selectable_label(selected, name).on_hover_text(
                         "Select it to change its settings, and to add models from Assets",
                     );
@@ -249,7 +271,17 @@ impl TerrainStudio {
                 hint(ui, &format!("{placed} placed by rules."));
             }
             ui.horizontal_wrapped(|ui| {
-                crate::widgets::menu_button(ui, Some(icons::PLUS), "Add rule", |ui| {
+                let into = cx
+                    .selected
+                    .and_then(|id| super::biomes::biome_of(world, id))
+                    .filter(|&b| world.get(b).and_then(|b| b.parent()) == Some(terrain))
+                    .and_then(|b| world.get(b))
+                    .map(|b| b.name().to_owned());
+                let add = match &into {
+                    Some(biome) => format!("Add rule to {biome}"),
+                    None => "Add rule".to_owned(),
+                };
+                crate::widgets::menu_button(ui, Some(icons::PLUS), &add, |ui| {
                     if ui
                         .button(theme::with_icon(
                             icons::TREE,

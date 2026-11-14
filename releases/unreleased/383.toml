@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Plugin API 3: commands, shortcuts, Explorer items and import hooks"
+details = "Plugins can add commands to Ctrl+K with their own keyboard shortcuts (plugin:CreateAction), items to the Explorer's right-click menu (plugin:AddExplorerAction), change each imported model inside the import's own undo step (plugin.ModelImported), save settings before they stop (plugin.Unloading), open a script at a line (plugin:OpenScript) and show a notice (plugin:Notify). plugin.ApiVersion is 3."
+features = ["editor.plugins"]
+fixes = []
+introduces_issues = []
+prs = [383]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -696,6 +696,37 @@ fn ray_tracing_section(
                 },
             );
             ui.end_row();
+
+            found_label(ui, "Ray traced reflections");
+            let label = |rays: Option<RayTracedReflections>| match rays {
+                Some(rays) => rays.label().to_owned(),
+                None => format!("Preset ({})", preset.ray_traced_reflections().label()),
+            };
+            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
+                egui::ComboBox::from_id_salt("ray traced reflections")
+                    .selected_text(label(settings.ray_traced_reflections))
+                    .show_ui(ui, |ui| {
+                        for choice in
+                            std::iter::once(None).chain(RayTracedReflections::ALL.map(Some))
+                        {
+                            ui.selectable_value(
+                                &mut settings.ray_traced_reflections,
+                                choice,
+                                label(choice),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Glossy surfaces mirror what's around them with a ray from each \
+                         pixel, even what's off the screen, instead of only the reflection \
+                         probes and the sky. Low traces surfaces smoother than 0.15 roughness \
+                         at half size; Medium those smoother than 0.3 and High than 0.5, at \
+                         full size. Rougher surfaces fade into the probes. See-through \
+                         parts, water and terrain keep the probes.",
+                    );
+            });
+            ui.end_row();
         });
     restart
 }
@@ -778,6 +809,18 @@ pub(super) fn ray_tracing_in_use(effective: &EffectiveGraphics) -> String {
             effective.ray_traced_global_illumination.label(),
             effective.ray_traced_global_illumination.probes_per_frame(),
             effective.ray_traced_global_illumination.rays()
+        ));
+    }
+    if effective.ray_traced_reflections != RayTracedReflections::Off {
+        effects.push(format!(
+            "reflections {} (smoother than {} roughness{})",
+            effective.ray_traced_reflections.label(),
+            effective.ray_traced_reflections.roughness_cutoff(),
+            if effective.ray_traced_reflections.downscale() > 1 {
+                ", half size"
+            } else {
+                ""
+            }
         ));
     }
     let reach = effective.ray_tracing_distance.round();

@@ -993,7 +993,7 @@ pub const ATMOSPHERE_NUMBERS: [&str; 4] = ["Density", "Offset", "Glare", "Haze"]
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 20] = [
+pub const GRAPHICS_OPTIONS: [&str; 21] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
@@ -1005,6 +1005,7 @@ pub const GRAPHICS_OPTIONS: [&str; 20] = [
     "RayTracedShadows",
     "RayTracedAmbientOcclusion",
     "RayTracedGlobalIllumination",
+    "RayTracedReflections",
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
@@ -1042,9 +1043,10 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
         "AmbientOcclusion" | "DepthOfField" | "MotionBlur" => &["Off", "Low", "High", PRESET],
         "ReflectionQuality" | "CloudQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
-        "RayTracedShadows" | "RayTracedAmbientOcclusion" | "RayTracedGlobalIllumination" => {
-            &["Off", "Low", "Medium", "High", PRESET]
-        }
+        "RayTracedShadows"
+        | "RayTracedAmbientOcclusion"
+        | "RayTracedGlobalIllumination"
+        | "RayTracedReflections" => &["Off", "Low", "Medium", "High", PRESET],
         "PostProcessing"
         | "ContactShadows"
         | "RealtimeGI"
