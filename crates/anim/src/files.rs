@@ -86,6 +86,11 @@ pub struct TakeLink {
     /// instead of the bone.
     #[serde(default, skip_serializing_if = "is_false")]
     pub root_motion: bool,
+    /// The retarget profile (`*.retarget.json`, AP2) that says how the take
+    /// plays on another skeleton, if the clip has one. With one, the take
+    /// is always retargeted, even onto a skeleton whose bone names match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retarget: Option<String>,
 }
 
 impl TakeLink {
@@ -121,6 +126,7 @@ impl ClipFile {
                 start,
                 end,
                 root_motion: false,
+                retarget: None,
             }),
             tracks: Vec::new(),
             events: Vec::new(),
