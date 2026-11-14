@@ -636,6 +636,7 @@
   },
   "players": {
     "properties": {
+      "CharacterAuthority": "Client",
       "CharacterAutoLoads": false,
       "LeaderboardEnabled": true,
       "MaxPlayers": 8,
