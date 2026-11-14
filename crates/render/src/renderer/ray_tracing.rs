@@ -102,7 +102,7 @@ pub(super) struct Surfaces {
     capacity: usize,
     written: Vec<SurfaceRaw>,
     /// Each base color texture's average color (linear), by its key.
-    texture_colors: FxHashMap<u64, [f32; 3]>,
+    pub(super) texture_colors: FxHashMap<u64, [f32; 3]>,
 }
 
 /// A mesh's BLAS: the mesh, and whether it's built for a cut-out (without
@@ -619,7 +619,7 @@ pub(super) fn prepare_scene(
 }
 
 impl Surfaces {
-    fn new(device: &wgpu::Device) -> Self {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
         let capacity = 256;
         Self {
             buffer: surface_buffer(device, capacity),
@@ -631,7 +631,12 @@ impl Surfaces {
 
     /// Writes `raw` (one a slot) to the GPU if it changed, growing the
     /// buffer to fit.
-    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, raw: Vec<SurfaceRaw>) {
+    pub(super) fn write(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        raw: Vec<SurfaceRaw>,
+    ) {
         if raw.len() > self.capacity {
             self.capacity = raw.len().next_power_of_two();
             self.buffer = surface_buffer(device, self.capacity);
@@ -656,7 +661,10 @@ fn surface_buffer(device: &wgpu::Device, slots: usize) -> wgpu::Buffer {
 /// What a ray hitting an item of `material` finds: its color (times its
 /// base color texture's average, worked out once a texture into
 /// `texture_colors`) and its glow, in linear light.
-fn surface_of(material: &Material, texture_colors: &mut FxHashMap<u64, [f32; 3]>) -> SurfaceRaw {
+pub(super) fn surface_of(
+    material: &Material,
+    texture_colors: &mut FxHashMap<u64, [f32; 3]>,
+) -> SurfaceRaw {
     let mut color = super::lighting::linear_color(material.base_color);
     if let Some(texture) = &material.base_color_texture {
         let average = *texture_colors
@@ -695,7 +703,7 @@ fn average_color(rgba: &[u8]) -> [f32; 3] {
 }
 
 /// Which kinds of ray see an item (the instance mask): see the `MASK_*`s.
-fn mask_of(material: &Material, draw: &Draw) -> u8 {
+pub(super) fn mask_of(material: &Material, draw: &Draw) -> u8 {
     if material.opacity < 1.0 || material.water.is_some() {
         return MASK_SEE_THROUGH;
     }
