@@ -24,6 +24,14 @@ PhysicsService:CollisionGroupSetCollidable(group1: string, group2: string, colli
 
 Sets whether parts in the two groups collide (and touch). Both must be registered.
 
+```lua
+local PhysicsService = game:GetService("PhysicsService")
+PhysicsService:RegisterCollisionGroup("Ghosts")
+PhysicsService:CollisionGroupSetCollidable("Ghosts", "Ghosts", false)
+workspace.GhostA.CollisionGroup = "Ghosts"
+workspace.GhostB.CollisionGroup = "Ghosts"
+```
+
 #### CollisionGroupsAreCollidable
 
 ```luau

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "scripting"
+title = "API docs and examples where you write code"
+details = "Rest the pointer on an engine name in a script (part.Touched, task.wait, workspace:Raycast) to see how it's written, what it does and an example. F1 opens its full API Reference page, and the reference can insert an example straight into the script you're editing. There are now 115 checked examples, up from 45, covering vectors, CFrames, colours, tweens, players and characters, remote events and functions, UI, input, attributes and tags."
+features = ["editor.script-editor"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
