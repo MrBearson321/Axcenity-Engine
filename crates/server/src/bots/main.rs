@@ -29,7 +29,7 @@ use bot::{Bot, BotSettings};
 use stats::{BotSample, Summary};
 
 const USAGE: &str = "usage: axcenity-bots <project-folder> --join <address:port> [--count <n>] [--seconds <s>] \
-                     [--threads <n>] [--stagger <ms>] [--password <text>] [--no-scripts] [--idle] \
+                     [--threads <n>] [--stagger <ms>] [--password <text>] [--no-scripts] [--idle] [--roam <studs>] \
                      [--report <s>] [--report-file <path>] [--user-id <first>]\n\
                      example: cargo run -p axcenity-server --bin axcenity-bots -- examples/hello-character --join 127.0.0.1:47800 --count 16";
 
@@ -49,6 +49,7 @@ struct Arguments {
     password: Option<String>,
     scripts: bool,
     idle: bool,
+    roam: f32,
     report: f64,
     report_file: Option<PathBuf>,
     first_user_id: Option<u64>,
@@ -66,6 +67,7 @@ impl Default for Arguments {
             password: None,
             scripts: true,
             idle: false,
+            roam: 30.0,
             report: 5.0,
             report_file: None,
             first_user_id: None,
@@ -119,6 +121,7 @@ impl Arguments {
                 "--password" => parsed.password = Some(value("--password", "the password")?),
                 "--no-scripts" => parsed.scripts = false,
                 "--idle" => parsed.idle = true,
+                "--roam" => parsed.roam = number(&value("--roam", "studs")?, "--roam", "studs")?,
                 "--report" => {
                     let seconds: f64 =
                         number(&value("--report", "seconds")?, "--report", "seconds")?;
@@ -176,6 +179,7 @@ fn main() -> Result<()> {
         password: arguments.password.clone(),
         scripts: arguments.scripts,
         idle: arguments.idle,
+        roam: arguments.roam,
         first_user_id,
     };
     let stop = Arc::new(AtomicBool::new(false));

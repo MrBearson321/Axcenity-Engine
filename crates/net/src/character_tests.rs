@@ -592,3 +592,25 @@ fn players_who_spawn_on_one_spawn_location_stand_apart_and_are_never_moved_back(
         assert_eq!(device.network.corrections(), 0, "{:?}", device.log);
     }
 }
+
+/// Only a 12-stud SpawnLocation, with nothing around it to stand on.
+fn ledge() -> World {
+    let mut world = spawn_arena();
+    let floor = world.find_first_child(world.workspace(), "Floor").unwrap();
+    world.set_parent(floor, None).unwrap();
+    world
+}
+
+/// Found by the bots (MP1): a character that walked off the edge of a map
+/// fell further each update than the teleport limit, so the server moved
+/// it back every frame from then on; and a character's first update had
+/// nothing saved up, so its first step was refused.
+#[test]
+fn a_character_that_walks_off_the_edge_falls_without_being_moved_back() {
+    let (mut server, mut players) = game_in(ledge, 1, Duration::ZERO);
+    let me = players[0].scripts.local_player().unwrap();
+    frames(&mut server, &mut players, 600, &[forward()]);
+    let fell = server.character_at(me).unwrap();
+    assert!(fell.y < -1000.0, "it fell a long way on the server too: {fell:?}");
+    assert_eq!(players[0].network.corrections(), 0, "{:?}", players[0].log);
+}

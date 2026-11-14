@@ -28,12 +28,20 @@ pub struct BotSettings {
     pub scripts: bool,
     /// Stand still instead of walking about.
     pub idle: bool,
+    /// How far from where it spawned a bot wanders before it turns back,
+    /// in studs, so bots stay on a small map.
+    pub roam: f32,
     /// The first bot's UserId; the others count up from it.
     pub first_user_id: u64,
 }
 
+/// Pixels of mouse look that turn a character half round: the controllers
+/// turn 0.003 radians a pixel.
+const HALF_TURN: f32 = std::f32::consts::PI / 0.003;
+
 /// A bot's made-up input: walks, turns now and then, sometimes runs or
-/// jumps. Seeded by its number, so a run is the same each time.
+/// jumps, and turns back when it's wandered too far. Seeded by its number,
+/// so a run is the same each time.
 struct Brain {
     seed: u64,
     /// Seconds until the next change of mind.
@@ -41,6 +49,10 @@ struct Brain {
     turning: f32,
     running: bool,
     jump: bool,
+    /// Turning back toward where it spawned, until it's near again.
+    returning: bool,
+    /// Pixels of turning left to do this many frames.
+    turn_left: (f32, u32),
 }
 
 impl Brain {
@@ -51,6 +63,8 @@ impl Brain {
             turning: 0.0,
             running: false,
             jump: false,
+            returning: false,
+            turn_left: (0.0, 0),
         }
     }
 
@@ -64,9 +78,28 @@ impl Brain {
         (x >> 11) as f64 / (1u64 << 53) as f64
     }
 
-    fn input(&mut self, seconds: f64, idle: bool) -> MoveInput {
+    /// This frame's input; `away` is how far it is from where it spawned,
+    /// against how far it may roam.
+    fn input(&mut self, seconds: f64, idle: bool, away: Option<(f32, f32)>) -> MoveInput {
         if idle {
             return MoveInput::default();
+        }
+        if let Some((distance, roam)) = away {
+            if !self.returning && distance > roam {
+                // About turn, over ten frames.
+                self.returning = true;
+                self.turn_left = (HALF_TURN / 10.0, 10);
+            } else if self.returning && distance < roam * 0.5 {
+                self.returning = false;
+            }
+        }
+        if self.turn_left.1 > 0 {
+            self.turn_left.1 -= 1;
+            return MoveInput {
+                forward: true,
+                look_dx: self.turn_left.0,
+                ..MoveInput::default()
+            };
         }
         self.next -= seconds;
         self.jump = false;
@@ -98,6 +131,9 @@ pub struct Bot {
     following: bool,
     brain: Brain,
     idle: bool,
+    roam: f32,
+    /// Where its character first stood.
+    home: Option<axcenity_core::Vector3>,
     started: Instant,
     /// Seconds from starting to having the server's world, once it has.
     joined_after: Option<f64>,
@@ -164,6 +200,8 @@ impl Bot {
             following: false,
             brain: Brain::new(index),
             idle: settings.idle,
+            roam: settings.roam,
+            home: None,
             started: Instant::now(),
             joined_after: None,
             ended: None,
@@ -230,6 +268,27 @@ impl Bot {
     }
 }
 
+impl Bot {
+    /// Where this bot's character's root part is, once it has one.
+    fn character_position(&self) -> Option<axcenity_core::Vector3> {
+        let world = &self.sim.world;
+        let player = self.sim.scripts.local_player()?;
+        let character = world.get(player)?.property("Character")?.as_instance()?;
+        let root = world
+            .get(character)?
+            .property("PrimaryPart")
+            .and_then(axcenity_core::Value::as_instance)
+            .filter(|&id| world.contains(id))
+            .or_else(|| world.find_first_child(character, "HumanoidRootPart"))
+            .or_else(|| {
+                world
+                    .descendants_iter(character)
+                    .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
+            })?;
+        world.get(root)?.property("Position")?.as_vector3()
+    }
+}
+
 impl HostIo for Bot {
     fn sim(&mut self) -> &mut Sim {
         &mut self.sim
@@ -269,7 +328,14 @@ impl HostIo for Bot {
     }
 
     fn character_motion(&mut self, seconds: f32) -> MoveInput {
-        let motion = self.brain.input(f64::from(seconds), self.idle);
+        let at = self.character_position();
+        if self.home.is_none() {
+            self.home = at;
+        }
+        let away = at
+            .zip(self.home)
+            .map(|(at, home)| ((at.x - home.x).hypot(at.z - home.z), self.roam));
+        let motion = self.brain.input(f64::from(seconds), self.idle, away);
         let others = self
             .network
             .other_characters(&self.sim.world, &self.sim.scripts);

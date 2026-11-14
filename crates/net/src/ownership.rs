@@ -165,7 +165,9 @@ impl CharacterCheck {
         owned: &Owned,
         now: f64,
     ) {
-        let dt = self.last.map_or(0.0, |last| (now - last).max(0.0));
+        // The first update has a full burst to spend, as if the character
+        // had stood still before it.
+        let dt = self.last.map_or(BURST, |last| (now - last).max(0.0));
         self.last = Some(now);
         let character = character_of(world, player);
         let parts: BTreeSet<InstanceId> = character_parts(world, player).into_iter().collect();
@@ -236,7 +238,10 @@ impl CharacterCheck {
             return false;
         };
         let to = state.position();
-        let jump = crate::motion::distance(was, to);
+        // Falling is never a teleport: a character falls faster the longer
+        // it falls (off the edge of a map, as far as it likes), so only
+        // going across or up counts.
+        let jump = horizontal(was, to).hypot(f64::from((to.y - was.y).max(0.0)));
         if jump > TELEPORT_DISTANCE {
             return false;
         }
