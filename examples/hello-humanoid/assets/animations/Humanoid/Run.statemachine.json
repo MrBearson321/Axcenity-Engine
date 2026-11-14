@@ -1,0 +1,19 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "Run",
+  "states": [
+    {
+      "name": "Run",
+      "motion": {
+        "clip": "assets/animations/Humanoid/Run.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "transitions": []
+}

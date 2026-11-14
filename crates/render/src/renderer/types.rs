@@ -176,6 +176,10 @@ pub(super) struct FrameUniform {
     /// pixels (to find a pixel in the mask), z: how far they reach in studs
     /// (lighting.wgsl's `ray_traced_sun`).
     pub(super) ray_shadows: [f32; 4],
+    /// x: the roughness from which ray traced reflections aren't traced (0
+    /// while off), y: how many scene pixels a traced one stands for each
+    /// way, z: the traced width (lighting.wgsl's `traced_reflected`).
+    pub(super) ray_reflections: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.
@@ -1092,6 +1096,10 @@ pub(super) struct ScenePipeline {
     pub(super) ray_ao: Option<Box<super::ray_ao::RayAmbientOcclusion>>,
     /// Ray traced GI's pass, while it's drawn (renderer/ray_gi.rs).
     pub(super) ray_gi: Option<Box<super::ray_gi::RayGlobalIllumination>>,
+    /// Ray traced reflections' pass, while drawn (renderer/ray_reflections.rs),
+    /// and the one blank entry bound in its place otherwise.
+    pub(super) ray_reflections: Option<Box<super::ray_reflections::RayReflections>>,
+    pub(super) no_ray_reflections: wgpu::Buffer,
     /// The scene GI's rays walk in software, while they're traced so
     /// (renderer/ray_soft.rs).
     pub(super) soft_scene: Option<Box<super::ray_soft::SoftScene>>,

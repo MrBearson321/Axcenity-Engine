@@ -103,8 +103,13 @@ pub enum Insertable {
     /// A SplineScatter in the selected Spline (or a new one), placing
     /// models along it (Phase 74).
     SplineScatter,
+    /// A TerrainPath in the selected Spline (or a new one): a road on the
+    /// terrain (procedural worlds PW4).
+    TerrainPath,
     /// Inverse kinematics during the game for the selected skinned MeshPart.
     IKControl,
+    /// The face of the selected MeshPart: its facial controls.
+    FaceControls,
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
     /// makes its bodies and joints.
     Ragdoll,
@@ -271,11 +276,12 @@ impl Insertable {
     /// Animators (skeletal) and Animations (property clips).
     /// Ragdolls go in a skinned MeshPart too.
     /// A Sequence plays a cutscene, from the Workspace.
-    pub const ANIMATION: [Insertable; 5] = [
+    pub const ANIMATION: [Insertable; 6] = [
         Insertable::Animator,
         Insertable::Animation,
         Insertable::Ragdoll,
         Insertable::IKControl,
+        Insertable::FaceControls,
         Insertable::Sequence,
     ];
     /// Fractures, which shatter the part they're inside.
@@ -316,11 +322,12 @@ impl Insertable {
     ];
     /// Splines, the mover that carries a part along one (Phase 73), and
     /// what bends models along one or scatters them (Phase 74).
-    pub const SPLINES: [Insertable; 4] = [
+    pub const SPLINES: [Insertable; 5] = [
         Insertable::Spline,
         Insertable::SplineFollower,
         Insertable::SplineMesh,
         Insertable::SplineScatter,
+        Insertable::TerrainPath,
     ];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
@@ -416,6 +423,7 @@ impl Insertable {
             Insertable::Animator => "Animator",
             Insertable::Ragdoll => "Ragdoll",
             Insertable::IKControl => "IK Control",
+            Insertable::FaceControls => "Face Controls",
             Insertable::Fracture => "Fracture",
             Insertable::Animation => "Animation",
             Insertable::Sequence => "Sequence",
@@ -423,6 +431,7 @@ impl Insertable {
             Insertable::SplineFollower => "Spline Follower",
             Insertable::SplineMesh => "Spline Mesh",
             Insertable::SplineScatter => "Spline Scatter",
+            Insertable::TerrainPath => "Terrain Path",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
@@ -500,6 +509,7 @@ impl Insertable {
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
             Insertable::IKControl => ClassName::IKControl,
+            Insertable::FaceControls => ClassName::FaceControls,
             Insertable::Fracture => ClassName::Fracture,
             Insertable::Animation => ClassName::Animation,
             Insertable::Sequence => ClassName::Sequence,
@@ -507,6 +517,7 @@ impl Insertable {
             Insertable::SplineFollower => ClassName::SplineFollower,
             Insertable::SplineMesh => ClassName::SplineMesh,
             Insertable::SplineScatter => ClassName::SplineScatter,
+            Insertable::TerrainPath => ClassName::TerrainPath,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
@@ -1089,8 +1100,12 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             || (what == Insertable::SplineFollower
                 && (is_part || is_group)
                 && is_saved(world, id))
-            // A SplineMesh or SplineScatter follows the Spline it's in.
-            || (matches!(what, Insertable::SplineMesh | Insertable::SplineScatter)
+            // A SplineMesh, SplineScatter or TerrainPath follows the
+            // Spline it's in.
+            || (matches!(
+                what,
+                Insertable::SplineMesh | Insertable::SplineScatter | Insertable::TerrainPath
+            )
                 && world
                     .get(id)
                     .is_some_and(|instance| instance.class() == ClassName::Spline)
@@ -1119,6 +1134,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::Animator
                         | Insertable::Ragdoll
                         | Insertable::IKControl
+                        | Insertable::FaceControls
                         | Insertable::Fracture
                         | Insertable::Animation
                         | Insertable::ThirdPersonController

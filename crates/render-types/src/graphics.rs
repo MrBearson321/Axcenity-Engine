@@ -484,6 +484,62 @@ impl RayTracedAmbientOcclusion {
     }
 }
 
+/// Hardware ray traced reflections (RL4, `docs/rendering/ray-tracing.md`):
+/// a ray along the mirrored view from each glossy solid pixel, through the
+/// ray traced scene, so a shiny floor or a car shows what's really beside
+/// it (things off screen too) instead of the nearest reflection probe.
+/// Surfaces rougher than the setting's cutoff keep the probes. Needs a GPU
+/// that can ray trace. Ordered from cheapest to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum RayTracedReflections {
+    /// Reflection probes and the sky alone (as Reflection quality says).
+    Off,
+    /// Mirror-like surfaces (roughness below 0.15), at half the scene's
+    /// size.
+    Low,
+    /// Roughness below 0.3, at the scene's size.
+    Medium,
+    /// Roughness below 0.5, at the scene's size.
+    High,
+}
+
+impl RayTracedReflections {
+    pub const ALL: [RayTracedReflections; 4] = [
+        RayTracedReflections::Off,
+        RayTracedReflections::Low,
+        RayTracedReflections::Medium,
+        RayTracedReflections::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RayTracedReflections::Off => "Off",
+            RayTracedReflections::Low => "Low",
+            RayTracedReflections::Medium => "Medium",
+            RayTracedReflections::High => "High",
+        }
+    }
+
+    /// The roughness from which surfaces keep the reflection probes: the
+    /// traced reflection fades out toward it. 0 when off.
+    pub fn roughness_cutoff(self) -> f32 {
+        match self {
+            RayTracedReflections::Off => 0.0,
+            RayTracedReflections::Low => 0.15,
+            RayTracedReflections::Medium => 0.3,
+            RayTracedReflections::High => 0.5,
+        }
+    }
+
+    /// How many times smaller than the scene the rays are traced, each way.
+    pub fn downscale(self) -> u32 {
+        match self {
+            RayTracedReflections::Low => 2,
+            _ => 1,
+        }
+    }
+}
+
 /// Ray traced global illumination (`docs/rendering/ray-tracing.md`): light
 /// probes traced with rays each frame, in place of real-time GI's drawn
 /// faces, so bounced light follows the sun, lamps, sky and moving things
@@ -743,6 +799,10 @@ pub struct GraphicsSettings {
     /// while real-time GI is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_traced_global_illumination: Option<RayTracedGlobalIllumination>,
+    /// Hardware ray traced reflections (RL4), on a GPU that can ray trace.
+    /// Off at every preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ray_traced_reflections: Option<RayTracedReflections>,
     /// Whether the GPU is opened with hardware ray tracing at the next
     /// start: off unless turned on (at every preset), since opening it
     /// changes the device even while no ray traced effect is on. Read once,
@@ -1011,8 +1071,15 @@ impl GraphicsSettings {
             ray_traced_shadows: None,
             ray_traced_ambient_occlusion: None,
             ray_traced_global_illumination: None,
+            ray_traced_reflections: None,
             ..self.clone()
         }
+    }
+
+    /// Hardware ray traced reflections: the override, or Off (every preset).
+    pub fn ray_traced_reflections(&self) -> RayTracedReflections {
+        self.ray_traced_reflections
+            .unwrap_or(RayTracedReflections::Off)
     }
 
     /// Hardware ray traced ambient occlusion: the override, or Off (every
@@ -1130,6 +1197,18 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
+        let ray_traced_reflections = if capabilities.ray_queries {
+            self.ray_traced_reflections()
+        } else {
+            RayTracedReflections::Off
+        };
+        if ray_traced_reflections != self.ray_traced_reflections() {
+            notes.push(
+                "Ray traced reflections are off: Hardware ray tracing is off or this GPU can't ray \
+                 trace. Reflection probes are used."
+                    .to_owned(),
+            );
+        }
         // Without ray queries, GI's rays are traced in software (RL3), in a
         // compute shader.
         let wanted_gi = self.ray_traced_global_illumination();
@@ -1193,6 +1272,7 @@ impl GraphicsSettings {
             ray_traced_ambient_occlusion,
             ray_traced_global_illumination,
             ray_traced_gi_in_software,
+            ray_traced_reflections,
             notes,
         }
     }
@@ -1303,6 +1383,8 @@ pub struct EffectiveGraphics {
     /// Whether ray traced GI's rays are traced in software (RL3): it's on
     /// and the GPU has no ray queries (or Hardware ray tracing is off).
     pub ray_traced_gi_in_software: bool,
+    /// Ray traced reflections (Off on a GPU without ray queries).
+    pub ray_traced_reflections: RayTracedReflections,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1735,6 +1817,7 @@ mod tests {
             ray_traced_shadows: Some(RayTracedShadows::Medium),
             ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Low),
             ray_traced_global_illumination: Some(RayTracedGlobalIllumination::High),
+            ray_traced_reflections: Some(RayTracedReflections::High),
             ray_tracing: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -2094,6 +2177,58 @@ mod tests {
     }
 
     #[test]
+    fn ray_traced_reflections_are_off_at_every_preset_and_without_ray_queries() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            assert_eq!(preset.ray_traced_reflections(), RayTracedReflections::Off);
+        }
+        let asked = GraphicsSettings {
+            ray_traced_reflections: Some(RayTracedReflections::Medium),
+            ..GraphicsSettings::default()
+        };
+        let gpu = Capabilities {
+            ray_queries: true,
+            ..Capabilities::default()
+        };
+        let effective = asked.effective(&gpu);
+        assert_eq!(
+            effective.ray_traced_reflections,
+            RayTracedReflections::Medium
+        );
+        assert!(effective.notes.is_empty(), "{:?}", effective.notes);
+        let without = asked.effective(&Capabilities::default());
+        assert_eq!(without.ray_traced_reflections, RayTracedReflections::Off);
+        assert!(
+            without
+                .notes
+                .iter()
+                .any(|note| note.contains("reflections are off"))
+        );
+        assert_eq!(
+            RayTracedReflections::ALL.map(RayTracedReflections::roughness_cutoff),
+            [0.0, 0.15, 0.3, 0.5]
+        );
+        assert_eq!(
+            RayTracedReflections::ALL.map(RayTracedReflections::downscale),
+            [1, 2, 1, 1]
+        );
+        // Turned off with the other ray traced effects, and kept in
+        // graphics.json only when set.
+        assert_eq!(
+            asked.without_ray_traced_effects().ray_traced_reflections,
+            None
+        );
+        let text = serde_json::to_string(&GraphicsSettings::default()).unwrap();
+        assert!(!text.contains("ray_traced_reflections"), "{text}");
+        let read: GraphicsSettings =
+            serde_json::from_str(&serde_json::to_string(&asked).unwrap()).unwrap();
+        assert_eq!(
+            read.ray_traced_reflections,
+            Some(RayTracedReflections::Medium)
+        );
+    }
+
+    #[test]
     fn ray_traced_global_illumination_is_off_at_every_preset_and_in_software_without_ray_queries() {
         for quality in Quality::ALL {
             let preset = GraphicsSettings::preset(quality);
@@ -2273,6 +2408,7 @@ mod tests {
                         ray_traced_shadows: Some(RayTracedShadows::High),
                         ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Medium),
                         ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Low),
+                        ray_traced_reflections: Some(RayTracedReflections::Medium),
                         ray_tracing: post,
                     };
                     for capabilities in &capabilities {
@@ -2292,6 +2428,9 @@ mod tests {
                         assert!(
                             effective.ray_traced_global_illumination
                                 <= settings.ray_traced_global_illumination()
+                        );
+                        assert!(
+                            effective.ray_traced_reflections <= settings.ray_traced_reflections()
                         );
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
@@ -2329,7 +2468,11 @@ mod tests {
                                     effective.ray_traced_global_illumination
                                         != settings.ray_traced_global_illumination(),
                                 )
-                                + usize::from(effective.ray_traced_gi_in_software);
+                                + usize::from(effective.ray_traced_gi_in_software)
+                                + usize::from(
+                                    effective.ray_traced_reflections
+                                        != settings.ray_traced_reflections(),
+                                );
                         assert_eq!(effective.notes.len(), lowered);
                     }
                 }

@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "intensity": 1.0,
+  "transition": 0.2,
+  "controls": {
+    "Brow_Raise_Left": 0.3,
+    "Brow_Raise_Right": 0.3,
+    "Cheek_Raise_Left": 0.9,
+    "Cheek_Raise_Right": 0.9,
+    "Eye_Squint_Left": 0.7,
+    "Eye_Squint_Right": 0.7,
+    "Jaw_Open": 0.7,
+    "Mouth_Open": 0.6,
+    "Mouth_Smile_Left": 1.0,
+    "Mouth_Smile_Right": 1.0,
+    "Upper_Lip_Raise": 0.3
+  }
+}

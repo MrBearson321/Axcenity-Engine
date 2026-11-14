@@ -169,3 +169,25 @@ fn bounds_cover_rotated_parts() {
     let (min, max) = bounds(&world, door).unwrap();
     assert!(min.x < 0.0 && max.x > 2.0);
 }
+
+#[test]
+fn a_face_controls_offers_its_controls_to_key() {
+    let (mut world, door, hinge, _) = door_world();
+    let face = world.create(ClassName::FaceControls).unwrap();
+    world.set_parent(face, Some(hinge)).unwrap();
+    world
+        .set_property(face, "Jaw_Open", Value::Number(0.5))
+        .unwrap();
+    let mut preview = ObjectPreview::default();
+    preview.follow(&world, Some(door));
+    preview.follow(&world, Some(face));
+    let focus = preview.focus().unwrap();
+    assert_eq!(focus.target, "Hinge/FaceControls");
+    assert_eq!(focus.values.len(), axcenity_core::face::FACE_CONTROLS.len());
+    let jaw = focus
+        .values
+        .iter()
+        .find(|v| v.property.as_str() == "Jaw_Open")
+        .unwrap();
+    assert_eq!(jaw.value, [0.5]);
+}

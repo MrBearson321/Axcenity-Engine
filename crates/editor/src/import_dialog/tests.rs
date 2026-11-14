@@ -66,11 +66,12 @@ fn ticking_a_group_ticks_what_is_inside_it() {
 #[test]
 fn only_the_tabs_a_file_needs_are_shown_in_order() {
     let mut dialog = dialog();
-    assert_eq!(dialog.tabs(), [Tab::Objects, Tab::Materials]);
+    // Settings (scale, up axis, collision: P7.3) is always last.
+    assert_eq!(dialog.tabs(), [Tab::Objects, Tab::Materials, Tab::Settings]);
     assert_eq!(dialog.current(), Tab::Objects);
     // One object: nothing to choose, so it opens on its maps.
     dialog.pick_objects = false;
-    assert_eq!(dialog.tabs(), [Tab::Materials]);
+    assert_eq!(dialog.tabs(), [Tab::Materials, Tab::Settings]);
     assert_eq!(dialog.current(), Tab::Materials);
 
     let take = axcenity_assets::Take {
@@ -270,9 +271,11 @@ fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
     // The object list too, as for a file with several objects.
     dialog.pick_objects = true;
     dialog.placement = Placement::Merged;
+    // With the Preset row above the tabs, as with a project open.
+    dialog.presets = axcenity_assets::ImportPresets::default().model_presets_in_order();
     assert_eq!(
         dialog.tabs(),
-        [Tab::Objects, Tab::Materials, Tab::Animation]
+        [Tab::Objects, Tab::Materials, Tab::Animation, Tab::Settings]
     );
 
     let size = egui::vec2(800.0, 600.0);

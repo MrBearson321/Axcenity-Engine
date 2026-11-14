@@ -43,6 +43,7 @@ Click **Compare** on the badge to see the view without the ray traced effects, a
 - **Ray traced ambient occlusion** darkens corners, gaps and the ground under objects. Lighting's **AmbientOcclusion** still sets how strong that is.
 - **The sky.** A sky picture (**Lighting > SkyImage**, such as the default sky) looks real but keeps its own colours. Changing ClockTime moves the sun and darkens the picture toward night, but sunsets stay the picture's. For a sky that turns orange at sunset and dark at night, click **Follow time of day** under the SkyImage row. It adds an **Atmosphere**.
 - **Bounced light.** Turn on **Ray traced GI** (Settings > Graphics > Ray tracing). Rays light a grid of light probes around the camera every frame, so a red wall throws red light, a room darkens when its door closes and light follows the sun as it goes down. Nothing needs placing or baking. Light Probes parts you've baked are kept up to date too. Reflection Probes still give reflections; bake them after big changes.
+- **Reflections.** Turn on **Ray traced reflections** (Settings > Graphics > Ray tracing). Smooth parts, such as polished floors, metal and glossy plastic, then mirror what's around them, even things off the screen, and the reflection moves when a part moves. Low reflects only the smoothest parts, Medium and High rougher ones too. Rougher parts, glass, water and terrain still use Reflection Probes, so keep those baked.
 
 ## Light a room
 
@@ -62,7 +63,7 @@ Each effect is timed in the **Profiler** panel's Graphics tab. **Low** effects a
 Players choose the same in the game's own graphics settings. Every effect is off unless the player or your game turns it on, because not every card can ray trace. Ray traced GI also works on a card that can't: its rays are then traced in software, which costs more, so keep it at Low there.
 
 - **Make it the default.** File ▸ Build Game ▸ **Ray Traced Look by Default** gives your game's first start the ray traced look (hardware ray tracing, ray traced shadows and ambient occlusion) on any card that can ray trace. Other cards start as before. After that first start the player's own choice wins.
-- **A settings menu.** A LocalScript reads and sets the same through `UserGameSettings`. Show a ray tracing switch only where `RayTracingSupported` is true, and set `HardwareRayTracing` from it. That takes effect when the game starts again, so while `RayTracingActive` differs from `HardwareRayTracing`, say "Restart to apply". The effects are `RayTracedShadows`, `RayTracedAmbientOcclusion` and `RayTracedGlobalIllumination`.
+- **A settings menu.** A LocalScript reads and sets the same through `UserGameSettings`. Show a ray tracing switch only where `RayTracingSupported` is true, and set `HardwareRayTracing` from it. That takes effect when the game starts again, so while `RayTracingActive` differs from `HardwareRayTracing`, say "Restart to apply". The effects are `RayTracedShadows`, `RayTracedAmbientOcclusion`, `RayTracedGlobalIllumination` and `RayTracedReflections`.
 
 ```lua
 local settings = game:GetService("UserGameSettings")

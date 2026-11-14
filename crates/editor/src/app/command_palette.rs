@@ -33,10 +33,11 @@ pub(super) enum Overlay {
     Streaming,
     LightProbes,
     Culling,
+    Skeletons,
 }
 
 impl Overlay {
-    pub(super) const ALL: [Overlay; 12] = [
+    pub(super) const ALL: [Overlay; 13] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -49,6 +50,7 @@ impl Overlay {
         Overlay::Streaming,
         Overlay::LightProbes,
         Overlay::Culling,
+        Overlay::Skeletons,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -65,6 +67,7 @@ impl Overlay {
             Overlay::Streaming => "Streaming",
             Overlay::LightProbes => "Light Probes",
             Overlay::Culling => "Culling",
+            Overlay::Skeletons => "Skeletons",
         }
     }
 
@@ -82,6 +85,7 @@ impl Overlay {
             Overlay::Streaming => &mut overlays.streaming,
             Overlay::LightProbes => &mut overlays.light_probes,
             Overlay::Culling => &mut overlays.culling,
+            Overlay::Skeletons => &mut overlays.skeletons,
         }
     }
 }
@@ -205,6 +209,8 @@ pub(super) enum Command {
     CheckForUpdates,
     /// Debug > Graphics Benchmark…
     GraphicsBenchmark,
+    /// Debug > Animator Inspector… (AP6)
+    AnimatorInspector,
     PanicDuringPlay,
     /// The ribbon's Pause on errors switch (roadmap G6).
     PauseOnErrors,
@@ -233,6 +239,11 @@ pub(super) enum Command {
     PluginButton {
         plugin: usize,
         button: u32,
+    },
+    /// A command a plugin made (`plugin:CreateAction`, API 3).
+    PluginAction {
+        plugin: usize,
+        action: u64,
     },
     /// The command palette itself.
     Palette,
@@ -340,7 +351,9 @@ impl EditorApp {
                        shortcut: Option<String>,
                        enabled: Result<(), &str>| {
             let key = match &command {
-                Command::PluginButton { .. } => format!("plugin {detail} {title}"),
+                Command::PluginButton { .. } | Command::PluginAction { .. } => {
+                    format!("plugin {detail} {title}")
+                }
                 other => format!("{other:?}"),
             };
             // Keys from the shortcut table (design system V16).
@@ -905,6 +918,14 @@ impl EditorApp {
             None,
             Ok(()),
         );
+        add(
+            Command::AnimatorInspector,
+            "Animator Inspector…",
+            "Debug",
+            &["Animation", "State machine", "Debug animation", "Bones"],
+            None,
+            Ok(()),
+        );
         if cfg!(debug_assertions) {
             add(
                 Command::PanicDuringPlay,
@@ -1159,6 +1180,31 @@ impl EditorApp {
                 }
             }
         }
+        // Plugins' commands (API 3), with their shortcuts.
+        for (index, action) in self.plugins.actions() {
+            let name = self.plugins.entries[index].found.name();
+            let shortcut = action.shortcut.as_ref().map(|shortcut| {
+                let text = shortcut.text();
+                let taken = super::plugins::keyboard_shortcut(shortcut)
+                    .is_some_and(|keys| super::plugins::editor_uses(&keys));
+                if taken {
+                    format!("{text} (the editor's)")
+                } else {
+                    text
+                }
+            });
+            add(
+                Command::PluginAction {
+                    plugin: index,
+                    action: action.id,
+                },
+                &action.text,
+                &format!("Plugin › {name}"),
+                &[action.key.as_str()],
+                shortcut,
+                when(!playing, "Plugins only run while editing."),
+            );
+        }
         list
     }
 
@@ -1292,6 +1338,7 @@ impl EditorApp {
             Command::About => self.about_open = true,
             Command::CheckForUpdates => self.open_updates(),
             Command::GraphicsBenchmark => self.open_graphics_benchmark(),
+            Command::AnimatorInspector => self.open_animator_inspector(),
             Command::PanicDuringPlay => {
                 if let Some(session) = &mut self.play {
                     session.panic_next_frame();
@@ -1347,6 +1394,9 @@ impl EditorApp {
             Command::PluginButton { plugin, button } if !playing => {
                 self.click_plugin_button(plugin, button);
             }
+            Command::PluginAction { plugin, action } if !playing => {
+                self.trigger_plugin_action(plugin, action);
+            }
             Command::Palette => self.palette.toggle_commands(),
             Command::QuickOpen | Command::Search => self.palette.toggle(),
             Command::FindInScripts => self.find.show_and_focus(),
@@ -1358,7 +1408,8 @@ impl EditorApp {
             | Command::InsertScript(_)
             | Command::InsertControls
             | Command::TerrainTool(_)
-            | Command::PluginButton { .. } => {
+            | Command::PluginButton { .. }
+            | Command::PluginAction { .. } => {
                 self.output.error("Press Stop to edit.");
             }
         }
