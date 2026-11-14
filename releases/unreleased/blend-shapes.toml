@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Models keep their blend shapes (shape keys, morph targets) and draw them"
+details = "glTF morph targets and FBX blend shapes are imported instead of dropped, with their names and default values, and drawn on the GPU before skinning, in shadows and motion blur too. Nothing animates them yet except code; facial controls come next. Hardware ray tracing still sees the shape without them."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = [360, 367]
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"
