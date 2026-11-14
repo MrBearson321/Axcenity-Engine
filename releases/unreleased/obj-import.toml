@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "assets"
+title = "Import OBJ models with their materials"
+details = "Wavefront .obj files can be imported like glTF and FBX ones, by Import… or by dropping them on the editor. The .mtl library next to the file gives them their colors and textures; each o object can be picked in the Import dialog. OBJ is taken as Y up, 1 unit = 1 stud."
+features = ["assets.model-import"]
+fixes = []
+introduces_issues = []
+prs = [351]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

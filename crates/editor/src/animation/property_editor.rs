@@ -177,6 +177,8 @@ pub struct PropertyDoc {
     /// Whether these are a sequence's keys in the Sequencer, whose preview
     /// can't be edited, so an empty dope sheet says to key from the Scene view.
     pub sequence: bool,
+    /// The Cleanup section's settings (AP4).
+    pub cleanup: cleanup::Cleanup,
 }
 
 impl PropertyDoc {
@@ -208,6 +210,7 @@ impl PropertyDoc {
             rig: None,
             sheet: egui::Rect::NOTHING,
             new_keys: NewKeys::default(),
+            cleanup: cleanup::Cleanup::default(),
         }
     }
 
@@ -480,6 +483,7 @@ pub fn new_property_clip(duration: f64) -> ClipFile {
     ClipFile::new(duration)
 }
 
+mod cleanup;
 mod curves;
 mod dope_sheet;
 mod editing;
