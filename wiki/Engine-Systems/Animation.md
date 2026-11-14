@@ -54,6 +54,7 @@ flowchart LR
 ## Limitations
 
 - Format 1 clip files still read (converted).
+- No motion matching: proposal only (`docs/research/motion-matching.md`, MM1–MM6; inertialization and a controller trajectory first, the database when there's a licensed dataset).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
 - Blend shapes (morph targets) are imported (F1) and drawn morphed on the GPU (F2, before skinning, in every raster pass), but hardware ray tracing sees the unmorphed mesh. Faces are driven by a `FaceControls` (F3: 48 standard controls through a face profile, eye and jaw bones turned after IK), but there are no expressions, facial layers, procedural blinking or gaze, or lip sync yet, and clips can't key face controls (scripts and tweens can). Plan: `docs/research/facial-animation.md` (F4–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
