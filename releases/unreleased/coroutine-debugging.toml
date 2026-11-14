@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "scripting"
+title = "Breakpoints and stepping work inside your own coroutines"
+details = "A breakpoint inside coroutine.wrap or coroutine.resume now pauses there instead of being skipped. The call stack shows the coroutine's functions and then the ones that resumed it, Step Into goes into a coroutine you resume and stepping past its yield comes back out, and a new Waiting coroutines list shows your other suspended coroutines with where each waits and its locals."
+features = ["editor.script-editor"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
