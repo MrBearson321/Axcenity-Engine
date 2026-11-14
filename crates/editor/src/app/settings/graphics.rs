@@ -664,32 +664,37 @@ fn ray_tracing_section(
                     preset.ray_traced_global_illumination().label()
                 ),
             };
-            ui.add_enabled_ui(capabilities.ray_queries, |ui| {
-                egui::ComboBox::from_id_salt("ray traced global illumination")
-                    .selected_text(label(settings.ray_traced_global_illumination))
-                    .show_ui(ui, |ui| {
-                        for choice in
-                            std::iter::once(None).chain(RayTracedGlobalIllumination::ALL.map(Some))
-                        {
-                            ui.selectable_value(
-                                &mut settings.ray_traced_global_illumination,
-                                choice,
-                                label(choice),
-                            );
-                        }
-                    })
-                    .response
-                    .on_hover_text(
-                        "Bounced light that follows the world as it changes: light probes \
+            // Without ray queries its rays are traced in software (RL3).
+            ui.add_enabled_ui(
+                capabilities.ray_queries || capabilities.compute_shaders,
+                |ui| {
+                    egui::ComboBox::from_id_salt("ray traced global illumination")
+                        .selected_text(label(settings.ray_traced_global_illumination))
+                        .show_ui(ui, |ui| {
+                            for choice in std::iter::once(None)
+                                .chain(RayTracedGlobalIllumination::ALL.map(Some))
+                            {
+                                ui.selectable_value(
+                                    &mut settings.ray_traced_global_illumination,
+                                    choice,
+                                    label(choice),
+                                );
+                            }
+                        })
+                        .response
+                        .on_hover_text(
+                            "Bounced light that follows the world as it changes: light probes \
                          are lit by rays each frame instead of a bake, so a moved wall or a \
                          lamp turned on colors the light around it, and a room gets the light \
                          its windows let in. The camera brings its own probes, 3 studs apart, \
                          so no light probe volume is needed; any in the world are lit too. \
                          Low, Medium and High update 128, 256 or 512 probes a frame with 64, \
-                         128 or 256 rays each. Needs Hardware ray tracing on; it replaces \
-                         Real-time GI while on.",
-                    );
-            });
+                         128 or 256 rays each. With Hardware ray tracing off, or on a GPU \
+                         that can't ray trace, the rays are traced in software instead: \
+                         slower, so Low suits it best. It replaces Real-time GI while on.",
+                        );
+                },
+            );
             ui.end_row();
         });
     restart
@@ -740,8 +745,17 @@ pub(super) fn ray_tracing_status(opened: bool, can: bool, wanted: bool) -> &'sta
 /// The "In use" line for ray tracing: off, or each ray traced effect on.
 pub(super) fn ray_tracing_in_use(effective: &EffectiveGraphics) -> String {
     if !effective.ray_queries {
-        return "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available"
-            .to_owned();
+        let off = "Ray tracing: off (Settings > Graphics > Hardware ray tracing) or not available";
+        // GI's rays are then traced in software (RL3).
+        if effective.ray_traced_gi_in_software {
+            return format!(
+                "{off}; GI {} traced in software ({} probes a frame, {} rays each)",
+                effective.ray_traced_global_illumination.label(),
+                effective.ray_traced_global_illumination.probes_per_frame(),
+                effective.ray_traced_global_illumination.rays()
+            );
+        }
+        return off.to_owned();
     }
     let mut effects = Vec::new();
     if effective.ray_traced_shadows != RayTracedShadows::Off {

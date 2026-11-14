@@ -406,4 +406,27 @@ print(door.Name, script.Parent, Players.LocalPlayer, ...)
         // the tab has been still for 0.4 s, not on every key.
         assert!(elapsed.as_millis() < 1_000, "{elapsed:?}");
     }
+
+    /// The API Reference's examples (shown on hover and inserted into
+    /// scripts) use the API as it is: the editor's own checks find nothing
+    /// in any of them but the objects they name (`workspace.Door`), which an
+    /// empty world doesn't have.
+    #[test]
+    fn every_api_example_passes_the_editors_own_checks() {
+        let world = World::new();
+        for (name, code) in axcenity_script::api_examples() {
+            let found: Vec<_> = check(code, &world)
+                .into_iter()
+                .filter(|found| {
+                    found.severity == Severity::Error
+                        || !found.message.contains("has no child named")
+                })
+                .map(|found| format!("{}: {}", found.line, found.message))
+                .collect();
+            assert!(
+                found.is_empty(),
+                "the example for `{name}`: {found:?}\n{code}"
+            );
+        }
+    }
 }
