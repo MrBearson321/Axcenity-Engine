@@ -88,6 +88,15 @@ AnimationTrack.Stopped: Signal
 
 Fires when the track has stopped: after Stop's fade, or at the end of a clip that doesn't loop.
 
+```lua
+local animator = workspace.Hero.Humanoid.Animator
+local wave = animator:LoadAnimation(workspace.Hero.Wave)
+wave.Stopped:Connect(function()
+	print("Done waving")
+end)
+wave:Play()
+```
+
 #### KeyframeReached
 
 ```luau

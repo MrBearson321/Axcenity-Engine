@@ -21,7 +21,7 @@ use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, Shadow
 use super::culling::{Bounds, CullingBounds, Frustum, ShadowView, Sphere};
 use super::lod::{Draw, OPAQUE};
 use super::parallel::{map_each, map_indexes, map_parts, sort_unstable, worth_sharing};
-use super::skinning::JointRaw;
+use super::skinning::{JointRaw, packed_counts};
 use super::{
     Batch, CASCADE_SPLIT_BLEND, CONTACT_SHADOW_LENGTH, CONTACT_SHADOW_THICKNESS, FAR_PLANE,
     FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE, LightRaw, MATERIAL_TEXTURES,
@@ -1043,7 +1043,7 @@ fn join_plan(parts: Vec<PlanPart>, seen: Option<&mut Vec<CullingBounds>>) -> Dra
                 .or_insert_with(|| {
                     let first = joints.len() as u32;
                     joints.extend(JointRaw::of(used.skin));
-                    [first, joints.len() as u32 - first]
+                    [first, packed_counts(used.skin)]
                 });
             if let Some(at) = used.instance {
                 part.instances[at as usize].skin = skin;
