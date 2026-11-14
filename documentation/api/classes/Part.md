@@ -44,6 +44,15 @@ Part.Position: Vector3
 
 Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 
+```lua
+local platform = workspace.Platform
+local start = platform.Position
+while true do
+	platform.Position = start + Vector3.new(0, math.sin(os.clock()) * 5, 0)
+	task.wait()
+end
+```
+
 #### Orientation
 
 ```luau
@@ -59,6 +68,14 @@ Part.Size: Vector3
 ```
 
 The part's size in studs along X, Y and Z.
+
+```lua
+local balloon = workspace.Balloon
+for _ = 1, 20 do
+	balloon.Size += Vector3.new(0.2, 0.2, 0.2)
+	task.wait(0.1)
+end
+```
 
 #### Color
 
@@ -79,6 +96,10 @@ Part.Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks
 ```
 
 Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
+
+```lua
+workspace.Floor.Material = Enum.Material.Wood
+```
 
 #### MaterialVariant
 
@@ -128,6 +149,15 @@ Part.Transparency: number
 
 From 0 (as solid as its material) to 1 (invisible).
 
+```lua
+local wall = workspace.SecretWall
+for i = 0, 10 do
+	wall.Transparency = i / 10
+	task.wait(0.05)
+end
+wall.CanCollide = false
+```
+
 #### CanCollide
 
 ```luau
@@ -135,6 +165,10 @@ Part.CanCollide: boolean
 ```
 
 If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+
+```lua
+workspace.GhostDoor.CanCollide = false -- players walk through it
+```
 
 #### WindAffected
 
@@ -215,6 +249,15 @@ Part.AssemblyLinearVelocity: Vector3
 ```
 
 How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+
+```lua
+-- A jump pad: throw whatever touches it upwards.
+workspace.JumpPad.Touched:Connect(function(hit)
+	if not hit.Anchored then
+		hit.AssemblyLinearVelocity = Vector3.new(0, 80, 0)
+	end
+end)
+```
 
 #### AssemblyAngularVelocity
 
@@ -320,6 +363,16 @@ Part.TouchEnded: Signal
 ```
 
 Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+
+```lua
+local plate = workspace.PressurePlate
+plate.Touched:Connect(function()
+	plate.Color = Color3.fromRGB(0, 255, 0)
+end)
+plate.TouchEnded:Connect(function()
+	plate.Color = Color3.fromRGB(255, 0, 0)
+end)
+```
 
 ### Functions
 

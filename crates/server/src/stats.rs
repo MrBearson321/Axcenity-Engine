@@ -75,10 +75,11 @@ impl ServerStats {
         let t = self.started.elapsed().as_secs_f64();
         let instances = sim.world.len();
         let lua_bytes = sim.scripts.used_memory();
+        let flags = network.flag_count();
         println!(
             "[{t:6.1} s] {} players; {fps:.0} frames a second, frame p50 {:.2} ms, p95 {:.2}, \
              max {:.2}; round trip p50 {:.0} ms, max {:.0}; loss {:.1}%; sending {:.1} KB/s \
-             ({:.1} per player), receiving {:.1} KB/s; {instances} Instances, Lua {:.1} MB",
+             ({:.1} per player), receiving {:.1} KB/s; {instances} Instances, Lua {:.1} MB; {flags} flags",
             links.len(),
             percentile(&frames, 0.5),
             percentile(&frames, 0.95),
@@ -106,6 +107,7 @@ impl ServerStats {
                 "received_bytes_per_s": received,
                 "instances": instances,
                 "lua_bytes": lua_bytes,
+                "flags": flags,
             });
             let _ = writeln!(file, "{line}");
         }

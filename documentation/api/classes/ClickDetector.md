@@ -40,6 +40,14 @@ ClickDetector.MouseClick: Signal
 
 Fires with the Player when the left button is pressed and let go on the part, from within MaxActivationDistance.
 
+```lua
+workspace.Lever.ClickDetector.MouseClick:Connect(function(player)
+	print(player.Name, "pulled the lever")
+	workspace.Gate.Transparency = 1
+	workspace.Gate.CanCollide = false
+end)
+```
+
 #### RightMouseClick
 
 ```luau
