@@ -268,3 +268,95 @@ fn a_wide_panel_names_its_tools() {
     assert!(names_drawn(600.0));
     assert!(!names_drawn(260.0));
 }
+
+/// The texts drawn by the panel at 260 points wide with `selected`.
+fn texts_drawn(
+    world: &World,
+    selected: Option<InstanceId>,
+    studio: &mut TerrainStudio,
+) -> Vec<String> {
+    let ctx = crate::theme::test_context();
+    let mut output = None;
+    for _ in 0..2 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(260.0, 2400.0),
+            )),
+            ..Default::default()
+        };
+        output = Some(crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                studio.show(
+                    ui,
+                    &StudioContext {
+                        world,
+                        selected,
+                        editing: true,
+                        time: 0.0,
+                        textures: &[],
+                        pictures: &HashMap::new(),
+                    },
+                );
+            });
+        }));
+    }
+    fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.unwrap().shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+#[test]
+fn a_selected_biome_shows_its_settings_and_paint_and_its_rules_say_where_they_are() {
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    for name in ["Grass", "Forest Floor"] {
+        let layer = world.create(ClassName::TerrainLayer).unwrap();
+        world.set_parent(layer, Some(terrain)).unwrap();
+        world.set_name(layer, name).unwrap();
+    }
+    let biome = world.create(ClassName::Biome).unwrap();
+    world.set_parent(biome, Some(terrain)).unwrap();
+    world.set_name(biome, "Lowland Forest").unwrap();
+    world
+        .set_property(biome, "GroundLayer", Value::String("Forest Floor".into()))
+        .unwrap();
+    let rule = world.create(ClassName::ScatterRule).unwrap();
+    world.set_parent(rule, Some(biome)).unwrap();
+    world.set_name(rule, "Trees").unwrap();
+    let mut studio = TerrainStudio::default();
+    let found = texts_drawn(&world, Some(biome), &mut studio);
+    for text in [
+        "Biomes",
+        "Lowland Forest",
+        "Paint this biome",
+        "1. Trees (in Lowland Forest)",
+    ] {
+        assert!(
+            found.iter().any(|t| t.contains(text)),
+            "{text} in {found:?}"
+        );
+    }
+    assert!(
+        found
+            .iter()
+            .any(|t| t.contains("Forest Floor · any height · 1 rule")),
+        "{found:?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|t| t.contains("Add rule to Lowland Forest"))
+    );
+    assert_eq!(studio.target, Some(terrain), "a biome selects its terrain");
+}

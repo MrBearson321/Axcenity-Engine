@@ -343,6 +343,111 @@ fn generated_foliage_is_never_saved_and_goes_with_its_rules() {
     assert_eq!(world.terrain(land).unwrap().generated_count(), 0);
 }
 
+/// PW2: a Biome inside `terrain` on ground layer `ground`, from `low` to
+/// `high` studs, with straight edges, holding one rule placing `models`.
+fn biome(
+    world: &mut World,
+    terrain: InstanceId,
+    ground: &str,
+    low: f64,
+    high: f64,
+    models: &str,
+) -> (InstanceId, InstanceId) {
+    let biome = world.create(ClassName::Biome).unwrap();
+    world.set_parent(biome, Some(terrain)).unwrap();
+    for (name, value) in [
+        ("GroundLayer", Value::String(ground.into())),
+        ("MinHeight", Value::Number(low)),
+        ("MaxHeight", Value::Number(high)),
+        ("HeightFade", Value::Number(8.0)),
+        ("EdgeNoise", Value::Number(0.0)),
+    ] {
+        set(world, biome, name, value);
+    }
+    let inside = rule(world, terrain, models, 4.0);
+    world.set_parent(inside, Some(biome)).unwrap();
+    (biome, inside)
+}
+
+/// Studs above the bottom of a generated instance on the east-rising ramp.
+fn ramp_height(instance: &FoliageInstance) -> f32 {
+    instance.x / 128.0 * 100.0
+}
+
+#[test]
+fn a_rule_in_a_biome_places_only_inside_it_thinning_at_its_soft_edge() {
+    let mut world = World::new();
+    // Rising from 0 studs (west) to 100 (east).
+    let land = terrain(&mut world, |x, _| x as f32 / 128.0);
+    for name in ["Grass", "Forest Floor", "Snow"] {
+        let layer = world.create(ClassName::TerrainLayer).unwrap();
+        world.set_parent(layer, Some(land)).unwrap();
+        world.set_name(layer, name).unwrap();
+    }
+    biome(&mut world, land, "Forest Floor", 0.0, 40.0, "plant:Tree");
+    let (alpine, _) = biome(&mut world, land, "Snow", 60.0, 10000.0, "prop:Crate");
+    let order: Vec<Option<usize>> = rules_of(&world, land).iter().map(|r| r.biome).collect();
+    assert_eq!(order, [Some(0), Some(1)]);
+    let mut scatter = TerrainScatter::default();
+    scatter.update(&mut world);
+    let placed = generated(&world, land);
+    let trees: Vec<f32> = placed
+        .iter()
+        .filter(|i| i.source == FoliageSource::Plant(FoliagePlant::Tree))
+        .map(ramp_height)
+        .collect();
+    let rocks: Vec<f32> = placed
+        .iter()
+        .filter(|i| matches!(i.source, FoliageSource::Prop(_)))
+        .map(ramp_height)
+        .collect();
+    assert!(trees.len() > 100 && rocks.len() > 100);
+    // Nothing outside its biome (the fade reaches 4 studs past each line).
+    assert!(trees.iter().all(|&h| h <= 44.5), "{trees:?}");
+    assert!(rocks.iter().all(|&h| h >= 55.5));
+    // Thinner across the edge than well inside.
+    let band = |low: f32, high: f32| trees.iter().filter(|&&h| h >= low && h < high).count();
+    let (inside, edge) = (band(10.0, 18.0), band(38.0, 46.0));
+    assert!(
+        edge > 0 && edge * 3 < inside * 2,
+        "{inside} inside, {edge} at the edge"
+    );
+
+    // Painting the forest's ground high up brings trees there and takes the rocks.
+    let data = world.terrain_mut(land).unwrap();
+    let rect = axcenity_core::SampleRect::new(110, 0, 129, 129);
+    let paint = data.paint_mut_in(rect);
+    for z in 0..129 {
+        for x in 110..129 {
+            paint[z * 129 + x] = [0, 255, 0, 0, 0, 0, 0, 0];
+        }
+    }
+    scatter.update(&mut world);
+    let placed = generated(&world, land);
+    let painted = |i: &&FoliageInstance| i.x >= 111.0;
+    assert!(
+        placed
+            .iter()
+            .filter(painted)
+            .any(|i| i.source == FoliageSource::Plant(FoliagePlant::Tree))
+    );
+    assert!(
+        !placed
+            .iter()
+            .filter(painted)
+            .any(|i| matches!(i.source, FoliageSource::Prop(_)))
+    );
+
+    // A biome switched off places nothing.
+    set(&mut world, alpine, "Enabled", Value::Bool(false));
+    scatter.update(&mut world);
+    assert!(
+        !generated(&world, land)
+            .iter()
+            .any(|i| matches!(i.source, FoliageSource::Prop(_)))
+    );
+}
+
 #[test]
 fn models_name_built_in_plants_props_and_files() {
     use axcenity_core::FoliageProp;

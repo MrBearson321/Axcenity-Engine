@@ -12,6 +12,10 @@
 //!   in all per sample. Whatever paint doesn't claim is left to the rules.
 //! - **The final weights** ([`blend`]) mix the two and add up to 1. They're
 //!   what the renderer draws.
+//!
+//! A terrain's Biomes ([`crate::biomes`]) lay their ground layers down
+//! first, under every layer's own rule: the first layer covers whatever no
+//! biome does.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -21,6 +25,7 @@ use axcenity_core::{
 use glam::Vec2;
 
 use crate::Placement;
+use crate::biomes::{self, BiomeRule, MAX_BIOMES, auto_biome_weights, blend_biomes};
 use crate::noise::{Noise, smoothstep};
 
 /// One layer's automatic rule: "where the height is between these and the
@@ -118,20 +123,35 @@ pub fn layers(world: &World, terrain: InstanceId) -> Vec<InstanceId> {
         .collect()
 }
 
-/// Every layer's rule (`None` where it has none).
+/// Every layer's rule (`None` where it has none), and every biome's
+/// (`None` where it's switched off).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MaterialRules {
     pub rules: Vec<Option<LayerRule>>,
+    pub biomes: Vec<Option<BiomeRule>>,
 }
 
 impl MaterialRules {
-    /// The rules of `terrain`'s layers.
+    /// The rules of `terrain`'s layers and biomes.
     pub fn of(world: &World, terrain: InstanceId) -> Self {
-        let rules = layers(world, terrain)
+        let layers = layers(world, terrain);
+        let names: Vec<String> = layers
+            .iter()
+            .map(|&layer| {
+                world
+                    .get(layer)
+                    .map_or_else(String::new, |i| i.name().to_owned())
+            })
+            .collect();
+        let rules = layers
             .into_iter()
             .map(|layer| world.get(layer).and_then(LayerRule::of))
             .collect();
-        Self { rules }
+        let biomes = biomes::biomes(world, terrain)
+            .into_iter()
+            .map(|biome| world.get(biome).and_then(|i| BiomeRule::of(i, &names)))
+            .collect();
+        Self { rules, biomes }
     }
 
     pub fn layer_count(&self) -> usize {
@@ -163,7 +183,22 @@ impl MaterialRules {
                 }
             }
         }
+        self.biomes.len().hash(&mut hasher);
+        for biome in &self.biomes {
+            match biome {
+                None => 0u8.hash(&mut hasher),
+                Some(biome) => {
+                    1u8.hash(&mut hasher);
+                    biome.hash_into(&mut hasher);
+                }
+            }
+        }
         hasher.finish()
+    }
+
+    /// Each biome's automatic weight at a point (see [`Self::auto_weights`]).
+    pub fn auto_biome_weights(&self, height: f32, slope: f32, at: Vec2) -> [f32; MAX_BIOMES] {
+        auto_biome_weights(&self.biomes, height, slope, at)
     }
 
     /// The automatic weights at a point `height` studs above the terrain's
@@ -176,6 +211,24 @@ impl MaterialRules {
             return weights;
         }
         weights[0] = 1.0;
+        // The biomes' ground first, where no layer's paint is.
+        if self
+            .biomes
+            .iter()
+            .any(|b| b.is_some_and(|b| b.ground.is_some()))
+        {
+            let covers = self.auto_biome_weights(height, slope, at);
+            for (biome, cover) in self.biomes.iter().zip(covers) {
+                if let Some(ground) = biome.and_then(|b| b.ground)
+                    && ground < self.rules.len()
+                    && cover > 0.0
+                {
+                    weights[0] -= cover;
+                    weights[ground] += cover;
+                }
+            }
+            weights[0] = weights[0].max(0.0);
+        }
         for (index, rule) in self.rules.iter().enumerate().skip(1) {
             let Some(rule) = rule else {
                 continue;
@@ -250,6 +303,25 @@ pub fn sample_weights(
     blend(auto, data.paint()[data.index(x, z)], rules.layer_count())
 }
 
+/// Each biome's final weight at sample (`x`, `z`), 0 to 1 (see
+/// [`crate::biomes`]). All 0 with no biomes.
+pub fn biome_weights(
+    data: &TerrainData,
+    placement: &Placement,
+    rules: &MaterialRules,
+    x: usize,
+    z: usize,
+) -> [f32; MAX_BIOMES] {
+    if rules.biomes.is_empty() {
+        return [0.0; MAX_BIOMES];
+    }
+    let height = data.height(x as isize, z as isize) * placement.size.y;
+    let slope = placement.slope_degrees(data, x, z);
+    let at = Vec2::new(x as f32, z as f32) * placement.cell_size(data);
+    let auto = rules.auto_biome_weights(height, slope, at);
+    blend_biomes(&rules.biomes, auto, data.paint()[data.index(x, z)])
+}
+
 /// The layer that covers the most at the sample nearest world (`x`, `z`),
 /// for picking a layer from the ground. `None` off the terrain or with no layers.
 pub fn dominant_layer(
@@ -288,6 +360,7 @@ mod tests {
     /// Grass underneath, rock on slopes over 35°, snow over 80 studs.
     fn alpine() -> MaterialRules {
         MaterialRules {
+            biomes: Vec::new(),
             rules: vec![
                 None,
                 quiet(LayerRule {
