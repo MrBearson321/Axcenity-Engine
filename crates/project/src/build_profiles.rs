@@ -294,7 +294,7 @@ pub fn report_group(name: &str) -> &'static str {
         "Scripts"
     } else if axcenity_assets::TEXTURE_EXTENSIONS.contains(&extension) {
         "Textures"
-    } else if ["glb", "gltf", "fbx", "bin"].contains(&extension) {
+    } else if ["glb", "gltf", "fbx", "obj", "mtl", "bin"].contains(&extension) {
         "Models"
     } else if axcenity_assets::AUDIO_EXTENSIONS.contains(&extension) {
         "Audio"

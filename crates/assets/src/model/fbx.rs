@@ -1,5 +1,6 @@
-//! Reading FBX models (binary or ASCII, any version) with `ufbx`, into the
-//! same triangles and materials as glTF.
+//! Reading FBX models (binary or ASCII, any version) and OBJ models (with
+//! their `.mtl` material library) with `ufbx`, into the same triangles and
+//! materials as glTF.
 //!
 //! `ufbx` converts the file to glTF's space as it loads: Y up, right-handed,
 //! 1 unit = 1 meter (= 1 stud), whatever axes and units the file was saved
@@ -35,11 +36,12 @@ const DEFAULT_FRAME_RATE: f64 = 30.0;
 /// the model is in.
 pub(super) fn load(
     bytes: &[u8],
+    source: Source<'_>,
     folder: &Path,
     in_project: Option<InProject<'_>>,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
-    let scene = parse(bytes)?;
+    let scene = parse(bytes, source)?;
     let mut reader = Reader {
         animated: animated_nodes(&scene),
         joints: Vec::new(),
@@ -141,7 +143,7 @@ fn unlinked_textures(scene: &ufbx::Scene) -> Vec<&ufbx::Texture> {
 /// The image files embedded in an FBX file, as file names (made safe, and
 /// unique) and their bytes as they are, for copying out on import.
 pub(super) fn embedded_textures(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
-    let scene = parse(bytes)?;
+    let scene = parse(bytes, Source::Fbx)?;
     Ok(embedded_files(&scene)
         .into_iter()
         .map(|(name, content, _)| (name, content.to_vec()))
@@ -185,8 +187,8 @@ fn embedded_files(scene: &ufbx::Scene) -> Vec<(String, &[u8], Vec<u32>)> {
 
 /// The objects in an FBX file: its visible nodes with meshes, and the
 /// nodes they're in.
-pub(super) fn list(bytes: &[u8]) -> Result<Vec<ModelObject>, ModelError> {
-    let scene = parse(bytes)?;
+pub(super) fn list(bytes: &[u8], source: Source<'_>) -> Result<Vec<ModelObject>, ModelError> {
+    let scene = parse(bytes, source)?;
     fn children(node: &ufbx::Node, path: &str, depth: usize) -> Vec<Listed> {
         let mut siblings = Siblings::default();
         node.children
@@ -246,15 +248,27 @@ fn material_names(node: &ufbx::Node, mesh: &ufbx::Mesh) -> Vec<String> {
     names
 }
 
-/// The texture files an FBX file in `folder` uses that are there, as paths
-/// inside `folder`.
-pub(super) fn files_used(bytes: &[u8], folder: &Path) -> Result<Vec<PathBuf>, ModelError> {
-    let scene = parse(bytes)?;
-    let mut files: Vec<PathBuf> = scene
-        .textures
-        .iter()
-        .filter(|texture| texture.content.is_empty())
-        .filter_map(|texture| texture_path(texture, folder))
+/// The texture files an FBX or OBJ file in `folder` uses that are there,
+/// as paths inside `folder`, and an OBJ file's material library.
+pub(super) fn files_used(
+    bytes: &[u8],
+    source: Source<'_>,
+    folder: &Path,
+) -> Result<Vec<PathBuf>, ModelError> {
+    let scene = parse(bytes, source)?;
+    let library = match source {
+        Source::Obj { library, .. } => library.map(|(path, _)| path.to_path_buf()),
+        Source::Fbx => None,
+    };
+    let mut files: Vec<PathBuf> = library
+        .into_iter()
+        .chain(
+            scene
+                .textures
+                .iter()
+                .filter(|texture| texture.content.is_empty())
+                .filter_map(|texture| texture_path(texture, folder)),
+        )
         .collect();
     files.sort();
     files.dedup();
@@ -263,7 +277,7 @@ pub(super) fn files_used(bytes: &[u8], folder: &Path) -> Result<Vec<PathBuf>, Mo
 
 /// Every take (animation stack) in an FBX file's `bytes`, baked into keys.
 pub(super) fn load_takes(bytes: &[u8]) -> Result<Vec<Take>, ModelError> {
-    let scene = parse(bytes)?;
+    let scene = parse(bytes, Source::Fbx)?;
     Ok(takes(&scene))
 }
 
@@ -520,23 +534,63 @@ fn skin_weights(
     (joints, weights)
 }
 
-fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
+/// What `ufbx` is reading: an FBX file, or an OBJ file with its material
+/// library's bytes, if it names one that's there.
+#[derive(Clone, Copy)]
+pub(super) enum Source<'a> {
+    Fbx,
+    Obj {
+        /// The `.mtl` file named by the OBJ's `mtllib` line: its path inside
+        /// the model's folder and its bytes.
+        library: Option<(&'a Path, &'a [u8])>,
+    },
+}
+
+/// The material library an OBJ file names (`mtllib materials.mtl`), as a
+/// path inside the model's folder, if it names one that's a safe path.
+/// Only the first is used, as `ufbx` reads one.
+pub(super) fn obj_library(bytes: &[u8]) -> Option<PathBuf> {
+    let text = String::from_utf8_lossy(bytes);
+    text.lines().find_map(|line| {
+        let name = line.trim_start().strip_prefix("mtllib")?;
+        // `mtllib` followed by a space or tab, then the file name (which
+        // may itself have spaces in it).
+        if !name.starts_with([' ', '\t']) {
+            return None;
+        }
+        crate::safe_path(&name.trim().replace('\\', "/"))
+    })
+}
+
+fn parse(bytes: &[u8], source: Source<'_>) -> Result<ufbx::SceneRoot, ModelError> {
+    // glTF's space: +X right, +Y up, +Z front, in meters.
+    let gltf_axes = CoordinateAxes {
+        right: CoordinateAxis::PositiveX,
+        up: CoordinateAxis::PositiveY,
+        front: CoordinateAxis::PositiveZ,
+    };
+    let (file_format, library) = match source {
+        Source::Fbx => (ufbx::FileFormat::Fbx, None),
+        Source::Obj { library } => (ufbx::FileFormat::Obj, library.map(|(_, bytes)| bytes)),
+    };
     let opts = ufbx::LoadOpts {
-        // Only the bytes given, and only as FBX (not OBJ).
+        // Only the bytes given (and an OBJ's library, read here), in the
+        // format its extension says.
         load_external_files: false,
-        file_format: ufbx::FileFormat::Fbx,
+        file_format,
+        obj_mtl_data: library.map_or(ufbx::BlobOpt::Unset, ufbx::BlobOpt::Ref),
+        // An OBJ file doesn't say its axes or units: take them as glTF's
+        // (Y up, 1 unit = 1 meter = 1 stud), as Blender and most tools
+        // export it. A Z-up export is turned when it's imported.
+        obj_axes: gltf_axes,
+        obj_unit_meters: 1.0,
         ignore_animation: false,
         generate_missing_normals: true,
         // Blender saves its Principled BSDF's metalness and roughness in
         // its own properties.
         use_blender_pbr_material: true,
         node_depth_limit: MAX_NODE_DEPTH as u32,
-        // glTF's space: +X right, +Y up, +Z front, in meters.
-        target_axes: CoordinateAxes {
-            right: CoordinateAxis::PositiveX,
-            up: CoordinateAxis::PositiveY,
-            front: CoordinateAxis::PositiveZ,
-        },
+        target_axes: gltf_axes,
         target_unit_meters: 1.0,
         ..Default::default()
     };
@@ -546,7 +600,10 @@ fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
         if !info.is_empty() {
             message.push_str(&format!(" ({info})"));
         }
-        ModelError::Fbx(message)
+        match source {
+            Source::Fbx => ModelError::Fbx(message),
+            Source::Obj { .. } => ModelError::Obj(message),
+        }
     })
 }
 
@@ -1221,5 +1278,7 @@ fn mat4(m: &ufbx::Matrix) -> DMat4 {
     ])
 }
 
+#[cfg(test)]
+mod obj_tests;
 #[cfg(test)]
 pub(crate) mod tests;

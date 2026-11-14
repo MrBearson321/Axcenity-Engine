@@ -293,7 +293,7 @@ fn kinds(paths: &[&str]) -> Vec<String> {
             .map(|(kind, _)| *kind)
             .unwrap_or_else(|| {
                 let extension = lower.rsplit('.').next().unwrap_or_default();
-                if ["gltf", "glb", "fbx"].contains(&extension) {
+                if axcenity_assets::MODEL_EXTENSIONS.contains(&extension) {
                     "model"
                 } else if axcenity_assets::TEXTURE_EXTENSIONS.contains(&extension) {
                     "texture"

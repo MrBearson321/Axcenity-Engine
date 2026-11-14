@@ -21,7 +21,7 @@ pub const TEXTURES_FOLDER: &str = "textures";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
-    #[error("only glTF and FBX models (.gltf, .glb or .fbx files) can be imported")]
+    #[error("only glTF, FBX and OBJ models (.gltf, .glb, .fbx or .obj files) can be imported")]
     NotAModel,
     #[error("only PNG, JPEG, TGA and BMP textures can be used")]
     NotATexture,
