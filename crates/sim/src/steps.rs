@@ -378,6 +378,8 @@ fn particles(ctx: &mut FrameCtx) {
 /// and physics moved the parts.
 fn animators(ctx: &mut FrameCtx) {
     let sim = ctx.io.sim();
+    let viewer = sim.scripts.camera_position();
+    sim.animators.set_viewer(viewer);
     let events = sim
         .animators
         .update(&mut sim.world, &sim.assets, ctx.seconds);

@@ -1289,3 +1289,77 @@ fn a_platform_put_far_away_leaves_the_character_to_fall() {
     let here = pos(&world, body);
     assert!(here.x.abs() < 1e-3 && here.y < 0.5, "{here:?}");
 }
+
+/// Where the [`standing`] character's body stops, walking at a wall whose
+/// near face is at z = -3.5, with a 6-stud-wide part that doesn't collide
+/// (a mesh in an A-pose) beside its 2-stud body named `root_name`.
+fn stops_at_a_wall(root_name: &str) -> f32 {
+    let (mut world, controller, body) = standing();
+    world.set_name(body, root_name).unwrap();
+    set(&mut world, controller, "WalkSpeed", 16.0);
+    let model = world.get(body).unwrap().parent().unwrap();
+    let visual = world.create(ClassName::MeshPart).unwrap();
+    world.set_parent(visual, Some(model)).unwrap();
+    for (name, value) in [
+        ("Size", Value::Vector3(Vector3::new(6.0, 2.0, 0.5))),
+        ("Position", Value::Vector3(Vector3::new(0.0, 1.0, 0.0))),
+        ("CanCollide", Value::Bool(false)),
+    ] {
+        world.set_property(visual, name, value).unwrap();
+    }
+    solid(
+        &mut world,
+        PartType::Block,
+        Vector3::new(12.0, 4.0, 1.0),
+        Vector3::new(0.0, 2.0, -4.0),
+    );
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, forward(), 60);
+    let body_at = pos(&world, body);
+    assert!(
+        (pos(&world, visual).z - body_at.z).abs() < 1e-3,
+        "the visual moves with it"
+    );
+    body_at.z
+}
+
+#[test]
+fn a_humanoid_root_part_alone_sizes_the_body_so_a_wide_mesh_does_not() {
+    // Measured by every part, the 6-stud mesh keeps it 3 studs off.
+    let wide = stops_at_a_wall("Body");
+    assert!(wide > -0.6 && wide < -0.3, "{wide}");
+    // Measured by its root part, it stops 1 stud off, as the body alone.
+    let root = stops_at_a_wall("HumanoidRootPart");
+    assert!(root > -2.6 && root < -2.3, "{root}");
+}
+
+#[test]
+fn a_character_with_a_root_part_crouches_only_that_part() {
+    let (mut world, controller, body) = standing();
+    world.set_name(body, "HumanoidRootPart").unwrap();
+    set(&mut world, controller, "CrouchHeight", 1.0);
+    let model = world.get(body).unwrap().parent().unwrap();
+    let mesh = world.create(ClassName::MeshPart).unwrap();
+    world.set_parent(mesh, Some(model)).unwrap();
+    for (name, value) in [
+        ("Size", Value::Vector3(Vector3::new(1.0, 2.0, 1.0))),
+        ("Position", Value::Vector3(Vector3::new(0.0, 1.0, 0.0))),
+        ("CanCollide", Value::Bool(false)),
+    ] {
+        world.set_property(mesh, name, value).unwrap();
+    }
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    crouch(&mut world, controller, true);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert!(controllers.crouched(controller));
+    // The root squashes; the mesh keeps its size (it crouches by animation).
+    assert_eq!(size(&world, body), Vector3::new(2.0, 1.0, 2.0));
+    assert_eq!(size(&world, mesh), Vector3::new(1.0, 2.0, 1.0));
+    assert!((pos(&world, mesh).y - 1.0).abs() < 1e-3);
+
+    crouch(&mut world, controller, false);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert!(!controllers.crouched(controller));
+    assert_eq!(size(&world, body), Vector3::new(2.0, 2.0, 2.0));
+}

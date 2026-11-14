@@ -483,6 +483,33 @@ mod tests {
     }
 
     #[test]
+    fn a_posed_model_knows_where_its_bones_are() {
+        let model = noodle();
+        let rig = model.rig.as_ref().unwrap();
+        let takes = load_takes(noodle_fbx().as_bytes(), ModelFormat::Fbx).unwrap();
+        let walk = &takes[2];
+        let mut pose = rig.rest_pose();
+        walk.sample(0.5, &walk.bind(rig), rig, &mut pose);
+        let posed = model.pose(&pose).unwrap();
+        assert_eq!(posed.bones().len(), rig.bones.len());
+        assert_eq!(posed.bones(), rig.skeleton(&pose));
+        // In fitted space: where the rig puts each bone, then fitted.
+        let world = rig.world(&pose);
+        for (index, bone) in posed.bones().iter().enumerate() {
+            assert_eq!(bone.parent, rig.bones[index].parent);
+            let expected = rig
+                .fit
+                .transform_point3(world[index].transform_point3(Vec3::ZERO));
+            assert!((bone.position - expected).length() < 1e-5);
+        }
+        // Mid sits above Root at rest; the walk moved Root forward.
+        let rest = model.rest_posed();
+        let (root, mid) = (rig.bone("Root").unwrap(), rig.bone("Mid").unwrap());
+        assert!(rest.bones()[mid].position.y > rest.bones()[root].position.y);
+        assert!(posed.bones()[root].position.z > rest.bones()[root].position.z);
+    }
+
+    #[test]
     fn the_example_project_has_this_noodle() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/hello-animation/assets/models/noodle.fbx");

@@ -335,6 +335,12 @@ fn find_limbs(rig: &Rig) -> Result<HashMap<Limb, usize>, String> {
 /// Where a MeshPart's model's file space is in the world: its `Position`,
 /// `Orientation` and `Size`, then the rig's fit into the 1×1×1 box.
 pub(crate) fn placement(world: &World, part: InstanceId, rig: &Rig) -> Option<Mat4> {
+    placement_with(world, part, rig.fit)
+}
+
+/// From a model file's space (fitted by `fit`) into the world, where the
+/// MeshPart `part` puts it.
+pub(crate) fn placement_with(world: &World, part: InstanceId, fit: Mat4) -> Option<Mat4> {
     let instance = world.get(part)?;
     let vector = |name| instance.property(name).and_then(Value::as_vector3);
     let size = vector("Size")?;
@@ -342,7 +348,7 @@ pub(crate) fn placement(world: &World, part: InstanceId, rig: &Rig) -> Option<Ma
         Vec3::new(size.x, size.y, size.z),
         rotation_of(vector("Orientation")?),
         to_vec3(vector("Position")?),
-    ) * rig.fit;
+    ) * fit;
     place.is_finite().then_some(place)
 }
 

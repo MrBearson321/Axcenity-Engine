@@ -554,6 +554,7 @@ pub enum EnumType {
     ParticleFlipbookMode,
     RayTracedAmbientOcclusion,
     RayTracedGlobalIllumination,
+    RayTracedReflections,
 }
 
 impl EnumType {
@@ -624,6 +625,7 @@ impl EnumType {
         EnumType::ParticleFlipbookMode,
         EnumType::RayTracedAmbientOcclusion,
         EnumType::RayTracedGlobalIllumination,
+        EnumType::RayTracedReflections,
     ];
 
     pub fn name(self) -> &'static str {
@@ -655,6 +657,7 @@ impl EnumType {
             EnumType::ParticleFlipbookMode => "ParticleFlipbookMode",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::RayTracedGlobalIllumination => "RayTracedGlobalIllumination",
+            EnumType::RayTracedReflections => "RayTracedReflections",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::AssetFetchStatus => "AssetFetchStatus",
@@ -711,6 +714,7 @@ impl EnumType {
             EnumType::RayTracedGlobalIllumination => {
                 user_settings::ray_traced_global_illumination_names()
             }
+            EnumType::RayTracedReflections => user_settings::ray_traced_reflections_names(),
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             // How a file went, for `ContentProvider:PreloadAsync`'s callback.
@@ -882,6 +886,7 @@ impl LuaEnumItem {
             | EnumType::RayTracedShadows
             | EnumType::RayTracedAmbientOcclusion
             | EnumType::RayTracedGlobalIllumination
+            | EnumType::RayTracedReflections
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::AssetFetchStatus

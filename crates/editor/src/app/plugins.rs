@@ -86,6 +86,8 @@ impl EditorApp {
                 rows: Vec::new(),
                 importers: Vec::new(),
                 asset_actions: Vec::new(),
+                actions: Vec::new(),
+                explorer_actions: Vec::new(),
             });
         }
         let roots = [
@@ -148,8 +150,18 @@ impl EditorApp {
         self.after_plugin_call(index, before, was_recording);
     }
 
-    /// Stops the plugin at `index`: its dock tabs go.
-    fn stop_plugin(&mut self, index: usize) {
+    /// Stops the plugin at `index`: it hears `plugin.Unloading` first
+    /// (and what it keeps with `SetSetting` then is saved), then its dock
+    /// tabs go.
+    pub(in crate::app) fn stop_plugin(&mut self, index: usize) {
+        let running = self
+            .plugins
+            .entries
+            .get(index)
+            .is_some_and(|entry| entry.running.is_some());
+        if running && !self.playing() {
+            self.call_plugin(index, |plugin, world| plugin.unloading(world));
+        }
         let Some(entry) = self.plugins.entries.get_mut(index) else {
             return;
         };
@@ -159,6 +171,8 @@ impl EditorApp {
         entry.rows.clear();
         entry.importers.clear();
         entry.asset_actions.clear();
+        entry.actions.clear();
+        entry.explorer_actions.clear();
         if let Some(plugin) = entry.running.take() {
             plugin.stop(&mut self.world);
         }
@@ -224,6 +238,7 @@ impl EditorApp {
         let mut open = self.plugins.open_step;
         let mut select = None;
         let mut history_moves = Vec::new();
+        let mut open_scripts = Vec::new();
         for request in requests {
             match request {
                 Request::Waypoint(waypoint) => {
@@ -246,10 +261,16 @@ impl EditorApp {
                 Request::Select(ids) => select = Some(ids),
                 Request::Undo => history_moves.push(true),
                 Request::Redo => history_moves.push(false),
+                Request::OpenScript(id, line) => open_scripts.push((id, line)),
+                Request::Notify(text) => self.toasts.success(format!("{name}: {text}")),
             }
         }
         let rest = self.take_world_changes();
-        let ids = changed_ids(&rest);
+        // What an import is making is recorded by the import itself.
+        let ids: Vec<InstanceId> = changed_ids(&rest)
+            .into_iter()
+            .filter(|id| !self.plugins.importing.contains(id))
+            .collect();
         open =
             self.history
                 .record_edits(&mut self.world, name.clone(), (&segment, None), &ids, open);
@@ -267,6 +288,9 @@ impl EditorApp {
             } else {
                 self.redo();
             }
+        }
+        for (id, line) in open_scripts {
+            self.open_plugin_script(id, line);
         }
         self.take_plugin_output(index);
     }
@@ -294,6 +318,10 @@ impl EditorApp {
         if let Some((importers, actions)) = plugin.take_asset_hooks() {
             entry.importers = importers;
             entry.asset_actions = actions;
+        }
+        if let Some((actions, explorer)) = plugin.take_actions() {
+            entry.actions = actions;
+            entry.explorer_actions = explorer;
         }
         for line in lines {
             match line.kind {
@@ -541,6 +569,84 @@ impl EditorApp {
             if self.plugins.entries[index].running.is_some() {
                 self.call_plugin(index, |plugin, world| plugin.asset_imported(world, path));
             }
+        }
+    }
+
+    /// Runs the plugin command numbered `action` of the plugin at
+    /// `plugin` (Ctrl+K or its shortcut).
+    pub(in crate::app) fn trigger_plugin_action(&mut self, plugin: usize, action: u64) {
+        self.call_plugin(plugin, |p, world| p.trigger_action(world, action));
+    }
+
+    /// A plugin's Explorer item was picked: it gets the selection (the
+    /// row right-clicked is in it).
+    pub(in crate::app) fn plugin_explorer_action(&mut self, plugin: usize, action: u64) {
+        let selection = self.selection.clone();
+        self.call_plugin(plugin, |p, world| {
+            p.explorer_action(world, action, &selection)
+        });
+    }
+
+    /// Tells the running plugins an import made `made` (not yet in the
+    /// world's tree) from the model file now at `path`
+    /// (`plugin.ModelImported`, once for each). Their changes to it are
+    /// part of the import's undo step, which is recorded after this; other
+    /// changes are steps of their own.
+    pub(in crate::app) fn plugins_model_imported(&mut self, made: &[InstanceId], path: &str) {
+        let any = self
+            .plugins
+            .entries
+            .iter()
+            .any(|entry| entry.running.is_some());
+        if !any || made.is_empty() {
+            return;
+        }
+        let mut inside: std::collections::HashSet<InstanceId> = made.iter().copied().collect();
+        for &id in made {
+            inside.extend(self.world.descendants(id));
+        }
+        self.plugins.importing = inside;
+        for index in 0..self.plugins.entries.len() {
+            if self.plugins.entries[index].running.is_some() {
+                for &root in made {
+                    self.call_plugin(index, |plugin, world| {
+                        plugin.model_imported(world, root, path)
+                    });
+                }
+            }
+        }
+        self.plugins.importing.clear();
+    }
+
+    /// Opens the script `id` for a plugin (`plugin:OpenScript`), at `line`.
+    fn open_plugin_script(&mut self, id: InstanceId, line: Option<usize>) {
+        match self.script_path(id) {
+            Some(path) => self.open_script(&path, line),
+            None => self.open_script_instance(id),
+        }
+    }
+
+    /// Runs the plugin commands whose shortcuts were pressed this frame,
+    /// while editing and not typing. A shortcut the editor already uses
+    /// stays the editor's.
+    pub(in crate::app) fn plugin_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.playing() || self.project.is_none() || ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        let mut pressed = Vec::new();
+        for (plugin, action) in self.plugins.actions() {
+            let Some(shortcut) = action.shortcut.as_ref().and_then(keyboard_shortcut) else {
+                continue;
+            };
+            if editor_uses(&shortcut) {
+                continue;
+            }
+            if ctx.input_mut(|input| input.consume_shortcut(&shortcut)) {
+                pressed.push((plugin, action.id));
+            }
+        }
+        for (plugin, action) in pressed {
+            self.trigger_plugin_action(plugin, action);
         }
     }
 
@@ -885,6 +991,31 @@ impl EditorApp {
             self.click_plugin_button(index, button);
         }
     }
+}
+
+/// A plugin command's shortcut as egui's (Ctrl is Cmd on macOS).
+pub(in crate::app) fn keyboard_shortcut(
+    shortcut: &axcenity_plugins::Shortcut,
+) -> Option<egui::KeyboardShortcut> {
+    let key = egui::Key::from_name(&shortcut.key)?;
+    let mut modifiers = egui::Modifiers::NONE;
+    if shortcut.ctrl {
+        modifiers |= egui::Modifiers::COMMAND;
+    }
+    if shortcut.shift {
+        modifiers |= egui::Modifiers::SHIFT;
+    }
+    if shortcut.alt {
+        modifiers |= egui::Modifiers::ALT;
+    }
+    Some(egui::KeyboardShortcut::new(modifiers, key))
+}
+
+/// Whether one of the editor's own shortcuts is `shortcut`.
+pub(in crate::app) fn editor_uses(shortcut: &egui::KeyboardShortcut) -> bool {
+    crate::shortcuts::Action::all()
+        .into_iter()
+        .any(|action| action.keys().contains(shortcut))
 }
 
 /// Whether a plugin widget's ScreenGui is `Enabled` (its tab shows).

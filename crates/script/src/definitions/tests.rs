@@ -76,6 +76,11 @@ fn every_property_has_a_description() {
     let described: BTreeSet<_> = PROPERTY_DOCS
         .iter()
         .map(|(c, p, _)| (c.as_str(), *p))
+        .chain(
+            axcenity_core::face::FACE_CONTROLS
+                .iter()
+                .map(|control| (ClassName::FaceControls.as_str(), control.name)),
+        )
         .collect();
     assert_eq!(
         in_core, described,
@@ -335,6 +340,7 @@ fn described_fields_and_methods_exist() {
         (ClassName::Animation, "Instance.new('Animation')"),
         (ClassName::Sequence, "Instance.new('Sequence')"),
         (ClassName::Spline, "Instance.new('Spline')"),
+        (ClassName::FaceControls, "Instance.new('FaceControls')"),
         (
             ClassName::NavigationAgent,
             "Instance.new('NavigationAgent')",

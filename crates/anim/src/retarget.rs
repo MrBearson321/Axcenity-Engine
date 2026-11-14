@@ -26,6 +26,7 @@ pub use check::{RigProblem, RigReport, Severity, check_pair, check_rig, rest_arm
 pub use profile::{
     HipsTravel, RETARGET_EXTENSION, RetargetProfile, RoleSetting, is_retarget_profile,
 };
+pub(crate) use roles::name_key;
 pub use roles::{Digit, HumanBone, HumanoidMap, ROLE_COUNT, Segment, Side};
 
 use axcenity_assets::{Pose, Rig, RigDefinitions, Take};
@@ -387,7 +388,7 @@ fn position(matrix: &Mat4) -> Vec3 {
 /// Which way a resting skeleton's body faces: its left (from the right
 /// arm or leg to the left), up (hips to head) and forward, as the columns
 /// of a rotation.
-fn body_frame(world: &[Mat4], map: &HumanoidMap) -> Option<Mat3> {
+pub(crate) fn body_frame(world: &[Mat4], map: &HumanoidMap) -> Option<Mat3> {
     let at = |role| map.get(role).map(|bone| position(&world[bone]));
     let up = (at(HumanBone::Head)? - at(HumanBone::Hips)?).normalize_or_zero();
     let across = at(HumanBone::LeftUpperArm)? - at(HumanBone::RightUpperArm)?;

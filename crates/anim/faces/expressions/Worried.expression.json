@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "intensity": 1.0,
+  "transition": 0.3,
+  "controls": {
+    "Brow_Inward_Left": 0.8,
+    "Brow_Inward_Right": 0.8,
+    "Brow_Raise_Left": 0.2,
+    "Brow_Raise_Right": 0.2,
+    "Eye_Wide_Left": 0.2,
+    "Eye_Wide_Right": 0.2,
+    "Lip_Corner_Pull_Left": 0.3,
+    "Lip_Corner_Pull_Right": 0.3,
+    "Mouth_Frown_Left": 0.3,
+    "Mouth_Frown_Right": 0.3,
+    "Mouth_Narrow": 0.2
+  }
+}

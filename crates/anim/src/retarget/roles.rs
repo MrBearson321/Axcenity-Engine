@@ -556,6 +556,30 @@ impl HumanoidMap {
 /// `lHand`) are taken off first; end bones, twist bones and metacarpals
 /// aren't humanoid bones.
 fn classify(name: &str) -> Option<(Kind, Option<Side>)> {
+    let (key, side) = name_key(name);
+    if let Some(kind) = kind_of(&key) {
+        return Some((kind, side));
+    }
+    // DAZ glues the side on: `lForearmBend`, `rThumb2`.
+    if side.is_none() {
+        for (prefix, found) in [('l', Side::Left), ('r', Side::Right)] {
+            let kind = key.strip_prefix(prefix).and_then(kind_of);
+            // Only limbs and fingers have sides (`lHip` isn't the hips).
+            if let Some(kind) = kind
+                && !matches!(kind, Kind::Hips | Kind::Spine | Kind::Neck | Kind::Head)
+            {
+                return Some((kind, Some(found)));
+            }
+        }
+    }
+    None
+}
+
+/// A bone's name lower-cased, its side and rig prefixes (`mixamorig:`,
+/// `DEF-`, `CC_Base_` …) taken off and its words run together, and the
+/// side it named: `mixamorig:LeftEye`, `eye.L` and `CC_Base_L_Eye` are all
+/// `("eye", Some(Side::Left))`.
+pub(crate) fn name_key(name: &str) -> (String, Option<Side>) {
     let lower = name.to_ascii_lowercase();
     let lower = lower.rsplit([':', '|']).next().unwrap_or(&lower);
     let mut side = None;
@@ -579,22 +603,7 @@ fn classify(name: &str) -> Option<(Kind, Option<Side>)> {
             key = rest.to_owned();
         }
     }
-    if let Some(kind) = kind_of(&key) {
-        return Some((kind, side));
-    }
-    // DAZ glues the side on: `lForearmBend`, `rThumb2`.
-    if side.is_none() {
-        for (prefix, found) in [('l', Side::Left), ('r', Side::Right)] {
-            let kind = key.strip_prefix(prefix).and_then(kind_of);
-            // Only limbs and fingers have sides (`lHip` isn't the hips).
-            if let Some(kind) = kind
-                && !matches!(kind, Kind::Hips | Kind::Spine | Kind::Neck | Kind::Head)
-            {
-                return Some((kind, Some(found)));
-            }
-        }
-    }
-    None
+    (key, side)
 }
 
 /// The kind of bone `key` (a name lower-cased, its side and prefixes taken

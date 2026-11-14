@@ -175,6 +175,7 @@
     * [VehicleWheel](api/classes/VehicleWheel.md)
     * [Ragdoll](api/classes/Ragdoll.md)
     * [IKControl](api/classes/IKControl.md)
+    * [FaceControls](api/classes/FaceControls.md)
     * [Fracture](api/classes/Fracture.md)
     * [Health](api/classes/Health.md)
     * [ProximityPrompt](api/classes/ProximityPrompt.md)
