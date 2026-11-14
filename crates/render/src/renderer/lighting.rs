@@ -168,6 +168,8 @@ pub(super) fn frame_uniform(
         weather: weather_uniform(&list.weather),
         // Filled in while ray traced shadows are drawn.
         ray_shadows: [0.0; 4],
+        // And while ray traced reflections are.
+        ray_reflections: [0.0; 4],
     }
 }
 
