@@ -169,7 +169,7 @@ use eframe::egui_wgpu::RenderState;
 use egui_dock::DockState;
 
 /// The hover text of Import…, in the File menu and the ribbon.
-const IMPORT_HOVER: &str = "Import models (.gltf, .glb, .fbx or .obj), images, sounds and prefabs. A \
+const IMPORT_HOVER: &str = "Import models (.gltf, .glb, .fbx, .obj, or USD, converted to .glb), images, sounds and prefabs. A \
     model opens the Import dialog and is inserted at the camera's focus point; images and \
     sounds are copied into the project's assets and reported in the Console. You can also \
     drop files onto the editor.";
@@ -391,6 +391,9 @@ pub struct EditorApp {
     importing: Option<ImportDialog>,
     /// Model files imported together, waiting for the dialog to be free.
     import_queue: VecDeque<PathBuf>,
+    /// Converted `.glb` copies waiting for (or in) the Import dialog, and
+    /// the file each was converted from (`app/files/convert.rs`).
+    converted: HashMap<PathBuf, PathBuf>,
     /// The theme, accent, density and motion, picked in Settings. Saved between runs.
     appearance: Appearance,
     /// The Settings window.
@@ -603,7 +606,12 @@ impl DockViewer<'_> {
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
             Pane::UiDesigner => self.app.ui_designer_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
-            Pane::Profiler => self.app.profiler.show(ui),
+            Pane::Profiler => {
+                self.app.profiler.show(ui);
+                if let Some((path, line)) = self.app.profiler.take_open() {
+                    self.app.open_script(&path, Some(line));
+                }
+            }
             Pane::Mixer => self.app.mixer_pane(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::LodInspector => self.app.lod_inspector_pane(ui),
@@ -1053,6 +1061,7 @@ impl EditorApp {
             constraint_tool: None,
             importing: None,
             import_queue: VecDeque::new(),
+            converted: HashMap::new(),
             game_keys: GameKeys::default(),
             warnings: WarningCache::default(),
             appearance: Appearance::default(),

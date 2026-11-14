@@ -411,6 +411,19 @@ impl Session {
         self.sim.scripts.pause()
     }
 
+    /// Starts or stops the script profiler (the Profiler's Scripts tab).
+    pub fn set_script_profiling(&mut self, on: bool) {
+        self.sim.scripts.set_profiling(on);
+    }
+
+    pub fn script_profile(&self) -> axcenity_script::ScriptProfile {
+        self.sim.scripts.script_profile()
+    }
+
+    pub fn clear_script_profile(&mut self) {
+        self.sim.scripts.clear_profile();
+    }
+
     pub fn set_breakpoints(&mut self, breakpoints: &Breakpoints) {
         self.sim.scripts.set_breakpoints(breakpoints);
     }

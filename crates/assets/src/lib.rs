@@ -60,7 +60,7 @@ use loading::{Kind, LoadKey};
 pub use asset_id::{
     AssetId, IMPORT_SUFFIX, KNOWN_IDS_FILE, asset_ids, encode_import_file, encode_import_file_with,
     give_asset_id, give_asset_ids, id_files, import_path, is_import_file, moved_assets,
-    read_asset_id, read_preset, takes_asset_id,
+    note_converted_from, read_asset_id, read_converted_from, read_preset, takes_asset_id,
 };
 pub use color_grading::{
     ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,

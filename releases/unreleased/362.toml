@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "assets"
+title = "Import USD files (.usd, .usda, .usdc, .usdz)"
+details = "USD scenes, including Apple's .usdz, can be imported with Import… or by dropping them on the editor. They're converted to a .glb first, with their units, up axis, object tree and UsdPreviewSurface materials and textures, so the project and games only ever hold glTF. Anything the conversion leaves out is listed in Output. Skeletons and animation aren't brought in yet."
+features = ["assets.model-import"]
+fixes = []
+introduces_issues = []
+prs = [362]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
