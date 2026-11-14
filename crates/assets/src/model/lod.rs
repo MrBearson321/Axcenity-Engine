@@ -7,11 +7,15 @@
 //! matched to its primitives by material. Otherwise each big enough
 //! primitive is simplified with meshoptimizer to half, then a quarter, of
 //! its triangles when it's loaded, and kept with the model in the cache.
+//! Cut-out primitives (leaves, fences: [`AlphaMode::Mask`]) aren't
+//! simplified: moving their corners stretches the texture's holes, so
+//! leaves changed shape and bushes thinned or clumped visibly at the
+//! switch. A file's own copies of them are still used.
 //! A project's model also keeps them on disk ([`super::lod_cache`]), so
 //! loading it again doesn't simplify again.
 
 use super::lod_cache::{self, Levels};
-use super::{InProject, Primitive, new_key};
+use super::{AlphaMode, InProject, Primitive, new_key};
 use crate::cooked::ContentHasher;
 
 /// How many simpler copies a primitive can have.
@@ -86,7 +90,9 @@ pub(super) fn attach(
     }
     let simplify: Vec<usize> = (0..full.len())
         .filter(|&index| {
-            full[index].lods.is_empty() && full[index].indices.len() / 3 >= MIN_TRIANGLES
+            full[index].lods.is_empty()
+                && full[index].indices.len() / 3 >= MIN_TRIANGLES
+                && !matches!(full[index].material.alpha_mode, AlphaMode::Mask { .. })
         })
         .collect();
     if simplify.is_empty() {
@@ -453,6 +459,13 @@ mod tests {
             1
         );
         let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn a_cut_out_primitive_is_not_simplified() {
+        let mut leaves = wavy_grid(40);
+        leaves.material.alpha_mode = AlphaMode::Mask { cutoff: 0.5 };
+        assert!(attach(vec![leaves], None)[0].lods.is_empty());
     }
 
     #[test]

@@ -301,3 +301,43 @@ fn flutter_keeps_the_decal_role_apart_and_widens_the_reach() {
     };
     assert!(leaves.reach() > plain.reach());
 }
+
+/// With ray traced shadows (and no shadow maps), the plant is bent into a
+/// BLAS of its own each frame, so its shadow moves with it too, and with
+/// no wind it uses its mesh's shared BLAS.
+#[test]
+fn a_swaying_plants_ray_traced_shadow_moves_with_it() {
+    let Some((device, queue)) = ray_test_device() else {
+        eprintln!("skipped: no graphics adapter with ray queries on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.set_graphics(&crate::GraphicsSettings {
+        shadow_quality: Some(crate::ShadowQuality::Off),
+        ray_traced_shadows: Some(crate::RayTracedShadows::Low),
+        ..crate::GraphicsSettings::preset(crate::Quality::Ultra)
+    });
+    let gale = Vec3::new(40.0, 0.0, 0.0);
+    let mut shadow_column = |wind| {
+        let list = plant_and_its_shadow(true, wind);
+        let lit = pixel_on(&mut renderer, &list, Vec3::new(8.0, 0.0, -7.0))[0];
+        let rows = (
+            on_screen(&list, Vec3::new(0.0, 0.0, -7.8)).y,
+            on_screen(&list, Vec3::new(0.0, 0.0, -6.0)).y,
+        );
+        let column = mean_column(&renderer.read_pixels(), rows, |[r, ..]| {
+            f32::from(lit.saturating_sub(r))
+        });
+        let bent = renderer.stats().ray_tracing.bent;
+        (list, column.expect("the ray traced shadow is drawn"), bent)
+    };
+    let (list, still, bent_still) = shadow_column(Vec3::ZERO);
+    assert_eq!(bent_still, 0, "no wind bends nothing");
+    let (_, swayed, bent) = shadow_column(gale);
+    assert_eq!(bent, 1, "the plant is bent in the wind");
+    let shadow_studs = (swayed - still) / pixels_per_stud(&list, Vec3::new(0.0, 0.0, -7.0));
+    assert!(
+        shadow_studs > 0.5,
+        "the ray traced shadow moved {shadow_studs} studs with the plant"
+    );
+}

@@ -1343,6 +1343,7 @@ impl ScenePipeline {
                 glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
                 self.graphics.ray_tracing_distance,
                 ray_gi_batch.is_some() || water_rays || path_traced,
+                frame_uniform.clock,
             ),
             &draws,
         );

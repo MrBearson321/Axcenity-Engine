@@ -25,8 +25,10 @@ pub(super) const LOD_SCREEN_SIZES: [f32; 2] = [0.3, 0.12];
 /// before its level changes.
 const HYSTERESIS: f32 = 0.15;
 
-/// How many frames a switch between levels cross-fades over.
-pub(super) const FADE_FRAMES: u64 = 12;
+/// How many frames a switch between levels cross-fades over: about half a
+/// second at 60 frames a second. 12 (a fifth of a second, less at high
+/// frame rates) read as a pop where the copies differ.
+pub(super) const FADE_FRAMES: u64 = 30;
 
 /// The share of an item's cull distance it fades out over, at the far end.
 const CULL_FADE: f32 = 0.1;

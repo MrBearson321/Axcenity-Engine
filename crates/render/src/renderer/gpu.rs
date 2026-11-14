@@ -27,6 +27,7 @@ pub(super) const SCENE_SHADER: &str = concat!(
     include_str!("../fog.wgsl"),
     include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
+    include_str!("../sway.wgsl"),
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl")
 );
@@ -37,6 +38,7 @@ pub(super) const WATER_SHADER: &str = concat!(
     include_str!("../fog.wgsl"),
     include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
+    include_str!("../sway.wgsl"),
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl"),
     include_str!("../water.wgsl"),
@@ -50,6 +52,7 @@ pub(super) const TRACED_WATER_SHADER: &str = concat!(
     include_str!("../fog.wgsl"),
     include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
+    include_str!("../sway.wgsl"),
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl"),
     include_str!("../water.wgsl"),
@@ -62,6 +65,7 @@ pub(super) const SCENE_TEMPLATE: &str = concat!(
     include_str!("../fog.wgsl"),
     include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
+    include_str!("../sway.wgsl"),
     include_str!("../shader.wgsl")
 );
 /// The shader for terrain chunks: the sky's colors, the fog and the
@@ -124,6 +128,14 @@ pub(super) const PATH_TRACER_SHADER: &str = concat!(
     include_str!("../lighting.wgsl"),
     include_str!("../ray_cut_outs.wgsl"),
     include_str!("../path_tracer.wgsl")
+);
+/// Bends swaying items' meshes for the ray traced scene
+/// (`ray_sway.wgsl`, renderer/ray_sway.rs), with sway.wgsl's `swayed_at`
+/// and the clouds' noise it rolls gusts with.
+pub(super) const RAY_SWAY_SHADER: &str = concat!(
+    include_str!("../clouds.wgsl"),
+    include_str!("../sway.wgsl"),
+    include_str!("../ray_sway.wgsl")
 );
 /// Ray traced ambient occlusion's pass (`ray_ao.wgsl`, renderer/ray_ao.rs):
 /// ray queries turned on first, then cut-outs' holes.
