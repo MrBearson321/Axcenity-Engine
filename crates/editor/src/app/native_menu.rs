@@ -503,6 +503,12 @@ impl EditorApp {
             ready,
             project.developer_console,
         );
+        items.check(
+            "Ray Traced Look by Default",
+            MenuAction::Command(Command::RayTracedByDefault),
+            ready,
+            project.ray_traced_by_default,
+        );
         items
     }
 
