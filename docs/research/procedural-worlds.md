@@ -44,8 +44,8 @@ The lesson for Axcenity: most of PCG's value in day-to-day worldbuilding comes f
 | **PW4 Roads and paths** | D6: `TerrainPath`, live keep-off for rules, Apply (paint and flatten, one undo step), Route | Rules leave a path's strip empty; Apply paints and flattens within Width and Falloff; Route keeps every stretch under its grade | A road routed over a hill with a SplineMesh |
 | **PW5 Terrain and objects** | Rules keep off anchored parts and models (`AvoidParts`), Conform to Terrain for the selection, Blend into Terrain (flatten and paint under a model's footprint), foliage that tilts with the slope and sinks into it | Nothing generated stands inside a part; a conformed model sits on the ground | A house dropped into a forest |
 | **PW6 Procedural buildings** | D7: `BuildingGenerator`, built-in modules, Bake, an example | A footprint gives the same building from the same seed; floors stack; Bake keeps it | A street of generated houses |
-| **PW7 Mesh terrain, part 1** | Option A below, if chosen: terrain holes and cliff and cave pieces | — | — |
-| **PW8 Mesh terrain, part 2** | Option B below, if chosen after a spike | — | — |
+| **PW7 Mesh terrain, part 1** | Option A below (chosen): a hole mask in `TerrainData` cut out of the drawn chunks, the collider and the navmesh, a Holes brush, and cliff, arch and cave-mouth pieces placed by rules with slope alignment | Holes are drawn, collided and walked through, and saved; pieces follow the slope | A cave mouth walked into |
+| **PW8 Mesh terrain, part 2** | Option B below: first a spike (one `TerrainVolume`, surface nets, a carve brush, a collider), then the full build only if its numbers hold up | Spike: meshing time per chunk, memory, collision | The spike's benchmark |
 
 Each stage updates [../terrain.md](../terrain.md) or [../architecture/splines.md](../architecture/splines.md), the wiki's Terrain and Splines and Procedural pages, and the roadmap's section 6.5 row.
 
@@ -61,7 +61,7 @@ A heightfield has one height per spot, so it can't have an overhang, a cave or a
 
 **Recommendation:** do **A** first (PW7). It gets cave entrances, cliff faces and arches into games soon, reuses PW1's rules and R15's models, and keeps every terrain feature (streaming, LE4 water, layers, navmesh, Collaborate) working. Then spike **B** (a single volume with surface nets, a carve brush, collision and a benchmark on Paul's PC) before deciding on PW8, and use volumes for cliffs and caves *inside* heightfield worlds rather than replacing them. Don't do **C**: it repeats what Unreal itself still calls experimental, and A plus B cover the same shapes.
 
-This is Paul's choice; nothing for PW7 or PW8 is built until he picks.
+**Paul chose A, then a spike of B (14 Nov 2026).** PW7 is holes plus cliff and cave pieces. PW8 starts as a spike (one volume, surface nets, a carve brush, collision and a benchmark on Paul's PC), and whether to build volumes fully is decided from its numbers. Option C isn't planned.
 
 ## Progress
 
