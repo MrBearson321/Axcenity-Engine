@@ -73,6 +73,7 @@ Internet-hosted dedicated servers are a **future objective, not an immediate pri
 - The focus now is reliable local multiplayer, the server/client architecture, networking fundamentals, and multiplayer testing in controlled environments: loopback, LAN, and a local `axcenity-server`.
 - Deferred until the multiplayer systems are mature: dedicated-server deployment, hosting infrastructure, server management, and internet-facing deployment, including renet's secure mode and connect tokens (roadmap M11).
 - **Revisit** once the underlying multiplayer systems are sufficiently mature.
+- **Revisited 2026-11-14:** Paul asked for multiplayer to be made ready for public hosting. The engine's side (secure mode with connect tokens, NAT traversal, a self-hostable relay, validation and operational tests) is now planned in [research/multiplayer-readiness.md](research/multiplayer-readiness.md) and [ADR-0026](../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md). Running hosted services (a public relay, matchmaking) is still infrastructure under rule 1: Paul decides.
 
 ## Deferred capabilities
 

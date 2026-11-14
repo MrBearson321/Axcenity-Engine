@@ -32,7 +32,7 @@ Priority 7 of Paul's list of 2026-11-14: "investigate USD and Alembic support, i
 
 **Decision (D1): convert.** A new editor-only crate, `convert` (`axcenity-convert`), turns a USD stage into a `.glb`: composed with its references and payloads loaded and default variants selected, each `Mesh` prim (triangulated, with normals, the first `st` primvar, and per-face `GeomSubset` materials) under its `Xform` path as a glTF node with the same name (so the Import dialog's Objects tab shows the USD tree), `metersPerUnit` and `upAxis` applied (glTF is Y up, meters), and `UsdPreviewSurface` materials as metallic-roughness: diffuse color, metallic, roughness, normal, occlusion, emissive and opacity, with their texture files embedded in the `.glb` (separate metallic and roughness maps are packed into one texture's blue and green, opacity into the color's alpha). The editor converts before the Import dialog opens, so the rest of importing is as for a `.glb`, and the sidecar notes the source file (`"converted_from"`). `.usdz` textures come out of the archive the same way. Out of P7.2: UsdSkel and animation (P7.6), lights, cameras, instancing beyond flattening it, and writing USD.
 
-Recorded as [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Convert-New-Model-Formats-To-glTF-On-Import.md). OBJ is the exception that proves the rule: `ufbx` already reads it in the player, so it costs nothing to read it directly.
+Recorded as [ADR-0027](../../wiki/Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md). OBJ is the exception that proves the rule: `ufbx` already reads it in the player, so it costs nothing to read it directly.
 
 ### Alembic: why deferred
 
@@ -79,7 +79,7 @@ Lua plugins run sandboxed, survive bad code (errors are caught and listed), relo
 
 | Stage | What | Status |
 |---|---|---|
-| P7.0 | This investigation, ADR-0026, wiki | This PR |
+| P7.0 | This investigation, ADR-0027, wiki | This PR |
 | P7.1 | OBJ import: `ModelFormat::Obj` through `ufbx` (with the `.mtl` and its textures from the model's folder), in Import…, drag and drop, the Assets panel and the player | Planned |
 | P7.2 | USD import: the `convert` crate (`openusd` + `openusd-schemas`), `.usd`/`.usda`/`.usdc`/`.usdz` converted to `.glb` before the Import dialog opens, `"converted_from"` in the sidecar | Planned |
 | P7.3 | Mesh import presets: `model_presets` in `import-presets.json`, the Preset dropdown and Save as preset… in the Import dialog, Scale, Up axis, Anchored and Collision fidelity | Planned |

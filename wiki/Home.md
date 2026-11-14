@@ -88,7 +88,7 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
-| 2026-11-14 | ADR-0026, roadmap | Import formats and plugins (P7): USD converted on import, OBJ, mesh import presets, plugin API 3 |
+| 2026-11-14 | ADR-0027, roadmap | Import formats and plugins (P7): USD converted on import, OBJ, mesh import presets, plugin API 3 |
 | 2026-11-13 | Rendering, lighting and atmosphere | Sun shafts in rooms: dust in a GraphicsVolume, volumetric fog that stays dark indoors, leaf-shaped ray traced shadows |
 | 2026-11-12 | Roadmap | Cohesion pass CP9: final checks done, the pass is complete |
 | 2026-11-12 | Project and serialization, roadmap | Cohesion pass CP8: your game's own icon and banner, in the player and every build |

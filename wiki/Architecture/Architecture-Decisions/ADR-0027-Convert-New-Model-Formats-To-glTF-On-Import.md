@@ -1,7 +1,7 @@
 ---
-title: "ADR-0026: Convert new model formats to glTF on import"
+title: "ADR-0027: Convert new model formats to glTF on import"
 type: adr
-adr: 26
+adr: 27
 adr_status: Proposed
 date: 2026-11-14
 supersedes:
@@ -12,7 +12,7 @@ docs: [docs/research/import-formats-and-plugins.md, docs/editor/import.md]
 tags: [adr, asset-pipeline, import]
 ---
 
-# ADR-0026: Convert new model formats to glTF on import
+# ADR-0027: Convert new model formats to glTF on import
 
 - **Status:** Proposed (P7 investigation, 2026-11-14; Paul's priority 7)
 - **Date:** 2026-11-14

@@ -70,7 +70,7 @@ In particular (status checked on main `5143a5a`):
 | G10 | Plugin API | **Implemented**: viewport drawing #265, drag handles #267, Properties rows #270, importers, Assets panel items and `plugin.ApiVersion` #274, on Phase 54's toolbars, dock widgets, selection, settings, files and mouse |
 | G11 | Editor modularization | **Implemented** for every planned move (#162, #164, #166, #189, #193, #194); further moves as they pay off |
 | G12 | Cooked-only games | **Implemented** (#243): Build Game leaves texture sources out; reading the pack in place not planned |
-| G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines |
+| G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines; bots and the harness are MP1 of [multiplayer-readiness.md](multiplayer-readiness.md) |
 | G14 | Run without a player | **Implemented** (#245): Run, F8 |
 | G15 | Physics debug views | **Implemented** (#253): Contacts and Bodies overlays (centers of mass, sleeping) beside collider wireframes, rays and Size boxes |
 | G16 | Humanoid retargeting | **Implemented** (stage 1, #244: roles by bone name and rest-pose correction; hand-edited maps and profiles later) |
