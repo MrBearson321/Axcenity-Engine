@@ -92,7 +92,7 @@ const REGION_WAIT_SECONDS: f64 = 5.0;
 /// Touchpads scroll in pixels; this many is one mouse wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
-const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] [--lan] | --join address:port] [--relay address:port] \
+const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] [--lan] [--no-port-map] | --join address:port] [--relay address:port] \
                      [--password text] [--bench frames] [--size WxH] [--quality preset] [--graphics file.json] \
                      [--replay file] \
                      [project-folder | game.axgame]  (or --version [--json])\n\
@@ -100,7 +100,8 @@ const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] [--
                      --watch reloads a project folder's changed assets while it plays\n\
                      --dev turns on the F9 Developer Console in a built game\n\
                      --host hosts the game (port 47800 unless given), secured with connect \
-                     tokens unless --lan; --join joins one, by address, join link or code\n\
+                     tokens unless --lan, and asks the router to forward the port unless --no-port-map; \
+                     --join joins one, by address, join link or code\n\
                      --relay gets a hosted game a join code from an axcenity-relay, or looks a code up on it\n\
                      --bench measures that many frames' steps, prints them and quits\n\
                      --size sets the window's size in pixels, such as 2560x1440\n\
@@ -345,6 +346,8 @@ fn main() -> Result<()> {
     network.set_data_folder(axcenity_save::saves_folder());
     network.set_secure(!arguments.lan);
     network.set_relay(arguments.relay.clone());
+    // Hosting secured asks the router to forward the port (MP5b).
+    network.set_port_mapping(!arguments.no_port_map && arguments.bench.is_none());
     match arguments.network {
         Some(NetworkStart::Host(port)) => {
             let password = arguments.password.clone();

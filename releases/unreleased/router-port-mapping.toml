@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Hosts ask the home router to forward the game's port"
+details = "A secured host (axcenity-server, or axcenity-player --host without --lan) asks its router to forward the game's port from the internet over UPnP, PCP or NAT-PMP, and logs the router's outside address with a join link players on other networks can use. The mapping is renewed while the game is hosted and removed when hosting stops. Routers with these turned off, and internet providers that put their own router in front (carrier-grade NAT, which the log warns about), still need a forwarded port or a relay. --no-port-map turns it off (multiplayer readiness MP5b)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

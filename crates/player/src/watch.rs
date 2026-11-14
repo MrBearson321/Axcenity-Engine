@@ -43,6 +43,9 @@ pub struct Arguments {
     /// `--relay <address:port>`: an `axcenity-relay` a host gets a join
     /// code from, and join codes are looked up on (MP5).
     pub relay: Option<String>,
+    /// `--no-port-map` with `--host`: don't ask the router to forward the
+    /// port (MP5b).
+    pub no_port_map: bool,
     /// `--dev`: the F9 Developer Console, even in a built game whose
     /// project setting has it off (Phase 71).
     pub dev: bool,
@@ -161,6 +164,8 @@ impl Arguments {
                 parsed.replay = Some(PathBuf::from(file));
             } else if argument == "--lan" {
                 parsed.lan = true;
+            } else if argument == "--no-port-map" {
+                parsed.no_port_map = true;
             } else if argument == "--relay" {
                 let Some(relay) = arguments.next() else {
                     bail!(
@@ -438,6 +443,11 @@ mod tests {
         let code = parse(&["--join", "K7Q-M2P", "--relay", "relay.example.com:47810"]).unwrap();
         assert_eq!(code.relay.as_deref(), Some("relay.example.com:47810"));
         assert!(parse(&["--relay"]).is_err());
+        assert!(
+            parse(&["--host", "--no-port-map", "examples/hello-part"])
+                .unwrap()
+                .no_port_map
+        );
     }
 
     #[test]

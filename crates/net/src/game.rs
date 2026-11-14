@@ -21,6 +21,7 @@ use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
 use crate::ownership::{
     CharacterCheck, OWNED_TAG, Owned, OwnedSender, Sender, character_of, character_parts,
 };
+use crate::port_map::{MapEvent, PortMapper, is_public};
 use crate::relayed::{RelayEvent, Route};
 use crate::replay::{BufferPlay, Replay, Replays};
 use crate::replicate::{LevelState, Replicator, Update, apply};
@@ -182,6 +183,16 @@ pub struct Network {
     punch: bool,
     /// Hosting through a relay: the game's join code.
     join_code: Option<String>,
+    /// Hosting secured asks the router to forward the port (MP5b; off by
+    /// default, so tests leave routers alone).
+    port_mapping: bool,
+    /// Hosting: the router's mapping of the port, while it lasts.
+    mapper: Option<PortMapper>,
+    /// Hosting: the address the router forwards to the game.
+    public_address: Option<std::net::SocketAddr>,
+    /// Tests' fake routers.
+    #[cfg(test)]
+    pub(crate) map_gateways: Option<crate::port_map::Gateways>,
     /// The key the server gave this device to rejoin with.
     rejoin_key: u64,
     /// Lost the connection and trying to rejoin.
@@ -241,6 +252,11 @@ impl Network {
             relay: None,
             punch: true,
             join_code: None,
+            port_mapping: false,
+            mapper: None,
+            public_address: None,
+            #[cfg(test)]
+            map_gateways: None,
             rejoin_key: 0,
             rejoining: None,
             rejoin_seconds: REJOIN_SECONDS,
@@ -596,7 +612,92 @@ impl Network {
             ),
         }
         self.start_relay();
+        self.start_port_mapping(port);
         Ok(port)
+    }
+
+    /// Hosting secured with port mapping on: asks the router to forward
+    /// the port; the answer arrives in a later receive.
+    fn start_port_mapping(&mut self, port: u16) {
+        self.public_address = None;
+        if !self.port_mapping || !self.secure {
+            return;
+        }
+        self.log.push(format!(
+            "Asking the router to forward port {port} (UDP and TCP) to this computer..."
+        ));
+        #[cfg(test)]
+        if let Some(gateways) = self.map_gateways.clone() {
+            self.mapper = Some(PortMapper::start_with(port, gateways));
+            return;
+        }
+        self.mapper = Some(PortMapper::start(port));
+    }
+
+    /// Hosting secured asks the router to forward the game's port (UPnP,
+    /// PCP or NAT-PMP), so players on the internet can join by address.
+    /// Takes effect at the next [`host`](Self::host).
+    pub fn set_port_mapping(&mut self, on: bool) {
+        self.port_mapping = on;
+    }
+
+    /// Hosting: the router's outside address and port that it forwards to
+    /// the game, once it has mapped them.
+    pub fn public_address(&self) -> Option<std::net::SocketAddr> {
+        self.public_address
+    }
+
+    /// Logs what the router said about the port.
+    fn port_mapping_events(&mut self) {
+        let Some(mapper) = &self.mapper else {
+            return;
+        };
+        for event in mapper.take_events() {
+            match event {
+                MapEvent::Mapped {
+                    external,
+                    method,
+                    permanent,
+                } => {
+                    let link = match self.fingerprint() {
+                        Some(fingerprint) => {
+                            crate::secure::join_link(&external.to_string(), &fingerprint)
+                        }
+                        None => external.to_string(),
+                    };
+                    let lasts = if permanent {
+                        " (the router keeps it until the game stops)"
+                    } else {
+                        ""
+                    };
+                    self.log.push(format!(
+                        "The router forwards {external} to this game ({method}){lasts}; players \
+                         on the internet join with {link}"
+                    ));
+                    if !is_public(external.ip()) {
+                        self.log.push(format!(
+                            "warning: the router's own outside address {} is a shared or \
+                             private one, so another router (often the internet provider's) is \
+                             in front of it and players outside still can't reach this game; \
+                             use a relay (--relay)",
+                            external.ip()
+                        ));
+                    }
+                    self.public_address = Some(external);
+                }
+                MapEvent::Failed(why) => self.log.push(format!(
+                    "The router didn't forward the port ({why}). Players on other networks need \
+                     the port forwarded by hand or a relay (--relay)."
+                )),
+                MapEvent::Lost(why) => {
+                    self.public_address = None;
+                    self.log.push(format!(
+                        "warning: the router stopped forwarding the port ({why}); trying again \
+                         each minute"
+                    ));
+                }
+            }
+        }
     }
 
     /// Hosting secured with a relay set: registers with it for a join
@@ -919,6 +1020,9 @@ impl Network {
         }
         self.answerer = None;
         self.join_code = None;
+        // Dropping the mapper removes the router's mappings.
+        self.mapper = None;
+        self.public_address = None;
         self.joined_to = None;
         self.rejoining = None;
         self.replicator = Replicator::default();
@@ -965,6 +1069,7 @@ impl Network {
         self.seconds = seconds.max(0.0);
         self.clock += self.seconds;
         self.try_rejoin(world, scripts);
+        self.port_mapping_events();
         let events = match &mut self.session {
             Session::Offline => Vec::new(),
             Session::Hosting(host) => {

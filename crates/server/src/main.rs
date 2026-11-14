@@ -43,12 +43,13 @@ use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 mod stats;
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--relay <address:port>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--relay <address:port>] [--no-port-map] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800\n\
                      The server is secured: players get a connect token from TCP on the same port, \
                      and every packet is encrypted. --insecure turns that off (LAN only); \
                      --data is where its certificate is kept (the engine's data folder unless given). \
-                     --relay also takes players through an axcenity-relay, which gives the game a join code.";
+                     --relay also takes players through an axcenity-relay, which gives the game a join code. \
+                     The server asks the router to forward its port (UPnP, PCP or NAT-PMP); --no-port-map doesn't.";
 
 /// Each frame is this long.
 const FRAME: Duration = Duration::from_micros(16_667);
@@ -78,6 +79,8 @@ struct Arguments {
     data: Option<PathBuf>,
     /// `--relay <address:port>`: an `axcenity-relay` for a join code (MP5).
     relay: Option<String>,
+    /// `--no-port-map`: don't ask the router to forward the port (MP5b).
+    no_port_map: bool,
 }
 
 impl Arguments {
@@ -164,6 +167,7 @@ impl Arguments {
                     parsed.stats_file = Some(PathBuf::from(path));
                 }
                 "--insecure" => parsed.insecure = true,
+                "--no-port-map" => parsed.no_port_map = true,
                 "--relay" => {
                     let Some(relay) = arguments.next() else {
                         bail!(
@@ -300,6 +304,9 @@ fn main() -> Result<()> {
     network.set_secure(!arguments.insecure);
     network.set_data_folder(arguments.data.clone().or_else(axcenity_save::saves_folder));
     network.set_relay(arguments.relay.clone());
+    // A secured server asks the router to forward its port (MP5b), unless
+    // told not to or only measuring.
+    network.set_port_mapping(!arguments.no_port_map && arguments.bench.is_none());
     // `ReplayService:StopRecording` saves beside the server's saves (Phase 81).
     network.set_replay_folder(
         axcenity_save::game_folder(&project.manifest.name).map(|data| data.join("replays")),
@@ -601,10 +608,12 @@ mod tests {
                 insecure: false,
                 data: None,
                 relay: None,
+                no_port_map: false,
             }
         );
         let insecure = parse(&["castle", "--insecure", "--data", "keys"]).unwrap();
         assert!(insecure.insecure);
+        assert!(parse(&["castle", "--no-port-map"]).unwrap().no_port_map);
         assert_eq!(insecure.data, Some(PathBuf::from("keys")));
         assert!(parse(&["castle", "--data"]).is_err());
     }

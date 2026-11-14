@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5a (the relay with join codes, hole punching, the NAT lab) is built ([§6](#mp5a-relay-join-codes-and-hole-punching-cloud-container-2026-11-14)); MP5b (port mapping on the host) is next. MP6–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5a (the relay with join codes, hole punching, the NAT lab) is built ([§6](#mp5a-relay-join-codes-and-hole-punching-cloud-container-2026-11-14)), and MP5b (port mapping on the host) too ([§6](#mp5b-port-mapping-on-the-host-cloud-container-2026-11-14)). MP6–MP7 not started.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -104,7 +104,24 @@ Left: the PC–Mac join over Tailscale (a firewall must let TCP through as well 
 
 Found while building it: **a router that accepts unasked packets addressed to itself breaks hole punching on Linux.** The first punch to arrive left a connection-tracking entry that made the router map the other side's outgoing packets to a new port, so neither side's punches matched (all relayed, even with friendly routers). Home routers drop such packets, and with the lab's routers doing the same every bot punched through. A router that accepts them still works, through the relay.
 
-Left: port mapping on the host (MP5b); a real cross-network join on Paul's machines (a relay on a public address, host and player on different networks); a "copy join code" in the player's UI; a relay address in the project settings so a game can carry its own.
+Left: a real cross-network join on Paul's machines (a relay on a public address, host and player on different networks); a "copy join code" in the player's UI; a relay address in the project settings so a game can carry its own.
+
+### MP5b: port mapping on the host (cloud container, 2026-11-14)
+
+[networking.md](../architecture/networking.md#reaching-a-host). A secured host (the server, or the player's `--host`) asks its router to forward the game's UDP and TCP port: UPnP IGD first (SSDP search, then the WAN connection's `AddPortMapping`), then PCP, then NAT-PMP for a router that only speaks that. It runs on a thread, leases for 30 minutes and renews at half, removes the mappings when hosting stops, and logs the router's outside address with a join link (and a warning when that address is a provider's shared one, where only a relay helps). The HTTP, SOAP and XML are a few hundred lines in `net::port_map`, no new dependency. `--no-port-map` turns it off; tests and `--bench` never ask.
+
+**The NAT lab** gained two modes in which router A runs miniupnpd (Ubuntu's `miniupnpd-nftables`) and there's no relay: the host asks it, and the bots behind router B join the address it logs. The lab's internet moved to 11.0.0.0/24, because miniupnpd won't forward on a documentation address.
+
+| Run (16 bots) | Result |
+|---|---|
+| `upnp`: miniupnpd with only UPnP | Mapped `11.0.0.1:47800` (UPnP); 16 of 16 in, all **direct**; join p50 0.09 s; round trip p50 20 ms; no loss, no corrections |
+| `pcp`: miniupnpd with only PCP and NAT-PMP | Mapped `11.0.0.1:47800` (PCP); 16 of 16 in, all **direct**; join p50 0.08 s; round trip p50 22 ms; no loss, no corrections |
+| Both, host killed and started again | Gets the same port back at once (the router's leftover mapping is the same computer's) |
+| `cone` and `symmetric` again (16 bots, with the new addresses) | 16 punched; 16 relayed (join p50 2.15 s) |
+
+Fake routers in `port_map/tests.rs` cover what miniupnpd doesn't show: a chunked description, a router that only takes permanent leases (UPnP 725), a port another computer already has (718: the next of 8 is mapped and the link names it, and the other computer's mapping is never deleted), NAT-PMP after a router refuses PCP, and nothing answering at all.
+
+Left: a check on Paul's router, which has no UPnP (the log should say why nothing was forwarded) and on any router that does; IPv6 pinholes (PCP can open them) aren't asked for; a killed host leaves its mapping for up to 30 minutes.
 
 ## 4. What stays Paul's call
 

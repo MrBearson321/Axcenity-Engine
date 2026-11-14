@@ -24,7 +24,7 @@ fn the_server_runs_headless_and_a_player_joins_it() {
     let example = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/hello-part");
     let mut command = Command::new(env!("CARGO_BIN_EXE_axcenity-server"));
     command
-        .args([example, "--port", "0"])
+        .args([example, "--port", "0", "--no-port-map"])
         // No display, as on a headless Linux server.
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
