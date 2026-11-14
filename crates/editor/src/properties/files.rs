@@ -148,52 +148,59 @@ pub(super) fn grading_control(
 /// Assets panel can be let go on it. All ask before the sky changes.
 pub(super) fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
-    let row = ui.horizontal(|ui| {
-        if ui
-            .small_button(icons::FOLDER_OPEN)
-            .on_hover_text(
-                "Choose a sky image from this computer: a 2:1 panorama, best as an HDR \
-                 (.exr or .hdr), or a PNG or JPEG",
-            )
-            .clicked()
-        {
-            edit = Some(Edit::PickSkyImage);
-        }
-        if path != axcenity_project::DEFAULT_SKY_PATH
-            && ui
-                .small_button(icons::SUN_HORIZON)
+    // One column: in the Properties grid a cell lays its pieces out left to
+    // right, so without it the hint would go beside the file, squeezed into
+    // whatever width was left, one letter to a line.
+    let control = ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            if ui
+                .small_button(icons::FOLDER_OPEN)
                 .on_hover_text(
-                    "Use the default sky: a partly cloudy midday HDR (CC0, Poly Haven), \
-                     with the sun moved to match it",
+                    "Choose a sky image from this computer: a 2:1 panorama, best as an HDR \
+                     (.exr or .hdr), or a PNG or JPEG",
                 )
                 .clicked()
-        {
-            edit = Some(Edit::UseDefaultSky);
-        }
-        if path.is_empty() {
-            ui.weak("Sky colors");
-            return;
-        }
-        if ui
-            .small_button(icons::X)
-            .on_hover_text("Go back to the sky colors")
-            .clicked()
-        {
-            edit = Some(Edit::Property("SkyImage", Value::String(String::new())));
-        }
-        file_label(ui, assets, path);
-    });
-    if !path.is_empty() {
-        // A picture can't change with the time of day: say so, with the
-        // way to a sky that does.
-        ui.horizontal_wrapped(|ui| {
-            ui.label(
-                egui::RichText::new(
-                    "A sky picture keeps its colors: ClockTime moves the sun and dims it \
-                     toward night.",
+            {
+                edit = Some(Edit::PickSkyImage);
+            }
+            if path != axcenity_project::DEFAULT_SKY_PATH
+                && ui
+                    .small_button(icons::SUN_HORIZON)
+                    .on_hover_text(
+                        "Use the default sky: a partly cloudy midday HDR (CC0, Poly Haven), \
+                         with the sun moved to match it",
+                    )
+                    .clicked()
+            {
+                edit = Some(Edit::UseDefaultSky);
+            }
+            if path.is_empty() {
+                ui.weak("Sky colors");
+                return;
+            }
+            if ui
+                .small_button(icons::X)
+                .on_hover_text("Go back to the sky colors")
+                .clicked()
+            {
+                edit = Some(Edit::Property("SkyImage", Value::String(String::new())));
+            }
+            file_label(ui, assets, path);
+        });
+        if !path.is_empty() {
+            // A picture can't change with the time of day: say so, under
+            // the file and as wide as the column, with the way to a sky
+            // that does.
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(
+                        "A sky picture keeps its colors: ClockTime moves the sun and dims \
+                         it toward night.",
+                    )
+                    .small()
+                    .weak(),
                 )
-                .small()
-                .weak(),
+                .wrap(),
             );
             if ui
                 .small_button("Follow time of day")
@@ -205,24 +212,21 @@ pub(super) fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Opt
             {
                 edit = Some(Edit::UseTimeOfDaySky);
             }
-        });
-    }
-    if let Some(held) = row
-        .response
-        .dnd_hover_payload::<crate::asset_browser::AssetPayload>()
+        }
+    });
+    // The whole control, hint included, takes a sky dropped on it.
+    let target = control.response;
+    if let Some(held) = target.dnd_hover_payload::<crate::asset_browser::AssetPayload>()
         && held.0.kind == crate::asset_browser::AssetKind::Sky
     {
         let palette = theme::palette(ui.ctx());
         ui.painter().rect_stroke(
-            row.response.rect.expand(2.0),
+            target.rect.expand(2.0),
             4,
             egui::Stroke::new(1.5_f32, palette.accent),
             egui::StrokeKind::Outside,
         );
-        if let Some(payload) = row
-            .response
-            .dnd_release_payload::<crate::asset_browser::AssetPayload>()
-        {
+        if let Some(payload) = target.dnd_release_payload::<crate::asset_browser::AssetPayload>() {
             edit = Some(Edit::AskSkyImage(payload.0.path.clone()));
         }
     }
