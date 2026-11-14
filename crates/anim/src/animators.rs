@@ -41,7 +41,7 @@ use glam::{EulerRot, Quat, Vec3};
 use crate::clip::{Clip, RootMotion};
 use crate::controller::{Compiled, Machine, Playing};
 use crate::face::{FaceRig, choose_face_profile};
-use crate::face_play::{FaceLayers, FaceMotion};
+use crate::face_play::{FaceDetail, FaceLayers, FaceLod, FaceMotion};
 use crate::face_world::{Lookers, face_layers};
 use crate::feet::{self, GroundProbe, Legs};
 use crate::files::{
@@ -139,8 +139,12 @@ pub struct Animators {
     threads: Threads,
     /// How long each thread spent posing in the last update.
     thread_times: ThreadTimes,
-    /// Where the camera is, which faces with GazeMode Camera look at.
+    /// Where the camera is, which faces with GazeMode Camera look at and
+    /// facial LOD measures from, and which way it looks (a unit vector).
     viewer: Option<Vec3>,
+    look: Option<Vec3>,
+    /// What faces cost in the last update (F7).
+    face_stats: FaceStats,
     /// The resting head of each skinned model a face has looked at, in
     /// its file's space, by model key.
     heads: HashMap<u64, Option<Vec3>>,
@@ -162,10 +166,34 @@ struct PoseJob {
     face: Option<FaceFrame>,
 }
 
-/// A face's layers this frame, and the profile matched to its model.
+/// A face's layers this frame (shared with the frames that reuse them
+/// at a lower LOD), and the profile matched to its model.
 struct FaceFrame {
     rig: Arc<FaceRig>,
-    layers: FaceLayers,
+    layers: Arc<FaceLayers>,
+}
+
+/// Where a face's LOD has got to: its level, the seconds since it was
+/// last worked out, and the layers it made then.
+#[derive(Default)]
+struct FaceLodRun {
+    level: FaceLod,
+    waited: f64,
+    last: Option<Arc<FaceLayers>>,
+}
+
+/// What faces cost in an update, for the Profiler (facial animation F7).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FaceStats {
+    /// Faces at each level, in [`FaceLod::ALL`]'s order.
+    pub faces: [usize; 4],
+    /// Faces worked out this update; the rest reused their last layers.
+    pub evaluated: usize,
+    /// Controls that move something, over the faces shown.
+    pub controls: usize,
+    /// Time spent reading faces and moving them on, on the calling
+    /// thread (composing them is part of posing).
+    pub time: std::time::Duration,
 }
 
 impl FaceFrame {
@@ -232,6 +260,7 @@ struct Running {
     face: Option<FaceRun>,
     /// Its face's blinks, darts and gaze, carried from frame to frame.
     face_motion: Option<FaceMotion>,
+    face_lod: FaceLodRun,
 }
 
 /// Where a thing's Ragdoll has got to.
@@ -310,11 +339,27 @@ impl Animators {
         }
     }
 
-    /// Where the camera is in the world (the viewer), which faces with
-    /// GazeMode Camera look at. Hosts set it before each update; `None`
-    /// (a dedicated server) leaves those faces looking ahead.
-    pub fn set_viewer(&mut self, at: Option<axcenity_core::Vector3>) {
+    /// Where the camera is in the world (the viewer) and which way it
+    /// looks: faces with GazeMode Camera look at it, and facial LOD is
+    /// measured from it (out of view or far off, a face costs less). Hosts
+    /// set it before each update; `None` (a dedicated server) leaves those
+    /// faces looking ahead and whole.
+    pub fn set_viewer(
+        &mut self,
+        at: Option<axcenity_core::Vector3>,
+        look: Option<axcenity_core::Vector3>,
+    ) {
         self.viewer = at.map(crate::ragdoll::to_vec3);
+        self.look = look
+            .map(crate::ragdoll::to_vec3)
+            .map(Vec3::normalize_or_zero)
+            .filter(|look| *look != Vec3::ZERO);
+    }
+
+    /// What faces cost in the last [`update`](Self::update), for the
+    /// Profiler.
+    pub fn face_stats(&self) -> FaceStats {
+        self.face_stats
     }
 
     /// The posed models, by MeshPart, after the last [`update`](Self::update).
@@ -452,6 +497,7 @@ impl Animators {
                 _ => parts.animations.push(id),
             }
         }
+        self.face_stats = FaceStats::default();
         let alive: HashSet<InstanceId> = owners.iter().map(|(owner, _)| *owner).collect();
         self.running.retain(|owner, _| alive.contains(owner));
         let changed = self.readable_changes(assets);
@@ -1352,6 +1398,33 @@ impl Animators {
             });
         }
         let rig = running.face.as_ref()?.rig.clone()?;
+        let started = std::time::Instant::now();
+        let lod = self.face_lod(world, face, owner);
+        let lod_run = &mut running.face_lod;
+        lod_run.waited += dt;
+        let due = lod_run.level != lod
+            || lod_run.waited >= lod.interval()
+            || (lod != FaceLod::Off && lod_run.last.is_none());
+        self.face_stats.faces[lod as usize] += 1;
+        if lod != FaceLod::Off {
+            self.face_stats.controls += rig.controls_used();
+        }
+        if !due {
+            let layers = lod_run.last.clone();
+            self.face_stats.time += started.elapsed();
+            return Some(FaceFrame {
+                rig,
+                layers: layers?,
+            });
+        }
+        let step = std::mem::take(&mut lod_run.waited);
+        lod_run.level = lod;
+        let procedural = world
+            .get(face)
+            .and_then(|face| face.property("ProceduralEnabled"))
+            .and_then(Value::as_bool)
+            != Some(false);
+        let detail = FaceDetail::at(lod, procedural);
         let motion = running
             .face_motion
             .get_or_insert_with(|| FaceMotion::new(face.to_bits()));
@@ -1368,16 +1441,42 @@ impl Animators {
             model,
             motion,
             lookers,
-            dt,
+            detail,
+            step,
             &mut problems,
-        );
+        )
+        .map(Arc::new);
         for problem in problems {
             self.report(problem);
         }
+        self.face_stats.evaluated += 1;
+        self.face_stats.time += started.elapsed();
+        // Off, it only kept time: the face rests.
+        running.face_lod.last = layers.clone().filter(|_| lod != FaceLod::Off);
         Some(FaceFrame {
             rig,
-            layers: layers?,
+            layers: layers.filter(|_| lod != FaceLod::Off)?,
         })
+    }
+
+    /// The LOD of the FaceControls `face` in `owner`: by its LodDistance,
+    /// how far the owner is from the viewer and whether it's in view (in
+    /// front of the camera, within 75 degrees of where it looks).
+    fn face_lod(&self, world: &World, face: InstanceId, owner: InstanceId) -> FaceLod {
+        let lod_distance = world
+            .get(face)
+            .and_then(|face| face.property("LodDistance"))
+            .and_then(Value::as_number)
+            .unwrap_or(30.0) as f32;
+        let (Some(viewer), Some(at)) = (self.viewer, ik_control::frame_of(world, owner)) else {
+            return FaceLod::Full;
+        };
+        let to = at.position - viewer;
+        let distance = to.length();
+        let in_view = self.look.is_none_or(|look| {
+            distance < 2.0 || look.dot(to / distance) > 75f32.to_radians().cos()
+        });
+        FaceLod::of(Some(distance), lod_distance, in_view)
     }
 
     fn report(&mut self, message: String) {

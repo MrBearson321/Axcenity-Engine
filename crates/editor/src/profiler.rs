@@ -64,6 +64,8 @@ pub struct FrameCost {
     /// How long each thread spent posing skeletons, inside `animation`
     /// (unified Phase 93).
     pub posing: PosingThreads,
+    /// Faces by LOD, and what they cost (facial animation F7).
+    pub faces: axcenity_anim::FaceStats,
     /// The whole game frame, steps 1 to 4.
     pub total: Duration,
 }
@@ -444,6 +446,8 @@ impl Profiler {
             }),
             memory: self.memory,
             lua_bytes: newest.load.lua_bytes,
+            faces: newest.game.faces,
+            face_time: average(|s| s.game.faces.time),
             scripts: average(|s| s.game.scripts),
             animation: average(|s| s.game.animation),
             posing: PosingThreads(std::array::from_fn(|slot| {
@@ -609,6 +613,21 @@ impl Profiler {
                 for (slot, time) in posing {
                     row(ui, &PosingThreads::name(slot), millis(time));
                 }
+            });
+        }
+        // Faces by facial LOD (F7): how many at each level, how many were
+        // worked out this frame, and the controls moving.
+        let faces = summary.faces;
+        if faces.faces.iter().sum::<usize>() > 0 {
+            section(ui, "Faces", |ui| {
+                for (lod, count) in axcenity_anim::FaceLod::ALL.iter().zip(faces.faces) {
+                    if count > 0 {
+                        row(ui, lod.label(), count.to_string());
+                    }
+                }
+                row(ui, "Worked out", faces.evaluated.to_string());
+                row(ui, "Controls moving", faces.controls.to_string());
+                row(ui, "Time", millis(summary.face_time));
             });
         }
         section(ui, "Network", |ui| {
@@ -858,6 +877,9 @@ struct Summary {
     animation: Duration,
     /// Average posing time per thread.
     posing: PosingThreads,
+    /// The newest frame's faces, and their average time.
+    faces: axcenity_anim::FaceStats,
+    face_time: Duration,
     physics: Duration,
     physics_steps: f64,
     bodies: usize,
@@ -1283,6 +1305,36 @@ mod tests {
             profiler.record_shader_errors(std::slice::from_ref(&error));
         }
         assert_eq!(profiler.shader_messages.len(), SHADER_MESSAGES);
+    }
+
+    #[test]
+    fn faces_are_listed_by_lod_only_when_there_are_some() {
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(frame(1), GameLoad::default());
+        assert!(!shown_text(&mut profiler).contains("Controls moving"));
+        let faces = axcenity_anim::FaceStats {
+            faces: [2, 1, 0, 3],
+            evaluated: 2,
+            controls: 90,
+            time: Duration::from_micros(40),
+        };
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(FrameCost { faces, ..frame(2) }, GameLoad::default());
+        let text = shown_text(&mut profiler);
+        for shown in [
+            "FACES",
+            "Full",
+            "Reduced",
+            "Off",
+            "Worked out",
+            "Controls moving",
+            "90",
+        ] {
+            assert!(text.contains(shown), "`{shown}` in {text}");
+        }
+        assert!(!text.contains("Expressions only"), "{text}");
     }
 
     #[test]

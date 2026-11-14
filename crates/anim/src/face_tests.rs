@@ -529,6 +529,7 @@ fn expressions_overrides_and_blinks_reach_the_shapes() {
                 viewer: None,
                 heads: &mut heads,
             },
+            crate::face_play::FaceDetail::at(crate::FaceLod::Full, true),
             dt,
             &mut Vec::new(),
         )
@@ -635,6 +636,7 @@ fn a_lip_sync_keeps_time_with_its_sound_and_fades_out_when_it_stops() {
                 viewer: None,
                 heads: &mut heads,
             },
+            crate::face_play::FaceDetail::at(crate::FaceLod::Full, true),
             dt,
             &mut problems,
         )
@@ -702,4 +704,93 @@ fn a_preview_poses_the_face_and_frames_the_head() {
         "the mouth covers the jaw"
     );
     assert_eq!(values[face_control("Brow_Lower_Left").unwrap()], 0.4);
+}
+
+#[test]
+fn far_and_unseen_faces_cost_less_and_say_so() {
+    let (assets, mesh) = remy();
+    let mut world = World::new();
+    let part = mesh_part(&mut world, mesh);
+    let face = face_controls(&mut world, part, &[("Eye_Look_Left", 1.0)]);
+    world
+        .set_property(face, "LodDistance", Value::Number(10.0))
+        .unwrap();
+    let mut animators = Animators::new();
+    let look = Some(axcenity_core::Vector3::new(0.0, 0.0, 1.0));
+    let from = |z: f32| Some(axcenity_core::Vector3::new(0.0, 0.0, -z));
+
+    // Near and in view: whole, every frame.
+    animators.set_viewer(from(5.0), look);
+    for _ in 0..3 {
+        animators.update(&mut world, &assets, FRAME);
+    }
+    let stats = animators.face_stats();
+    assert_eq!(stats.faces, [1, 0, 0, 0]);
+    assert_eq!(stats.evaluated, 1);
+    assert!(stats.controls >= 4, "the eyes turn: {stats:?}");
+    assert!(animators.poses().get(&part).is_some());
+
+    // Past LodDistance: worked out 15 times a second, the rest reused.
+    animators.set_viewer(from(12.0), look);
+    let mut evaluated = 0;
+    for _ in 0..60 {
+        animators.update(&mut world, &assets, FRAME);
+        evaluated += animators.face_stats().evaluated;
+        assert_eq!(animators.face_stats().faces, [0, 1, 0, 0]);
+        assert!(animators.poses().get(&part).is_some(), "still shown");
+    }
+    assert!((14..=17).contains(&evaluated), "{evaluated}");
+
+    // Out of view: the face rests, so nothing poses Remy.
+    animators.set_viewer(from(5.0), Some(axcenity_core::Vector3::new(0.0, 0.0, -1.0)));
+    animators.update(&mut world, &assets, FRAME);
+    assert_eq!(animators.face_stats().faces, [0, 0, 0, 1]);
+    assert_eq!(animators.face_stats().controls, 0);
+    assert!(animators.poses().get(&part).is_none());
+
+    // LodDistance 0 keeps it whole however far.
+    world
+        .set_property(face, "LodDistance", Value::Number(0.0))
+        .unwrap();
+    animators.set_viewer(from(500.0), look);
+    animators.update(&mut world, &assets, FRAME);
+    assert_eq!(animators.face_stats().faces, [1, 0, 0, 0]);
+    assert!(animators.take_errors().is_empty());
+}
+
+#[test]
+fn a_face_without_procedural_motion_doesnt_blink_or_look_about() {
+    let (assets, mesh) = remy();
+    let mut world = World::new();
+    let part = mesh_part(&mut world, mesh);
+    let face = face_controls(&mut world, part, &[]);
+    world
+        .set_property(face, "ProceduralEnabled", Value::Bool(false))
+        .unwrap();
+    world
+        .set_property(face, "GazeMode", Value::String("Camera".into()))
+        .unwrap();
+    world
+        .set_property(face, "BlinkIntervalMax", Value::Number(0.2))
+        .unwrap();
+    world
+        .set_property(face, "BlinkIntervalMin", Value::Number(0.1))
+        .unwrap();
+    let model = assets.model_blocking(mesh).unwrap();
+    let rig = model.rig.clone().unwrap();
+    let eye = rig.bone("mixamorig:LeftEye").unwrap();
+    let mut animators = Animators::new();
+    animators.set_viewer(
+        Some(axcenity_core::Vector3::new(3.0, 1.0, 3.0)),
+        Some(axcenity_core::Vector3::new(-1.0, 0.0, -1.0)),
+    );
+    for _ in 0..90 {
+        animators.update(&mut world, &assets, FRAME);
+        let posed = animators.poses().get(&part).expect("posed");
+        let turn = eye_turn(&rig, eye, posed);
+        assert!(
+            turn.angle_between(Quat::IDENTITY) < 1e-3,
+            "the eyes stay ahead"
+        );
+    }
 }

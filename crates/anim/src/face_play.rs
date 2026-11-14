@@ -349,6 +349,90 @@ fn blend(out: &mut [f32], values: &LayerValues, setting: &FaceLayerSetting) {
     }
 }
 
+/// How much of a face is worked out (facial LOD, F7), by how far it is
+/// from the camera and whether it's in view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum FaceLod {
+    /// Every frame, everything.
+    #[default]
+    Full,
+    /// 15 times a second, without idle motion.
+    Reduced,
+    /// 4 times a second, only the controls and expressions (no
+    /// blinking, gaze, idle motion or lip sync shown).
+    Static,
+    /// Not shown: it rests, and its expressions and lip sync only keep
+    /// time, twice a second.
+    Off,
+}
+
+impl FaceLod {
+    pub const ALL: [FaceLod; 4] = [
+        FaceLod::Full,
+        FaceLod::Reduced,
+        FaceLod::Static,
+        FaceLod::Off,
+    ];
+
+    /// The level for a face `distance` studs from the camera (`None`
+    /// without one) with LodDistance `lod_distance` (0 or less: always
+    /// whole), `in_view` or not.
+    pub fn of(distance: Option<f32>, lod_distance: f32, in_view: bool) -> Self {
+        let Some(distance) = distance.filter(|_| lod_distance > 0.0) else {
+            return FaceLod::Full;
+        };
+        if !in_view || distance >= lod_distance * 4.0 {
+            FaceLod::Off
+        } else if distance >= lod_distance * 2.0 {
+            FaceLod::Static
+        } else if distance >= lod_distance {
+            FaceLod::Reduced
+        } else {
+            FaceLod::Full
+        }
+    }
+
+    /// Seconds between updates at this level (0: every frame).
+    pub fn interval(self) -> f64 {
+        match self {
+            FaceLod::Full => 0.0,
+            FaceLod::Reduced => 1.0 / 15.0,
+            FaceLod::Static => 0.25,
+            FaceLod::Off => 0.5,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FaceLod::Full => "Full",
+            FaceLod::Reduced => "Reduced",
+            FaceLod::Static => "Expressions only",
+            FaceLod::Off => "Off",
+        }
+    }
+}
+
+/// What a face works out this update: its procedural motion (blinks,
+/// gaze, idle) and idle motion, and its lip sync, each on or off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FaceDetail {
+    pub procedural: bool,
+    pub idle: bool,
+    pub dialogue: bool,
+}
+
+impl FaceDetail {
+    /// At `lod`, with the FaceControls' ProceduralEnabled `procedural`.
+    pub fn at(lod: FaceLod, procedural: bool) -> Self {
+        let shown = matches!(lod, FaceLod::Full | FaceLod::Reduced);
+        Self {
+            procedural: procedural && shown,
+            idle: procedural && lod == FaceLod::Full,
+            dialogue: shown,
+        }
+    }
+}
+
 /// A face's blink settings, from its FaceControls.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BlinkSettings {
@@ -516,6 +600,32 @@ impl FaceMotion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_faces_lod_follows_its_distance_and_view() {
+        let lod = |distance, in_view| FaceLod::of(distance, 10.0, in_view);
+        assert_eq!(lod(None, false), FaceLod::Full, "no camera: whole");
+        assert_eq!(lod(Some(5.0), true), FaceLod::Full);
+        assert_eq!(lod(Some(10.0), true), FaceLod::Reduced);
+        assert_eq!(lod(Some(25.0), true), FaceLod::Static);
+        assert_eq!(lod(Some(40.0), true), FaceLod::Off);
+        assert_eq!(lod(Some(5.0), false), FaceLod::Off, "out of view");
+        assert_eq!(
+            FaceLod::of(Some(500.0), 0.0, false),
+            FaceLod::Full,
+            "0: always whole"
+        );
+        assert!(FaceLod::Reduced.interval() < FaceLod::Static.interval());
+
+        let full = FaceDetail::at(FaceLod::Full, true);
+        assert!(full.procedural && full.idle && full.dialogue);
+        let reduced = FaceDetail::at(FaceLod::Reduced, true);
+        assert!(reduced.procedural && !reduced.idle && reduced.dialogue);
+        let still = FaceDetail::at(FaceLod::Static, true);
+        assert!(!still.procedural && !still.dialogue);
+        let switched_off = FaceDetail::at(FaceLod::Full, false);
+        assert!(!switched_off.procedural && !switched_off.idle && switched_off.dialogue);
+    }
 
     fn play(name: &str, priority: i32, order: u64) -> ExpressionPlay {
         ExpressionPlay {

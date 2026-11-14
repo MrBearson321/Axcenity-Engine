@@ -51,7 +51,7 @@ pub mod sequence;
 mod threads;
 
 pub use animators::{
-    AnimatorEvent, Animators, LoadedClip, Poses, load_clip, read_retarget_profile,
+    AnimatorEvent, Animators, FaceStats, LoadedClip, Poses, load_clip, read_retarget_profile,
     read_state_machine,
 };
 pub use blend_space::{blend_space_weights, triangulate};
@@ -72,7 +72,9 @@ pub use face::{
     BUILT_IN_FACE_PROFILES, FaceBoneRole, FaceProblem, FaceRig, GazeAim, built_in_face_profile,
     check_face, choose_face_profile, face_point, pose_face,
 };
-pub use face_play::{BUILT_IN_EXPRESSIONS, built_in_expression, expression_names, find_expression};
+pub use face_play::{
+    BUILT_IN_EXPRESSIONS, FaceLod, built_in_expression, expression_names, find_expression,
+};
 pub use feet::{GroundHit, GroundProbe};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendSpace, BlendSpaceChild, BlendTree,

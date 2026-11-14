@@ -804,13 +804,21 @@ impl ScriptRuntime {
     }
 
     /// Where the player's camera is (`workspace.CurrentCamera.Position`),
-    /// or `None` on a dedicated server, where no one looks. Faces with
-    /// GazeMode Camera look at it (`Animators::set_viewer`).
+    /// or `None` on a dedicated server, where no one looks.
     pub fn camera_position(&self) -> Option<Vector3> {
+        self.camera_view().map(|(at, _)| at)
+    }
+
+    /// Where the player's camera is and which way it looks (a unit
+    /// vector), or `None` on a dedicated server. Faces with GazeMode Camera
+    /// look at it, and facial LOD is measured from it
+    /// (`Animators::set_viewer`).
+    pub fn camera_view(&self) -> Option<(Vector3, Vector3)> {
         if self.dedicated {
             return None;
         }
-        self.client.camera_position()
+        let state = self.client.camera_state()?;
+        Some((state.position, camera::look_vector(state.orientation)))
     }
 
     /// The game view's size in pixels (`Camera.ViewportSize`): the
