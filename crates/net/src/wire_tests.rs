@@ -99,10 +99,12 @@ fn every_message() -> Vec<Message> {
             password: Some("moat".to_owned()),
             user_id: 42,
             defaults: crate::handshake::class_defaults(),
+            rejoin: 0x1234_5678_9abc_def0,
         },
         Message::Welcome {
             you: peer.clone(),
             players: vec![peer.clone()],
+            rejoin: 7,
         },
         Message::Refused {
             reason: "Wrong password.".to_owned(),
@@ -180,6 +182,7 @@ fn hello_and_refused_stay_the_json_every_engine_reads() {
             password: None,
             user_id: 42,
             defaults: 0,
+            rejoin: 0,
         })
     );
     // From before Phase 64: no user id.
@@ -415,6 +418,7 @@ fn a_player_whose_engine_has_other_class_defaults_is_refused() {
         password: None,
         user_id: 1,
         defaults,
+        rejoin: 0,
     };
     assert_ne!(class_defaults(), 0);
     assert_eq!(admit(Some(&hello(class_defaults())), &admission), Ok(()));

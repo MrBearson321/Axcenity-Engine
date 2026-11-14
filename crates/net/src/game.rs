@@ -33,6 +33,23 @@ use crate::{DEFAULT_PORT, DISCOVERY_PORT};
 /// who finds the game full is told so by the handshake.
 const SPARE_CONNECTIONS: usize = 4;
 
+/// How long a device that lost its connection tries to rejoin, in seconds
+/// (multiplayer readiness MP2).
+pub const REJOIN_SECONDS: f64 = 60.0;
+/// The longest wait between two tries, in seconds; the first is 1.
+const REJOIN_MOST_WAIT: f64 = 8.0;
+
+/// A device that lost its connection, trying to rejoin.
+struct Rejoining {
+    /// The server clock's time to give up at.
+    deadline: f64,
+    /// When to try next, and how long the wait after that is.
+    next_try: f64,
+    wait: f64,
+    /// Why the connection was lost.
+    reason: String,
+}
+
 /// A script's code, which a joined device starts again on the server's
 /// world: its LocalScripts and the ModuleScripts they require.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,6 +141,18 @@ pub struct Network {
     /// Joined: how many times the server moved this device's character
     /// back (`Correction`), since the session started.
     corrections: u64,
+    /// Joined over UDP: the address and password, to rejoin with.
+    joined_to: Option<(String, Option<String>)>,
+    /// The key the server gave this device to rejoin with.
+    rejoin_key: u64,
+    /// Lost the connection and trying to rejoin.
+    rejoining: Option<Rejoining>,
+    /// How long to try to rejoin for; 0 never tries.
+    rejoin_seconds: f64,
+    /// Times this device rejoined since it first joined.
+    rejoins: u64,
+    /// Times this device's world became the server's (joins and rejoins).
+    follows: u64,
 }
 
 impl Network {
@@ -159,6 +188,12 @@ impl Network {
             replays: Replays::default(),
             join_name: None,
             corrections: 0,
+            joined_to: None,
+            rejoin_key: 0,
+            rejoining: None,
+            rejoin_seconds: REJOIN_SECONDS,
+            rejoins: 0,
+            follows: 0,
         }
     }
 
@@ -216,7 +251,30 @@ impl Network {
 
     /// Whether this device follows a server it joined.
     pub fn is_following(&self) -> bool {
-        matches!(self.session, Session::Joined(_))
+        matches!(self.session, Session::Joined(_)) || self.rejoining.is_some()
+    }
+
+    /// How long a device that lost its connection tries to rejoin, in
+    /// seconds ([`REJOIN_SECONDS`] unless set); 0 gives up at once.
+    pub fn set_rejoin_seconds(&mut self, seconds: f64) {
+        self.rejoin_seconds = seconds.max(0.0);
+    }
+
+    /// Lost the connection and trying to rejoin.
+    pub fn is_rejoining(&self) -> bool {
+        self.rejoining.is_some()
+    }
+
+    /// Times this device rejoined after losing its connection.
+    pub fn rejoins(&self) -> u64 {
+        self.rejoins
+    }
+
+    /// Times this device's world became the server's: on joining and on
+    /// each rejoin. A host starts its physics, characters and Animators
+    /// again on the new world whenever this changes.
+    pub fn follows(&self) -> u64 {
+        self.follows
     }
 
     /// The characters other devices move, which this device's controllers
@@ -481,7 +539,9 @@ impl Network {
     ) -> Result<(), String> {
         let client =
             Client::connect(address).map_err(|err| format!("Can't join {address}: {err}."))?;
-        self.join_through(world, scripts, client, password);
+        self.join_through(world, scripts, client, password.clone());
+        self.joined_to = Some((address.to_owned(), password));
+        self.rejoins = 0;
         self.log.push(format!("Joining {address}..."));
         Ok(())
     }
@@ -507,14 +567,62 @@ impl Network {
         password: Option<String>,
     ) {
         self.disconnect(world, scripts);
+        let join = self.start_join(world, scripts, client, password);
+        self.corrections = 0;
+        self.session = Session::Joined(Box::new(join));
+    }
+
+    fn start_join(
+        &self,
+        world: &World,
+        scripts: &ScriptRuntime,
+        client: Client,
+        password: Option<String>,
+    ) -> Join {
         let name = self
             .join_name
             .clone()
             .unwrap_or_else(|| local_name(world, scripts));
-        self.corrections = 0;
         let user_id = scripts.user_id() as u64;
-        let join = Join::start(client, &self.game, &name, password, user_id);
-        self.session = Session::Joined(Box::new(join));
+        Join::start(client, &self.game, &name, password, user_id)
+    }
+
+    /// While rejoining, tries again when it's time; gives up at the
+    /// deadline, as a failed join does.
+    fn try_rejoin(&mut self, world: &mut World, scripts: &mut ScriptRuntime) {
+        let Some(rejoining) = &mut self.rejoining else {
+            return;
+        };
+        if !matches!(self.session, Session::Offline) || self.clock < rejoining.next_try {
+            return;
+        }
+        if self.clock >= rejoining.deadline {
+            let reason = format!(
+                "Lost the connection to the server and couldn't rejoin: {}",
+                rejoining.reason
+            );
+            self.rejoining = None;
+            self.joined_to = None;
+            self.remove_players(world, scripts);
+            self.log.push(format!("warning: {reason}"));
+            scripts.fire_connection_failed(world, &reason);
+            return;
+        }
+        rejoining.next_try = self.clock + rejoining.wait;
+        rejoining.wait = (rejoining.wait * 2.0).min(REJOIN_MOST_WAIT);
+        let Some((address, password)) = self.joined_to.clone() else {
+            return;
+        };
+        match Client::connect(&address) {
+            Ok(client) => {
+                let join = self
+                    .start_join(world, scripts, client, password)
+                    .rejoining(self.rejoin_key);
+                self.session = Session::Joined(Box::new(join));
+                self.log.push(format!("Rejoining {address}..."));
+            }
+            Err(err) => self.log.push(format!("Can't rejoin {address} yet: {err}.")),
+        }
     }
 
     /// Leaves the game or stops hosting; the other players leave `Players`.
@@ -531,6 +639,8 @@ impl Network {
             }
         }
         self.answerer = None;
+        self.joined_to = None;
+        self.rejoining = None;
         self.replicator = Replicator::default();
         self.need_snapshot.clear();
         self.motion.clear();
@@ -574,6 +684,7 @@ impl Network {
         let elapsed = Duration::from_secs_f64(seconds.max(0.0));
         self.seconds = seconds.max(0.0);
         self.clock += self.seconds;
+        self.try_rejoin(world, scripts);
         let events = match &mut self.session {
             Session::Offline => Vec::new(),
             Session::Hosting(host) => host.update(elapsed),
@@ -909,6 +1020,9 @@ impl Network {
                 }
             }
             SessionEvent::Welcomed(you) => {
+                if let Session::Joined(join) = &self.session {
+                    self.rejoin_key = join.rejoin_key();
+                }
                 scripts.rename_local_player(world, &you.name);
                 self.log
                     .push(format!("Joined \"{}\" as {}.", self.game.name, you.name));
@@ -917,6 +1031,11 @@ impl Network {
             SessionEvent::Snapshot { you, update } => {
                 if !self.is_hosting() {
                     self.follow_server(world, scripts, InstanceId::from_bits(you), &update);
+                    self.follows += 1;
+                    if self.rejoining.take().is_some() {
+                        self.rejoins += 1;
+                        self.log.push("Rejoined the game.".to_owned());
+                    }
                 }
             }
             SessionEvent::Update(update) => {
@@ -1024,8 +1143,32 @@ impl Network {
             SessionEvent::StreamedAround(request) => {
                 scripts.finish_stream_around(world, request);
             }
-            SessionEvent::Failed(reason) => {
+            // Lost after joining (the server crashed or stopped, or the
+            // network failed): the world stays as it was while this device
+            // tries to rejoin (MP2).
+            SessionEvent::Lost(reason) if self.rejoin_seconds > 0.0 && self.joined_to.is_some() => {
                 self.session = Session::Offline;
+                self.owned.clear();
+                self.owned_sender = OwnedSender::default();
+                self.log.push(format!(
+                    "warning: Lost the connection to the server: {reason} Trying to rejoin for {} seconds.",
+                    self.rejoin_seconds
+                ));
+                self.rejoining = Some(Rejoining {
+                    deadline: self.clock + self.rejoin_seconds,
+                    next_try: self.clock + 1.0,
+                    wait: 1.0,
+                    reason,
+                });
+            }
+            // A try at rejoining that failed: the next waits longer.
+            SessionEvent::Failed(reason) if self.rejoining.is_some() => {
+                self.session = Session::Offline;
+                self.log.push(format!("Couldn't rejoin yet: {reason}"));
+            }
+            SessionEvent::Failed(reason) | SessionEvent::Lost(reason) => {
+                self.session = Session::Offline;
+                self.joined_to = None;
                 self.remove_players(world, scripts);
                 self.log.push(format!("warning: {reason}"));
                 scripts.fire_connection_failed(world, &reason);
