@@ -169,15 +169,15 @@ struct Running {
     ragdoll: RagdollRun,
     /// Each IKControl's progress.
     ik: HashMap<InstanceId, ik_control::Run>,
-    /// The skeleton's legs (found again for a new model), if it has them.
-    legs: Option<Legs>,
-    feet: feet::Run,
     /// Its Animator at the last update, for the inspector.
     animator: Option<InstanceId>,
     /// What it played over the state machine at the last update.
     layers: Vec<Layer>,
     /// What it fired lately, newest last ([`inspect::RECENT`] at most).
     recent: std::collections::VecDeque<inspect::Fired>,
+    /// The skeleton's legs (found again for a new model), if it has them.
+    legs: Option<Legs>,
+    feet: feet::Run,
 }
 
 /// Where a thing's Ragdoll has got to.
