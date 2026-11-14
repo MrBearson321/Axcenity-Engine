@@ -41,6 +41,8 @@ use glam::{EulerRot, Quat, Vec3};
 use crate::clip::{Clip, RootMotion};
 use crate::controller::{Compiled, Machine, Playing};
 use crate::face::{FaceRig, choose_face_profile};
+use crate::face_play::{FaceLayers, FaceMotion};
+use crate::face_world::{Lookers, face_layers};
 use crate::feet::{self, GroundProbe, Legs};
 use crate::files::{
     CLIP_EXTENSION, ClipFile, DEFAULT_BLEND, STATE_MACHINE_EXTENSION, StateMachineFile,
@@ -142,6 +144,11 @@ pub struct Animators {
     threads: Threads,
     /// How long each thread spent posing in the last update.
     thread_times: ThreadTimes,
+    /// Where the camera is, which faces with GazeMode Camera look at.
+    viewer: Option<Vec3>,
+    /// The resting head of each skinned model a face has looked at, in
+    /// its file's space, by model key.
+    heads: HashMap<u64, Option<Vec3>>,
 }
 
 /// A pose to work out off the calling thread: everything it needs from
@@ -160,26 +167,39 @@ struct PoseJob {
     face: Option<FaceFrame>,
 }
 
-/// A face's controls this frame, and the profile matched to its model.
+/// A face's layers this frame, and the profile matched to its model.
 struct FaceFrame {
     rig: Arc<FaceRig>,
-    /// One value per standard control (`FACE_CONTROLS`).
-    controls: Vec<f32>,
+    layers: FaceLayers,
 }
 
 impl FaceFrame {
-    /// Turns the eye and jaw bones in `pose`, poses `model` and sets its
-    /// blend shapes.
-    fn pose(&self, model: &Model, mut pose: axcenity_assets::Pose) -> Option<Posed> {
-        self.rig.turn(&mut pose, &self.controls);
+    /// Composes the face over the body's `pose` (of `skeleton`), turns the
+    /// eye and jaw bones in it, poses `model` and sets its blend shapes.
+    fn pose(
+        &self,
+        model: &Model,
+        skeleton: &Rig,
+        mut pose: axcenity_assets::Pose,
+    ) -> Option<Posed> {
+        let controls = self.layers.compose(&self.rig, Some(skeleton), Some(&pose));
+        self.rig.turn(&mut pose, &controls);
         let mut posed = model.pose(&pose)?;
-        self.set_shapes(model, &mut posed);
+        self.set_shapes(model, &controls, &mut posed);
         Some(posed)
     }
 
-    fn set_shapes(&self, model: &Model, posed: &mut Posed) {
+    /// A model with blend shapes and no skeleton, posed for its face.
+    fn shapes_only(&self, model: &Model) -> Posed {
+        let controls = self.layers.compose(&self.rig, None, None);
+        let mut posed = model.rest_posed();
+        self.set_shapes(model, &controls, &mut posed);
+        posed
+    }
+
+    fn set_shapes(&self, model: &Model, controls: &[f32], posed: &mut Posed) {
         let mut weights = Vec::with_capacity(model.morph_targets.len());
-        self.rig.weights(model, &self.controls, &mut weights);
+        self.rig.weights(model, controls, &mut weights);
         posed.set_morph_weights(&weights);
     }
 }
@@ -221,6 +241,8 @@ struct Running {
     legs: Option<Legs>,
     feet: feet::Run,
     face: Option<FaceRun>,
+    /// Its face's blinks, darts and gaze, carried from frame to frame.
+    face_motion: Option<FaceMotion>,
 }
 
 /// Where a thing's Ragdoll has got to.
@@ -302,6 +324,13 @@ impl Animators {
             ground: Some(probe),
             ..Self::default()
         }
+    }
+
+    /// Where the camera is in the world (the viewer), which faces with
+    /// GazeMode Camera look at. Hosts set it before each update; `None`
+    /// (a dedicated server) leaves those faces looking ahead.
+    pub fn set_viewer(&mut self, at: Option<axcenity_core::Vector3>) {
+        self.viewer = at.map(crate::ragdoll::to_vec3);
     }
 
     /// The posed models, by MeshPart, after the last [`update`](Self::update).
@@ -480,7 +509,7 @@ impl Animators {
                 &job.bone_layers,
             );
             match &job.face {
-                Some(face) => face.pose(&job.model, pose),
+                Some(face) => face.pose(&job.model, &job.rig, pose),
                 None => job.model.pose(&pose),
             }
         });
@@ -729,9 +758,17 @@ impl Animators {
         }
 
         // The face's controls, read now so the pose can be made anywhere.
-        let face = parts
-            .face
-            .and_then(|face| self.face_frame(world, assets, face, mesh.as_deref(), &mut running));
+        let face = parts.face.and_then(|face| {
+            self.face_frame(
+                world,
+                assets,
+                face,
+                owner,
+                mesh.as_deref(),
+                &mut running,
+                game_dt,
+            )
+        });
 
         // Bones: the state machine's pose, then each layer over it.
         let mut posed = false;
@@ -851,7 +888,7 @@ impl Animators {
                         }
                     }
                     let made = match &face {
-                        Some(face) => face.pose(model, pose),
+                        Some(face) => face.pose(model, rig, pose),
                         None => model.pose(&pose),
                     };
                     if let Some(pose) = made {
@@ -862,9 +899,7 @@ impl Animators {
             }
         } else if let (Some(face), Some(mesh)) = (&face, &mesh) {
             // Blend shapes and no skeleton: posed for the face alone.
-            let mut pose = mesh.rest_posed();
-            face.set_shapes(mesh, &mut pose);
-            self.poses.insert(owner, Arc::new(pose));
+            self.poses.insert(owner, Arc::new(face.shapes_only(mesh)));
             posed = true;
         } else if let Some(&control) = parts.ik.first() {
             let name = world.full_name(control).unwrap_or_default();
@@ -1275,13 +1310,16 @@ impl Animators {
     /// The FaceControls `face`'s controls this frame and the profile matched
     /// to `model`, or `None` when it's off or has nothing to move (said
     /// once).
+    #[allow(clippy::too_many_arguments)]
     fn face_frame(
         &mut self,
-        world: &World,
+        world: &mut World,
         assets: &Assets,
         face: InstanceId,
+        owner: InstanceId,
         model: Option<&Model>,
         running: &mut Running,
+        dt: f64,
     ) -> Option<FaceFrame> {
         let instance = world.get(face)?;
         if instance.property("Enabled").and_then(Value::as_bool) == Some(false) {
@@ -1344,16 +1382,32 @@ impl Animators {
             });
         }
         let rig = running.face.as_ref()?.rig.clone()?;
-        let controls = axcenity_core::face::FACE_CONTROLS
-            .iter()
-            .map(|control| {
-                instance
-                    .property(control.name)
-                    .and_then(Value::as_number)
-                    .unwrap_or(0.0) as f32
-            })
-            .collect();
-        Some(FaceFrame { rig, controls })
+        let motion = running
+            .face_motion
+            .get_or_insert_with(|| FaceMotion::new(face.to_bits()));
+        let mut problems = Vec::new();
+        let lookers = Lookers {
+            viewer: self.viewer,
+            heads: &mut self.heads,
+        };
+        let layers = face_layers(
+            world,
+            assets,
+            face,
+            owner,
+            model,
+            motion,
+            lookers,
+            dt,
+            &mut problems,
+        );
+        for problem in problems {
+            self.report(problem);
+        }
+        Some(FaceFrame {
+            rig,
+            layers: layers?,
+        })
     }
 
     fn report(&mut self, message: String) {
@@ -1513,7 +1567,7 @@ fn pose_of(
 }
 
 /// The model of `owner` if it's a MeshPart whose model is loaded.
-fn mesh_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<Arc<Model>> {
+pub(crate) fn mesh_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<Arc<Model>> {
     let part = world.get(owner)?;
     if part.class() != ClassName::MeshPart {
         return None;

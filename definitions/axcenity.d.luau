@@ -4886,6 +4886,32 @@ declare extern type FaceControls extends Instance with
 	Enabled: boolean
 	--- The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`"axcenity"`, `"arkit"` or `"vroid"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.
 	Profile: string
+	--- The face layers' order, lowest first, as names separated by commas (`"Base, Expression, Dialogue, Procedural, Override"`): Base is these properties, Expression is `SetExpression`'s, Dialogue is lip sync, Procedural is blinking, gaze and idle motion, and Override is `SetOverride`'s. Layers left out keep their place after the named ones.
+	LayerOrder: string
+	--- Whether the eyes blink by themselves, now and then.
+	BlinkEnabled: boolean
+	--- Which eyes blink by themselves: `"Both"`, `"Left"` or `"Right"`.
+	BlinkEyes: string
+	--- The fewest seconds between blinks; each wait is a random time from this to BlinkIntervalMax.
+	BlinkIntervalMin: number
+	--- The most seconds between blinks.
+	BlinkIntervalMax: number
+	--- Seconds a blink takes, closing and opening.
+	BlinkDuration: number
+	--- How often a blink is followed straight away by another, from 0 (never) to 1 (always).
+	DoubleBlinkChance: number
+	--- What the eyes look at: `"Animation"` (only what the controls say), `"Camera"`, `"Target"` (GazeTarget) or `"Position"` (GazePosition). The eyes turn within the face profile's limits and look ahead again when the target is too far round.
+	GazeMode: string
+	--- With GazeMode `"Target"`: the part, Attachment or character (a Model, looked at in its Head) to look at.
+	GazeTarget: Instance?
+	--- With GazeMode `"Position"`: the point in the world to look at.
+	GazePosition: Vector3
+	--- About how many seconds the eyes take to catch up with a moving target; 0 follows at once.
+	GazeSmoothing: number
+	--- How much the gaze counts over the eye controls, from 0 to 1.
+	GazeWeight: number
+	--- Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.
+	IdleMotion: number
 	--- Closes the left eye in a blink, 0 to 1.
 	Blink_Left: number
 	--- Closes the right eye in a blink, 0 to 1.
@@ -4983,6 +5009,18 @@ declare extern type FaceControls extends Instance with
 	--- Curls the tongue's tip down, 0 to 1.
 	Tongue_Down: number
 	[string]: any
+	--- Shows the expression `name` (a built-in one such as `"Happy"`, `"Sad"` or `"Sleepy"`, or a `*.expression.json` file's name or path) at `intensity` (0 to 1, 1 if left out), blending in over `duration` seconds (the expression's own time if left out). `options` may set `Weight` (0 to 1, how much it counts over the expressions under it), `Priority` (higher goes over lower; equal ones go in the order they were set) and `Asymmetry` (-1 shows only the left side, 1 only the right). Setting a shown expression again changes it.
+	function SetExpression(self, name: string, intensity: number?, duration: number?, options: { Weight: number?, Priority: number?, Asymmetry: number? }?): ()
+	--- Fades the expression `name` out over `duration` seconds (its own time if left out), or every expression if `name` is nil.
+	function ClearExpression(self, name: string?, duration: number?): ()
+	--- The expressions being shown, in the order they were set: each a table of `Name`, `Intensity`, `Weight`, `Priority` and `Asymmetry`.
+	function GetExpressions(self): { { Name: string, Intensity: number, Weight: number, Priority: number, Asymmetry: number } }
+	--- Holds the control `control` (such as `"Jaw_Open"`) at `value` (0 to 1) over everything else on the Override layer, such as a character's mouth while eating; nil lets it go.
+	function SetOverride(self, control: string, value: number?): ()
+	--- Lets go of every control SetOverride holds.
+	function ClearOverrides(self): ()
+	--- Sets how the face layer `layer` (`"Base"`, `"Expression"`, `"Dialogue"`, `"Procedural"` or `"Override"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `"Override"` (replaces, the default) or `"Additive"` (adds), and `mask`, the controls it may move: a group (`"Eyes"`, `"Eyebrows"`, `"Mouth"`, `"CheeksAndNose"`, `"JawAndTongue"`), a control, or a list of them; nil for all.
+	function SetLayer(self, layer: string, weight: number?, blend: string?, mask: (string | { string })?): ()
 end
 
 --- Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime.

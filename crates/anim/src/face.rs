@@ -276,6 +276,9 @@ pub struct FaceRig {
     /// The body's left, up and forward, in the file's space.
     axes: Mat3,
     limits: FaceLimits,
+    /// The head bone and its resting turn in the file's space, which gaze
+    /// is measured from.
+    head: Option<(usize, Quat)>,
 }
 
 const EYE_LOOK: [&str; 4] = [
@@ -434,6 +437,13 @@ impl FaceRig {
             (Some(rig), Some(world)) => facing(rig, world, &eyes),
             _ => Mat3::IDENTITY,
         };
+        let head = rig.zip(rest_world.as_ref()).and_then(|(rig, world)| {
+            let head = HumanoidMap::detect(&rig.bones).get(crate::retarget::HumanBone::Head)?;
+            Some((
+                head,
+                world[head].to_scale_rotation_translation().1.normalize(),
+            ))
+        });
         let face = FaceRig {
             profile: name.to_owned(),
             drives,
@@ -442,6 +452,7 @@ impl FaceRig {
             eyes,
             axes,
             limits,
+            head,
         };
         (face, problems)
     }
@@ -531,6 +542,90 @@ impl FaceRig {
                 local.rotation = (own * local.rotation).normalize();
             }
         }
+    }
+}
+
+/// How far the eyes turn to look at a point.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GazeAim {
+    /// Eye_Look_Up, Eye_Look_Down, Eye_Look_Left and Eye_Look_Right, 0 to 1.
+    pub look: [f32; 4],
+    /// 1 while the point is in front, fading to 0 as it goes round behind.
+    pub visible: f32,
+}
+
+impl FaceRig {
+    /// The look controls that aim the eyes at `point` (in the model file's
+    /// space) from where `pose` (the body's, or none for a model without a
+    /// skeleton) has the eyes and head, plus `offset` degrees (sideways
+    /// toward the left, up), held within the profile's limits.
+    pub fn gaze(
+        &self,
+        rig: Option<&Rig>,
+        pose: Option<&Pose>,
+        point: Vec3,
+        offset: glam::Vec2,
+    ) -> GazeAim {
+        let world = rig.zip(pose).map(|(rig, pose)| rig.world(pose));
+        let at = |bone: usize| {
+            world
+                .as_ref()
+                .and_then(|w| w.get(bone))
+                .map(|m| m.w_axis.truncate())
+        };
+        let eyes: Vec<Vec3> = self
+            .eyes
+            .iter()
+            .flatten()
+            .filter_map(|eye| at(eye.bone))
+            .collect();
+        let from = if eyes.is_empty() {
+            self.head
+                .and_then(|(head, _)| at(head))
+                .unwrap_or(Vec3::ZERO)
+        } else {
+            eyes.iter().sum::<Vec3>() / eyes.len() as f32
+        };
+        // The head's turn since rest carries the face's axes with it.
+        let turned = self
+            .head
+            .and_then(|(head, rest)| {
+                let now = world.as_ref()?.get(head)?.to_scale_rotation_translation().1;
+                Some(now.normalize() * rest.inverse())
+            })
+            .unwrap_or(Quat::IDENTITY);
+        let along = turned.inverse() * (point - from);
+        let [left, up, forward] = self.axes.to_cols_array_2d().map(Vec3::from);
+        let (x, y, z) = (along.dot(left), along.dot(up), along.dot(forward));
+        if along.length_squared() < 1e-12 {
+            return GazeAim::default();
+        }
+        let yaw = x.atan2(z).to_degrees() + offset.x;
+        let pitch = y.atan2((x * x + z * z).sqrt()).to_degrees() + offset.y;
+        GazeAim {
+            look: self.look_from_degrees(glam::Vec2::new(yaw, pitch)),
+            visible: ((130.0 - yaw.abs()) / 30.0).clamp(0.0, 1.0),
+        }
+    }
+
+    /// The look controls (Up, Down, Left, Right) that turn the eyes
+    /// `degrees` (sideways toward the left, up), within the profile's
+    /// limits.
+    pub fn look_from_degrees(&self, degrees: glam::Vec2) -> [f32; 4] {
+        let limits = &self.limits;
+        let share = |degrees: f32, limit: f32| {
+            if limit > 0.0 {
+                (degrees / limit).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        };
+        [
+            share(degrees.y, limits.look_up),
+            share(-degrees.y, limits.look_down),
+            share(degrees.x, limits.look_sideways),
+            share(-degrees.x, limits.look_sideways),
+        ]
     }
 }
 

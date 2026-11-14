@@ -1,4 +1,5 @@
-//! Facial animation F3: face profiles, FaceRig and FaceControls.
+//! Facial animation F3 and F4: face profiles, FaceRig and FaceControls,
+//! then expressions, layers, blinks and gaze.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -288,6 +289,29 @@ fn mesh_part(world: &mut World, mesh: &str) -> InstanceId {
     part
 }
 
+/// How `eye` is turned from rest in `posed`, in the file's space (the
+/// fitted space is squashed).
+fn eye_turn(rig: &Rig, eye: usize, posed: &axcenity_assets::Posed) -> Quat {
+    let joint = rig
+        .joints
+        .iter()
+        .position(|joint| joint.bone == eye)
+        .unwrap();
+    let before = rig.joint_matrices(&rig.rest_pose())[joint];
+    let after = posed.joints()[joint];
+    (rig.fit.inverse() * after * before.inverse() * rig.fit)
+        .to_scale_rotation_translation()
+        .1
+}
+
+fn remy() -> (Assets, &'static str) {
+    let assets =
+        Assets::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-character"));
+    let mesh = "assets/models/Walking/Walking.fbx";
+    assets.model_blocking(mesh).unwrap();
+    (assets, mesh)
+}
+
 #[test]
 fn face_controls_turn_a_skinned_characters_eyes() {
     // The hello-character example's Remy has mixamorig:LeftEye and
@@ -309,19 +333,7 @@ fn face_controls_turn_a_skinned_characters_eyes() {
         .poses()
         .get(&part)
         .expect("a face poses its MeshPart");
-    // The eye's turn in the file's space (the fitted space is squashed).
-    let looks = |posed: &axcenity_assets::Posed| {
-        let joint = rig
-            .joints
-            .iter()
-            .position(|joint| joint.bone == eye)
-            .unwrap();
-        let before = rig.joint_matrices(&rig.rest_pose())[joint];
-        let after = posed.joints()[joint];
-        (rig.fit.inverse() * after * before.inverse() * rig.fit)
-            .to_scale_rotation_translation()
-            .1
-    };
+    let looks = |posed: &axcenity_assets::Posed| eye_turn(&rig, eye, posed);
     let turn = looks(posed);
     let ahead = turn * Vec3::Z;
     assert!(
@@ -435,4 +447,141 @@ fn face_controls_set_a_still_models_blend_shapes() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors[0].contains("nope"));
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn gaze_turns_the_eyes_toward_a_position_and_ahead_when_it_goes_behind() {
+    let (assets, mesh) = remy();
+    let model = assets.model_blocking(mesh).unwrap();
+    let rig = model.rig.clone().unwrap();
+    let eye = rig.bone("mixamorig:LeftEye").unwrap();
+    let mut world = World::new();
+    let part = mesh_part(&mut world, mesh);
+    let face = face_controls(&mut world, part, &[("IdleMotion", 0.0)]);
+    world
+        .set_property(face, "BlinkEnabled", Value::Bool(false))
+        .unwrap();
+    world
+        .set_property(face, "GazeMode", Value::String("Position".into()))
+        .unwrap();
+    world
+        .set_property(face, "GazeSmoothing", Value::Number(0.0))
+        .unwrap();
+    // Far off to Remy's left (+X) and ahead (+Z), at about eye height.
+    let look_at = |world: &mut World, x: f32, z: f32| {
+        world
+            .set_property(
+                face,
+                "GazePosition",
+                Value::Vector3(axcenity_core::Vector3::new(x, 0.0, z)),
+            )
+            .unwrap();
+    };
+    look_at(&mut world, 100.0, 100.0);
+    let mut animators = Animators::new();
+    for _ in 0..30 {
+        animators.update(&mut world, &assets, FRAME);
+    }
+    assert_eq!(animators.take_errors(), Vec::<String>::new());
+    let turn = eye_turn(&rig, eye, animators.poses().get(&part).unwrap());
+    let ahead = turn * Vec3::Z;
+    assert!(
+        (turn.angle_between(Quat::IDENTITY).to_degrees() - 30.0).abs() < 2.0,
+        "45° off, held to the 30° limit: {turn:?}"
+    );
+    assert!(ahead.x > 0.4, "{ahead}");
+
+    // Behind, the eyes give up and look ahead.
+    look_at(&mut world, 0.0, -100.0);
+    animators.update(&mut world, &assets, FRAME);
+    let turn = eye_turn(&rig, eye, animators.poses().get(&part).unwrap());
+    assert!(
+        turn.angle_between(Quat::IDENTITY).to_degrees() < 1.0,
+        "{turn:?}"
+    );
+}
+
+#[test]
+fn expressions_overrides_and_blinks_reach_the_shapes() {
+    let (assets, mesh) = remy();
+    let mut world = World::new();
+    let part = mesh_part(&mut world, mesh);
+    let face = face_controls(&mut world, part, &[("Mouth_Smile_Left", 0.25)]);
+    // Remy has no blend shapes; the profile turns no bones for a smile,
+    // so this checks what the layers make through a FaceRig directly.
+    let model = assets.model_blocking(mesh).unwrap();
+    let profile = crate::built_in_face_profile("axcenity").unwrap();
+    let (rig, _) = FaceRig::bind(&model, "axcenity", &profile);
+    let compose_with = |world: &mut World, motion: &mut crate::face_play::FaceMotion, dt: f64| {
+        let mut heads = std::collections::HashMap::new();
+        let layers = crate::face_world::face_layers(
+            world,
+            &assets,
+            face,
+            part,
+            &model,
+            motion,
+            crate::face_world::Lookers {
+                viewer: None,
+                heads: &mut heads,
+            },
+            dt,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        layers.compose(&rig, None, None)
+    };
+    let compose = |world: &mut World, dt: f64| {
+        compose_with(world, &mut crate::face_play::FaceMotion::new(3), dt)
+    };
+    let at = |controls: &[f32], name: &str| controls[face_control(name).unwrap()];
+    assert_eq!(at(&compose(&mut world, 0.0), "Mouth_Smile_Left"), 0.25);
+
+    let state = world.face_mut(face).unwrap();
+    state.expressions.push(axcenity_core::face::ExpressionPlay {
+        name: "happy".into(),
+        intensity: 1.0,
+        target_intensity: 1.0,
+        presence: 1.0,
+        target_presence: 1.0,
+        transition: None,
+        weight: 1.0,
+        priority: 0,
+        asymmetry: 0.0,
+        order: 0,
+    });
+    let controls = compose(&mut world, 0.0);
+    assert_eq!(
+        at(&controls, "Mouth_Smile_Left"),
+        0.8,
+        "Happy over the base"
+    );
+
+    // An override goes over everything; a masked layer leaves its controls.
+    let state = world.face_mut(face).unwrap();
+    state
+        .overrides
+        .insert(face_control("Mouth_Smile_Left").unwrap(), 0.1);
+    assert_eq!(at(&compose(&mut world, 0.0), "Mouth_Smile_Left"), 0.1);
+    let state = world.face_mut(face).unwrap();
+    state.overrides.clear();
+    state.layers.insert(
+        axcenity_core::face::FaceLayer::Expression,
+        axcenity_core::face::FaceLayerSetting {
+            mask: axcenity_core::face::face_mask_controls("Eyes"),
+            ..Default::default()
+        },
+    );
+    assert_eq!(at(&compose(&mut world, 0.0), "Mouth_Smile_Left"), 0.25);
+
+    // The eyes blink by themselves within the longest wait between
+    // blinks, and the expression stays on.
+    let mut motion = crate::face_play::FaceMotion::new(3);
+    let mut closed = 0.0f32;
+    for _ in 0..(7.0 / FRAME) as usize {
+        let controls = compose_with(&mut world, &mut motion, FRAME);
+        closed = closed.max(at(&controls, "Blink_Left").min(at(&controls, "Blink_Right")));
+    }
+    assert!(closed > 0.9, "{closed}");
+    assert_eq!(world.face(face).unwrap().expressions.len(), 1);
 }

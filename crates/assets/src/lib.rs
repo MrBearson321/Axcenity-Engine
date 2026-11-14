@@ -34,6 +34,7 @@ mod asset_id;
 mod color_grading;
 mod cooked;
 mod data_table;
+mod face_expression;
 mod face_profile;
 mod fonts;
 mod import;
@@ -79,6 +80,10 @@ pub use cooked::{
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
     Row, data_table_name, data_table_path, is_data_table, read_data_table, write_data_table,
+};
+pub use face_expression::{
+    EXPRESSION_EXTENSION, EXPRESSIONS_FOLDER, FaceExpression, FaceExpressions, expression_name,
+    is_face_expression, read_face_expressions, write_face_expression,
 };
 pub use face_profile::{
     FACE_EXTENSION, FACES_FOLDER, FaceLimits, FaceProfile, FaceProfiles, ShapeWeight,
@@ -237,6 +242,8 @@ struct Shared {
     /// The project's face profiles, read the first time they're asked for
     /// (see [`Assets::face_profiles`]).
     faces: Option<Arc<FaceProfiles>>,
+    /// The project's expressions (see [`Assets::face_expressions`]).
+    expressions: Option<Arc<FaceExpressions>>,
     /// Each model and texture file's stamp when it was read, so
     /// [`Assets::reload`] skips one that hasn't changed since (such as a
     /// model the editor just imported).
@@ -841,6 +848,9 @@ impl Assets {
         if is_face_profile(file) {
             shared.faces = None;
         }
+        if is_face_expression(file) {
+            shared.expressions = None;
+        }
         forget_materials_using(&mut shared, file);
         loading::reread_loads(&mut shared, |key| {
             key.file() == file || key.kind == Kind::Material
@@ -942,6 +952,29 @@ impl Assets {
         }
         shared.errors.extend(read.problems.iter().cloned());
         shared.faces = Some(read.clone());
+        read
+    }
+
+    /// The project's expressions (`assets/faces/expressions/**/*.expression.json`),
+    /// read the first time they're asked for and again after one changes,
+    /// as [`face_profiles`](Self::face_profiles) are.
+    pub fn face_expressions(&self) -> Arc<FaceExpressions> {
+        let folder = {
+            let shared = self.lock();
+            if let Some(expressions) = &shared.expressions {
+                return expressions.clone();
+            }
+            shared.folder.clone()
+        };
+        let read = Arc::new(folder.map_or_else(FaceExpressions::default, |folder| {
+            read_face_expressions(&folder)
+        }));
+        let mut shared = self.lock();
+        if let Some(expressions) = &shared.expressions {
+            return expressions.clone();
+        }
+        shared.errors.extend(read.problems.iter().cloned());
+        shared.expressions = Some(read.clone());
         read
     }
 

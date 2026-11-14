@@ -30,6 +30,110 @@ FaceControls.Profile: string
 
 The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`"axcenity"`, `"arkit"` or `"vroid"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.
 
+#### LayerOrder
+
+```luau
+FaceControls.LayerOrder: string
+```
+
+The face layers' order, lowest first, as names separated by commas (`"Base, Expression, Dialogue, Procedural, Override"`): Base is these properties, Expression is `SetExpression`'s, Dialogue is lip sync, Procedural is blinking, gaze and idle motion, and Override is `SetOverride`'s. Layers left out keep their place after the named ones.
+
+#### BlinkEnabled
+
+```luau
+FaceControls.BlinkEnabled: boolean
+```
+
+Whether the eyes blink by themselves, now and then.
+
+#### BlinkEyes
+
+```luau
+FaceControls.BlinkEyes: string
+```
+
+Which eyes blink by themselves: `"Both"`, `"Left"` or `"Right"`.
+
+#### BlinkIntervalMin
+
+```luau
+FaceControls.BlinkIntervalMin: number
+```
+
+The fewest seconds between blinks; each wait is a random time from this to BlinkIntervalMax.
+
+#### BlinkIntervalMax
+
+```luau
+FaceControls.BlinkIntervalMax: number
+```
+
+The most seconds between blinks.
+
+#### BlinkDuration
+
+```luau
+FaceControls.BlinkDuration: number
+```
+
+Seconds a blink takes, closing and opening.
+
+#### DoubleBlinkChance
+
+```luau
+FaceControls.DoubleBlinkChance: number
+```
+
+How often a blink is followed straight away by another, from 0 (never) to 1 (always).
+
+#### GazeMode
+
+```luau
+FaceControls.GazeMode: string
+```
+
+What the eyes look at: `"Animation"` (only what the controls say), `"Camera"`, `"Target"` (GazeTarget) or `"Position"` (GazePosition). The eyes turn within the face profile's limits and look ahead again when the target is too far round.
+
+#### GazeTarget
+
+```luau
+FaceControls.GazeTarget: Instance?
+```
+
+With GazeMode `"Target"`: the part, Attachment or character (a Model, looked at in its Head) to look at.
+
+#### GazePosition
+
+```luau
+FaceControls.GazePosition: Vector3
+```
+
+With GazeMode `"Position"`: the point in the world to look at.
+
+#### GazeSmoothing
+
+```luau
+FaceControls.GazeSmoothing: number
+```
+
+About how many seconds the eyes take to catch up with a moving target; 0 follows at once.
+
+#### GazeWeight
+
+```luau
+FaceControls.GazeWeight: number
+```
+
+How much the gaze counts over the eye controls, from 0 to 1.
+
+#### IdleMotion
+
+```luau
+FaceControls.IdleMotion: number
+```
+
+Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.
+
 #### Blink_Left
 
 ```luau
@@ -413,4 +517,54 @@ FaceControls.Tongue_Down: number
 ```
 
 Curls the tongue's tip down, 0 to 1.
+
+### Functions
+
+#### SetExpression
+
+```luau
+FaceControls:SetExpression(name: string, intensity: number?, duration: number?, options: { Weight: number?, Priority: number?, Asymmetry: number? }?): ()
+```
+
+Shows the expression `name` (a built-in one such as `"Happy"`, `"Sad"` or `"Sleepy"`, or a `*.expression.json` file's name or path) at `intensity` (0 to 1, 1 if left out), blending in over `duration` seconds (the expression's own time if left out). `options` may set `Weight` (0 to 1, how much it counts over the expressions under it), `Priority` (higher goes over lower; equal ones go in the order they were set) and `Asymmetry` (-1 shows only the left side, 1 only the right). Setting a shown expression again changes it.
+
+#### ClearExpression
+
+```luau
+FaceControls:ClearExpression(name: string?, duration: number?): ()
+```
+
+Fades the expression `name` out over `duration` seconds (its own time if left out), or every expression if `name` is nil.
+
+#### GetExpressions
+
+```luau
+FaceControls:GetExpressions(): { { Name: string, Intensity: number, Weight: number, Priority: number, Asymmetry: number } }
+```
+
+The expressions being shown, in the order they were set: each a table of `Name`, `Intensity`, `Weight`, `Priority` and `Asymmetry`.
+
+#### SetOverride
+
+```luau
+FaceControls:SetOverride(control: string, value: number?): ()
+```
+
+Holds the control `control` (such as `"Jaw_Open"`) at `value` (0 to 1) over everything else on the Override layer, such as a character's mouth while eating; nil lets it go.
+
+#### ClearOverrides
+
+```luau
+FaceControls:ClearOverrides(): ()
+```
+
+Lets go of every control SetOverride holds.
+
+#### SetLayer
+
+```luau
+FaceControls:SetLayer(layer: string, weight: number?, blend: string?, mask: (string | { string })?): ()
+```
+
+Sets how the face layer `layer` (`"Base"`, `"Expression"`, `"Dialogue"`, `"Procedural"` or `"Override"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `"Override"` (replaces, the default) or `"Additive"` (adds), and `mask`, the controls it may move: a group (`"Eyes"`, `"Eyebrows"`, `"Mouth"`, `"CheeksAndNose"`, `"JawAndTongue"`), a control, or a list of them; nil for all.
 
