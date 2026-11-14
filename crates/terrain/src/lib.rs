@@ -15,6 +15,7 @@
 //! - [`files`] reads and writes the saved PNG and JSON files.
 //! - [`job`] runs slow work on another thread, with progress and cancel.
 
+pub mod biomes;
 pub mod brush;
 pub mod convert;
 pub mod erosion;

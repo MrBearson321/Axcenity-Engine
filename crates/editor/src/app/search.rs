@@ -511,6 +511,9 @@ fn command_description(command: &Command) -> String {
         Command::GraphicsBenchmark => {
             "Measure how this computer draws the viewport and get recommended editor graphics settings."
         }
+        Command::AnimatorInspector => {
+            "During Play: the selected Animator's state, blends, layers, tracks, parameters and events, live."
+        }
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
         Command::PauseOnErrors => {
             "Turn on or off: a script error pauses Play where it happened, with its variables."
@@ -535,6 +538,7 @@ fn command_description(command: &Command) -> String {
         Command::TerrainStudio => "Sculpt, paint, scatter foliage on and generate terrain.",
         Command::ModelStudio => "Make and edit models: meshes, UVs, painting, sculpting and rigs.",
         Command::PluginButton { .. } => "A button a plugin added.",
+        Command::PluginAction { .. } => "A command a plugin added.",
         Command::Palette => "Run any menu or ribbon command by typing part of its name.",
         Command::QuickOpen | Command::Search => {
             "Find anything: commands, tools, objects, assets, scripts, levels and settings."

@@ -12,6 +12,11 @@
 //! on every device, and "is anything of an earlier rule within
 //! `AvoidRadius`?" means looking at that rule's few cells nearby.
 //!
+//! A rule inside a Biome (PW2) places only where that biome covers the
+//! ground, thinning out with the biome's weight at its soft edges. No rule
+//! places inside a TerrainPath's strip (PW4, [`KeepOff`]); a chunk is made
+//! again when a strip that reaches it moves.
+//!
 //! To answer that near a chunk's edge, the earlier rules are worked out a
 //! little past it: rule *k* over the chunk grown by the `AvoidRadius` of
 //! every rule after it ([`margin`]).
@@ -23,10 +28,12 @@ use axcenity_core::{
     MAX_TERRAIN_LAYERS, TerrainData, Value, World,
 };
 use axcenity_terrain::Placement;
-use axcenity_terrain::materials::{LayerRule, MaterialRules, sample_weights};
+use axcenity_terrain::biomes::MAX_BIOMES;
+use axcenity_terrain::materials::{LayerRule, MaterialRules, biome_weights, sample_weights};
 use axcenity_terrain::noise::{Noise, smoothstep};
 use glam::Vec2;
 
+use crate::paths::{KeepOff, keep_offs};
 use crate::rng::Rng;
 
 /// The rules one terrain reads, at most (later ones are left out).
@@ -63,6 +70,8 @@ pub struct Rule {
     pub rotation: Vec2,
     pub scale: Vec2,
     pub collide: bool,
+    /// The Biome (by its place among the terrain's biomes) it's inside, if any.
+    pub biome: Option<usize>,
 }
 
 impl Rule {
@@ -140,6 +149,7 @@ impl Rule {
             rotation: pair("RotationRange", Vec2::new(0.0, 360.0)),
             scale: pair("ScaleRange", Vec2::new(0.85, 1.15)),
             collide: instance.property("CanCollide") == Some(&Value::Bool(true)),
+            biome: None,
         })
     }
 }
@@ -170,32 +180,78 @@ pub fn entry(source: &FoliageSource) -> String {
     }
 }
 
-/// The ScatterRules a terrain uses: its first [`MAX_RULES`] ScatterRule
-/// children that are on and place something, in order.
+/// The ScatterRules a terrain uses, at most [`MAX_RULES`], in order: its
+/// ScatterRule children, and those inside its Biomes where each Biome
+/// stands among them, leaving out rules that are off or place nothing
+/// and Biomes that are off.
 pub fn rules_of(world: &World, terrain: InstanceId) -> Vec<Rule> {
     let layers: Vec<String> = axcenity_terrain::materials::layers(world, terrain)
         .into_iter()
         .filter_map(|layer| world.get(layer).map(|i| i.name().to_owned()))
         .collect();
-    world
+    let biomes = axcenity_terrain::biomes::biomes(world, terrain);
+    let children = world
         .get(terrain)
         .map(Instance::children)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut rules = Vec::new();
+    for (&id, child) in children
         .iter()
-        .filter_map(|&child| world.get(child))
-        .filter(|child| child.class() == ClassName::ScatterRule)
-        .filter_map(|child| Rule::of(child, &layers))
-        .take(MAX_RULES)
-        .collect()
+        .filter_map(|id| world.get(*id).map(|child| (id, child)))
+    {
+        match child.class() {
+            ClassName::ScatterRule => rules.extend(Rule::of(child, &layers)),
+            ClassName::Biome => {
+                let Some(index) = biomes.iter().position(|&b| b == id) else {
+                    continue;
+                };
+                if child.property("Enabled") != Some(&Value::Bool(true)) {
+                    continue;
+                }
+                let inside = child
+                    .children()
+                    .iter()
+                    .filter_map(|&rule| world.get(rule))
+                    .filter_map(|rule| Rule::of(rule, &layers))
+                    .map(|rule| Rule {
+                        biome: Some(index),
+                        ..rule
+                    });
+                rules.extend(inside);
+            }
+            _ => {}
+        }
+    }
+    rules.truncate(MAX_RULES);
+    rules
 }
 
 /// What the rules stand on: the terrain, where it is, its material rules
-/// (for `Layer`), and its water level (world Y), if it has water.
+/// (for `Layer`), its water level (world Y), if it has water, and the
+/// strips they keep off.
 pub struct Ground<'a> {
     pub data: &'a TerrainData,
     pub placement: Placement,
     pub materials: &'a MaterialRules,
     pub water: Option<f32>,
+    pub keep_off: &'a [KeepOff],
+}
+
+impl Ground<'_> {
+    /// The terrain's corner (world X and Z), where rules measure from.
+    fn corner(&self) -> Vec2 {
+        self.placement.to_world_xz(self.data, Vec2::ZERO)
+    }
+
+    /// The strips that reach the box from `min` to `max` (studs from the
+    /// terrain's corner).
+    fn strips_in(&self, min: Vec2, max: Vec2) -> Vec<&KeepOff> {
+        let corner = self.corner();
+        self.keep_off
+            .iter()
+            .filter(|strip| strip.overlaps(min + corner, max + corner))
+            .collect()
+    }
 }
 
 /// Studs past a chunk's edge that rules have to be worked out to, so the
@@ -228,9 +284,17 @@ pub fn chunk(rules: &[Rule], ground: &Ground, cx: usize, cz: usize) -> Vec<Folia
     );
     let mut placed: Vec<Spots> = Vec::with_capacity(rules.len());
     let mut out = Vec::new();
+    let all = Vec2::splat(margin(rules));
+    let strips = ground.strips_in(own_min - all, own_max + all);
     for (index, rule) in rules.iter().enumerate() {
         let grow = Vec2::splat(margin(&rules[index..]));
-        let spots = Spots::of(rule, ground, own_min - grow, own_max + grow, &placed);
+        let spots = Spots::of(
+            rule,
+            ground,
+            (own_min - grow, own_max + grow),
+            &placed,
+            &strips,
+        );
         for spot in &spots.spots {
             let at = spot.at;
             if at.x >= own_min.x && at.y >= own_min.y && at.x < own_max.x && at.y < own_max.y {
@@ -277,8 +341,15 @@ struct Spots {
 impl Spots {
     /// The spots `rule` uses with candidates between `min` and `max`
     /// (studs from the terrain's corner), keeping `AvoidRadius` from the
-    /// spots in `earlier`.
-    fn of(rule: &Rule, ground: &Ground, min: Vec2, max: Vec2, earlier: &[Spots]) -> Spots {
+    /// spots in `earlier` and out of `strips`.
+    fn of(
+        rule: &Rule,
+        ground: &Ground,
+        (min, max): (Vec2, Vec2),
+        earlier: &[Spots],
+        strips: &[&KeepOff],
+    ) -> Spots {
+        let corner = ground.corner();
         let s = rule.spacing;
         let first = ((min.x / s).floor() as i64, (min.y / s).floor() as i64);
         let last = ((max.x / s).floor() as i64, (max.y / s).floor() as i64);
@@ -303,6 +374,9 @@ impl Spots {
                 );
                 let roll = rng.unit();
                 if at.x < min.x || at.y < min.y || at.x >= max.x || at.y >= max.y {
+                    continue;
+                }
+                if strips.iter().any(|strip| strip.covers(at + corner)) {
                     continue;
                 }
                 let chance = base * suitability(rule, ground, at, &clumps);
@@ -396,6 +470,15 @@ fn suitability(rule: &Rule, ground: &Ground, at: Vec2, clumps: &Noise) -> f32 {
             return 0.0;
         }
     }
+    if let Some(biome) = rule.biome {
+        if biome >= MAX_BIOMES {
+            return 0.0;
+        }
+        fit *= biome_weights(data, placement, ground.materials, nx, nz)[biome];
+        if fit <= 0.0 {
+            return 0.0;
+        }
+    }
     if rule.clumping > 0.0 {
         let n = clumps.fbm(at.x / rule.clump_size, at.y / rule.clump_size, 3, 0.5, 2.0);
         let inside = smoothstep(-0.15, 0.25, n);
@@ -446,7 +529,7 @@ fn cell_index(i: i64, j: i64) -> u64 {
 }
 
 /// The 64-bit FNV-1a hash, the same in every build.
-fn fnv(bytes: &[u8]) -> u64 {
+pub(crate) fn fnv(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
     })
@@ -472,13 +555,21 @@ impl TerrainScatter {
         let terrains = world.all_below(world.root(), |class| class == ClassName::Terrain);
         self.seen.retain(|id, _| terrains.contains(id));
         let mut made = 0;
+        let mut strips = None;
         for terrain in terrains {
-            made += self.update_terrain(world, terrain);
+            made += self.update_terrain(world, terrain, &mut strips);
         }
         made
     }
 
-    fn update_terrain(&mut self, world: &mut World, terrain: InstanceId) -> usize {
+    /// `strips` is every TerrainPath's keep-off strip, worked out by the
+    /// first terrain with rules.
+    fn update_terrain(
+        &mut self,
+        world: &mut World,
+        terrain: InstanceId,
+        strips: &mut Option<Vec<KeepOff>>,
+    ) -> usize {
         let Some(placement) = world.get(terrain).and_then(Placement::of) else {
             return 0;
         };
@@ -496,6 +587,7 @@ impl TerrainScatter {
             }
             return 0;
         }
+        let strips: &[KeepOff] = strips.get_or_insert_with(|| keep_offs(world));
         let materials = MaterialRules::of(world, terrain);
         let water = world
             .get(terrain)
@@ -505,12 +597,18 @@ impl TerrainScatter {
             .map(|level| level as f32);
         let signature = {
             let mut text = format!("{rules:?}|{placement:?}|{water:?}|{:?}", data.size());
-            if rules.iter().any(|rule| rule.layer.is_some()) {
+            if rules
+                .iter()
+                .any(|rule| rule.layer.is_some() || rule.biome.is_some())
+            {
                 text.push_str(&format!("|{}", materials.key()));
             }
             fnv(text.as_bytes())
         };
-        let mut fingerprint = mix_in(signature, data.generated_version());
+        let strips_key = strips
+            .iter()
+            .fold(signature, |key, strip| mix_in(key, strip.hash));
+        let mut fingerprint = mix_in(strips_key, data.generated_version());
         for cz in 0..chunks_z {
             for cx in 0..chunks_x {
                 fingerprint = mix_in(fingerprint, data.chunk_height_version(cx, cz));
@@ -524,10 +622,19 @@ impl TerrainScatter {
         let cell = placement.cell_size(data);
         let chunk_studs = CHUNK_STUDS_CELLS * cell.x.min(cell.y);
         let ring = (margin(&rules) / chunk_studs.max(f32::EPSILON)).ceil() as usize;
+        let corner = placement.to_world_xz(data, Vec2::ZERO);
+        let reach = Vec2::splat(margin(&rules) + cell.max_element());
         let mut dirty = Vec::new();
         for cz in 0..chunks_z {
             for cx in 0..chunks_x {
                 let mut key = signature;
+                // The strips that reach this chunk's rules.
+                let rect = data.chunk_rect(cx, cz);
+                let low = corner + Vec2::new(rect.x0 as f32, rect.z0 as f32) * cell - reach;
+                let high = corner + Vec2::new(rect.x1 as f32, rect.z1 as f32) * cell + reach;
+                for strip in strips.iter().filter(|strip| strip.overlaps(low, high)) {
+                    key = mix_in(key, strip.hash);
+                }
                 for z in cz.saturating_sub(ring)..=(cz + ring).min(chunks_z - 1) {
                     for x in cx.saturating_sub(ring)..=(cx + ring).min(chunks_x - 1) {
                         key = mix_in(key, data.chunk_height_version(x, z));
@@ -547,6 +654,7 @@ impl TerrainScatter {
                 placement,
                 materials: &materials,
                 water,
+                keep_off: strips,
             };
             let results = make_chunks(&rules, &ground, &dirty);
             if let Some(data) = world.terrain_mut(terrain) {
@@ -557,7 +665,7 @@ impl TerrainScatter {
         }
         // Setting chunks moved the generated version on: remember the new one.
         if let Some(data) = world.terrain(terrain) {
-            let mut fingerprint = mix_in(signature, data.generated_version());
+            let mut fingerprint = mix_in(strips_key, data.generated_version());
             for cz in 0..chunks_z {
                 for cx in 0..chunks_x {
                     fingerprint = mix_in(fingerprint, data.chunk_height_version(cx, cz));
