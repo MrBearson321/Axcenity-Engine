@@ -124,8 +124,8 @@ fn every_event_has_a_description() {
 fn definitions_cover_instance_new_part_properties_and_task() {
     let text = lua_definitions();
     for line in [
-        "\tnew: ((className: \"Part\") -> Part) & ",
-        "& ((className: string) -> Instance)\n",
+        "\tnew: ((className: \"Part\") -> Part)\n\t\t& ",
+        "\t\t& ((className: string) -> Instance)\n",
         "declare Instance: InstanceLibrary\n",
         "declare extern type Part extends Instance with\n",
         "\tPosition: Vector3\n",
