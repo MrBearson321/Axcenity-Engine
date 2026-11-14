@@ -29,6 +29,7 @@ mod clip_editor;
 mod controller_editor;
 mod graph;
 pub(crate) mod object_preview;
+mod retarget_panel;
 // Posing and the preview live in `axcenity-editor-tools`, shared with the
 // Model Studio; they keep their old paths here.
 use axcenity_editor_tools::posing;
@@ -415,6 +416,9 @@ struct ClipView {
     /// How fast the preview plays, kept from clip to clip while the editor
     /// runs. Never saved: the clip's own Speed is.
     rate: transport::Rate,
+    /// A linked clip's Retargeting section (AP3): its bone map window and
+    /// what it read.
+    retarget: retarget_panel::RetargetPanel,
 }
 
 impl ClipView {

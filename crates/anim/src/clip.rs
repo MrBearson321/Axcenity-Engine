@@ -13,7 +13,7 @@ use glam::{Mat4, Quat, Vec3};
 use crate::bones::{bone_from_numbers, bone_paths, find_bone};
 use crate::files::{ClipFile, PropertyName, TakeLink};
 use crate::property_clip::{EvaluatedProperty, PropertyClip, sample_track};
-use crate::retarget::{HumanoidMap, Retarget};
+use crate::retarget::{HumanoidMap, Retarget, RetargetProfile};
 
 /// A clip ready to play on one thing: its property tracks checked and,
 /// with a rig, its take and bone tracks bound to the rig's bones (matched
@@ -96,16 +96,19 @@ impl Clip {
         takes: Option<Arc<Vec<Take>>>,
         rig: Option<&Rig>,
     ) -> Result<Self, String> {
-        Self::bind_with(file, takes, rig, &RigDefinitions::default())
+        Self::bind_with(file, takes, rig, &RigDefinitions::default(), None)
     }
 
     /// [`bind`](Self::bind), matching skeletons to humanoid roles through
-    /// the project's rig definitions `rigs` when a take is retargeted.
+    /// the project's rig definitions `rigs` when a take is retargeted, as
+    /// `profile` (the clip's link's retarget profile, read) says. With a
+    /// profile, the take is retargeted even when bone names match.
     pub fn bind_with(
         file: ClipFile,
         takes: Option<Arc<Vec<Take>>>,
         rig: Option<&Rig>,
         rigs: &RigDefinitions,
+        profile: Option<&RetargetProfile>,
     ) -> Result<Self, String> {
         let clip = PropertyClip::from_file(file).map_err(|err| err.0)?;
         let mut animated = rig.map_or_else(Vec::new, |rig| vec![false; rig.bones.len()]);
@@ -113,7 +116,7 @@ impl Clip {
             (Some(link), Some(rig)) => {
                 let takes =
                     takes.ok_or_else(|| format!("its model `{}` can't be read", link.source))?;
-                let take = BoundTake::bind(link.clone(), takes, rig, rigs)?;
+                let take = BoundTake::bind(link.clone(), takes, rig, rigs, profile)?;
                 for bone in take.targets() {
                     if let Some(slot) = animated.get_mut(bone) {
                         *slot = true;
@@ -174,6 +177,28 @@ impl Clip {
     /// track). Empty when it wasn't bound to a rig.
     pub fn animated_bones(&self) -> &[bool] {
         &self.animated
+    }
+
+    /// One per bone of the rig it was bound to: whether its linked take
+    /// moves it (by name, or through retargeting). All false without a take.
+    pub fn take_bones(&self) -> Vec<bool> {
+        let mut moved = vec![false; self.animated.len()];
+        if let Some(take) = &self.take {
+            for bone in take.targets() {
+                if let Some(slot) = moved.get_mut(bone) {
+                    *slot = true;
+                }
+            }
+        }
+        moved
+    }
+
+    /// Whether its take plays through humanoid roles (retargeted) rather
+    /// than by bone names.
+    pub fn retargeted(&self) -> bool {
+        self.take
+            .as_ref()
+            .is_some_and(|take| take.retarget.is_some())
     }
 
     /// How far through one pass `phase` is, from 0 to 1: a looping clip
@@ -305,6 +330,7 @@ impl BoundTake {
         takes: Arc<Vec<Take>>,
         rig: &Rig,
         rigs: &RigDefinitions,
+        profile: Option<&RetargetProfile>,
     ) -> Result<Self, String> {
         let take = takes
             .iter()
@@ -325,12 +351,13 @@ impl BoundTake {
         let binding = takes[take].bind(rig);
         // A take for another skeleton (other bone names) plays through
         // humanoid roles, unless it moves some of the model's humanoid
-        // bones by name (the same skeleton, or one named like it).
+        // bones by name (the same skeleton, or one named like it) and the
+        // clip has no retarget profile asking for retargeting anyway.
         let (map, _) = HumanoidMap::for_skeleton(&rig.bones, rigs);
         let named = map.bones().any(|bone| binding.contains(&Some(bone)));
         let mut retarget = None;
-        if !named && !takes[take].tracks.is_empty() {
-            match Retarget::new(&takes[take], rig, rigs) {
+        if (profile.is_some() || !named) && !takes[take].tracks.is_empty() {
+            match Retarget::new(&takes[take], rig, rigs, profile) {
                 Ok(bound) => retarget = Some(bound),
                 Err(why) if !binding.iter().any(Option::is_some) => {
                     return Err(format!(

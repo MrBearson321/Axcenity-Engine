@@ -17,7 +17,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 - No per-script **memory limit**; long C functions (`string.rep`, pathological patterns) aren't interrupted by the watchdog (`docs/scripting/sandbox.md`).
 - `task.defer` runs at the next step (Roblox: later in the same frame); a RemoteEvent message with no handler is dropped (Roblox queues it); `ContextActionResult.Pass` and touch buttons not implemented (`docs/scripting/client-server.md`).
 - Vector3 math allocates a userdata per result; `--!native` doesn't speed up engine calls.
-- A breakpoint inside a script-made coroutine or a C-called Lua function can't pause; a step goes on to the next line where it can. The same goes for a conditional breakpoint, a logpoint and Pause (Pause waits for the next script line that can pause, so a game whose scripts are all waiting pauses only when one wakes). Logpoints and conditions make their line yield on every pass, which slows a hot loop.
+- A breakpoint inside a C-called Lua function (a `table.sort` comparator), or in a script-made coroutine resumed from one, can't pause; a step goes on to the next line where it can. The same goes for a conditional breakpoint, a logpoint and Pause (Pause waits for the next script line that can pause, so a game whose scripts are all waiting pauses only when one wakes). Logpoints and conditions make their line yield on every pass, which slows a hot loop.
 
 ## Rendering
 
@@ -41,7 +41,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 
 ## Editor
 
-- Script completion and Go to Definition (F12) follow chains and declarations but doesn't type-check: a value it can't follow (a function's result, a table field, a module's return) offers nothing, luau-lsp ships in every package (a source build downloads it on request) but checks one script at a time without the others (a `require`d module's types are unknown), and check only open tabs.
+- Script completion and Go to Definition (F12) follow chains and declarations but doesn't type-check: a value it can't follow (a function's result, a table field, a module's return) offers nothing, luau-lsp ships in every package (a source build downloads it on request) and follows `require(game.ReplicatedStorage.X)` and `GetService` paths into modules (not `require(script.Parent.X)`, nor children's types such as `workspace.Door`); only open tabs are checked, and VS Code's set-up still checks each file alone.
 - Panics while drawing the Play world aren't caught.
 - Model files aren't watched for changes while the editor runs (read again on open).
 - Bakes (reflection probes, light probe volumes) go stale and must be rebaked by hand (flagged). A bake runs a little each frame with progress and Cancel, but each probe still reads its six faces back one at a time, so thousands of probes take minutes.

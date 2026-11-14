@@ -734,6 +734,26 @@ pub fn render_lines(stats: &axcenity_render::RenderStats) -> Vec<String> {
         stats.shadow_casters_drawn,
         stats.shadow_casters_culled
     ));
+    // Hardware ray tracing, while something traces rays (RL2).
+    let rays = &stats.ray_tracing;
+    if rays.instances > 0 {
+        let mut line = format!(
+            "Ray tracing: {} items traced, {} meshes ({:.2} M triangles)",
+            rays.instances,
+            rays.meshes,
+            millions(rays.triangles)
+        );
+        if rays.meshes_waiting > 0 {
+            line += &format!(", {} meshes waiting", rays.meshes_waiting);
+        }
+        if rays.bent > 0 {
+            line += &format!(", {} swaying", rays.bent);
+        }
+        if rays.shadow_reach > 0 {
+            line += &format!("; shadows reach {} studs", rays.shadow_reach);
+        }
+        lines.push(line);
+    }
     let lods: Vec<String> = stats.lod_items.iter().map(u32::to_string).collect();
     lines.push(format!("Levels of detail (0/1/2): {}", lods.join(" / ")));
     let megabytes = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
@@ -1045,6 +1065,32 @@ mod tests {
         let tab = stats_lines(&stats);
         assert!(tab.contains(&"Draws 10".to_owned()), "{tab:?}");
         assert!(tab[1].contains("1% low 95"), "{tab:?}");
+    }
+
+    #[test]
+    fn the_drawings_lines_say_what_ray_tracing_traces_only_while_it_does() {
+        let plain = render_lines(&axcenity_render::RenderStats::default());
+        assert!(!plain.iter().any(|line| line.starts_with("Ray tracing")));
+        let stats = axcenity_render::RenderStats {
+            ray_tracing: axcenity_render::RayTracingStats {
+                instances: 812,
+                meshes: 40,
+                triangles: 1_250_000,
+                meshes_waiting: 2,
+                shadow_reach: 400,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let lines = render_lines(&stats);
+        assert!(
+            lines.contains(
+                &"Ray tracing: 812 items traced, 40 meshes (1.25 M triangles), 2 meshes \
+                  waiting; shadows reach 400 studs"
+                    .to_owned()
+            ),
+            "{lines:?}"
+        );
     }
 
     #[test]

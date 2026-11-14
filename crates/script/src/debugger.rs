@@ -22,11 +22,27 @@
 //! each one stopped (a [`Spot`]) and lets it carry on until it reaches
 //! another line in that function.
 //!
-//! **Where it can't pause.** A coroutine the script made itself
-//! (`coroutine.wrap`) would hand the yield to the script, not the
-//! scheduler, and Lua can't yield inside a function called from C (a
-//! `table.sort` comparison). There the line runs, and Output says once that
-//! the breakpoint was passed.
+//! **Coroutines the script makes** (`coroutine.create`, `wrap`; scripting
+//! priority 2). The sandbox's `coroutine.resume` and `wrap`
+//! (`watchdog::COROUTINE_FUNCTIONS`) tell the debugger when a script
+//! resumes one of its own coroutines ([`enter_user`], [`leave_user`]), so it
+//! is on [`Debugger::running`] like a scheduler coroutine and can pause.
+//! Its yield goes back to that `resume`, not the scheduler, so the resume
+//! **relays** it: it yields the coroutine that called it, and so on down to
+//! the scheduler coroutine at the bottom (the stop's `carrier`), which the
+//! scheduler holds as for any pause. On Continue the carrier is resumed,
+//! and each relaying `resume` resumes the coroutine above it again. The
+//! pause lists the resumers' frames under the paused coroutine's
+//! ([`PausedFrame::coroutine`]), and every other coroutine the scripts made
+//! that is waiting to be resumed, with its locals ([`Pause::coroutines`]).
+//! Step Into on a line that resumes a coroutine pauses at its first line
+//! run; a step in a coroutine that yields or finishes carries on in the one
+//! that resumed it.
+//!
+//! **Where it can't pause.** Lua can't yield inside a function called from
+//! C (a `table.sort` comparison), nor relay a pause through a `resume`
+//! called there. There the line runs, and Output says once that the
+//! breakpoint was passed.
 //!
 //! **Stepping.** [`resume_from_pause`] with a [`Resume`] other than
 //! Continue remembers the paused coroutine, its line and call depth. The
@@ -111,6 +127,8 @@ impl BreakpointRule {
 /// The most frames and locals a pause lists, so a deep recursion or a huge
 /// function can't make it slow.
 const MAX_FRAMES: usize = 20;
+/// The most of the scripts' other coroutines a pause lists.
+const MAX_COROUTINES: usize = 50;
 const MAX_LOCALS: usize = 60;
 /// How many entries of a table a local's value lists, and how long a value's
 /// text gets before it's cut short.
@@ -132,6 +150,18 @@ pub struct Pause {
     pub error: Option<String>,
     /// Whether a breakpoint on `line` paused it (not only a step).
     pub breakpoint: bool,
+    /// Every other coroutine the scripts made that is waiting to be
+    /// resumed (`suspended`), with where it waits.
+    pub coroutines: Vec<CoroutineView>,
+}
+
+/// A coroutine a script made, as a pause shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoroutineView {
+    /// `suspended`, or `normal` while it resumes another.
+    pub status: String,
+    /// Its script functions, innermost (where it waits) first.
+    pub frames: Vec<PausedFrame>,
 }
 
 /// How Play carries on from a pause.
@@ -160,6 +190,10 @@ pub struct PausedFrame {
     /// The variables from outside it that it uses (upvalues), such as a
     /// script's own locals inside one of its functions.
     pub upvalues: Vec<Local>,
+    /// Which coroutine it's on: 0 is the paused one; 1 the one that
+    /// resumed it (with `coroutine.resume` or a `wrap`ped function), and so
+    /// on down to the scheduler's.
+    pub coroutine: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -182,9 +216,15 @@ const EXPANDED_DEPTH: usize = 2;
 #[derive(Default)]
 struct Debugger {
     breakpoints: Breakpoints,
-    /// The coroutines the scheduler is running, innermost last. Only the
-    /// innermost can be paused: its yield goes back to the scheduler.
-    running: Vec<Thread>,
+    /// The coroutines running, innermost last: the scheduler's, and the
+    /// scripts' own that a scheduler coroutine resumed. Only the innermost
+    /// can be paused: its yield goes back to the scheduler, or is relayed
+    /// there by the scripts' `resume`s.
+    running: Vec<Running>,
+    /// The hook made a script's own coroutine yield, and the `resume`s that
+    /// resumed it are relaying the yield down to the scheduler: `holding`
+    /// is the coroutine that should yield next.
+    relaying: bool,
     /// A coroutine the hook asked to yield, until the scheduler sees it did.
     holding: Option<Thread>,
     paused: Option<Stop>,
@@ -207,6 +247,15 @@ struct Debugger {
     hits: BTreeMap<(String, usize), u32>,
     /// Pause at the next line any scheduler coroutine runs ([`request_pause`]).
     pause_requested: bool,
+}
+
+/// A coroutine on [`Debugger::running`].
+#[derive(Clone)]
+struct Running {
+    thread: Thread,
+    /// One the scripts made (`coroutine.create`), resumed by a script's
+    /// `coroutine.resume`, not by the scheduler.
+    user: bool,
 }
 
 /// A step from a pause: the coroutine and where it was.
@@ -267,6 +316,10 @@ struct Stop {
     path: String,
     line: usize,
     thread: Thread,
+    /// The scheduler coroutine the pause is held on: `thread`, or for a
+    /// coroutine a script made, the scheduler coroutine that (through any
+    /// others) resumed it.
+    carrier: Thread,
     /// Its call depth there.
     depth: i32,
     /// Read by the hook, before the coroutine yields: afterwards Luau
@@ -283,6 +336,8 @@ struct Stop {
     error: Option<String>,
     /// Paused by a breakpoint on this line.
     breakpoint: bool,
+    /// The scripts' other coroutines, read when it paused.
+    coroutines: Vec<CoroutineView>,
     /// The breakpoint, not a step or a pause request, paused it, so its
     /// rule decides ([`settle`]).
     ruled: bool,
@@ -293,6 +348,7 @@ struct Stop {
 /// are compiled with their local names.
 pub fn install(lua: &Lua) -> mlua::Result<()> {
     lua.set_app_data(Debugger::default());
+    coroutine_state(lua)?.raw_set("on", true)?;
     lua.set_compiler(crate::sandbox::compiler().set_debug_level(2));
     set_step_hook(lua)
 }
@@ -319,6 +375,7 @@ pub fn pause(lua: &Lua) -> Option<Pause> {
         frames: stop.frames.clone(),
         error: stop.error.clone(),
         breakpoint: stop.breakpoint,
+        coroutines: stop.coroutines.clone(),
     })
 }
 
@@ -371,7 +428,10 @@ pub fn failed(lua: &Lua, thread: &Thread, message: &str) {
     let wanted = lua.app_data_ref::<Debugger>().is_some_and(|debugger| {
         debugger.pause_on_error
             && debugger.paused.is_none()
-            && debugger.running.last() == Some(thread)
+            && debugger
+                .running
+                .last()
+                .is_some_and(|last| last.thread == *thread)
     });
     if !wanted {
         return;
@@ -388,6 +448,7 @@ pub fn failed(lua: &Lua, thread: &Thread, message: &str) {
             path,
             line,
             thread: thread.clone(),
+            carrier: thread.clone(),
             depth: 0,
             frames,
             scopes,
@@ -396,6 +457,7 @@ pub fn failed(lua: &Lua, thread: &Thread, message: &str) {
             error: Some(message.to_owned()),
             breakpoint: false,
             ruled: false,
+            coroutines: Vec::new(),
         });
     }
 }
@@ -423,7 +485,10 @@ pub fn hold_while_paused(lua: &Lua, thread: &Thread, args: MultiValue) -> Option
 pub fn enter(lua: &Lua, thread: &Thread) {
     if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
         single_step(thread);
-        debugger.running.push(thread.clone());
+        debugger.running.push(Running {
+            thread: thread.clone(),
+            user: false,
+        });
     }
 }
 
@@ -436,6 +501,9 @@ pub fn leave(lua: &Lua, thread: &Thread) {
         return;
     };
     debugger.running.pop();
+    if debugger.holding.as_ref() == Some(thread) {
+        debugger.relaying = false;
+    }
     if !thread.is_resumable() {
         debugger.spots.retain(|spot| spot.thread != *thread);
         if debugger
@@ -459,7 +527,7 @@ pub fn leave(lua: &Lua, thread: &Thread) {
     }
     debugger.holding = None;
     match &mut debugger.paused {
-        Some(stop) if stop.thread == *thread => {
+        Some(stop) if stop.carrier == *thread => {
             stop.yielded = true;
             debugger
                 .held
@@ -469,6 +537,192 @@ pub fn leave(lua: &Lua, thread: &Thread) {
             .held
             .push_back((thread.clone(), MultiValue::new(), script)),
     }
+}
+
+/// The name the coroutine functions' shared state is kept under in Lua's
+/// registry: `{ on = <the debugger is installed>, made = <weak set of the
+/// coroutines scripts made> }`.
+const COROUTINE_STATE: &str = "axcenity.debugger.coroutines";
+
+/// The table `watchdog::COROUTINE_FUNCTIONS` reads to know whether to tell
+/// the debugger about resumes, and where it notes the coroutines scripts
+/// make, made once per Lua state.
+pub(crate) fn coroutine_state(lua: &Lua) -> mlua::Result<Table> {
+    if let Ok(state) = lua.named_registry_value::<Table>(COROUTINE_STATE) {
+        return Ok(state);
+    }
+    let state = lua.create_table()?;
+    state.raw_set("on", is_installed(lua))?;
+    let made = lua.create_table()?;
+    let weak = lua.create_table()?;
+    weak.raw_set("__mode", "k")?;
+    made.set_metatable(Some(weak))?;
+    state.raw_set("made", made)?;
+    state.raw_set(
+        "enter",
+        lua.create_function(|lua, thread: Thread| {
+            enter_user(lua, &thread);
+            Ok(())
+        })?,
+    )?;
+    state.raw_set(
+        "leave",
+        lua.create_function(|lua, thread: Thread| Ok(leave_user(lua, &thread)))?,
+    )?;
+    state.raw_set(
+        "relay_failed",
+        lua.create_function(|lua, ()| {
+            relay_failed(lua);
+            Ok(())
+        })?,
+    )?;
+    lua.set_named_registry_value(COROUTINE_STATE, &state)?;
+    Ok(state)
+}
+
+/// Called by the scripts' `coroutine.resume` (and `wrap`ped functions)
+/// before resuming `thread`, a coroutine a script made: it runs the step
+/// hook and can pause. A Step Into from the line that resumes it pauses at
+/// the first line it runs.
+fn enter_user(lua: &Lua, thread: &Thread) {
+    let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
+        return;
+    };
+    if !thread.is_resumable() {
+        return;
+    }
+    let resumer = debugger
+        .running
+        .last()
+        .map(|running| running.thread.clone());
+    if let Some(step) = &mut debugger.stepping
+        && step.how == Resume::StepInto
+        && resumer.as_ref() == Some(&step.thread)
+    {
+        *step = Stepping {
+            how: Resume::StepInto,
+            thread: thread.clone(),
+            path: String::new(),
+            line: 0,
+            depth: -1,
+        };
+    }
+    single_step(thread);
+    debugger.running.push(Running {
+        thread: thread.clone(),
+        user: true,
+    });
+}
+
+/// Called by the scripts' `resume` once `thread` has yielded, finished or
+/// failed. True when the hook made it yield to pause: the `resume` then
+/// relays the pause by yielding its own coroutine (or calls
+/// [`relay_failed`] if it can't), and resumes `thread` again once that
+/// coroutine is resumed. A step in `thread` that it yields or finishes
+/// before reaching carries on in the coroutine that resumed it.
+fn leave_user(lua: &Lua, thread: &Thread) -> bool {
+    let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
+        return false;
+    };
+    if !debugger
+        .running
+        .last()
+        .is_some_and(|running| running.user && running.thread == *thread)
+    {
+        return false;
+    }
+    debugger.running.pop();
+    let resumer = debugger
+        .running
+        .last()
+        .map(|running| running.thread.clone());
+    let finished = !thread.is_resumable();
+    if finished {
+        debugger.spots.retain(|spot| spot.thread != *thread);
+    }
+    if debugger.holding.as_ref() == Some(thread) {
+        if finished {
+            drop(debugger);
+            hold_failed(lua, thread);
+            return false;
+        }
+        let Some(resumer) = resumer else {
+            return false;
+        };
+        debugger.holding = Some(resumer);
+        debugger.relaying = true;
+        return true;
+    }
+    if let Some(resumer) = resumer
+        && debugger
+            .stepping
+            .as_ref()
+            .is_some_and(|step| step.thread == *thread)
+    {
+        // Pause at the next line of the coroutine that resumed it.
+        debugger.stepping = Some(Stepping {
+            how: Resume::StepOver,
+            thread: resumer,
+            path: String::new(),
+            line: 0,
+            depth: i32::MAX,
+        });
+    }
+    false
+}
+
+/// The `resume` relaying a pause can't yield (it was called from a function
+/// the engine calls, such as a `table.sort` comparison): the pause doesn't
+/// happen, and the coroutine runs on.
+fn relay_failed(lua: &Lua) {
+    let thread = lua
+        .app_data_ref::<Debugger>()
+        .and_then(|debugger| debugger.paused.as_ref().map(|stop| stop.thread.clone()));
+    match thread {
+        Some(thread) => hold_failed(lua, &thread),
+        None => {
+            if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
+                debugger.holding = None;
+                debugger.relaying = false;
+            }
+        }
+    }
+}
+
+/// The coroutines scripts made that are alive and not in `chain` (the
+/// paused one and those resuming it), with their frames.
+fn user_coroutines(lua: &Lua, chain: &[Thread]) -> Vec<CoroutineView> {
+    let Ok(state) = coroutine_state(lua) else {
+        return Vec::new();
+    };
+    let Ok(made) = state.raw_get::<Table>("made") else {
+        return Vec::new();
+    };
+    let mut views = Vec::new();
+    for pair in made.pairs::<Thread, Value>() {
+        let Ok((thread, _)) = pair else {
+            continue;
+        };
+        if chain.contains(&thread) || !thread.is_resumable() {
+            continue;
+        }
+        if views.len() >= MAX_COROUTINES {
+            break;
+        }
+        let (frames, _) = read_frames(lua, &thread);
+        if frames.is_empty() {
+            // Not started yet, or waiting in the engine's code only.
+            continue;
+        }
+        views.push(CoroutineView {
+            status: "suspended".to_owned(),
+            frames,
+        });
+    }
+    views.sort_by(|a, b| {
+        (&a.frames[0].path, a.frames[0].line).cmp(&(&b.frames[0].path, b.frames[0].line))
+    });
+    views
 }
 
 /// Called by `task.wait` as `thread` is about to yield to wait. If the hook
@@ -491,10 +745,11 @@ fn hold_failed(lua: &Lua, thread: &Thread) {
             return;
         };
         debugger.holding = None;
+        debugger.relaying = false;
         if !debugger
             .paused
             .as_ref()
-            .is_some_and(|stop| stop.thread == *thread)
+            .is_some_and(|stop| stop.thread == *thread || stop.carrier == *thread)
         {
             return;
         }
@@ -521,10 +776,9 @@ fn report_missed(lua: &Lua, path: &str, line: usize) {
         OutputKind::Error,
         format!(
             "{path}:{line}: Play can't pause at this breakpoint, so the game carried on. The \
-             line ran inside a coroutine the script made itself (coroutine.wrap or \
-             coroutine.resume), or inside a function the engine calls that can't pause \
-             (such as a table.sort comparison). Put the breakpoint where that code is \
-             called, or start it with task.spawn."
+             line ran inside a function the engine calls that can't pause (such as a \
+             table.sort comparison), or in a coroutine resumed from one. Put the \
+             breakpoint where that code is called."
         ),
     );
 }
@@ -549,6 +803,7 @@ pub fn resume_from_pause(lua: &Lua, how: Resume) {
                 depth: stop.depth,
             });
         debugger.holding = None;
+        debugger.relaying = false;
         debugger.pause_requested = false;
         std::mem::take(&mut debugger.held)
     };
@@ -568,7 +823,7 @@ pub fn settle(lua: &Lua, thread: &Thread) -> bool {
         let Some(stop) = debugger
             .paused
             .as_ref()
-            .filter(|stop| stop.thread == *thread && stop.yielded && stop.ruled)
+            .filter(|stop| stop.carrier == *thread && stop.yielded && stop.ruled)
         else {
             return false;
         };
@@ -699,6 +954,7 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
     };
     if let Some(holding) = debugger.holding.clone()
         && holding.state() == step.state
+        && !debugger.relaying
     {
         // Still running after the hook asked it to yield: it couldn't.
         drop(debugger);
@@ -716,8 +972,8 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
     let Some(current) = debugger
         .running
         .last()
-        .filter(|thread| thread.state() == step.state)
-        .cloned()
+        .filter(|running| running.thread.state() == step.state)
+        .map(|running| running.thread.clone())
     else {
         let missed = debugger.paused.is_none() && debugger.on_breakpoint(&path, line);
         if missed && debugger.reported.insert((path.clone(), line)) {
@@ -742,10 +998,17 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
         debugger.pause_requested = false;
         let ruled = breakpoint && !stepped && !requested;
         let stepping = debugger.stepping.take();
+        let carrier = debugger
+            .running
+            .iter()
+            .rev()
+            .find(|running| !running.user)
+            .map_or_else(|| current.clone(), |running| running.thread.clone());
         debugger.paused = Some(Stop {
             path: path.clone(),
             line,
             thread: current.clone(),
+            carrier,
             depth,
             frames: Vec::new(),
             scopes: Vec::new(),
@@ -754,6 +1017,7 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
             error: None,
             breakpoint,
             ruled,
+            coroutines: Vec::new(),
         });
     }
     let at_breakpoint = debugger
@@ -767,14 +1031,40 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
         line,
         depth,
     });
+    // The coroutines that resumed this one, down to the scheduler's: their
+    // frames are listed after its own.
+    let current_is_user = debugger.running.last().is_some_and(|running| running.user);
+    let resumers: Vec<Thread> = debugger
+        .running
+        .iter()
+        .rev()
+        .skip(1)
+        .scan(current_is_user, |more, running| {
+            let take = *more;
+            *more = running.user;
+            take.then(|| running.thread.clone())
+        })
+        .collect();
     drop(debugger);
     if at_breakpoint {
-        let (frames, scopes) = read_frames(lua, &current);
+        let (mut frames, mut scopes) = read_frames(lua, &current);
+        for (index, resumer) in resumers.iter().enumerate() {
+            let (more, more_scopes) = read_frames(lua, resumer);
+            frames.extend(more.into_iter().map(|frame| PausedFrame {
+                coroutine: index + 1,
+                ..frame
+            }));
+            scopes.extend(more_scopes);
+        }
+        let mut chain = resumers;
+        chain.push(current.clone());
+        let coroutines = user_coroutines(lua, &chain);
         if let Some(mut debugger) = lua.app_data_mut::<Debugger>()
             && let Some(stop) = &mut debugger.paused
         {
             stop.frames = frames;
             stop.scopes = scopes;
+            stop.coroutines = coroutines;
         }
     }
     VmState::Yield
@@ -1032,6 +1322,7 @@ fn read_frames(lua: &Lua, thread: &Thread) -> (Vec<PausedFrame>, Vec<Scope>) {
                 line,
                 locals: shown(&locals),
                 upvalues: shown(&upvalues),
+                coroutine: 0,
             };
             scopes.push(Scope {
                 variables: upvalues.into_iter().chain(locals).collect(),
