@@ -45,10 +45,14 @@ mod retarget;
 pub mod sequence;
 mod threads;
 
-pub use animators::{AnimatorEvent, Animators, LoadedClip, Poses, load_clip, read_state_machine};
+pub use animators::{
+    AnimatorEvent, Animators, LoadedClip, Poses, load_clip, read_retarget_profile,
+    read_state_machine,
+};
 pub use blend_space::{blend_space_weights, triangulate};
 pub use bones::{
-    bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, find_bone, pose_bones, take_bones,
+    bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, convert_to_keys_with, find_bone,
+    pose_bones, take_bones,
 };
 pub use clip::{Clip, RootMotion};
 pub use controller::{

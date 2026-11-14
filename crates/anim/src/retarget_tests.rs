@@ -927,3 +927,31 @@ fn load_clip_reads_the_links_retarget_profile_or_says_why_it_cant() {
     );
     let _ = std::fs::remove_dir_all(&project);
 }
+
+#[test]
+fn convert_to_keys_bakes_the_retargeted_motion_onto_the_models_own_bones() {
+    let mut file = ClipFile::linked("assets/anims/walk.fbx", "Walk", 0.0, 1.0);
+    file.looping = false;
+    let rig = unreal(Quat::IDENTITY);
+    let takes = Arc::new(vec![walk()]);
+    let clip = Clip::bind(file.clone(), Some(takes.clone()), Some(&rig)).unwrap();
+    assert!(clip.retargeted());
+    let moved: Vec<usize> = (0..rig.bones.len())
+        .filter(|&bone| clip.take_bones()[bone])
+        .collect();
+    assert_eq!(moved, [0, 8]);
+    let keyed = crate::convert_to_keys(&file, takes, &rig).unwrap();
+    assert!(keyed.link.is_none());
+    let targets: Vec<&str> = keyed.tracks.iter().map(|t| t.target.as_str()).collect();
+    assert_eq!(targets.len(), 2, "{targets:?}");
+    assert!(
+        targets.iter().any(|t| t.ends_with("lowerarm_l")),
+        "{targets:?}"
+    );
+    // Played back, the keys pose the forearm as the retargeted take does.
+    let baked = Clip::bind(keyed, None, Some(&rig)).unwrap();
+    let (mut a, mut b) = (rig.rest_pose(), rig.rest_pose());
+    clip.sample(1.0, &rig, &mut a);
+    baked.sample(1.0, &rig, &mut b);
+    assert!(a[8].rotation.abs_diff_eq(b[8].rotation, 1e-3));
+}
