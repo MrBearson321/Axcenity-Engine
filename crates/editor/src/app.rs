@@ -504,6 +504,9 @@ pub struct EditorApp {
     templates_folder: Option<PathBuf>,
     /// Save as Template…, while it's open.
     template_draft: Option<save_template::TemplateDraft>,
+    /// The world presets the Terrain Studio offers (procedural worlds PW3):
+    /// built-in, then the project's, read for the project folder named.
+    world_presets: terrain::WorldPresets,
     light_cones: bool,
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
@@ -1112,6 +1115,7 @@ impl EditorApp {
             blender_path: String::new(),
             templates_folder: None,
             template_draft: None,
+            world_presets: Default::default(),
             light_cones: false,
             view_cube: true,
             ray_badge: true,
@@ -1970,11 +1974,20 @@ impl EditorApp {
         if self.learn_open && self.project.is_some() {
             let folder = self.project.as_ref().map(|project| project.folder.clone());
             let playing = self.playing();
+            self.start.set_insert_target(self.tabs.insert_target());
             if let Some(sample) =
                 self.start
                     .learn_window(ctx, &mut self.learn_open, folder.as_deref(), playing)
             {
                 self.request_and_go_ahead(ctx, Discard::OpenSample(sample));
+            }
+            // The API Reference's Insert button (scripting P2 PR 5).
+            if let Some(code) = self.start.take_insert()
+                && let Some(path) = self.tabs.insert_lines(&code)
+            {
+                let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                self.output
+                    .info(format!("Inserted the example into {name}"));
             }
         }
         if self.about_open

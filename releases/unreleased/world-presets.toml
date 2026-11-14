@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "World presets set up a whole landscape at once, and your own can be saved"
+details = "The Terrain Studio's Generate tool has World Presets: Temperate Forest, Alpine, Desert, Tropical Island, Tundra and Meadow. Generate with it previews the landscape, and Apply puts in its shape, material layers, biomes, scatter rules and water as one undo step; Only its materials and rules keeps the terrain's shape. Save as preset writes the terrain's setup to the project's presets folder as an .axworld file, listed with the built-in ones; heights scale to the terrain it's used on."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

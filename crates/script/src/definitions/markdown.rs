@@ -35,10 +35,7 @@ pub fn api_markdown() -> Vec<(String, String)> {
     };
     let classes = top(ApiKind::Class);
     let types = top(ApiKind::Type);
-    let mut pages = vec![(
-        "README.md".to_owned(),
-        readme(&entries, classes.len(), types.len()),
-    )];
+    let mut pages = vec![("README.md".to_owned(), readme())];
     for (folder, title, what, list) in [
         (
             "classes",
@@ -130,22 +127,16 @@ pub fn with_api_summary(summary: &str) -> String {
     format!("{}\n\n{}", before.trim_end(), api_summary())
 }
 
-fn readme(entries: &[ApiEntry], classes: usize, types: usize) -> String {
-    let members = entries
-        .iter()
-        .filter(|entry| !entry.owner.is_empty())
-        .count();
-    let examples = entries
-        .iter()
-        .filter(|entry| api_example(&entry.qualified_name()).is_some())
-        .count();
-    format!(
-        "---\ndescription: Every class, data type, enum, library and global the engine's \
+/// The folder's front page. It names no counts on purpose: every API change
+/// would rewrite the same line, so two open pull requests that each add to
+/// the API would always conflict here.
+fn readme() -> String {
+    "---\ndescription: Every class, data type, enum, library and global the engine's \
          scripts can use, generated from the engine itself.\n---\n\n\
          # API reference\n\n\
-         Everything Luau scripts can use: {classes} classes, {types} data types and \
-         {members} properties, events, functions and enum items, with what each does \
-         and {examples} usage examples.\n\n\
+         Everything Luau scripts can use: every class, data type, property, event, \
+         function and enum item, with what each does and usage examples for the most \
+         used ones.\n\n\
          These pages are generated from the engine's own API description, the one the \
          editor's **API Reference** page and the VS Code definitions \
          (`definitions/axcenity.d.luau`) come from, so they always match the engine. \
@@ -159,7 +150,7 @@ fn readme(entries: &[ApiEntry], classes: usize, types: usize) -> String {
          * [Libraries](libraries.md): global tables of functions, such as `task`.\n\
          * [Globals](globals.md): `game`, `workspace`, `script`, `require` and the rest.\n\n\
          Every class also has the members of [Instance](classes/Instance.md).\n"
-    )
+        .to_owned()
 }
 
 /// A list of `entries`, each linked to its page in `folder`.

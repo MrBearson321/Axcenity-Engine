@@ -59,7 +59,7 @@ Each effect is timed in the **Profiler** panel's Graphics tab. **Low** effects a
 
 ## In your game
 
-Players choose the same in the game's own graphics settings. Every effect is off unless the player or your game turns it on, because not every card can ray trace.
+Players choose the same in the game's own graphics settings. Every effect is off unless the player or your game turns it on, because not every card can ray trace. Ray traced GI also works on a card that can't: its rays are then traced in software, which costs more, so keep it at Low there.
 
 - **Make it the default.** File ▸ Build Game ▸ **Ray Traced Look by Default** gives your game's first start the ray traced look (hardware ray tracing, ray traced shadows and ambient occlusion) on any card that can ray trace. Other cards start as before. After that first start the player's own choice wins.
 - **A settings menu.** A LocalScript reads and sets the same through `UserGameSettings`. Show a ray tracing switch only where `RayTracingSupported` is true, and set `HardwareRayTracing` from it. That takes effect when the game starts again, so while `RayTracingActive` differs from `HardwareRayTracing`, say "Restart to apply". The effects are `RayTracedShadows`, `RayTracedAmbientOcclusion` and `RayTracedGlobalIllumination`.

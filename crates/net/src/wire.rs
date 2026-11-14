@@ -159,6 +159,40 @@ impl WireValue {
     }
 }
 
+/// How deep tables may nest in a remote message's arguments
+/// ([`axcenity_script::MAX_TABLE_DEPTH`]): a message nested deeper is
+/// refused as it's read, so a modified client can't overflow the stack
+/// with a million tables, one inside the next (MP3; a 3 MB message did).
+pub use axcenity_script::MAX_TABLE_DEPTH;
+
+thread_local! {
+    /// How many tables deep the message being read is now.
+    static TABLE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Reads a table's pairs, refusing past [`MAX_TABLE_DEPTH`].
+fn nested_table<'de, D>(reader: D) -> Result<Vec<(WireArg, WireArg)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    /// Leaves the table on the way out, whether it was read or not.
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            TABLE_DEPTH.with(|depth| depth.set(depth.get() - 1));
+        }
+    }
+    let depth = TABLE_DEPTH.with(|depth| {
+        depth.set(depth.get() + 1);
+        depth.get()
+    });
+    let _leave = Leave;
+    if depth > MAX_TABLE_DEPTH {
+        return Err(serde::de::Error::custom("tables nested too deep"));
+    }
+    Vec::deserialize(reader)
+}
+
 /// One argument of a remote message (a [`RemoteValue`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WireArg {
@@ -175,7 +209,7 @@ pub enum WireArg {
         item: String,
     },
     Instance(u64),
-    Table(Vec<(WireArg, WireArg)>),
+    Table(#[serde(deserialize_with = "nested_table")] Vec<(WireArg, WireArg)>),
 }
 
 impl WireArg {

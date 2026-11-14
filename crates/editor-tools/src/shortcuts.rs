@@ -251,6 +251,15 @@ pub enum Action {
     NextFrames,
     ClipStart,
     ClipEnd,
+    /// The Sequencer's (AP5): play backwards, loop, the play range's In
+    /// and Out and clearing it, and the previous and next edit point.
+    PlayBackwards,
+    LoopPlayback,
+    MarkIn,
+    MarkOut,
+    ClearRange,
+    PreviousEdit,
+    NextEdit,
     KeySelected,
     DeleteKeys,
     CopyKeys,
@@ -407,6 +416,13 @@ impl Action {
             NextFrames,
             ClipStart,
             ClipEnd,
+            PlayBackwards,
+            LoopPlayback,
+            MarkIn,
+            MarkOut,
+            ClearRange,
+            PreviousEdit,
+            NextEdit,
             KeySelected,
             DeleteKeys,
             CopyKeys,
@@ -552,6 +568,13 @@ impl Action {
             NextFrames => keys![SHIFT ArrowRight],
             ClipStart => keys![NONE Home],
             ClipEnd => keys![NONE End],
+            PlayBackwards => keys![SHIFT Space],
+            LoopPlayback => keys![NONE L],
+            MarkIn => keys![NONE I],
+            MarkOut => keys![NONE O],
+            ClearRange => keys![ALT X],
+            PreviousEdit => keys![NONE ArrowUp],
+            NextEdit => keys![NONE ArrowDown],
             KeySelected => keys![NONE K],
             DeleteKeys => keys![NONE Delete, NONE Backspace],
             CopyKeys => keys![CMD C],
@@ -667,9 +690,9 @@ impl Action {
             BrushSmaller | BrushBigger => Context::Brushes,
             ConsoleRun | ConsoleComplete | ConsoleHistory => Context::Console,
             PlayPause | PreviousFrame | NextFrame | PreviousFrames | NextFrames | ClipStart
-            | ClipEnd | KeySelected | DeleteKeys | CopyKeys | CutKeys | PasteKeys | FrameCurves => {
-                Context::Animation
-            }
+            | ClipEnd | PlayBackwards | LoopPlayback | MarkIn | MarkOut | ClearRange
+            | PreviousEdit | NextEdit | KeySelected | DeleteKeys | CopyKeys | CutKeys
+            | PasteKeys | FrameCurves => Context::Animation,
             DeleteNodes | DuplicateNodes | SelectAllNodes | ClearNodeSelection | FrameNodes
             | SearchNodes => Context::Graphs,
             AddToSelection | BoxSelect | Nudge | NudgeTen | CopyElements | PasteElements | Bold
@@ -745,6 +768,13 @@ impl Action {
             NextFrames => "On ten frames",
             ClipStart => "Go to the clip's start",
             ClipEnd => "Go to the clip's end",
+            PlayBackwards => "Play backwards, or pause (Sequencer)",
+            LoopPlayback => "Loop playback on or off (Sequencer)",
+            MarkIn => "Start the play range at the playhead (Sequencer)",
+            MarkOut => "End the play range at the playhead (Sequencer)",
+            ClearRange => "Clear the play range (Sequencer)",
+            PreviousEdit => "Previous edit point: a section's end, a cut or an event (Sequencer)",
+            NextEdit => "Next edit point (Sequencer)",
             KeySelected => "Key the selected",
             DeleteKeys => "Delete the selected keys",
             CopyKeys => "Copy keys",

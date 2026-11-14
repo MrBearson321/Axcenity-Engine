@@ -128,7 +128,8 @@ fn main() -> Result<()> {
     // written to before the game exits.
     logs::install_logger(
         env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("warn,wgpu_hal=error"),
+            env_logger::Env::default()
+                .default_filter_or(format!("{},wgpu_hal=error", axcenity_net::LOG_FILTER)),
         )
         .build(),
     );
@@ -797,6 +798,9 @@ struct App {
     /// (Phase 64): the server moves the parts, characters and agents, and
     /// only LocalScripts run here.
     following: bool,
+    /// `Network::follows` when the world last became the server's: it
+    /// changes again when the device rejoins after losing its connection.
+    followed: u64,
     /// The F9 Developer Console (Phase 71), and whether this run has it
     /// (`dev_console::console_allowed`).
     console: axcenity_ui::DevConsole,
@@ -893,6 +897,7 @@ impl App {
                 version: String::new(),
             }),
             following: false,
+            followed: 0,
             console: axcenity_ui::DevConsole::default(),
             console_allowed: false,
             dev: dev_console::DevSettings::default(),
@@ -1548,6 +1553,9 @@ mod gpu_particles_tests;
 
 #[cfg(test)]
 mod skinning_tests;
+
+#[cfg(test)]
+mod default_humanoid_tests;
 
 #[cfg(test)]
 mod shader_tests;

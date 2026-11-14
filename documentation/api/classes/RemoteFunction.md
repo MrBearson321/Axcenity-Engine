@@ -22,6 +22,12 @@ RemoteFunction.OnServerInvoke: (Player, ...any) -> ...any
 
 The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. Scripts only.
 
+```lua
+game.ReplicatedStorage.GetCoins.OnServerInvoke = function(player)
+	return player:GetAttribute("Coins") or 0
+end
+```
+
 #### OnClientInvoke
 
 ```luau
@@ -39,6 +45,12 @@ RemoteFunction:InvokeServer(...: any): ...any
 ```
 
 Asks the server: pauses until its `OnServerInvoke` returns (it gets this player first, then the arguments), and returns what it returned. An error there is raised here, with the server script's line. LocalScripts only. LocalScripts only.
+
+```lua
+-- In a LocalScript: ask the server and wait for its answer.
+local coins = game.ReplicatedStorage.GetCoins:InvokeServer()
+print("I have", coins, "coins")
+```
 
 #### InvokeClient
 

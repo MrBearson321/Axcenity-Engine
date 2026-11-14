@@ -32,6 +32,12 @@ Instance.Parent: Instance?
 
 The Instance this one is inside, or nil. Setting it moves the Instance.
 
+```lua
+local coin = workspace.Coin:Clone()
+coin.Position = Vector3.new(10, 3, 0)
+coin.Parent = workspace -- it appears once it has a parent
+```
+
 #### StreamingState
 
 ```luau
@@ -110,6 +116,12 @@ Instance.Destroying: Signal
 
 Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.
 
+```lua
+workspace.Bomb.Destroying:Connect(function()
+	print("The bomb is gone")
+end)
+```
+
 #### StreamedIn
 
 ```luau
@@ -166,6 +178,14 @@ Instance:FindFirstChildOfClass(className: string): Instance?
 
 The first child whose class is exactly `className`, or nil.
 
+```lua
+local character = workspace:FindFirstChild("Hero")
+local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+if humanoid then
+	humanoid.WalkSpeed = 24
+end
+```
+
 #### FindFirstChildWhichIsA
 
 ```luau
@@ -189,6 +209,15 @@ Instance:FindFirstAncestorOfClass(className: string): Instance?
 ```
 
 The nearest Instance above this one whose class is exactly `className`, or nil.
+
+```lua
+workspace.Lava.Touched:Connect(function(hit)
+	local model = hit:FindFirstAncestorOfClass("Model")
+	if model then
+		print(model.Name, "touched the lava")
+	end
+end)
+```
 
 #### FindFirstAncestorWhichIsA
 
@@ -234,6 +263,14 @@ Instance:GetDescendants(): {Instance}
 ```
 
 Every Instance inside this one, parents before their children.
+
+```lua
+for _, item in workspace.House:GetDescendants() do
+	if item:IsA("BasePart") then
+		item.Anchored = true
+	end
+end
+```
 
 #### IsA
 
@@ -312,6 +349,11 @@ Instance:ClearAllChildren(): ()
 
 Destroys every child of this Instance (except services).
 
+```lua
+-- Empty the folder of last round's coins.
+workspace.Coins:ClearAllChildren()
+```
+
 #### SetAttribute
 
 ```luau
@@ -334,6 +376,12 @@ Instance:GetAttribute(name: string): any
 
 The value of the attribute `name`, or nil if it has none.
 
+```lua
+local door = workspace.Door
+local key = door:GetAttribute("KeyColor") or "Red"
+print("This door needs the", key, "key")
+```
+
 #### GetAttributes
 
 ```luau
@@ -349,6 +397,13 @@ Instance:GetAttributeChangedSignal(name: string): Signal
 ```
 
 An event that fires when the attribute `name` gets a different value or is removed. The handler gets nothing: read it with `GetAttribute`.
+
+```lua
+local door = workspace.Door
+door:GetAttributeChangedSignal("Open"):Connect(function()
+	door.CanCollide = not door:GetAttribute("Open")
+end)
+```
 
 #### AddTag
 

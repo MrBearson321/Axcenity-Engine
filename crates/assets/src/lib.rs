@@ -42,6 +42,7 @@ mod loading;
 mod material;
 mod memory;
 mod model;
+mod model_presets;
 mod orphaned;
 mod probe;
 mod references;
@@ -112,6 +113,11 @@ pub use model::{
     Track, apply_morphs, cached_meshes, cooked_models, embedded_files, is_collision_piece,
     list_objects, load_model, load_models, load_takes, lod_level, tangents, texture_pack_name,
     texture_roles,
+};
+pub use model_presets::{
+    BringIn, DEFAULT_MODEL_PRESET, ImportCollision, LAST_MODEL_PRESET_FILE, ModelSettings, UpAxis,
+    built_in_model_presets, last_model_preset, presets_file_with_model_preset,
+    remember_model_preset,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{

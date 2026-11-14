@@ -12,6 +12,9 @@
 //! on every device, and "is anything of an earlier rule within
 //! `AvoidRadius`?" means looking at that rule's few cells nearby.
 //!
+//! A rule inside a Biome (PW2) places only where that biome covers the
+//! ground, thinning out with the biome's weight at its soft edges.
+//!
 //! To answer that near a chunk's edge, the earlier rules are worked out a
 //! little past it: rule *k* over the chunk grown by the `AvoidRadius` of
 //! every rule after it ([`margin`]).
@@ -23,7 +26,8 @@ use axcenity_core::{
     MAX_TERRAIN_LAYERS, TerrainData, Value, World,
 };
 use axcenity_terrain::Placement;
-use axcenity_terrain::materials::{LayerRule, MaterialRules, sample_weights};
+use axcenity_terrain::biomes::MAX_BIOMES;
+use axcenity_terrain::materials::{LayerRule, MaterialRules, biome_weights, sample_weights};
 use axcenity_terrain::noise::{Noise, smoothstep};
 use glam::Vec2;
 
@@ -63,6 +67,8 @@ pub struct Rule {
     pub rotation: Vec2,
     pub scale: Vec2,
     pub collide: bool,
+    /// The Biome (by its place among the terrain's biomes) it's inside, if any.
+    pub biome: Option<usize>,
 }
 
 impl Rule {
@@ -140,6 +146,7 @@ impl Rule {
             rotation: pair("RotationRange", Vec2::new(0.0, 360.0)),
             scale: pair("ScaleRange", Vec2::new(0.85, 1.15)),
             collide: instance.property("CanCollide") == Some(&Value::Bool(true)),
+            biome: None,
         })
     }
 }
@@ -170,23 +177,50 @@ pub fn entry(source: &FoliageSource) -> String {
     }
 }
 
-/// The ScatterRules a terrain uses: its first [`MAX_RULES`] ScatterRule
-/// children that are on and place something, in order.
+/// The ScatterRules a terrain uses, at most [`MAX_RULES`], in order: its
+/// ScatterRule children, and those inside its Biomes where each Biome
+/// stands among them, leaving out rules that are off or place nothing
+/// and Biomes that are off.
 pub fn rules_of(world: &World, terrain: InstanceId) -> Vec<Rule> {
     let layers: Vec<String> = axcenity_terrain::materials::layers(world, terrain)
         .into_iter()
         .filter_map(|layer| world.get(layer).map(|i| i.name().to_owned()))
         .collect();
-    world
+    let biomes = axcenity_terrain::biomes::biomes(world, terrain);
+    let children = world
         .get(terrain)
         .map(Instance::children)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut rules = Vec::new();
+    for (&id, child) in children
         .iter()
-        .filter_map(|&child| world.get(child))
-        .filter(|child| child.class() == ClassName::ScatterRule)
-        .filter_map(|child| Rule::of(child, &layers))
-        .take(MAX_RULES)
-        .collect()
+        .filter_map(|id| world.get(*id).map(|child| (id, child)))
+    {
+        match child.class() {
+            ClassName::ScatterRule => rules.extend(Rule::of(child, &layers)),
+            ClassName::Biome => {
+                let Some(index) = biomes.iter().position(|&b| b == id) else {
+                    continue;
+                };
+                if child.property("Enabled") != Some(&Value::Bool(true)) {
+                    continue;
+                }
+                let inside = child
+                    .children()
+                    .iter()
+                    .filter_map(|&rule| world.get(rule))
+                    .filter_map(|rule| Rule::of(rule, &layers))
+                    .map(|rule| Rule {
+                        biome: Some(index),
+                        ..rule
+                    });
+                rules.extend(inside);
+            }
+            _ => {}
+        }
+    }
+    rules.truncate(MAX_RULES);
+    rules
 }
 
 /// What the rules stand on: the terrain, where it is, its material rules
@@ -396,6 +430,15 @@ fn suitability(rule: &Rule, ground: &Ground, at: Vec2, clumps: &Noise) -> f32 {
             return 0.0;
         }
     }
+    if let Some(biome) = rule.biome {
+        if biome >= MAX_BIOMES {
+            return 0.0;
+        }
+        fit *= biome_weights(data, placement, ground.materials, nx, nz)[biome];
+        if fit <= 0.0 {
+            return 0.0;
+        }
+    }
     if rule.clumping > 0.0 {
         let n = clumps.fbm(at.x / rule.clump_size, at.y / rule.clump_size, 3, 0.5, 2.0);
         let inside = smoothstep(-0.15, 0.25, n);
@@ -505,7 +548,10 @@ impl TerrainScatter {
             .map(|level| level as f32);
         let signature = {
             let mut text = format!("{rules:?}|{placement:?}|{water:?}|{:?}", data.size());
-            if rules.iter().any(|rule| rule.layer.is_some()) {
+            if rules
+                .iter()
+                .any(|rule| rule.layer.is_some() || rule.biome.is_some())
+            {
                 text.push_str(&format!("|{}", materials.key()));
             }
             fnv(text.as_bytes())
