@@ -2,10 +2,12 @@
 //! skeleton on another whose bones have other names, rest poses and
 //! proportions.
 //!
-//! Each skeleton's bones are matched to humanoid roles by name
-//! ([`HumanoidMap::detect`]: Mixamo's `LeftForeArm`, Unreal's `lowerarm_l`,
-//! Blender's `forearm.L`, 3ds Max's `Bip01 L Forearm` all become
-//! [`HumanBone::LeftLowerArm`]). A retargeted take moves each role's bone by
+//! Each skeleton's bones are matched to humanoid roles ([`roles`]): by a
+//! rig definition of the project's that fits it (`assets/rigs/*.rig.json`,
+//! its own bone map), else by name (Mixamo's `LeftForeArm`, Unreal's
+//! `lowerarm_l`, Blender's `forearm.L`, 3ds Max's `Bip01 L Forearm` all
+//! become [`HumanBone::LeftLowerArm`]; fingers too, `LeftHandIndex1`,
+//! `index_01_l`, `f_index.01.L`). A retargeted take moves each role's bone by
 //! how much the take turns that role's bone away from its rest, measured in
 //! world space and turned into the other skeleton's frame (which way is up
 //! and which way it faces, from its rest pose), so bones whose local axes
@@ -14,274 +16,16 @@
 //!
 //! Both skeletons should rest in a similar pose (both in a T-pose, or both
 //! in an A-pose): the difference between rest poses plays as part of the
-//! motion.
+//! motion. [`check_rig`] says when they don't.
 
-use axcenity_assets::{Bone, Pose, Rig, Take};
+mod check;
+mod roles;
+
+pub use check::{RigProblem, RigReport, Severity, check_pair, check_rig, rest_arm_angle};
+pub use roles::{Digit, HumanBone, HumanoidMap, ROLE_COUNT, Segment, Side};
+
+use axcenity_assets::{Pose, Rig, RigDefinitions, Take};
 use glam::{Mat3, Mat4, Quat, Vec3};
-
-/// A role a bone of a humanoid skeleton plays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum HumanBone {
-    Hips,
-    Spine,
-    Chest,
-    UpperChest,
-    Neck,
-    Head,
-    LeftShoulder,
-    LeftUpperArm,
-    LeftLowerArm,
-    LeftHand,
-    RightShoulder,
-    RightUpperArm,
-    RightLowerArm,
-    RightHand,
-    LeftUpperLeg,
-    LeftLowerLeg,
-    LeftFoot,
-    LeftToes,
-    RightUpperLeg,
-    RightLowerLeg,
-    RightFoot,
-    RightToes,
-}
-
-impl HumanBone {
-    pub const ALL: [HumanBone; 22] = [
-        HumanBone::Hips,
-        HumanBone::Spine,
-        HumanBone::Chest,
-        HumanBone::UpperChest,
-        HumanBone::Neck,
-        HumanBone::Head,
-        HumanBone::LeftShoulder,
-        HumanBone::LeftUpperArm,
-        HumanBone::LeftLowerArm,
-        HumanBone::LeftHand,
-        HumanBone::RightShoulder,
-        HumanBone::RightUpperArm,
-        HumanBone::RightLowerArm,
-        HumanBone::RightHand,
-        HumanBone::LeftUpperLeg,
-        HumanBone::LeftLowerLeg,
-        HumanBone::LeftFoot,
-        HumanBone::LeftToes,
-        HumanBone::RightUpperLeg,
-        HumanBone::RightLowerLeg,
-        HumanBone::RightFoot,
-        HumanBone::RightToes,
-    ];
-
-    /// The roles a skeleton needs to be retargeted to or from.
-    pub const REQUIRED: [HumanBone; 15] = [
-        HumanBone::Hips,
-        HumanBone::Spine,
-        HumanBone::Head,
-        HumanBone::LeftUpperArm,
-        HumanBone::LeftLowerArm,
-        HumanBone::LeftHand,
-        HumanBone::RightUpperArm,
-        HumanBone::RightLowerArm,
-        HumanBone::RightHand,
-        HumanBone::LeftUpperLeg,
-        HumanBone::LeftLowerLeg,
-        HumanBone::LeftFoot,
-        HumanBone::RightUpperLeg,
-        HumanBone::RightLowerLeg,
-        HumanBone::RightFoot,
-    ];
-
-    /// Its name, as messages show it.
-    pub fn name(self) -> &'static str {
-        match self {
-            HumanBone::Hips => "Hips",
-            HumanBone::Spine => "Spine",
-            HumanBone::Chest => "Chest",
-            HumanBone::UpperChest => "UpperChest",
-            HumanBone::Neck => "Neck",
-            HumanBone::Head => "Head",
-            HumanBone::LeftShoulder => "LeftShoulder",
-            HumanBone::LeftUpperArm => "LeftUpperArm",
-            HumanBone::LeftLowerArm => "LeftLowerArm",
-            HumanBone::LeftHand => "LeftHand",
-            HumanBone::RightShoulder => "RightShoulder",
-            HumanBone::RightUpperArm => "RightUpperArm",
-            HumanBone::RightLowerArm => "RightLowerArm",
-            HumanBone::RightHand => "RightHand",
-            HumanBone::LeftUpperLeg => "LeftUpperLeg",
-            HumanBone::LeftLowerLeg => "LeftLowerLeg",
-            HumanBone::LeftFoot => "LeftFoot",
-            HumanBone::LeftToes => "LeftToes",
-            HumanBone::RightUpperLeg => "RightUpperLeg",
-            HumanBone::RightLowerLeg => "RightLowerLeg",
-            HumanBone::RightFoot => "RightFoot",
-            HumanBone::RightToes => "RightToes",
-        }
-    }
-
-    fn index(self) -> usize {
-        HumanBone::ALL
-            .iter()
-            .position(|&role| role == self)
-            .expect("every role is listed")
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Side {
-    Left,
-    Right,
-    Middle,
-}
-
-/// What kind of bone a name is, before sides and the spine are sorted out.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    Hips,
-    Spine,
-    Neck,
-    Head,
-    Shoulder,
-    UpperArm,
-    LowerArm,
-    Hand,
-    UpperLeg,
-    LowerLeg,
-    Foot,
-    Toes,
-}
-
-/// Which bone of a skeleton plays each [`HumanBone`] role.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct HumanoidMap {
-    bones: [Option<usize>; 22],
-}
-
-impl HumanoidMap {
-    /// Matches `bones` (parents first) to roles by their names. The first
-    /// bone of a kind and side wins; spine bones between the hips and the
-    /// neck become Spine, then Chest, and the last of three or more
-    /// UpperChest.
-    pub fn detect(bones: &[Bone]) -> HumanoidMap {
-        let mut map = HumanoidMap::default();
-        let mut spine = Vec::new();
-        for (index, bone) in bones.iter().enumerate() {
-            let Some((kind, side)) = classify(&bone.name) else {
-                continue;
-            };
-            let role = match (kind, side) {
-                (Kind::Spine, _) => {
-                    spine.push(index);
-                    continue;
-                }
-                (Kind::Hips, _) => HumanBone::Hips,
-                (Kind::Neck, _) => HumanBone::Neck,
-                (Kind::Head, _) => HumanBone::Head,
-                (_, Side::Middle) => continue,
-                (Kind::Shoulder, Side::Left) => HumanBone::LeftShoulder,
-                (Kind::Shoulder, _) => HumanBone::RightShoulder,
-                (Kind::UpperArm, Side::Left) => HumanBone::LeftUpperArm,
-                (Kind::UpperArm, _) => HumanBone::RightUpperArm,
-                (Kind::LowerArm, Side::Left) => HumanBone::LeftLowerArm,
-                (Kind::LowerArm, _) => HumanBone::RightLowerArm,
-                (Kind::Hand, Side::Left) => HumanBone::LeftHand,
-                (Kind::Hand, _) => HumanBone::RightHand,
-                (Kind::UpperLeg, Side::Left) => HumanBone::LeftUpperLeg,
-                (Kind::UpperLeg, _) => HumanBone::RightUpperLeg,
-                (Kind::LowerLeg, Side::Left) => HumanBone::LeftLowerLeg,
-                (Kind::LowerLeg, _) => HumanBone::RightLowerLeg,
-                (Kind::Foot, Side::Left) => HumanBone::LeftFoot,
-                (Kind::Foot, _) => HumanBone::RightFoot,
-                (Kind::Toes, Side::Left) => HumanBone::LeftToes,
-                (Kind::Toes, _) => HumanBone::RightToes,
-            };
-            map.bones[role.index()].get_or_insert(index);
-        }
-        let roles: &[HumanBone] = match spine.len() {
-            0 => &[],
-            1 => &[HumanBone::Spine],
-            2 => &[HumanBone::Spine, HumanBone::Chest],
-            _ => &[HumanBone::Spine, HumanBone::Chest, HumanBone::UpperChest],
-        };
-        // Spine, the next as Chest, the last as UpperChest.
-        let picks = match spine.len() {
-            0..=2 => spine.clone(),
-            _ => vec![spine[0], spine[1], spine[spine.len() - 1]],
-        };
-        for (&role, bone) in roles.iter().zip(picks) {
-            map.bones[role.index()] = Some(bone);
-        }
-        map
-    }
-
-    /// The bone playing `role`, if any.
-    pub fn get(&self, role: HumanBone) -> Option<usize> {
-        self.bones[role.index()]
-    }
-
-    /// Every bone that plays a role.
-    pub fn bones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.bones.iter().flatten().copied()
-    }
-
-    /// The [`HumanBone::REQUIRED`] roles no bone plays.
-    pub fn missing(&self) -> Vec<HumanBone> {
-        HumanBone::REQUIRED
-            .into_iter()
-            .filter(|&role| self.get(role).is_none())
-            .collect()
-    }
-}
-
-/// A bone name's kind and side, if it's a humanoid bone's name. Namespaces
-/// (`mixamorig:`), common prefixes (`DEF-`, `Bip01`) and side markers
-/// (`Left`, `_l`, `.L`, ` L `) are taken off first; finger bones, end bones
-/// and twist bones aren't humanoid bones.
-fn classify(name: &str) -> Option<(Kind, Side)> {
-    let lower = name.to_ascii_lowercase();
-    let lower = lower.rsplit([':', '|']).next().unwrap_or(&lower);
-    let mut side = Side::Middle;
-    let mut words: Vec<String> = Vec::new();
-    for word in lower
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-    {
-        match word {
-            "l" | "left" => side = Side::Left,
-            "r" | "right" => side = Side::Right,
-            "def" | "org" | "mch" | "bip01" | "bip001" | "mixamorig" | "armature" | "rig"
-            | "cc" | "base" | "jnt" | "bn" | "b" => {}
-            _ => words.push(word.to_owned()),
-        }
-    }
-    let mut key = words.concat();
-    for (prefix, found) in [("left", Side::Left), ("right", Side::Right)] {
-        if let Some(rest) = key.strip_prefix(prefix) {
-            side = found;
-            key = rest.to_owned();
-        }
-    }
-    // Spine1, spine_01, Spine.003, Toe0: the number only orders them.
-    let base = key.trim_end_matches(|c: char| c.is_ascii_digit());
-    let kind = match base {
-        "hips" | "hip" | "pelvis" => Kind::Hips,
-        "spine" | "chest" | "upperchest" | "torso" | "abdomen" | "abdomenupper" | "waist" => {
-            Kind::Spine
-        }
-        "neck" => Kind::Neck,
-        "head" => Kind::Head,
-        "shoulder" | "clavicle" | "collar" | "collarbone" => Kind::Shoulder,
-        "upperarm" | "arm" | "uparm" => Kind::UpperArm,
-        "forearm" | "lowerarm" | "elbow" => Kind::LowerArm,
-        "hand" | "wrist" => Kind::Hand,
-        "upleg" | "thigh" | "upperleg" => Kind::UpperLeg,
-        "leg" | "calf" | "shin" | "lowerleg" | "knee" => Kind::LowerLeg,
-        "foot" | "ankle" => Kind::Foot,
-        "toe" | "toes" | "toebase" | "ball" => Kind::Toes,
-        _ => return None,
-    };
-    Some((kind, side))
-}
 
 /// A take bound to another skeleton through humanoid roles.
 #[derive(Clone, Debug)]
@@ -311,7 +55,7 @@ pub(crate) struct Retarget {
 impl Retarget {
     /// Binds `take`, through its skeleton, to `rig`. Fails, saying why, if
     /// either skeleton isn't a humanoid one by its bone names.
-    pub(crate) fn new(take: &Take, rig: &Rig) -> Result<Retarget, String> {
+    pub(crate) fn new(take: &Take, rig: &Rig, rigs: &RigDefinitions) -> Result<Retarget, String> {
         if take.skeleton.is_empty() {
             return Err("its file doesn't say what skeleton it was made for".to_owned());
         }
@@ -320,8 +64,8 @@ impl Retarget {
             joints: Vec::new(),
             fit: Mat4::IDENTITY,
         };
-        let from = HumanoidMap::detect(&source.bones);
-        let to = HumanoidMap::detect(&rig.bones);
+        let (from, _) = HumanoidMap::for_skeleton(&source.bones, rigs);
+        let (to, _) = HumanoidMap::for_skeleton(&rig.bones, rigs);
         let names = |missing: Vec<HumanBone>| {
             missing
                 .into_iter()
@@ -346,8 +90,7 @@ impl Retarget {
         let target_rest = rig.world(&rig.rest_pose());
         let source_binding = take.bind(&source);
         let moved: Vec<usize> = source_binding.iter().flatten().copied().collect();
-        let pairs: Vec<(usize, usize)> = HumanBone::ALL
-            .into_iter()
+        let pairs: Vec<(usize, usize)> = HumanBone::all()
             .filter_map(|role| Some((from.get(role)?, to.get(role)?)))
             .filter(|(source, _)| moved.contains(source))
             .collect();
