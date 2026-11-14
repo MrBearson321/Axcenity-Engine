@@ -100,7 +100,7 @@ R15 is built: sculpt brushes and the Mesh Filter (#317), masks saved (#322), `_C
 
 `docs/research/import-formats-and-plugins.md`: OBJ read directly through `ufbx` (P7.1), USD converted to `.glb` on import by an editor-only `convert` crate ([ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md), P7.2), mesh import presets (P7.3), plugin API 3 (P7.4); Alembic deferred until a geometry-cache workflow needs it (P7.5), USD animation later (P7.6), native extensions deferred.
 
-`docs/research/facial-animation.md` (Paul's facial animation spec, 2026-11-14): blend shapes imported (F1) and morphed on the GPU (F2, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)), face profiles and `FaceControls` (F3), expressions, face layers, blinking and gaze (F4), lip sync (F5), Character Studio's Face workspace (F6), facial LOD, profiling and replication (F7). **Planned**; nothing built yet.
+`docs/research/facial-animation.md` (Paul's facial animation spec, 2026-11-14): blend shapes imported (F1) and morphed on the GPU (F2, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)), face profiles and `FaceControls` (F3), expressions, face layers, blinking and gaze (F4), lip sync (F5), Character Studio's Face workspace (F6), facial LOD, profiling and replication (F7). F0–F6 built (PRs #358, #360, #367, #377, #384, #385, #389 and F6's); F7 next.
 
 ## Feature plan (unified plan, Phases 1–93)
 

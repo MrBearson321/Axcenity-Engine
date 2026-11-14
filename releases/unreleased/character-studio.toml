@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "editor"
+title = "Character Studio: edit a character's face"
+details = "A Character Studio tab shows the selected character's face in a preview of its own. Rig: pick the face profile, see what doesn't fit, move the 48 face controls with sliders, and map the model's own blend shapes, eye and jaw bones and their limits to a new profile. Expressions: preview the built-in and project expressions at any intensity, blend two, change one and save it. Lip sync: open a lip sync or make one from a sound or phoneme timings, see it over the sound's waveform, pick, retime, change, add and delete visemes, play them on the face and save. Key in Animation opens the face's controls in the Animation tab to key them over time."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

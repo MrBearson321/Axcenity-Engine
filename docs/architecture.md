@@ -26,5 +26,6 @@ Map only. Open the one file that matches the change.
 - Assets panel: [editor/assets.md](editor/assets.md)
 - Server, client, and modules in the editor: [editor/sides.md](editor/sides.md)
 - Lua editor plugins: [editor/plugins.md](editor/plugins.md)
+- Character Studio (faces): [editor/character-studio.md](editor/character-studio.md)
 - Team Board (tasks shared with the team): [editor/team-board.md](editor/team-board.md)
 - The MCP server for AI clients: [editor/mcp.md](editor/mcp.md)

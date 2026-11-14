@@ -29,6 +29,7 @@ mod autorecover;
 mod behavior_trees;
 mod block_undo;
 mod branding;
+mod character_studio;
 mod chrome;
 mod collab_trust;
 mod collision_groups;
@@ -473,6 +474,8 @@ pub struct EditorApp {
     object_viewer: Box<axcenity_editor_tools::object_viewer::ObjectViewer>,
     /// The Effect tab (roadmap R17.3).
     effect_editor: Box<crate::effect_editor::EffectEditor>,
+    /// The Character Studio tab (facial animation F6).
+    character_studio: Box<crate::character_studio::CharacterStudio>,
     /// The block script whose tab is under the mouse, set as it's drawn:
     /// Ctrl+Z and Ctrl+Y are its then, and the world's keys aren't taken.
     block_tab_pointer: Option<String>,
@@ -633,6 +636,7 @@ impl DockViewer<'_> {
                     .ui(ui, self.render_state, &self.app.assets)
             }
             Pane::Effect => self.app.effect_pane(ui, self.render_state),
+            Pane::CharacterStudio => self.app.character_studio_pane(ui, self.render_state),
             Pane::Toolbox => self.app.toolbox_pane(ui),
             Pane::Inventory => self.app.inventory_pane(ui),
             Pane::VersionExplorer => self
@@ -1100,6 +1104,7 @@ impl EditorApp {
             model_studio: Default::default(),
             object_viewer: Default::default(),
             effect_editor: Default::default(),
+            character_studio: Default::default(),
             block_tab_pointer: None,
             scene_drawn_pass: None,
             ui_designer: UiDesigner::default(),

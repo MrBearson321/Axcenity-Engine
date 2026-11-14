@@ -130,6 +130,15 @@ impl CompiledVisemes {
         }
         layer
     }
+
+    /// Sets `controls` (one per standard control) to what `weights` (one
+    /// per viseme) say, as the Dialogue layer covers the layers under it.
+    pub fn apply(&self, weights: &[f32; 12], controls: &mut [f32]) {
+        let layer = self.layer(weights, 1.0);
+        for ((control, value), cover) in controls.iter_mut().zip(&layer.value).zip(&layer.cover) {
+            *control = *control * (1.0 - cover) + value;
+        }
+    }
 }
 
 /// How lip sync keys blend.

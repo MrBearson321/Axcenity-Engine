@@ -18,7 +18,7 @@
 
 use std::fmt;
 
-use axcenity_assets::{FaceLimits, FaceProfile, FaceProfiles, Model, Pose, Rig};
+use axcenity_assets::{FaceLimits, FaceProfile, FaceProfiles, Model, Pose, Posed, Rig};
 use axcenity_core::face::{FACE_CONTROLS, face_control};
 use glam::{Mat3, Quat, Vec3};
 
@@ -459,16 +459,25 @@ impl FaceRig {
 
     /// How many standard controls move something on the model.
     pub fn controls_used(&self) -> usize {
-        FACE_CONTROLS
-            .iter()
-            .enumerate()
-            .filter(|(index, control)| {
-                !self.drives[*index].is_empty()
-                    || (self.eyes_turn() && EYE_LOOK.contains(&control.name))
-                    || (self.jaw.is_some()
-                        && matches!(control.name, "Jaw_Open" | "Jaw_Left" | "Jaw_Right"))
-            })
+        (0..FACE_CONTROLS.len())
+            .filter(|&index| self.moves(index))
             .count()
+    }
+
+    /// Whether the standard control at `index` moves something on the
+    /// model: a blend shape, or an eye or jaw bone.
+    pub fn moves(&self, index: usize) -> bool {
+        let Some(control) = FACE_CONTROLS.get(index) else {
+            return false;
+        };
+        !self.drives[index].is_empty()
+            || (self.eyes_turn() && EYE_LOOK.contains(&control.name))
+            || (self.jaw.is_some() && matches!(control.name, "Jaw_Open" | "Jaw_Left" | "Jaw_Right"))
+    }
+
+    /// The way the body faces, in the model file's space.
+    pub fn forward(&self) -> Vec3 {
+        self.axes.z_axis
     }
 
     fn eyes_turn(&self) -> bool {
@@ -652,4 +661,42 @@ fn facing(rig: &Rig, world: &[glam::Mat4], eyes: &[Option<TurnedBone>; 2]) -> Ma
 /// Checks `profile` against `model`: what [`FaceRig::bind`] reports.
 pub fn check_face(model: &Model, name: &str, profile: &FaceProfile) -> Vec<FaceProblem> {
     FaceRig::bind(model, name, profile).1
+}
+
+impl FaceRig {
+    /// The bone a view of the face is framed on: the head, else an eye,
+    /// else the jaw.
+    pub fn face_bone(&self) -> Option<usize> {
+        self.head
+            .map(|(bone, _)| bone)
+            .or_else(|| self.eyes.iter().flatten().next().map(|eye| eye.bone))
+            .or(self.jaw.map(|jaw| jaw.bone))
+    }
+}
+
+/// `model` at rest with its face set to `controls` (one value per standard
+/// control, 0 to 1): what Character Studio's preview draws.
+pub fn pose_face(model: &Model, face: &FaceRig, controls: &[f32]) -> Posed {
+    let mut posed = model
+        .rig
+        .as_ref()
+        .and_then(|rig| {
+            let mut pose = rig.rest_pose();
+            face.turn(&mut pose, controls);
+            model.pose(&pose)
+        })
+        .unwrap_or_else(|| model.rest_posed());
+    let mut weights = Vec::with_capacity(model.morph_targets.len());
+    face.weights(model, controls, &mut weights);
+    posed.set_morph_weights(&weights);
+    posed
+}
+
+/// Where the face is (its [`FaceRig::face_bone`] at rest), in the space a
+/// MeshPart of size 1 at the origin draws `model` in; `None` without bones.
+pub fn face_point(model: &Model, face: &FaceRig) -> Option<Vec3> {
+    let rig = model.rig.as_ref()?;
+    let bone = face.face_bone()?;
+    let at = rig.world(&rig.rest_pose()).get(bone)?.w_axis.truncate();
+    Some(rig.fit.transform_point3(at)).filter(|point| point.is_finite())
 }

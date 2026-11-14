@@ -36,6 +36,7 @@ mod blender;
 mod block_editor;
 mod build_game;
 mod build_tools;
+mod character_studio;
 mod command_palette;
 mod console;
 mod constraints;
