@@ -119,6 +119,9 @@ enum Motion {
 pub struct Animators {
     running: HashMap<InstanceId, Running>,
     poses: Poses,
+    /// This update's skeletal poses, by MeshPart, with the skeleton each is
+    /// of: what the skinned MeshParts inside one follow ([`Self::follow`]).
+    local: HashMap<InstanceId, (Arc<Rig>, axcenity_assets::Pose)>,
     errors: Vec<String>,
     /// Errors already given, so each is reported once.
     reported: HashSet<String>,
@@ -326,6 +329,7 @@ impl Animators {
     /// `CurrentState` and each track's `TimePosition` up to date. Returns
     /// what scripts should hear about, in order.
     pub fn update(&mut self, world: &mut World, assets: &Assets, dt: f64) -> Vec<AnimatorEvent> {
+        self.local.clear();
         let mut owners: Vec<(InstanceId, Parts)> = Vec::new();
         let animated = world.all_below(world.workspace(), |class| {
             matches!(
@@ -409,22 +413,74 @@ impl Animators {
                 &job.layer_weights,
                 &job.bone_layers,
             );
-            job.model.pose(&pose)
+            let posed = job.model.pose(&pose);
+            (pose, posed)
         });
         self.thread_times = times;
-        for (job, pose) in jobs.iter().zip(made) {
+        for (job, (local, pose)) in jobs.iter().zip(made) {
             match pose {
                 Some(pose) => {
                     self.poses.insert(job.owner, Arc::new(pose));
+                    self.local.insert(job.owner, (Arc::clone(&job.rig), local));
                 }
                 None => {
                     posed.remove(&job.owner);
                 }
             }
         }
+        self.follow(world, assets, &mut posed);
         // A MeshPart nothing poses any more goes back to its still model.
         self.poses.retain(|part, _| posed.contains(part));
         events
+    }
+
+    /// Poses each skinned MeshPart directly inside a posed one, that
+    /// nothing animates itself, as its parent is posed: each of its bones
+    /// takes the parent's bone of the same name, the rest stay at rest. So
+    /// a character's parts (hair, a jacket) made on its skeleton move with
+    /// it from one Animator (default humanoid HD4). Followers lead their
+    /// own skinned children in turn. A follower is kept where its parent's
+    /// skeleton puts it ([`place_follower`]), so changing its `MeshId` to
+    /// another part of the same skeleton is all a swap takes.
+    fn follow(&mut self, world: &mut World, assets: &Assets, posed: &mut HashSet<InstanceId>) {
+        let mut leaders: Vec<InstanceId> = self.local.keys().copied().collect();
+        while let Some(leader) = leaders.pop() {
+            let Some((rig, pose)) = self.local.get(&leader).cloned() else {
+                continue;
+            };
+            let children = world
+                .get(leader)
+                .map(|instance| instance.children().to_vec())
+                .unwrap_or_default();
+            for child in children {
+                if self.running.contains_key(&child) || posed.contains(&child) {
+                    continue;
+                }
+                let Some(model) = skeleton_model(world, assets, child) else {
+                    continue;
+                };
+                let Some(own) = model.rig.clone() else {
+                    continue;
+                };
+                place_follower(world, leader, &rig, child, &own);
+                let follows: axcenity_assets::Pose = own
+                    .bones
+                    .iter()
+                    .map(|bone| {
+                        rig.bone(&bone.name)
+                            .and_then(|index| pose.get(index).copied())
+                            .unwrap_or(bone.rest)
+                    })
+                    .collect();
+                let Some(made) = model.pose(&follows) else {
+                    continue;
+                };
+                self.poses.insert(child, Arc::new(made));
+                posed.insert(child);
+                self.local.insert(child, (own, follows));
+                leaders.push(child);
+            }
+        }
     }
 
     /// Plays one animated thing, binding again what uses the `changed`
@@ -766,8 +822,9 @@ impl Animators {
                             self.report(problem);
                         }
                     }
-                    if let Some(pose) = model.pose(&pose) {
-                        self.poses.insert(owner, Arc::new(pose));
+                    if let Some(made) = model.pose(&pose) {
+                        self.poses.insert(owner, Arc::new(made));
+                        self.local.insert(owner, (Arc::clone(rig), pose));
                         posed = true;
                     }
                 }
@@ -1327,6 +1384,50 @@ fn pose_of(
         }
     }
     pose
+}
+
+/// Sets the follower MeshPart `part` (of skeleton `own`) where the
+/// skeleton of its parent `leader` (of skeleton `rig`) puts it: the same
+/// file space in the world, so the two files' meshes line up as they do in
+/// the files. Its `Orientation` is the leader's, its `Size` and `Position`
+/// what its own fit needs. Written only when they differ, so a follower
+/// moved with its leader is left alone.
+fn place_follower(world: &mut World, leader: InstanceId, rig: &Rig, part: InstanceId, own: &Rig) {
+    let Some(file_space) = ragdoll::placement(world, leader, rig) else {
+        return;
+    };
+    let Some(orientation) = world
+        .get(leader)
+        .and_then(|instance| instance.property("Orientation"))
+        .and_then(Value::as_vector3)
+    else {
+        return;
+    };
+    let wanted = file_space * own.fit.inverse();
+    let (scale, _, translation) = wanted.to_scale_rotation_translation();
+    if !scale.is_finite() || !translation.is_finite() {
+        return;
+    }
+    let size = Vector3::new(scale.x.abs(), scale.y.abs(), scale.z.abs());
+    let position = Vector3::new(translation.x, translation.y, translation.z);
+    for (name, value) in [
+        ("Size", size),
+        ("Position", position),
+        ("Orientation", orientation),
+    ] {
+        let now = world
+            .get(part)
+            .and_then(|instance| instance.property(name))
+            .and_then(Value::as_vector3);
+        let close = now.is_some_and(|now| {
+            (now.x - value.x).abs() < 1e-4
+                && (now.y - value.y).abs() < 1e-4
+                && (now.z - value.z).abs() < 1e-4
+        });
+        if !close {
+            let _ = world.set_property(part, name, Value::Vector3(value));
+        }
+    }
 }
 
 /// The model of `owner` if it's a MeshPart whose model has a skeleton.

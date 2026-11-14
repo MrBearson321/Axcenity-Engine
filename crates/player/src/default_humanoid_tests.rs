@@ -102,130 +102,242 @@ fn the_default_humanoid_head_has_the_facial_profile_shapes_at_rest() {
     assert!(model.morph_targets.iter().all(|t| t.default_weight == 0.0));
 }
 
+/// A new Baseplate project in a temporary folder, its player spawned as
+/// the default humanoid, stepped frame by frame as the player steps it.
+struct Game {
+    parent: std::path::PathBuf,
+    folder: std::path::PathBuf,
+    world: World,
+    assets: Assets,
+    scripts: axcenity_script::ScriptRuntime,
+    characters: Controllers,
+    physics: Physics,
+    animators: Animators,
+}
+
+impl Game {
+    fn new(name: &str) -> Self {
+        let parent = std::env::temp_dir().join(format!(
+            "axcenity-player-default-humanoid-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        let folder = axcenity_project::create_project_from(
+            &parent,
+            "Humanoid Test",
+            axcenity_project::Template::Baseplate,
+        )
+        .unwrap();
+        let mut world = axcenity_project::load(&folder).unwrap().world;
+        axcenity_project::load_starter_character(&folder, &mut world)
+            .unwrap()
+            .expect("the template names the Character prefab");
+        let assets = Assets::new(&folder);
+        let mut scripts = axcenity_sim::script_runtime();
+        scripts.set_assets(assets.clone());
+        let physics = Physics::with_assets(assets.clone());
+        Self {
+            parent,
+            folder,
+            world,
+            assets,
+            scripts,
+            characters: Controllers::default(),
+            physics,
+            animators: Animators::new(),
+        }
+    }
+
+    fn frames(&mut self, count: usize, input: MoveInput) {
+        let seconds = 1.0 / 60.0;
+        for _ in 0..count {
+            let world = &mut self.world;
+            self.characters
+                .step(world, &self.assets, input, seconds as f32);
+            axcenity_gameplay::step_humanoids(&mut self.scripts, world, &self.characters, seconds);
+            self.scripts.step_players(world, seconds);
+            self.scripts.step(world, seconds);
+            self.characters.keep_kinematic(world);
+            self.physics.step(world, seconds);
+            self.animators.update(world, &self.assets, seconds);
+        }
+    }
+
+    /// The player's character Model.
+    fn character(&self) -> InstanceId {
+        let players = self.world.players();
+        let player = self.world.get(players).unwrap().children()[0];
+        self.world
+            .get(player)
+            .unwrap()
+            .property("Character")
+            .and_then(Value::as_instance)
+            .unwrap()
+    }
+
+    fn vector(&self, id: InstanceId, name: &str) -> axcenity_core::Vector3 {
+        self.world
+            .get(id)
+            .unwrap()
+            .property(name)
+            .unwrap()
+            .as_vector3()
+            .unwrap()
+    }
+
+    fn no_errors(&mut self) {
+        assert_eq!(self.animators.take_errors(), Vec::<String>::new());
+        let errors = self.assets.take_errors();
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+}
+
+impl Drop for Game {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.parent);
+    }
+}
+
+fn walk() -> MoveInput {
+    MoveInput {
+        forward: true,
+        ..MoveInput::default()
+    }
+}
+
 /// A new Baseplate project's player spawns as the default humanoid, which
 /// walks on its root part and animates through the Humanoid's states.
 #[test]
 fn a_new_baseplate_projects_player_is_the_default_humanoid_and_walks_animated() {
-    let parent = std::env::temp_dir().join(format!(
-        "axcenity-player-default-humanoid-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&parent);
-    std::fs::create_dir_all(&parent).unwrap();
-    let folder = axcenity_project::create_project_from(
-        &parent,
-        "Humanoid Test",
-        axcenity_project::Template::Baseplate,
-    )
-    .unwrap();
-    let project = axcenity_project::load(&folder).unwrap();
-    let mut world = project.world;
-    axcenity_project::load_starter_character(&folder, &mut world)
-        .unwrap()
-        .expect("the template names the Character prefab");
-    let assets = Assets::new(&folder);
-    let mut scripts = axcenity_sim::script_runtime();
-    scripts.set_assets(assets.clone());
-    let (mut characters, mut physics) =
-        (Controllers::default(), Physics::with_assets(assets.clone()));
-    let mut animators = Animators::new();
-    let walk = MoveInput {
-        forward: true,
-        ..MoveInput::default()
-    };
-    let mut frame = |world: &mut World, animators: &mut Animators, input: MoveInput| {
-        let seconds = 1.0 / 60.0;
-        characters.step(world, &assets, input, seconds as f32);
-        axcenity_gameplay::step_humanoids(&mut scripts, world, &characters, seconds);
-        scripts.step_players(world, seconds);
-        scripts.step(world, seconds);
-        characters.keep_kinematic(world);
-        physics.step(world, seconds);
-        animators.update(world, &assets, seconds);
-    };
-    for _ in 0..30 {
-        frame(&mut world, &mut animators, MoveInput::default());
-    }
-    let player = world
-        .find_first_child(world.players(), "Player")
-        .unwrap_or_else(|| world.get(world.players()).unwrap().children()[0]);
-    let character = world
-        .get(player)
-        .unwrap()
-        .property("Character")
-        .and_then(Value::as_instance)
-        .unwrap();
-    let root = world
+    let mut game = Game::new("walks");
+    game.frames(30, MoveInput::default());
+    let character = game.character();
+    let root = game
+        .world
         .find_first_child(character, "HumanoidRootPart")
         .unwrap();
-    let body = world.find_first_child(character, "Body").unwrap();
-    let position = |world: &World, id| {
-        world
-            .get(id)
-            .unwrap()
-            .property("Position")
-            .unwrap()
-            .as_vector3()
-            .unwrap()
-    };
-    let start = position(&world, root);
+    let body = game.world.find_first_child(character, "Body").unwrap();
+    let start = game.vector(root, "Position");
     assert!(
         start.y > 2.0 && start.y < 3.0,
         "standing on the baseplate: {start:?}"
     );
-    let animator = world.find_first_child(body, "Animator").unwrap();
-    let state = |world: &World| world.animator(animator).unwrap().current_state.clone();
-    assert_eq!(state(&world), "Idle");
-    let idle = animators.poses()[&body].joints().to_vec();
-    for _ in 0..30 {
-        frame(&mut world, &mut animators, walk);
-    }
-    let moved = position(&world, root);
+    let animator = game.world.find_first_child(body, "Animator").unwrap();
+    let state = |game: &Game| game.world.animator(animator).unwrap().current_state.clone();
+    assert_eq!(state(&game), "Idle");
+    let idle = game.animators.poses()[&body].joints().to_vec();
+    game.frames(30, walk());
+    let moved = game.vector(root, "Position");
     assert!(
         moved.z < start.z - 4.0,
         "walked forward: {start:?} → {moved:?}"
     );
-    let body_at = position(&world, body);
-    assert!((body_at.z - moved.z).abs() < 0.5, "the mesh came along");
-    assert_eq!(state(&world), "Walk");
-    assert_ne!(animators.poses()[&body].joints(), idle.as_slice());
+    assert!(
+        (game.vector(body, "Position").z - moved.z).abs() < 0.5,
+        "the mesh came along"
+    );
+    assert_eq!(state(&game), "Walk");
+    assert_ne!(game.animators.poses()[&body].joints(), idle.as_slice());
     // Crouched, the root squashes (the mesh doesn't) and it plays
     // CrouchWalk, then Crouch standing still.
     let crouch = MoveInput {
         crouch: true,
-        ..walk
+        ..walk()
     };
-    for _ in 0..10 {
-        frame(&mut world, &mut animators, crouch);
-    }
-    assert_eq!(state(&world), "CrouchWalk");
-    let size = |world: &World, id| {
-        world
-            .get(id)
-            .unwrap()
-            .property("Size")
-            .unwrap()
-            .as_vector3()
-            .unwrap()
-    };
-    assert!(size(&world, root).y < 4.0, "{:?}", size(&world, root));
-    assert!((size(&world, body).y - 5.0).abs() < 0.1);
-    for _ in 0..10 {
-        frame(
-            &mut world,
-            &mut animators,
-            MoveInput {
-                forward: false,
-                ..crouch
-            },
-        );
-    }
-    assert_eq!(state(&world), "Crouch");
-    assert_eq!(animators.take_errors(), Vec::<String>::new());
-    assert!(
-        assets.take_errors().is_empty(),
-        "{:?}",
-        assets.take_errors()
+    game.frames(10, crouch);
+    assert_eq!(state(&game), "CrouchWalk");
+    let root_size = game.vector(root, "Size");
+    assert!(root_size.y < 4.0, "{root_size:?}");
+    assert!((game.vector(body, "Size").y - 5.0).abs() < 0.1);
+    game.frames(
+        10,
+        MoveInput {
+            forward: false,
+            ..crouch
+        },
     );
-    let _ = std::fs::remove_dir_all(&parent);
+    assert_eq!(state(&game), "Crouch");
+    game.no_errors();
+}
+
+/// HD4: a part from `HumanoidParts.glb` put inside the default character's
+/// Body follows its pose (each bone where the Body's is) and is placed
+/// where the Body's skeleton puts it, moving and turning with it.
+#[test]
+fn a_part_inside_the_body_follows_its_pose_and_place() {
+    let mut game = Game::new("parts");
+    axcenity_project::add_humanoid_parts(&game.folder).unwrap();
+    game.frames(10, MoveInput::default());
+    let character = game.character();
+    let body = game.world.find_first_child(character, "Body").unwrap();
+    let hair = axcenity_project::humanoid_part(&mut game.world, body, "Hair_Long");
+    let hair_mesh = axcenity_project::humanoid_part_mesh_id("Hair_Long");
+    let _ = game.assets.model_blocking(&hair_mesh);
+    game.frames(40, walk());
+    // Turn it too, so the place is checked off the axes.
+    game.frames(
+        20,
+        MoveInput {
+            right: true,
+            ..walk()
+        },
+    );
+    assert!(
+        game.animators.poses().contains_key(&hair),
+        "the hair is posed"
+    );
+    assert_eq!(
+        game.vector(hair, "Orientation"),
+        game.vector(body, "Orientation")
+    );
+    let hair_size = game.vector(hair, "Size");
+    assert!(
+        hair_size.y > 0.5 && hair_size.y < 2.5,
+        "hair is a small part of a 5-stud body: {hair_size:?}"
+    );
+    // The head bone is in the same place in the world in both, posed.
+    let bone_at = |game: &Game, part: InstanceId, mesh: &str| {
+        let rig = game
+            .assets
+            .model_blocking(mesh)
+            .unwrap()
+            .rig
+            .clone()
+            .unwrap();
+        let bone = rig.bone("Head").unwrap();
+        let posed = game.animators.poses().get(&part).cloned();
+        axcenity_anim::ragdoll::bone_in_world(&game.world, part, &rig, posed.as_deref(), bone)
+            .unwrap()
+            .w_axis
+    };
+    let body_head = bone_at(&game, body, MODEL);
+    let hair_head = bone_at(&game, hair, &hair_mesh);
+    assert!(
+        (body_head - hair_head).length() < 1e-3,
+        "{body_head:?} vs {hair_head:?}"
+    );
+    // And the hair's mesh sits around that head: its box's top is near
+    // the top of the body.
+    let top = |game: &Game, id| game.vector(id, "Position").y + game.vector(id, "Size").y * 0.5;
+    assert!(
+        (top(&game, hair) - top(&game, body)).abs() < 0.3,
+        "{} vs {}",
+        top(&game, hair),
+        top(&game, body)
+    );
+    // Swapping is setting the MeshId: the short hair is placed anew.
+    let short = axcenity_project::humanoid_part_mesh_id("Hair_Short");
+    game.world
+        .set_property(hair, "MeshId", Value::String(short.clone()))
+        .unwrap();
+    let _ = game.assets.model_blocking(&short);
+    game.frames(2, MoveInput::default());
+    assert_ne!(game.vector(hair, "Size"), hair_size);
+    assert!(game.animators.poses().contains_key(&hair));
+    assert!(
+        (bone_at(&game, hair, &short) - bone_at(&game, body, MODEL)).length() < 1e-3,
+        "the short hair's head is the body's"
+    );
+    game.no_errors();
 }
