@@ -3083,6 +3083,71 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`\"axcenity\"`, `\"arkit\"` or `\"vroid\"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.",
     ),
     (
+        ClassName::FaceControls,
+        "LayerOrder",
+        "The face layers' order, lowest first, as names separated by commas (`\"Base, Expression, Dialogue, Procedural, Override\"`): Base is these properties, Expression is `SetExpression`'s, Dialogue is lip sync, Procedural is blinking, gaze and idle motion, and Override is `SetOverride`'s. Layers left out keep their place after the named ones.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkEnabled",
+        "Whether the eyes blink by themselves, now and then.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkEyes",
+        "Which eyes blink by themselves: `\"Both\"`, `\"Left\"` or `\"Right\"`.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkIntervalMin",
+        "The fewest seconds between blinks; each wait is a random time from this to BlinkIntervalMax.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkIntervalMax",
+        "The most seconds between blinks.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkDuration",
+        "Seconds a blink takes, closing and opening.",
+    ),
+    (
+        ClassName::FaceControls,
+        "DoubleBlinkChance",
+        "How often a blink is followed straight away by another, from 0 (never) to 1 (always).",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeMode",
+        "What the eyes look at: `\"Animation\"` (only what the controls say), `\"Camera\"`, `\"Target\"` (GazeTarget) or `\"Position\"` (GazePosition). The eyes turn within the face profile's limits and look ahead again when the target is too far round.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeTarget",
+        "With GazeMode `\"Target\"`: the part, Attachment or character (a Model, looked at in its Head) to look at.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazePosition",
+        "With GazeMode `\"Position\"`: the point in the world to look at.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeSmoothing",
+        "About how many seconds the eyes take to catch up with a moving target; 0 follows at once.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeWeight",
+        "How much the gaze counts over the eye controls, from 0 to 1.",
+    ),
+    (
+        ClassName::FaceControls,
+        "IdleMotion",
+        "Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.",
+    ),
+    (
         ClassName::IKControl,
         "Type",
         "How it turns the bones: `\"Position\"` puts EndEffector at the Target, `\"Rotation\"` turns it as the Target is turned from the MeshPart, `\"Transform\"` does both, and `\"LookAt\"` faces it at the Target.",

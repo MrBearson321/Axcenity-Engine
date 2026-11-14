@@ -171,6 +171,13 @@ impl Assets {
             shared.fonts = None;
             return Reload::Reloaded;
         }
+        if crate::is_face_expression(file) {
+            let mut shared = self.lock();
+            return match shared.expressions.take() {
+                Some(_) => Reload::Reloaded,
+                None => Reload::Unused,
+            };
+        }
         if crate::is_face_profile(file) {
             let mut shared = self.lock();
             return match shared.faces.take() {

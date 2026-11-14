@@ -263,6 +263,172 @@ pub fn face_control(name: &str) -> Option<usize> {
         .position(|control| control.name == name)
 }
 
+/// The layers a face's controls are blended through, lowest first by
+/// default: the FaceControls' own properties, expressions, dialogue (lip
+/// sync), procedural motion (blinks, gaze, idle), and gameplay overrides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum FaceLayer {
+    Base,
+    Expression,
+    Dialogue,
+    Procedural,
+    Override,
+}
+
+impl FaceLayer {
+    pub const ALL: [FaceLayer; 5] = [
+        FaceLayer::Base,
+        FaceLayer::Expression,
+        FaceLayer::Dialogue,
+        FaceLayer::Procedural,
+        FaceLayer::Override,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FaceLayer::Base => "Base",
+            FaceLayer::Expression => "Expression",
+            FaceLayer::Dialogue => "Dialogue",
+            FaceLayer::Procedural => "Procedural",
+            FaceLayer::Override => "Override",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|layer| layer.as_str().eq_ignore_ascii_case(name.trim()))
+    }
+
+    /// A FaceControls' `LayerOrder` read: each layer named once, in its
+    /// order; layers left out keep their default place after the named
+    /// ones. `None` names an unknown layer.
+    pub fn order(text: &str) -> Result<Vec<FaceLayer>, String> {
+        let mut order = Vec::new();
+        for name in text
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            let Some(layer) = FaceLayer::from_name(name) else {
+                return Err(format!(
+                    "`{name}` isn't a face layer (Base, Expression, Dialogue, Procedural or Override)"
+                ));
+            };
+            if !order.contains(&layer) {
+                order.push(layer);
+            }
+        }
+        for layer in FaceLayer::ALL {
+            if !order.contains(&layer) {
+                order.push(layer);
+            }
+        }
+        Ok(order)
+    }
+}
+
+/// How a layer goes over the ones under it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FaceBlend {
+    /// Its values replace those under it, by its weight.
+    #[default]
+    Override,
+    /// Its values are added to those under it, by its weight.
+    Additive,
+}
+
+/// A layer's settings, which `FaceControls:SetLayer` changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaceLayerSetting {
+    /// How much it counts, 0 to 1.
+    pub weight: f64,
+    pub blend: FaceBlend,
+    /// The controls it may move (by index in [`FACE_CONTROLS`]), or `None`
+    /// for all.
+    pub mask: Option<Vec<usize>>,
+}
+
+impl Default for FaceLayerSetting {
+    fn default() -> Self {
+        Self {
+            weight: 1.0,
+            blend: FaceBlend::Override,
+            mask: None,
+        }
+    }
+}
+
+/// An expression a script set with `FaceControls:SetExpression`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExpressionPlay {
+    /// The expression's name (`Happy`) or file path.
+    pub name: String,
+    /// How strongly it's shown now, and where that's heading.
+    pub intensity: f64,
+    pub target_intensity: f64,
+    /// How far it has faded in, 0 to 1, and where that's heading (0 once
+    /// it's cleared, when it's then dropped).
+    pub presence: f64,
+    pub target_presence: f64,
+    /// Seconds a change takes; `None`: the expression file's own.
+    pub transition: Option<f64>,
+    /// How much it counts against those under it, 0 to 1.
+    pub weight: f64,
+    /// Higher goes over lower; equal ones go in the order they were set.
+    pub priority: i32,
+    /// -1 (only the left side) to 1 (only the right side); 0 is both.
+    pub asymmetry: f64,
+    /// When it was set, among this face's expressions.
+    pub order: u64,
+}
+
+/// A FaceControls' live state while the game runs: what scripts set
+/// through its methods, which the host's animation reads every frame. Not
+/// saved, like an Animator's.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FaceState {
+    /// Expressions playing or fading out, in the order they were set.
+    pub expressions: Vec<ExpressionPlay>,
+    /// Gameplay overrides, by control index: the value it's held at.
+    pub overrides: std::collections::BTreeMap<usize, f64>,
+    /// Layer settings changed from the defaults.
+    pub layers: std::collections::BTreeMap<FaceLayer, FaceLayerSetting>,
+    pub next_order: u64,
+}
+
+impl FaceState {
+    /// A layer's settings (the defaults when unchanged).
+    pub fn layer(&self, layer: FaceLayer) -> FaceLayerSetting {
+        self.layers.get(&layer).cloned().unwrap_or_default()
+    }
+}
+
+/// The controls a mask name stands for: a group's ("Eyes", "Eyebrows",
+/// "Mouth", "CheeksAndNose", "JawAndTongue") or one control's.
+pub fn face_mask_controls(name: &str) -> Option<Vec<usize>> {
+    let group = [
+        FaceGroup::Eyes,
+        FaceGroup::Eyebrows,
+        FaceGroup::Mouth,
+        FaceGroup::CheeksAndNose,
+        FaceGroup::JawAndTongue,
+    ]
+    .into_iter()
+    .find(|group| format!("{group:?}").eq_ignore_ascii_case(name.trim()));
+    match group {
+        Some(group) => Some(
+            FACE_CONTROLS
+                .iter()
+                .enumerate()
+                .filter(|(_, control)| control.group == group)
+                .map(|(index, _)| index)
+                .collect(),
+        ),
+        None => face_control(name.trim()).map(|index| vec![index]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +446,27 @@ mod tests {
         }
         assert_eq!(FACE_CONTROLS.len(), 48);
         assert_eq!(face_control("Blink"), None);
+    }
+
+    #[test]
+    fn layer_orders_and_masks_read_names() {
+        assert_eq!(
+            FaceLayer::order("override, Base").unwrap(),
+            [
+                FaceLayer::Override,
+                FaceLayer::Base,
+                FaceLayer::Expression,
+                FaceLayer::Dialogue,
+                FaceLayer::Procedural
+            ]
+        );
+        assert_eq!(FaceLayer::order("").unwrap(), FaceLayer::ALL);
+        assert!(FaceLayer::order("Base, Nose").is_err());
+        assert_eq!(face_mask_controls("eyebrows").unwrap().len(), 6);
+        assert_eq!(
+            face_mask_controls("Jaw_Open"),
+            face_control("Jaw_Open").map(|i| vec![i])
+        );
+        assert_eq!(face_mask_controls("Nose"), None);
     }
 }

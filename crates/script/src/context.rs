@@ -108,6 +108,10 @@ impl Context {
                 .expect("creating Animator methods only fails when out of memory"),
         );
         methods.extend(
+            crate::face::methods(&lua)
+                .expect("creating FaceControls methods only fails when out of memory"),
+        );
+        methods.extend(
             instance::property_animation_methods(&lua)
                 .expect("creating Animation methods only fails when out of memory"),
         );
@@ -895,6 +899,12 @@ impl Context {
         if let Some(mut camera) = self.lua.app_data_mut::<Camera>() {
             camera.set_host(state);
         }
+    }
+
+    /// Where the camera is now, as scripts see it.
+    pub fn camera_position(&self) -> Option<axcenity_core::Vector3> {
+        let camera = self.lua.app_data_ref::<Camera>()?;
+        Some(camera.state.position)
     }
 
     /// The view's size in pixels, for `ViewportSize` and screen points.

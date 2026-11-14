@@ -73,6 +73,7 @@ mod definitions;
 mod edit;
 mod errors;
 mod events;
+mod face;
 mod gui_service;
 mod handler_threads;
 pub mod hot_reload;
@@ -800,6 +801,16 @@ impl ScriptRuntime {
     /// Call it each frame after the player has moved the camera.
     pub fn set_camera(&mut self, camera: CameraState) {
         self.client.set_camera(camera);
+    }
+
+    /// Where the player's camera is (`workspace.CurrentCamera.Position`),
+    /// or `None` on a dedicated server, where no one looks. Faces with
+    /// GazeMode Camera look at it (`Animators::set_viewer`).
+    pub fn camera_position(&self) -> Option<Vector3> {
+        if self.dedicated {
+            return None;
+        }
+        self.client.camera_position()
     }
 
     /// The game view's size in pixels (`Camera.ViewportSize`): the

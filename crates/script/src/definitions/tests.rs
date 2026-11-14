@@ -340,6 +340,7 @@ fn described_fields_and_methods_exist() {
         (ClassName::Animation, "Instance.new('Animation')"),
         (ClassName::Sequence, "Instance.new('Sequence')"),
         (ClassName::Spline, "Instance.new('Spline')"),
+        (ClassName::FaceControls, "Instance.new('FaceControls')"),
         (
             ClassName::NavigationAgent,
             "Instance.new('NavigationAgent')",

@@ -2674,6 +2674,38 @@ impl ClassName {
                     // a `*.face.json` file's path, or empty for the one that
                     // names the most of the model's blend shapes.
                     ("Profile", Value::String(String::new())),
+                    // The layers' order, lowest first; layers left out keep
+                    // their place after the named ones.
+                    (
+                        "LayerOrder",
+                        Value::String("Base, Expression, Dialogue, Procedural, Override".into()),
+                    ),
+                    // Procedural blinking: on, which eyes ("Both", "Left",
+                    // "Right"), seconds between blinks (a random time from
+                    // min to max), seconds a blink takes, and how often a
+                    // blink is a double one (0 to 1).
+                    ("BlinkEnabled", Value::Bool(true)),
+                    ("BlinkEyes", Value::String("Both".into())),
+                    ("BlinkIntervalMin", Value::Number(2.0)),
+                    ("BlinkIntervalMax", Value::Number(6.0)),
+                    ("BlinkDuration", Value::Number(0.15)),
+                    ("DoubleBlinkChance", Value::Number(0.15)),
+                    // What the eyes look at: "Animation" (what the controls
+                    // say), "Camera", "Target" (GazeTarget: a part,
+                    // Attachment or character) or "Position" (GazePosition).
+                    ("GazeMode", Value::String("Animation".into())),
+                    ("GazeTarget", Value::Instance(None)),
+                    (
+                        "GazePosition",
+                        Value::Vector3(crate::Vector3::new(0.0, 0.0, 0.0)),
+                    ),
+                    // Seconds the eyes take to catch up with a moving target.
+                    ("GazeSmoothing", Value::Number(0.12)),
+                    // How much the gaze counts, 0 to 1.
+                    ("GazeWeight", Value::Number(1.0)),
+                    // Small idle movements (eye darts, brow drift), 0 (none)
+                    // to 1.
+                    ("IdleMotion", Value::Number(0.5)),
                 ];
                 properties.extend(
                     crate::face::FACE_CONTROLS
