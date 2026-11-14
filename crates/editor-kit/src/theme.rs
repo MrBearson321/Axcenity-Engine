@@ -1419,6 +1419,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ScatterRule => icons::TREE_STRUCTURE,
         ClassName::Biome => icons::MOUNTAINS,
         ClassName::TerrainPath => icons::PATH,
+        ClassName::BuildingGenerator => icons::BUILDINGS,
         ClassName::ThirdPersonController => icons::PERSON_SIMPLE_WALK,
         ClassName::FirstPersonController => icons::EYE,
         ClassName::NavigationAgent => icons::ROBOT,
@@ -1540,7 +1541,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::SplineFollower
         | ClassName::SplineMesh
         | ClassName::SplineScatter
-        | ClassName::TerrainPath => pick((90, 200, 160), (20, 130, 100)),
+        | ClassName::TerrainPath
+        | ClassName::BuildingGenerator => pick((90, 200, 160), (20, 130, 100)),
         class
             if class == ClassName::Attachment
                 || class == ClassName::WeldConstraint

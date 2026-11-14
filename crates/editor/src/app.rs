@@ -76,6 +76,7 @@ mod sequencer;
 mod session;
 pub(crate) mod settings;
 
+mod buildings;
 mod collab_conflicts;
 mod collab_handoff;
 mod collab_project;
@@ -2037,6 +2038,8 @@ mod autorecover_tests;
 mod behavior_tree_tests;
 #[cfg(test)]
 mod block_undo_tests;
+#[cfg(test)]
+mod building_tests;
 #[cfg(test)]
 mod camera_tests;
 #[cfg(test)]

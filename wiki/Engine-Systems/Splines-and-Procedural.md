@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [core, procedural, script]
-source: [crates/core/src/spline.rs, crates/procedural/src/lib.rs, crates/procedural/src/bend.rs, crates/procedural/src/scatter.rs, crates/procedural/src/flatten.rs, crates/procedural/src/rng.rs, crates/procedural/src/terrain_scatter.rs, crates/procedural/src/paths.rs, crates/procedural/src/route.rs, crates/script/src/spline.rs]
+source: [crates/core/src/spline.rs, crates/procedural/src/lib.rs, crates/procedural/src/bend.rs, crates/procedural/src/scatter.rs, crates/procedural/src/flatten.rs, crates/procedural/src/rng.rs, crates/procedural/src/terrain_scatter.rs, crates/procedural/src/paths.rs, crates/procedural/src/route.rs, crates/procedural/src/building.rs, crates/script/src/spline.rs]
 docs: [docs/architecture/splines.md, crates/procedural/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -14,7 +14,7 @@ tags: [system/splines, procedural]
 # Splines and procedural
 
 > [!summary]
-> A **Spline** is a curve of cubic Bézier stretches through its **SplinePoint** children (Auto, Linear or Free tangents), measured into an even-speed length table (`core::spline`, shared by `script`, `nav`, `anim` and `net`). **SplineFollowers** carry parts along it (server-side), NavigationAgents patrol it, Sequence cameras ride it. `procedural` makes what **SplineMeshes** (a model bent along the curve) and **SplineScatters** (models along or inside it, standing on the surface below) generate, keeps it up to date (`Generators::update`) and flattens terrain along a spline. A **TerrainPath** in a Spline (PW4) keeps terrain scatter rules off its strip and, in the editor, is applied (flatten and paint) or routed over hills within a grade. Generated children are never saved, sent or kept in slots: every device makes them from the same settings and seed. **Implemented.**
+> A **Spline** is a curve of cubic Bézier stretches through its **SplinePoint** children (Auto, Linear or Free tangents), measured into an even-speed length table (`core::spline`, shared by `script`, `nav`, `anim` and `net`). **SplineFollowers** carry parts along it (server-side), NavigationAgents patrol it, Sequence cameras ride it. `procedural` makes what **SplineMeshes** (a model bent along the curve) and **SplineScatters** (models along or inside it, standing on the surface below) generate, keeps it up to date (`Generators::update`) and flattens terrain along a spline. A **TerrainPath** in a Spline (PW4) keeps terrain scatter rules off its strip and, in the editor, is applied (flatten and paint) or routed over hills within a grade. A **BuildingGenerator** (PW6) makes a building of parts from a footprint (its own box, or a Spline's corners) and a seed. Generated children are never saved, sent or kept in slots: every device makes them from the same settings and seed. **Implemented.**
 
 ## Flow
 
@@ -30,6 +30,7 @@ flowchart LR
   C --> TP["paths.rs: TerrainPath strips<br/>(keep-off, Apply)"]
   TP --> TSC
   C --> RT["route.rs: Route, A* within MaxGrade"]
+  GEN --> BLD["building.rs: BuildingGenerator<br/>bays, slabs, roof (PW6)"]
 ```
 
 ## Development guidance
@@ -37,9 +38,10 @@ flowchart LR
 - Deterministic: the same spline, settings and seed give the same layout; use `rng.rs`, never `rand`; never iterate a `HashMap` into output.
 - Anything that saves, sends or snapshots the tree must leave generated children out (`core::spline::is_generator`).
 - Terrain scatter rules (PW1) keep their results in `TerrainData`'s generated chunks, not as children; see [Terrain](Terrain.md).
+- A BuildingGenerator is a generator with its own `Position`, `Orientation` and `Size`, so the transform handles move its footprint; `viewport::movable_parts` leaves out anything a generator made.
 - A TerrainPath is a setting, not a generator: its keep-off is live, but Apply and Route change saved data (heights, paint, points) and are editor undo steps.
 - `procedural` depends on `core`, `assets`, `terrain` only, so the server and player share it.
 
 ## Related documentation
 
-`docs/architecture/splines.md`; `examples/hello-splines`, `examples/hello-roads`; [Terrain](Terrain.md), [Networking](Networking.md); the procedural worlds plan (scatter rules, biomes, presets, roads, buildings, mesh terrain proposal): `docs/research/procedural-worlds.md`
+`docs/architecture/splines.md`; `examples/hello-splines`, `examples/hello-roads`, `examples/hello-buildings`; [Terrain](Terrain.md), [Networking](Networking.md); the procedural worlds plan (scatter rules, biomes, presets, roads, buildings, mesh terrain proposal): `docs/research/procedural-worlds.md`

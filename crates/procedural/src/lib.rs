@@ -10,11 +10,18 @@
 //! devices or kept in save slots (`core::spline::is_generator`). Bake (in
 //! the editor) turns them into ordinary Instances.
 //!
+//! A **BuildingGenerator** makes a building from a footprint
+//! ([`building`], procedural worlds PW6): parts, made and never saved the
+//! same way.
+//!
 //! Every host keeps one [`Generators`] per world and calls
 //! [`Generators::update`] each frame: the editor while editing, and the
 //! script runtime's step in the game, the server and editor Play.
 
 mod bend;
+pub mod building;
+#[cfg(test)]
+mod building_tests;
 mod flatten;
 mod footprint;
 #[cfg(test)]
@@ -40,10 +47,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use axcenity_assets::Assets;
 use axcenity_core::spline::{SplineCurve, is_generator};
-use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, PartType, Value, Vector3, World};
 use glam::{EulerRot, Quat, Vec2, Vec3};
 
 pub use bend::{MAX_PIECES, Piece, bend, frame, piece_count};
+pub use building::{Block, BuildingSettings, Footprint, Look, Roof, plan};
 pub use flatten::flatten_along;
 pub use footprint::blend_footprint;
 pub use paths::{KeepOff, PathSettings, apply_path, keep_offs};
@@ -55,7 +63,8 @@ pub use surface::Surfaces;
 /// a file. Shared by every world, so two never use one id.
 static NEXT_MODEL: AtomicU64 = AtomicU64::new(1);
 
-/// What each SplineMesh and SplineScatter in one world last made.
+/// What each SplineMesh, SplineScatter and BuildingGenerator in one world
+/// last made.
 #[derive(Default)]
 pub struct Generators {
     made: HashMap<InstanceId, Made>,
@@ -84,7 +93,7 @@ impl Generators {
     pub fn update(&mut self, world: &mut World, assets: &Assets) -> Vec<String> {
         self.assets = Some(assets.clone());
         let mut generators: Vec<InstanceId> = world.all_below(world.root(), is_generator);
-        // Stable: SplineMeshes first, each kind in tree order.
+        // Stable: SplineMeshes and buildings first, each kind in tree order.
         generators.sort_by_key(|&id| {
             world
                 .get(id)
@@ -135,6 +144,7 @@ impl Generators {
                     self.meshes_made += 1;
                     make_pieces(world, assets, id)
                 }
+                ClassName::BuildingGenerator => make_building(world, assets, id),
                 _ => make_scatter(world, assets, id),
             };
             problems.extend(problem);
@@ -209,8 +219,8 @@ fn inputs(world: &World, assets: &Assets, generator: InstanceId, hasher: &mut De
     }
 }
 
-/// The model files a SplineMesh (`MeshId`) or SplineScatter (`Models`,
-/// split at `;`) uses.
+/// The model files a SplineMesh (`MeshId`), SplineScatter (`Models`,
+/// split at `;`) or BuildingGenerator (its modules) uses.
 fn model_ids(instance: &axcenity_core::Instance) -> Vec<String> {
     let text = |name| {
         instance
@@ -226,6 +236,7 @@ fn model_ids(instance: &axcenity_core::Instance) -> Vec<String> {
                 .into_iter()
                 .collect()
         }
+        ClassName::BuildingGenerator => BuildingSettings::of(instance).models(),
         _ => text("Models")
             .split(';')
             .map(str::trim)
@@ -384,6 +395,74 @@ fn make_scatter(world: &mut World, assets: &Assets, generator: InstanceId) -> Ou
     (results, Vec::new(), problem)
 }
 
+/// A BuildingGenerator's building: Parts, and MeshParts for its module
+/// models.
+fn make_building(world: &mut World, assets: &Assets, generator: InstanceId) -> Outcome {
+    let Some(instance) = world.get(generator) else {
+        return (Vec::new(), Vec::new(), None);
+    };
+    let name = instance.name().to_owned();
+    let settings = BuildingSettings::of(instance);
+    let can_collide = instance
+        .property("CanCollide")
+        .cloned()
+        .unwrap_or(Value::Bool(true));
+    let missing: Vec<String> = settings
+        .models()
+        .into_iter()
+        .filter(|model| assets.model_blocking(model).is_none())
+        .map(|model| format!("`{model}`"))
+        .collect();
+    let problem = (!missing.is_empty()).then(|| {
+        format!(
+            "The BuildingGenerator `{name}` can't load {}.",
+            missing.join(", ")
+        )
+    });
+    let Some(footprint) = Footprint::of(world, generator) else {
+        return (Vec::new(), Vec::new(), problem);
+    };
+    let mut results = Vec::new();
+    for block in plan(&footprint, &settings) {
+        let mut properties = vec![
+            ("Anchored", Value::Bool(true)),
+            ("Position", Value::Vector3(vector3(block.center))),
+            (
+                "Orientation",
+                Value::Vector3(orientation_from_rotation(block.rotation)),
+            ),
+            ("Size", Value::Vector3(vector3(block.size))),
+            ("CanCollide", can_collide.clone()),
+        ];
+        let class = match block.look {
+            Look::Model(model) => {
+                properties.push(("MeshId", Value::String(model)));
+                ClassName::MeshPart
+            }
+            Look::Part {
+                wedge,
+                material,
+                color,
+                transparency,
+            } => {
+                if wedge {
+                    properties.push(("Shape", Value::PartType(PartType::Wedge)));
+                }
+                properties.push(("Material", Value::Material(material)));
+                properties.push(("Color", Value::Color3(color)));
+                if transparency > 0.0 {
+                    properties.push(("Transparency", Value::Number(transparency.into())));
+                }
+                ClassName::Part
+            }
+        };
+        if let Some(id) = add_instance(world, generator, class, block.name, properties) {
+            results.push(id);
+        }
+    }
+    (results, Vec::new(), problem)
+}
+
 /// A new MeshPart named `name` with `properties`, in `generator`.
 fn add_result(
     world: &mut World,
@@ -391,7 +470,18 @@ fn add_result(
     name: &str,
     properties: Vec<(&str, Value)>,
 ) -> Option<InstanceId> {
-    let id = world.create(ClassName::MeshPart).ok()?;
+    add_instance(world, generator, ClassName::MeshPart, name, properties)
+}
+
+/// A new `class` named `name` with `properties`, in `generator`.
+fn add_instance(
+    world: &mut World,
+    generator: InstanceId,
+    class: ClassName,
+    name: &str,
+    properties: Vec<(&str, Value)>,
+) -> Option<InstanceId> {
+    let id = world.create(class).ok()?;
     let _ = world.set_name(id, name);
     for (key, value) in properties {
         let _ = world.set_property(id, key, value);

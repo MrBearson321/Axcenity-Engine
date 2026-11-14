@@ -1,0 +1,576 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Size": [
+            220,
+            1,
+            160
+          ],
+          "Color": [
+            0.36,
+            0.55,
+            0.3
+          ],
+          "Material": "Sand"
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Street",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            0.05,
+            0
+          ],
+          "Size": [
+            180,
+            0.1,
+            12
+          ],
+          "Color": [
+            0.22,
+            0.22,
+            0.24
+          ],
+          "Material": "Concrete"
+        }
+      },
+      {
+        "class": "Part",
+        "name": "NorthPavement",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            0.15,
+            -8
+          ],
+          "Size": [
+            180,
+            0.3,
+            4
+          ],
+          "Color": [
+            0.62,
+            0.6,
+            0.57
+          ],
+          "Material": "Concrete"
+        }
+      },
+      {
+        "class": "Part",
+        "name": "SouthPavement",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            0.15,
+            8
+          ],
+          "Size": [
+            180,
+            0.3,
+            4
+          ],
+          "Color": [
+            0.62,
+            0.6,
+            0.57
+          ],
+          "Material": "Concrete"
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "North1",
+        "properties": {
+          "Seed": 1,
+          "Position": [
+            -60,
+            0.5,
+            -17.0
+          ],
+          "Orientation": [
+            0,
+            180,
+            0
+          ],
+          "Size": [
+            20,
+            1,
+            14
+          ],
+          "Floors": 2,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "Brick",
+          "WallColor": [
+            0.78,
+            0.45,
+            0.36
+          ],
+          "RoofColor": [
+            0.32,
+            0.2,
+            0.18
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "North2",
+        "properties": {
+          "Seed": 2,
+          "Position": [
+            -36,
+            0.5,
+            -17.0
+          ],
+          "Orientation": [
+            0,
+            180,
+            0
+          ],
+          "Size": [
+            18,
+            1,
+            14
+          ],
+          "Floors": 3,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Flat",
+          "WallMaterial": "Concrete",
+          "WallColor": [
+            0.85,
+            0.82,
+            0.74
+          ],
+          "RoofColor": [
+            0.4,
+            0.4,
+            0.42
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "North3",
+        "properties": {
+          "Seed": 3,
+          "Position": [
+            -12,
+            0.5,
+            -18.0
+          ],
+          "Orientation": [
+            0,
+            180,
+            0
+          ],
+          "Size": [
+            22,
+            1,
+            16
+          ],
+          "Floors": 2,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "Brick",
+          "WallColor": [
+            0.86,
+            0.78,
+            0.66
+          ],
+          "RoofColor": [
+            0.45,
+            0.24,
+            0.2
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "North4",
+        "properties": {
+          "Seed": 4,
+          "Position": [
+            12,
+            0.5,
+            -17.0
+          ],
+          "Orientation": [
+            0,
+            180,
+            0
+          ],
+          "Size": [
+            16,
+            1,
+            14
+          ],
+          "Floors": 1,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "WoodPlanks",
+          "WallColor": [
+            0.72,
+            0.62,
+            0.5
+          ],
+          "RoofColor": [
+            0.3,
+            0.3,
+            0.34
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "North5",
+        "properties": {
+          "Seed": 5,
+          "Position": [
+            36,
+            0.5,
+            -19.0
+          ],
+          "Orientation": [
+            0,
+            180,
+            0
+          ],
+          "Size": [
+            20,
+            1,
+            18
+          ],
+          "Floors": 4,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Flat",
+          "WallMaterial": "Brick",
+          "WallColor": [
+            0.6,
+            0.36,
+            0.3
+          ],
+          "RoofColor": [
+            0.36,
+            0.36,
+            0.38
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "South1",
+        "properties": {
+          "Seed": 6,
+          "Position": [
+            -60,
+            0.5,
+            17.0
+          ],
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Size": [
+            18,
+            1,
+            14
+          ],
+          "Floors": 1,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "WoodPlanks",
+          "WallColor": [
+            0.82,
+            0.76,
+            0.62
+          ],
+          "RoofColor": [
+            0.4,
+            0.22,
+            0.18
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "South2",
+        "properties": {
+          "Seed": 7,
+          "Position": [
+            -36,
+            0.5,
+            18.0
+          ],
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Size": [
+            20,
+            1,
+            16
+          ],
+          "Floors": 2,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "Brick",
+          "WallColor": [
+            0.7,
+            0.5,
+            0.4
+          ],
+          "RoofColor": [
+            0.28,
+            0.28,
+            0.3
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "South3",
+        "properties": {
+          "Seed": 8,
+          "Position": [
+            -12,
+            0.5,
+            17.0
+          ],
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Size": [
+            18,
+            1,
+            14
+          ],
+          "Floors": 3,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Flat",
+          "WallMaterial": "Concrete",
+          "WallColor": [
+            0.9,
+            0.88,
+            0.82
+          ],
+          "RoofColor": [
+            0.42,
+            0.42,
+            0.44
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "South4",
+        "properties": {
+          "Seed": 9,
+          "Position": [
+            12,
+            0.5,
+            17.0
+          ],
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Size": [
+            22,
+            1,
+            14
+          ],
+          "Floors": 2,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "Brick",
+          "WallColor": [
+            0.86,
+            0.7,
+            0.55
+          ],
+          "RoofColor": [
+            0.45,
+            0.24,
+            0.2
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "BuildingGenerator",
+        "name": "South5",
+        "properties": {
+          "Seed": 10,
+          "Position": [
+            36,
+            0.5,
+            18.0
+          ],
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Size": [
+            18,
+            1,
+            16
+          ],
+          "Floors": 2,
+          "FloorHeight": 10,
+          "RoofStyle": "BuildingRoofStyle.Gable",
+          "WallMaterial": "Brick",
+          "WallColor": [
+            0.76,
+            0.6,
+            0.48
+          ],
+          "RoofColor": [
+            0.34,
+            0.22,
+            0.2
+          ],
+          "WindowChance": 0.7
+        }
+      },
+      {
+        "class": "Spline",
+        "name": "CornerShop",
+        "properties": {
+          "Closed": true
+        },
+        "children": [
+          {
+            "class": "SplinePoint",
+            "name": "Point1",
+            "properties": {
+              "Position": [
+                54,
+                0,
+                10
+              ],
+              "TangentMode": "SplineTangentMode.Linear"
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point2",
+            "properties": {
+              "Position": [
+                78,
+                0,
+                10
+              ],
+              "TangentMode": "SplineTangentMode.Linear"
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point3",
+            "properties": {
+              "Position": [
+                78,
+                0,
+                30
+              ],
+              "TangentMode": "SplineTangentMode.Linear"
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point4",
+            "properties": {
+              "Position": [
+                68,
+                0,
+                30
+              ],
+              "TangentMode": "SplineTangentMode.Linear"
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point5",
+            "properties": {
+              "Position": [
+                68,
+                0,
+                20
+              ],
+              "TangentMode": "SplineTangentMode.Linear"
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point6",
+            "properties": {
+              "Position": [
+                54,
+                0,
+                20
+              ],
+              "TangentMode": "SplineTangentMode.Linear"
+            }
+          },
+          {
+            "class": "BuildingGenerator",
+            "name": "Shop",
+            "properties": {
+              "Seed": 11,
+              "Floors": 2,
+              "RoofStyle": "BuildingRoofStyle.Flat",
+              "WallMaterial": "Brick",
+              "WallColor": [
+                0.55,
+                0.62,
+                0.7
+              ],
+              "RoofColor": [
+                0.36,
+                0.36,
+                0.38
+              ],
+              "WindowChance": 0.9
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false
+    }
+  }
+}

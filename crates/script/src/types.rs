@@ -540,6 +540,7 @@ pub enum EnumType {
     Precipitation,
     SplineTangentMode,
     SplineFollowMode,
+    BuildingRoofStyle,
     EffectOperation,
     NormalId,
     ModelStreamingMode,
@@ -556,7 +557,7 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 51] = [
+    pub const ALL: [EnumType; 52] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -595,6 +596,7 @@ impl EnumType {
         EnumType::Precipitation,
         EnumType::SplineTangentMode,
         EnumType::SplineFollowMode,
+        EnumType::BuildingRoofStyle,
         EnumType::EffectOperation,
         EnumType::NormalId,
         EnumType::ModelStreamingMode,
@@ -659,6 +661,7 @@ impl EnumType {
             EnumType::Precipitation => "Precipitation",
             EnumType::SplineTangentMode => "SplineTangentMode",
             EnumType::SplineFollowMode => "SplineFollowMode",
+            EnumType::BuildingRoofStyle => "BuildingRoofStyle",
             EnumType::EffectOperation => "EffectOperation",
             EnumType::NormalId => "NormalId",
             EnumType::ModelStreamingMode => "ModelStreamingMode",
@@ -725,6 +728,8 @@ impl EnumType {
             EnumType::SplineTangentMode => axcenity_core::spline::TangentMode::NAMES.to_vec(),
             // What a SplineFollower does at the ends of its spline.
             EnumType::SplineFollowMode => vec!["Loop", "PingPong", "Once"],
+            // A BuildingGenerator's roof (procedural worlds PW6).
+            EnumType::BuildingRoofStyle => vec!["Flat", "Gable"],
             // How an Effect changes what it changes (Phase 76).
             EnumType::EffectOperation => vec!["Add", "Multiply"],
             // A part's face: a Decal's `Face` (Phase 75).
@@ -883,6 +888,7 @@ impl LuaEnumItem {
             | EnumType::Precipitation
             | EnumType::SplineTangentMode
             | EnumType::SplineFollowMode
+            | EnumType::BuildingRoofStyle
             | EnumType::EffectOperation
             | EnumType::NormalId
             | EnumType::ModelStreamingMode

@@ -419,14 +419,18 @@ pub fn facing(direction: Vector3) -> Vector3 {
     Vector3::new(pitch + 0.0, yaw + 0.0, 0.0)
 }
 
-/// A SplineMesh or SplineScatter (Phase 74): its children are what it made
-/// from its spline, made again whenever that changes, and never saved,
-/// sent to other devices or kept in a save slot.
+/// A SplineMesh or SplineScatter (Phase 74), or a BuildingGenerator
+/// (procedural worlds PW6): its children are what it made from its
+/// settings (and its spline), made again whenever they change, and never
+/// saved, sent to other devices or kept in a save slot.
 pub fn is_generator(class: ClassName) -> bool {
-    matches!(class, ClassName::SplineMesh | ClassName::SplineScatter)
+    matches!(
+        class,
+        ClassName::SplineMesh | ClassName::SplineScatter | ClassName::BuildingGenerator
+    )
 }
 
-/// The SplineMesh or SplineScatter that made `id`, if it's inside one.
+/// The generator (see [`is_generator`]) that made `id`, if it's inside one.
 pub fn generator_of(world: &World, id: InstanceId) -> Option<InstanceId> {
     let mut at = world.get(id)?.parent();
     while let Some(current) = at {
@@ -439,8 +443,7 @@ pub fn generator_of(world: &World, id: InstanceId) -> Option<InstanceId> {
     None
 }
 
-/// True when `id` was made by a SplineMesh or SplineScatter (see
-/// [`is_generator`]).
+/// True when `id` was made by a generator (see [`is_generator`]).
 pub fn is_generated(world: &World, id: InstanceId) -> bool {
     generator_of(world, id).is_some()
 }

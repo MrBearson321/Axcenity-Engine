@@ -70,6 +70,7 @@ Click a class name to open its API Reference entry, with every property, method 
 | `Spline`, `SplinePoint` | A smooth path. |
 | `SplineFollower` | Moves something along a spline. |
 | `SplineMesh`, `SplineScatter` | A mesh bent along a spline (roads, rails), or objects scattered along it (fences, trees). |
+| `BuildingGenerator` | A building made from a footprint (its own box or a spline's corners): floors of walls, windows and a door under a flat or gable roof, from a seed. |
 
 ## Animation and sound
 

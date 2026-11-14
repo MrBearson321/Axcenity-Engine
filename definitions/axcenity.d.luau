@@ -1244,6 +1244,16 @@ declare extern type EnumSplineFollowModeItems with
 	Once: EnumSplineFollowMode
 end
 
+--- One choice of `Enum.BuildingRoofStyle`.
+declare extern type EnumBuildingRoofStyle extends EnumItem with
+end
+
+--- The choices of `Enum.BuildingRoofStyle`.
+declare extern type EnumBuildingRoofStyleItems with
+	Flat: EnumBuildingRoofStyle
+	Gable: EnumBuildingRoofStyle
+end
+
 --- One choice of `Enum.EffectOperation`.
 declare extern type EnumEffectOperation extends EnumItem with
 end
@@ -1434,6 +1444,7 @@ declare extern type EnumLibrary with
 	Precipitation: EnumPrecipitationItems
 	SplineTangentMode: EnumSplineTangentModeItems
 	SplineFollowMode: EnumSplineFollowModeItems
+	BuildingRoofStyle: EnumBuildingRoofStyleItems
 	EffectOperation: EnumEffectOperationItems
 	NormalId: EnumNormalIdItems
 	ModelStreamingMode: EnumModelStreamingModeItems
@@ -5778,6 +5789,51 @@ declare extern type TerrainPath extends Instance with
 	[string]: any
 end
 
+--- A building made from a footprint (procedural worlds PW6). Standing free, its footprint is its own box (Position, Size, and its turn round Y from Orientation, front facing -Z), which the editor's Move, Rotate and Scale handles change; inside a Spline, the Spline's points are its corners. On a foundation Size.Y studs thick, it stacks Floors storeys FloorHeight studs tall of wall bays about BayWidth studs wide, each a window (WindowChance of them) or plain wall, with a doorway in the middle of the front, under a Flat or Gable roof. Bays, the door and corners are built-in parts unless WallModel, WindowModel, DoorModel or CornerModel name a model to stretch into place. The same Seed gives the same building. Its parts are made again on every device whenever its settings change and are never saved; Bake in the editor keeps them as a Model.
+declare extern type BuildingGenerator extends Instance with
+	--- Changes which bays get windows. The same Seed and settings give the same building. 1 by default.
+	Seed: number
+	--- Standing free: the middle of its foundation, in studs. Ignored inside a Spline.
+	Position: Vector3
+	--- Standing free: only its turn round Y (degrees) counts, so the building stays upright; its front (with the door) faces -Z turned by it. Ignored inside a Spline.
+	Orientation: Vector3
+	--- The foundation: width (X), thickness (Y) and depth (Z) in studs. Inside a Spline only the thickness counts, under the lowest point. 24, 1, 16 by default.
+	Size: Vector3
+	--- How many storeys, 1 to 50. 2 by default.
+	Floors: number
+	--- Studs from one floor to the next. 10 by default.
+	FloorHeight: number
+	--- `Enum.BuildingRoofStyle.Gable` (the default) puts a pitched roof over a rectangular footprint, its ridge along the longer side; `Flat`, or any footprint that isn't a rectangle, a flat one.
+	RoofStyle: EnumBuildingRoofStyle | "Flat" | "Gable"
+	--- Studs from the eaves to a gable roof's ridge. 6 by default.
+	RoofHeight: number
+	--- About how many studs of wall each window, door or plain bay takes: each side is cut into a whole number of equal bays. 8 by default.
+	BayWidth: number
+	--- The share of bays (0 to 1) that get a window rather than plain wall, picked by Seed. 0.7 by default.
+	WindowChance: number
+	--- Studs. 1 by default.
+	WallThickness: number
+	--- A model file stretched over each plain wall bay (its front, -Z, facing out). Empty (the default) uses a built-in part.
+	WallModel: string
+	--- A model file stretched over each window bay. Empty (the default) builds the window from parts with a glass pane.
+	WindowModel: string
+	--- A model file stretched over the door bay. Empty (the default) leaves an open doorway in parts.
+	DoorModel: string
+	--- A model file stretched over each corner, one a floor. Empty (the default) uses a built-in post.
+	CornerModel: string
+	--- The walls' Material. Brick by default.
+	WallMaterial: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	--- The walls' color.
+	WallColor: Color3
+	--- The floors, corners, sills and lintels' color.
+	TrimColor: Color3
+	--- The roof's color.
+	RoofColor: Color3
+	--- If true (the default), its parts are solid.
+	CanCollide: boolean
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -5798,7 +5854,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "SunRaysEffect") -> SunRaysEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: "DataLayer") -> DataLayer) & ((className: "ScatterRule") -> ScatterRule) & ((className: "Biome") -> Biome) & ((className: "TerrainPath") -> TerrainPath) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "SunRaysEffect") -> SunRaysEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: "DataLayer") -> DataLayer) & ((className: "ScatterRule") -> ScatterRule) & ((className: "Biome") -> Biome) & ((className: "TerrainPath") -> TerrainPath) & ((className: "BuildingGenerator") -> BuildingGenerator) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

@@ -106,6 +106,9 @@ pub enum Insertable {
     /// A TerrainPath in the selected Spline (or a new one): a road on the
     /// terrain (procedural worlds PW4).
     TerrainPath,
+    /// A BuildingGenerator in front of the camera, or in the selected
+    /// Spline, its points the corners (procedural worlds PW6).
+    BuildingGenerator,
     /// Inverse kinematics during the game for the selected skinned MeshPart.
     IKControl,
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
@@ -317,14 +320,16 @@ impl Insertable {
         Insertable::VehicleSeat,
         Insertable::VehicleWheel,
     ];
-    /// Splines, the mover that carries a part along one (Phase 73), and
-    /// what bends models along one or scatters them (Phase 74).
-    pub const SPLINES: [Insertable; 5] = [
+    /// Splines, the mover that carries a part along one (Phase 73), what
+    /// bends models along one or scatters them (Phase 74), roads (PW4) and
+    /// buildings (PW6).
+    pub const SPLINES: [Insertable; 6] = [
         Insertable::Spline,
         Insertable::SplineFollower,
         Insertable::SplineMesh,
         Insertable::SplineScatter,
         Insertable::TerrainPath,
+        Insertable::BuildingGenerator,
     ];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
@@ -428,6 +433,7 @@ impl Insertable {
             Insertable::SplineMesh => "Spline Mesh",
             Insertable::SplineScatter => "Spline Scatter",
             Insertable::TerrainPath => "Terrain Path",
+            Insertable::BuildingGenerator => "Building",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
@@ -513,6 +519,7 @@ impl Insertable {
             Insertable::SplineMesh => ClassName::SplineMesh,
             Insertable::SplineScatter => ClassName::SplineScatter,
             Insertable::TerrainPath => ClassName::TerrainPath,
+            Insertable::BuildingGenerator => ClassName::BuildingGenerator,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
@@ -1095,11 +1102,14 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             || (what == Insertable::SplineFollower
                 && (is_part || is_group)
                 && is_saved(world, id))
-            // A SplineMesh, SplineScatter or TerrainPath follows the
-            // Spline it's in.
+            // A SplineMesh, SplineScatter, TerrainPath or building follows
+            // the Spline it's in.
             || (matches!(
                 what,
-                Insertable::SplineMesh | Insertable::SplineScatter | Insertable::TerrainPath
+                Insertable::SplineMesh
+                    | Insertable::SplineScatter
+                    | Insertable::TerrainPath
+                    | Insertable::BuildingGenerator
             )
                 && world
                     .get(id)

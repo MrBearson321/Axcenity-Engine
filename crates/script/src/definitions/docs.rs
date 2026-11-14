@@ -2918,6 +2918,106 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The steepest the editor's Route lets the road climb, in degrees. 8 by default.",
     ),
     (
+        ClassName::BuildingGenerator,
+        "Seed",
+        "Changes which bays get windows. The same Seed and settings give the same building. 1 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "Position",
+        "Standing free: the middle of its foundation, in studs. Ignored inside a Spline.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "Orientation",
+        "Standing free: only its turn round Y (degrees) counts, so the building stays upright; its front (with the door) faces -Z turned by it. Ignored inside a Spline.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "Size",
+        "The foundation: width (X), thickness (Y) and depth (Z) in studs. Inside a Spline only the thickness counts, under the lowest point. 24, 1, 16 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "Floors",
+        "How many storeys, 1 to 50. 2 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "FloorHeight",
+        "Studs from one floor to the next. 10 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "RoofStyle",
+        "`Enum.BuildingRoofStyle.Gable` (the default) puts a pitched roof over a rectangular footprint, its ridge along the longer side; `Flat`, or any footprint that isn't a rectangle, a flat one.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "RoofHeight",
+        "Studs from the eaves to a gable roof's ridge. 6 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "BayWidth",
+        "About how many studs of wall each window, door or plain bay takes: each side is cut into a whole number of equal bays. 8 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "WindowChance",
+        "The share of bays (0 to 1) that get a window rather than plain wall, picked by Seed. 0.7 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "WallThickness",
+        "Studs. 1 by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "WallModel",
+        "A model file stretched over each plain wall bay (its front, -Z, facing out). Empty (the default) uses a built-in part.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "WindowModel",
+        "A model file stretched over each window bay. Empty (the default) builds the window from parts with a glass pane.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "DoorModel",
+        "A model file stretched over the door bay. Empty (the default) leaves an open doorway in parts.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "CornerModel",
+        "A model file stretched over each corner, one a floor. Empty (the default) uses a built-in post.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "WallMaterial",
+        "The walls' Material. Brick by default.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "WallColor",
+        "The walls' color.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "TrimColor",
+        "The floors, corners, sills and lintels' color.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "RoofColor",
+        "The roof's color.",
+    ),
+    (
+        ClassName::BuildingGenerator,
+        "CanCollide",
+        "If true (the default), its parts are solid.",
+    ),
+    (
         ClassName::ThirdPersonController,
         "Movement",
         "\"Walk\", \"Run\" or \"Crouch\", or any other name for a custom mode: the controller stops moving the character, and scripts and blocks move it. Set \"\" to clear a custom mode; the controller puts back the built-in mode it had. Set and read from a script or the set-property and property blocks.",
@@ -5587,6 +5687,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::TerrainPath => {
             "Inside a Spline: a road or path on the terrain (procedural worlds PW4), Width studs across along the Spline's curve. ScatterRules keep off it (ClearScatter) wherever it goes, on every device, without changing the terrain. In the editor, Apply to Terrain flattens the ground under it to the curve and paints its Layer, blending in over Falloff (one undo step), and Route lays the Spline's points over the terrain from its first point to its last, no stretch climbing more than MaxGrade degrees, so a road winds round or up a hill (one undo step). Put a SplineMesh in the same Spline for the road's surface."
+        }
+        ClassName::BuildingGenerator => {
+            "A building made from a footprint (procedural worlds PW6). Standing free, its footprint is its own box (Position, Size, and its turn round Y from Orientation, front facing -Z), which the editor's Move, Rotate and Scale handles change; inside a Spline, the Spline's points are its corners. On a foundation Size.Y studs thick, it stacks Floors storeys FloorHeight studs tall of wall bays about BayWidth studs wide, each a window (WindowChance of them) or plain wall, with a doorway in the middle of the front, under a Flat or Gable roof. Bays, the door and corners are built-in parts unless WallModel, WindowModel, DoorModel or CornerModel name a model to stretch into place. The same Seed gives the same building. Its parts are made again on every device whenever its settings change and are never saved; Bake in the editor keeps them as a Model."
         }
         ClassName::DataLayer => {
             "A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag."

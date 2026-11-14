@@ -124,9 +124,10 @@ impl EditorApp {
         self.generate_frame();
     }
 
-    /// Bake: what the SplineMesh or SplineScatter `generator` made becomes
-    /// ordinary Instances in a Model named after it, beside its Spline, and
-    /// it's removed, as one undo step. A SplineMesh's bent pieces are
+    /// Bake: what the SplineMesh, SplineScatter or BuildingGenerator
+    /// `generator` made becomes ordinary Instances in a Model named after
+    /// it, beside its Spline (or where it was, standing free), and it's
+    /// removed, as one undo step. A SplineMesh's bent pieces are
     /// saved as `assets/models/<name>.spline.glb` first (kept on undo, as
     /// a Fracture's pieces are).
     pub(super) fn bake_spline(&mut self, generator: InstanceId) {
@@ -143,13 +144,15 @@ impl EditorApp {
         let name = instance.name().to_owned();
         let class = instance.class();
         let results = instance.children().to_vec();
-        let Some(spline) = instance.parent() else {
+        let Some(parent) = instance.parent() else {
             return;
         };
         if results.is_empty() {
-            self.output.warning(format!(
-                "{name} hasn't made anything to bake: give it a model and a Spline with points."
-            ));
+            self.output.warning(if class == ClassName::BuildingGenerator {
+                format!("{name} hasn't made anything to bake: give it a Size, or 3 points in its Spline.")
+            } else {
+                format!("{name} hasn't made anything to bake: give it a model and a Spline with points.")
+            });
             return;
         }
         let mut pieces_file = None;
@@ -180,17 +183,25 @@ impl EditorApp {
             }
         }
         let before = self.world.clone();
-        let holder = self
+        // Beside its Spline, or where it was.
+        let in_spline = self
             .world
-            .get(spline)
-            .and_then(|s| s.parent())
-            .unwrap_or(self.world.workspace());
+            .get(parent)
+            .is_some_and(|p| p.class() == ClassName::Spline);
+        let (holder, after) = if in_spline {
+            let holder = self
+                .world
+                .get(parent)
+                .and_then(|s| s.parent())
+                .unwrap_or(self.world.workspace());
+            (holder, parent)
+        } else {
+            (parent, generator)
+        };
         let model = self
             .world
             .create(ClassName::Model)
             .expect("a Model can be made");
-        let unique = tree::unique_name(&self.world, holder, &name);
-        self.world.set_name(model, unique).expect("just made");
         for (i, &id) in results.iter().enumerate() {
             if let Some(file) = &pieces_file {
                 let mesh_id = Value::String(format!("{file}#Piece{}", i + 1));
@@ -201,16 +212,27 @@ impl EditorApp {
         let index = self
             .world
             .get(holder)
-            .and_then(|h| h.children().iter().position(|&c| c == spline))
+            .and_then(|h| h.children().iter().position(|&c| c == after))
             .map_or(0, |i| i + 1);
-        let _ = self.world.set_parent_at(model, holder, index);
         let _ = self.world.destroy(generator);
+        // A building standing free leaves its own place (and name) free.
+        let index = if in_spline {
+            index
+        } else {
+            index.saturating_sub(1)
+        };
+        let unique = tree::unique_name(&self.world, holder, &name);
+        self.world.set_name(model, unique).expect("just made");
+        let _ = self.world.set_parent_at(model, holder, index);
         self.history
             .record_world(&mut self.world, format!("Bake {name}"), before);
         self.select_from_viewport(Some(model));
         let count = results.len();
         self.output.info(match pieces_file {
             Some(file) => format!("Baked {name}: {count} pieces, saved in {file}."),
+            None if class == ClassName::BuildingGenerator => {
+                format!("Baked {name}: {count} parts.")
+            }
             None => format!("Baked {name}: {count} models."),
         });
     }

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Procedural buildings: a street of houses from a few settings"
+details = "Insert > Building makes a building from a footprint: its own box, which the Move, Rotate and Scale handles change, or the corners of a Spline. It stacks Floors of walls with windows and a front door under a flat or gable roof, varied by Seed, from built-in parts or your own wall, window, door and corner models. Change a setting and it's built again; Bake keeps it as ordinary parts. The Hello Buildings example is a street of them."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
