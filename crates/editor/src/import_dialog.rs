@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axcenity_assets::{Model, ModelObject, Take};
 use axcenity_core::ClassName;
@@ -102,6 +102,9 @@ pub struct ImportDialog {
     /// The model file being imported, outside the project.
     pub file: PathBuf,
     pub objects: Vec<ModelObject>,
+    /// How many blend shapes (morph targets) the model has, once it's
+    /// loaded for the preview.
+    blend_shapes: usize,
     /// One per object. Only the ticks of objects with meshes matter; a
     /// group shows its contents' ticks.
     ticked: Vec<bool>,
@@ -126,6 +129,10 @@ pub struct ImportDialog {
     /// The asset package being imported, for a `.axpkg` file (then there's
     /// no model).
     pub package: Option<PackageImport>,
+    /// The file `file` was converted from, for a format the engine doesn't
+    /// read itself (a USD file made into a `.glb`, ADR-0027): named in the
+    /// title and Output, and noted in the copy's sidecar.
+    pub source: Option<PathBuf>,
     /// The tab shown (the first tab if it isn't one of [`tabs`](Self::tabs)).
     pub tab: Tab,
     /// The model drawn beside the tabs; `None` without one (an
@@ -163,8 +170,10 @@ impl ImportDialog {
             animation: None,
             animation_only: false,
             package: None,
+            source: None,
             tab: Tab::Objects,
             preview: None,
+            blend_shapes: 0,
             previewing: 0,
             buttons: None,
             import_button: None,
@@ -189,6 +198,11 @@ impl ImportDialog {
         }
     }
 
+    /// The file the person picked: the one converted, if it was, else `file`.
+    pub fn shown_file(&self) -> &Path {
+        self.source.as_deref().unwrap_or(&self.file)
+    }
+
     /// Adds the file's animation. An animated file comes in as one
     /// MeshPart by default, so one Animator moves all of it.
     pub fn with_animation(mut self, animation: Option<AnimationImport>) -> Self {
@@ -202,6 +216,7 @@ impl ImportDialog {
     /// Adds a preview of the file's `model` (as loaded from it), playing
     /// clips made from its `takes`.
     pub fn with_preview(mut self, model: Model, takes: Vec<Take>) -> Self {
+        self.blend_shapes = model.morph_targets.len();
         self.preview = Some(ImportPreview::new(&self.file, model, takes));
         self
     }
@@ -364,6 +379,9 @@ impl ImportDialog {
                 parts.push(format!("{} triangles", thousands(triangles)));
             }
             parts.push(plural(self.materials.len(), "material"));
+            if self.blend_shapes > 0 {
+                parts.push(plural(self.blend_shapes, "blend shape"));
+            }
         }
         if let Some(animation) = &self.animation {
             if !animation.bones.is_empty() {
@@ -434,7 +452,7 @@ impl ImportDialog {
     /// The title, what the file holds, and the tabs.
     fn header(&mut self, ui: &mut egui::Ui) {
         let file_name = self
-            .file
+            .shown_file()
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();

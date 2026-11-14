@@ -106,6 +106,7 @@ impl PartialEq for TerrainShape {
     fn eq(&self, other: &Self) -> bool {
         self.data.uid() == other.data.uid()
             && self.data.revision() == other.data.revision()
+            && self.data.generated_version() == other.data.generated_version()
             && self.foliage_models == other.foliage_models
     }
 }
@@ -114,8 +115,7 @@ impl PartialEq for TerrainShape {
 /// key (or none while it can't be read).
 pub fn colliding_model_keys(data: &TerrainData, assets: &Assets) -> Vec<(String, Option<u64>)> {
     let mut paths: Vec<String> = data
-        .foliage()
-        .iter()
+        .all_foliage()
         .filter(|instance| instance.collide)
         .filter_map(|instance| match &instance.source {
             FoliageSource::Model(path) => Some(path.clone()),
@@ -725,7 +725,7 @@ pub fn foliage_colliders(data: &TerrainData, size: Vec3, assets: &Assets) -> Vec
 /// Local pose, form, and size of each colliding foliage instance.
 pub fn foliage_forms(data: &TerrainData, size: Vec3, assets: &Assets) -> Vec<(Pose, Form, Vec3)> {
     let mut forms = Vec::new();
-    for instance in data.foliage() {
+    for instance in data.all_foliage() {
         if !instance.collide {
             continue;
         }

@@ -19,7 +19,7 @@ Click a class name to open its API Reference entry, with every property, method 
 | `Folder` | A group for tidiness only. |
 | `SpawnLocation` | Where players appear. |
 | `Seat`, `VehicleSeat` | Places to sit; a VehicleSeat drives a vehicle. |
-| `Terrain`, `TerrainLayer` | The landscape and its painted layers. |
+| `Terrain`, `TerrainLayer`, `ScatterRule` | The landscape, its painted layers and the rules that scatter plants and props over it. |
 | `Decal`, `ProjectedDecal` | Pictures on a surface, or projected onto whatever is in a box. |
 
 ## Lights and effects

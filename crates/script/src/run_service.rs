@@ -172,18 +172,21 @@ pub fn fire_stepped(lua: &Lua, seconds: f64) {
 /// priority in the order bound), each as its own coroutine, then fires
 /// `RenderStepped`. All get the frame's length in seconds.
 pub fn render_step(lua: &Lua, seconds: f64) {
-    let mut bound: Vec<(f64, u64, Function, Option<InstanceId>)> = lua
+    let mut bound: Vec<(f64, u64, Function, Option<InstanceId>, String)> = lua
         .app_data_ref::<RenderSteps>()
         .map(|steps| {
             steps
                 .bound
                 .iter()
-                .map(|b| (b.priority, b.order, b.callback.clone(), b.script))
+                .map(|b| {
+                    let name = b.name.clone();
+                    (b.priority, b.order, b.callback.clone(), b.script, name)
+                })
                 .collect()
         })
         .unwrap_or_default();
     bound.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    for (_, order, callback, script) in bound {
+    for (_, order, callback, script, name) in bound {
         // An earlier function may have unbound this one.
         let still_bound = lua
             .app_data_ref::<RenderSteps>()
@@ -191,7 +194,8 @@ pub fn render_step(lua: &Lua, seconds: f64) {
         if !still_bound {
             continue;
         }
-        crate::handler_threads::run(lua, callback, seconds, script);
+        let event = || format!("BindToRenderStep \"{name}\"");
+        crate::handler_threads::run(lua, callback, seconds, script, event);
     }
     events::fire(lua, Owner::RunService, "RenderStepped", seconds);
 }
