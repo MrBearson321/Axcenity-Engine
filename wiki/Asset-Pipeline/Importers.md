@@ -14,7 +14,7 @@ tags: [asset-pipeline, import]
 # Importers
 
 > [!summary]
-> Models are read at load time by `assets`: **glTF 2.0** with the `gltf` crate **FBX** (binary or ASCII, any version) and **OBJ** (with its `.mtl`, P7.1) with `ufbx`, converted to glTF's space (Y up, right-handed, meters). Every model is **fitted into the 1×1×1 cube** so `Size` stretches it like a built-in part. Materials become metallic-roughness with their maps; texture **roles are also read from file names** (`_BaseColor`, `_N`, `ORM`, …) including channel-packed layouts. LODs come from the file's `_LOD1`/`_LOD2` objects or are simplified with **meshoptimizer**. Rigs, skins and takes are read for animation. USD files are **converted to `.glb`** by the editor-only `convert` crate before the Import dialog opens (P7.2, [ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md)). The editor's one **Import…** copies files into the project. **Implemented.**
+> Models are read at load time by `assets`: **glTF 2.0** with the `gltf` crate **FBX** (binary or ASCII, any version) and **OBJ** (with its `.mtl`, P7.1) with `ufbx`, converted to glTF's space (Y up, right-handed, meters). Every model is **fitted into the 1×1×1 cube** so `Size` stretches it like a built-in part. Materials become metallic-roughness with their maps; texture **roles are also read from file names** (`_BaseColor`, `_N`, `ORM`, …) including channel-packed layouts. LODs come from the file's `_LOD1`/`_LOD2` objects or are simplified with **meshoptimizer**. Rigs, skins and takes (FBX animation stacks and glTF animations) are read for animation. USD files are **converted to `.glb`** by the editor-only `convert` crate before the Import dialog opens (P7.2, [ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md)). The editor's one **Import…** copies files into the project. **Implemented.**
 
 ## What the editor's import does
 
@@ -33,7 +33,7 @@ tags: [asset-pipeline, import]
 | LODs | `_LOD1`/`_LOD2` objects, else meshopt to 1/2 and 1/4 of triangles (≥ 256 triangles; a copy that saves < 20% is dropped) | Same; hidden LOD objects read too |
 | Collision pieces (R15.2) | `_COL`/`_COL1`… objects: one convex piece each, not drawn, `Model::collision` | Same; hidden pieces read too |
 | Rig | glTF skins | Skeletons, clusters (inverse bind), takes baked at the file's frame rate |
-| Not read | Vertex colors, `KHR_materials_emissive_strength`, glTF animation | Per-UV-set texture choice |
+| Not read | Vertex colors, `KHR_materials_emissive_strength`, glTF morph-weight animation | Per-UV-set texture choice |
 
 A `MeshId` can pick objects in a file (`file.fbx#A/B,C`, `model/objects.rs`). FBX textures are looked for only inside the model's folder (relative path, file name, a `textures` folder).
 
