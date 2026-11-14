@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [anim, assets, render]
-source: [crates/anim/src/lib.rs, crates/anim/src/retarget.rs, crates/anim/src/retarget/roles.rs, crates/anim/src/retarget/check.rs, crates/assets/src/rig_definition.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
+source: [crates/assets/src/model/morph.rs, crates/anim/src/lib.rs, crates/anim/src/retarget.rs, crates/anim/src/retarget/roles.rs, crates/anim/src/retarget/check.rs, crates/assets/src/rig_definition.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
 docs: [docs/rendering/animation.md, docs/scripting/api-animation.md, docs/project/animation-files.md, docs/project/sequences.md, crates/anim/CLAUDE.md]
 verified: 2026-11-14
 verified_commit: f6d5427f
@@ -55,7 +55,7 @@ flowchart LR
 - Format 1 clip files still read (converted).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
-- No blend shapes (morph targets) and no facial animation yet: glTF morph targets and FBX blend shapes are dropped on import. Plan: `docs/research/facial-animation.md` (F1–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
+- Blend shapes (morph targets) are imported (F1: `Model::morph_targets`, sparse `Primitive::morphs`, applied by `Posed::primitive` on the CPU) but not yet drawn morphed on the GPU (F2), and there is no facial animation yet. Plan: `docs/research/facial-animation.md` (F1–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
 - Retargeting has rig definitions and fingers (AP1) but no profiles yet: rest poses must match (T vs A pose plays as motion) and nothing corrects feet sliding when leg shapes differ (foot IK helps). Plan: `docs/research/animation-production.md` (AP2-AP7).
 
 ## Development guidance

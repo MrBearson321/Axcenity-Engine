@@ -23,7 +23,7 @@ use super::objects::{self, Listed, Siblings};
 use super::{
     AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, InProject, Joint, Keys,
     MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take,
-    Track, cooked_texture, decode_image, file_origin, fit, fit_matrix, missing, new_key,
+    Track, cooked_texture, decode_image, file_origin, fit, fit_matrix, missing, morph, new_key,
     smooth_normals, want,
 };
 
@@ -56,12 +56,14 @@ pub(super) fn load(
         warnings: Vec::new(),
         level: 0,
         pieces: super::collision::Pieces::default(),
+        morph_names: morph::MorphNames::default(),
     };
     let mut models = Vec::new();
     for pick in picks {
         // Each model notes its own materials' problems.
         reader.materials.clear();
         reader.joints.clear();
+        reader.morph_names.clear();
         let wanted = pick.paths();
         let mut found = HashSet::new();
         reader.children(&scene.root_node, "", &wanted, &mut found);
@@ -76,6 +78,8 @@ pub(super) fn load(
         if !reader.joints.is_empty() {
             model.rig = Some(Arc::new(rig(&scene, &reader.joints, fit_matrix(&model))));
         }
+        model.morph_targets = std::mem::take(&mut reader.morph_names.targets);
+        reader.morph_names.clear();
         // A texture that can't be used is noted by the first model that has it.
         model.warnings = std::mem::take(&mut reader.warnings);
         models.push(model);
@@ -551,6 +555,82 @@ fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
 }
 
 /// Collects each mesh's triangles in model space.
+/// One blend shape of an FBX mesh, placed as the mesh is.
+struct Shape {
+    name: String,
+    default_weight: f32,
+    /// Each moved file vertex's position and normal change, at weight 1.
+    offsets: HashMap<u32, (Vec3, Vec3)>,
+    has_normals: bool,
+}
+
+/// The blend shapes of `mesh` (its blend deformers' channels), placed by
+/// `transform`. A channel with in-between shapes uses its full one (target
+/// weight 1, or the highest).
+fn blend_shapes(mesh: &ufbx::Mesh, transform: DMat4, normal_matrix: DMat3) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    for deformer in &mesh.blend_deformers {
+        for channel in &deformer.channels {
+            let full = channel.target_shape.as_deref().or_else(|| {
+                channel
+                    .keyframes
+                    .iter()
+                    .max_by(|a, b| a.target_weight.total_cmp(&b.target_weight))
+                    .map(|keyframe| &*keyframe.shape)
+            });
+            let Some(shape) = full else {
+                continue;
+            };
+            // Some exporters write all-zero normal offsets for "not
+            // worked out": those are worked out from the moved triangles.
+            let has_normals = shape.normal_offsets.len() == shape.num_offsets
+                && shape
+                    .normal_offsets
+                    .iter()
+                    .any(|n| n.x != 0.0 || n.y != 0.0 || n.z != 0.0);
+            let mut offsets = HashMap::with_capacity(shape.num_offsets);
+            for at in 0..shape.num_offsets {
+                let (Some(&vertex), Some(position)) = (
+                    shape.offset_vertices.get(at),
+                    shape.position_offsets.get(at),
+                ) else {
+                    continue;
+                };
+                let weight = shape.offset_weights.get(at).copied().unwrap_or(1.0);
+                let position = transform
+                    .transform_vector3(dvec3(*position) * weight)
+                    .as_vec3();
+                let normal = match has_normals {
+                    true => (normal_matrix * (dvec3(shape.normal_offsets[at]) * weight)).as_vec3(),
+                    false => Vec3::ZERO,
+                };
+                offsets.insert(vertex, (position, normal));
+            }
+            let name = if channel.element.name.is_empty() {
+                shape.element.name.to_string()
+            } else {
+                channel.element.name.to_string()
+            };
+            shapes.push(Shape {
+                name: shape_name(&name),
+                default_weight: channel.weight as f32,
+                offsets,
+                has_normals,
+            });
+        }
+    }
+    shapes
+}
+
+/// A blend channel's name without the deformer's prefix some exporters
+/// add (Maya writes `blendShape1.Smile`).
+fn shape_name(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((_, last)) if !last.is_empty() => last.to_owned(),
+        _ => name.to_owned(),
+    }
+}
+
 struct Reader<'a> {
     /// The nodes some take moves (see [`animated_nodes`]).
     animated: HashSet<u32>,
@@ -578,6 +658,8 @@ struct Reader<'a> {
     level: u8,
     /// The collision pieces read (see [`super::collision`]).
     pieces: super::collision::Pieces,
+    /// The blend shapes' names so far (see [`super::morph`]).
+    morph_names: morph::MorphNames,
 }
 
 impl Reader<'_> {
@@ -669,6 +751,9 @@ impl Reader<'_> {
             rigid_joint = Some(index);
         }
 
+        let shapes = blend_shapes(mesh, transform, normal_matrix);
+        let has_shapes = !shapes.is_empty();
+
         for part in &mesh.material_parts {
             if part.num_triangles == 0 {
                 continue;
@@ -691,6 +776,8 @@ impl Reader<'_> {
             let mut indices = Vec::new();
             let mut joints = Vec::new();
             let mut weights = Vec::new();
+            // The file's vertex each corner is, for its blend shapes.
+            let mut file_vertices: Vec<u32> = Vec::new();
             // Corners with the same position, normal and UV become one
             // vertex. The bit patterns compare exactly. Skin weights belong
             // to the file's vertices, so skinned corners of different ones
@@ -722,7 +809,7 @@ impl Reader<'_> {
                     };
                     let vertex_index = mesh.vertex_indices.get(index).copied().unwrap_or(0);
                     let mut key = [0; 9];
-                    if skin.is_some() {
+                    if skin.is_some() || has_shapes {
                         key[8] = vertex_index;
                     }
                     for (slot, value) in key.iter_mut().zip(
@@ -736,6 +823,7 @@ impl Reader<'_> {
                     }
                     let next = positions.len() as u32;
                     let vertex = *vertices.entry(key).or_insert_with(|| {
+                        file_vertices.push(vertex_index);
                         positions.push(position.to_array());
                         normals.push(normal.to_array());
                         if want_uvs {
@@ -762,6 +850,7 @@ impl Reader<'_> {
             if !mesh.vertex_normal.exists {
                 normals = smooth_normals(&positions, &indices);
             }
+            let morphs = self.morphs(&shapes, &file_vertices, (&positions, &normals, &indices));
             // A texture needs coordinates to be placed by.
             if uvs.is_empty() {
                 material.remove_textures();
@@ -776,10 +865,55 @@ impl Reader<'_> {
                 material,
                 joints,
                 weights,
+                morphs,
                 lods: Vec::new(),
                 level: self.level,
             });
         }
+    }
+
+    /// The blend shapes of one part of a mesh, whose corners are the file's
+    /// vertices `file_vertices` (already placed: `positions`, `normals`,
+    /// `indices`). `shapes` are the mesh's, each its name, default weight
+    /// and offsets by file vertex, already placed.
+    fn morphs(
+        &mut self,
+        shapes: &[Shape],
+        file_vertices: &[u32],
+        (positions, normals, indices): (&[[f32; 3]], &[[f32; 3]], &[u32]),
+    ) -> Vec<super::PrimitiveMorph> {
+        let mut morphs = Vec::new();
+        for shape in shapes {
+            let Some(target) = self.morph_names.target(&shape.name, shape.default_weight) else {
+                break;
+            };
+            let deltas: Vec<Vec3> = file_vertices
+                .iter()
+                .map(|vertex| {
+                    shape
+                        .offsets
+                        .get(vertex)
+                        .map_or(Vec3::ZERO, |(position, _)| *position)
+                })
+                .collect();
+            let normal_deltas: Option<Vec<Vec3>> = shape.has_normals.then(|| {
+                file_vertices
+                    .iter()
+                    .map(|vertex| shape.offsets.get(vertex).map_or(Vec3::ZERO, |(_, n)| *n))
+                    .collect()
+            });
+            if let Some(morph) = morph::sparse(
+                target,
+                positions,
+                normals,
+                indices,
+                &deltas,
+                normal_deltas.as_deref(),
+            ) {
+                morphs.push(morph);
+            }
+        }
+        morphs
     }
 
     /// Whether a take moves `node` or a node above it.

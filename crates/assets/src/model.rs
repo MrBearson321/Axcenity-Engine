@@ -14,6 +14,7 @@ mod lod;
 mod lod_cache;
 mod lod_report;
 mod maps;
+mod morph;
 mod objects;
 mod rig;
 mod stamped;
@@ -24,6 +25,7 @@ pub use collision::is_piece as is_collision_piece;
 pub use lod::level_of as lod_level;
 pub use lod_report::{LevelReport, LodReport, LodWarning, PrimitiveReport};
 pub use maps::{MapSlot, TextureRole, texture_pack_name, texture_roles};
+pub use morph::{MorphTarget, PrimitiveMorph, apply as apply_morphs};
 pub use objects::{ModelObject, Pick};
 pub use rig::{
     Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedPrimitive, Rig, Take, Track,
@@ -114,6 +116,10 @@ pub struct Model {
     /// FBX file with a skin or animation, or a glTF file with a skin). See
     /// [`Model::pose`].
     pub rig: Option<Arc<Rig>>,
+    /// Its blend shapes, which [`Primitive::morphs`] name by their place
+    /// here. Shapes of one name in several meshes are one target, so a
+    /// face split into meshes moves as one. Empty when it has none.
+    pub morph_targets: Vec<MorphTarget>,
 }
 
 impl Model {
@@ -159,6 +165,7 @@ impl Model {
                     material,
                     joints: primitive.joints.clone(),
                     weights: primitive.weights.clone(),
+                    morphs: primitive.morphs.clone(),
                     lods: Vec::new(),
                     level: primitive.level,
                 }
@@ -173,6 +180,7 @@ impl Model {
             collision: self.collision.clone(),
             warnings: Vec::new(),
             rig: self.rig.clone(),
+            morph_targets: self.morph_targets.clone(),
         }
     }
 
@@ -225,6 +233,10 @@ pub struct Primitive {
     /// moves). Empty when the model isn't animated.
     pub joints: Vec<[u16; 4]>,
     pub weights: Vec<[f32; 4]>,
+    /// The corners each of the model's blend shapes
+    /// ([`Model::morph_targets`]) moves here, one entry per shape that moves
+    /// any. Empty when none does.
+    pub morphs: Vec<PrimitiveMorph>,
     /// Simpler copies with the same material, each with fewer triangles
     /// than the one before, to draw far away: the file's own `_LOD1` and
     /// `_LOD2` objects, or simplified when the model was loaded (see
@@ -245,6 +257,11 @@ impl Primitive {
             + std::mem::size_of_val(self.indices.as_slice())
             + std::mem::size_of_val(self.joints.as_slice())
             + std::mem::size_of_val(self.weights.as_slice())
+            + self
+                .morphs
+                .iter()
+                .map(PrimitiveMorph::heap_bytes)
+                .sum::<usize>()
             + self.lods.iter().map(Primitive::heap_bytes).sum::<usize>()
     }
 
@@ -296,6 +313,7 @@ impl Primitive {
             material,
             joints: Vec::new(),
             weights: Vec::new(),
+            morphs: Vec::new(),
             lods: Vec::new(),
             level: 0,
         }
@@ -1000,6 +1018,7 @@ fn read(
         pieces: collision::Pieces::default(),
         joints: Vec::new(),
         skins: HashMap::new(),
+        morph_names: morph::MorphNames::default(),
     };
     let mut models = Vec::new();
     for pick in picks {
@@ -1008,6 +1027,7 @@ fn read(
         reader.found.clear();
         reader.joints.clear();
         reader.skins.clear();
+        reader.morph_names.clear();
         reader.walk(&document)?;
         if let Some(path) = missing(&reader.wanted, &reader.found) {
             return Err(ModelError::NoObject(path));
@@ -1024,6 +1044,8 @@ fn read(
                 fit_matrix(&model),
             )));
         }
+        model.morph_targets = std::mem::take(&mut reader.morph_names.targets);
+        reader.morph_names.clear();
         models.push(model);
     }
     Ok(models)
@@ -1304,6 +1326,8 @@ struct Reader<'a> {
     /// and where each skin's start in them.
     joints: Vec<(usize, Mat4)>,
     skins: HashMap<usize, u16>,
+    /// The blend shapes' names so far (see [`morph`]).
+    morph_names: morph::MorphNames,
 }
 
 impl Reader<'_> {
@@ -1506,6 +1530,25 @@ impl Reader<'_> {
                 }
             }
 
+            // Each morph target's moves and normal changes, placed as the
+            // corners are.
+            let targets: Vec<(Vec<Vec3>, Option<Vec<Vec3>>)> = reader
+                .read_morph_targets()
+                .map(|(moved, turned, _)| {
+                    let moved = moved
+                        .map(|deltas| {
+                            deltas
+                                .map(|d| transform.transform_vector3(Vec3::from(d)))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let turned = turned
+                        .map(|deltas| deltas.map(|d| normal_matrix * Vec3::from(d)).collect());
+                    (moved, turned)
+                })
+                .collect();
+            let morphs = self.morphs(mesh, targets, (&positions, &normals, &indices));
+
             self.primitives.push(Primitive {
                 key: new_key(),
                 positions,
@@ -1516,11 +1559,72 @@ impl Reader<'_> {
                 material,
                 joints,
                 weights,
+                morphs,
                 lods: Vec::new(),
                 level: self.level,
             });
         }
         Ok(())
+    }
+
+    /// The blend shapes (glTF morph targets) of one primitive of `mesh`,
+    /// each `targets` entry its moves and normal changes per corner, whose
+    /// corners are `positions`, `normals` and `indices`, all placed alike.
+    /// A shape's name is the mesh's `extras.targetNames` entry (Blender
+    /// writes its shape keys' names there), else `<mesh>.<n>`.
+    fn morphs(
+        &mut self,
+        mesh: &gltf::Mesh,
+        targets: Vec<(Vec<Vec3>, Option<Vec<Vec3>>)>,
+        (positions, normals, indices): (&[[f32; 3]], &[[f32; 3]], &[u32]),
+    ) -> Vec<PrimitiveMorph> {
+        #[derive(serde::Deserialize)]
+        struct Extras {
+            #[serde(rename = "targetNames")]
+            target_names: Option<Vec<String>>,
+        }
+        let names = mesh
+            .extras()
+            .as_ref()
+            .and_then(|raw| serde_json::from_str::<Extras>(raw.get()).ok())
+            .and_then(|extras| extras.target_names)
+            .unwrap_or_default();
+        let defaults = mesh.weights().unwrap_or(&[]);
+        let count = positions.len();
+        let mut morphs = Vec::new();
+        for (index, (deltas, normal_deltas)) in targets.into_iter().enumerate() {
+            let name = names
+                .get(index)
+                .filter(|name| !name.is_empty())
+                .cloned()
+                .unwrap_or_else(|| {
+                    let mesh_name = mesh.name().unwrap_or("Mesh");
+                    format!("{mesh_name}.{index}")
+                });
+            let Some(target) = self
+                .morph_names
+                .target(&name, defaults.get(index).copied().unwrap_or(0.0))
+            else {
+                break;
+            };
+            let deltas = if deltas.len() == count {
+                deltas
+            } else {
+                vec![Vec3::ZERO; count]
+            };
+            let normal_deltas = normal_deltas.filter(|deltas| deltas.len() == count);
+            if let Some(morph) = morph::sparse(
+                target,
+                positions,
+                normals,
+                indices,
+                &deltas,
+                normal_deltas.as_deref(),
+            ) {
+                morphs.push(morph);
+            }
+        }
+        morphs
     }
 
     /// The material and the texture coordinate set its textures use: the
@@ -1950,6 +2054,10 @@ fn fit_with(
                 hull_points.push(fitted.to_array());
             }
         }
+        if !primitive.morphs.is_empty() {
+            let before = primitive.normals.clone();
+            morph::fit(primitive, &before, scale, normal_scale);
+        }
         for normal in &mut primitive.normals {
             *normal = (Vec3::from(*normal) * normal_scale)
                 .normalize_or_zero()
@@ -1989,6 +2097,7 @@ fn fit_with(
         collision,
         warnings: Vec::new(),
         rig: None,
+        morph_targets: Vec::new(),
     })
 }
 

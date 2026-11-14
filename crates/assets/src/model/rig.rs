@@ -273,6 +273,10 @@ pub struct Posed {
     /// matching turn for normals.
     joints: Vec<Mat4>,
     normal_matrices: Vec<Mat3>,
+    /// How far toward each of the model's blend shapes
+    /// ([`Model::morph_targets`]) its corners lean, applied before the
+    /// joints move them.
+    morph_weights: Vec<f32>,
     /// How many primitives the model has.
     primitive_count: usize,
     /// Each primitive's corners at each level, the full one first
@@ -311,6 +315,32 @@ impl Posed {
         &self.normal_matrices
     }
 
+    /// How far toward each of the model's blend shapes its corners lean
+    /// ([`Model::morph_targets`] order), the file's default weights unless
+    /// set. What the renderer morphs with on the GPU, before skinning.
+    pub fn morph_weights(&self) -> &[f32] {
+        &self.morph_weights
+    }
+
+    /// Leans the model toward its blend shapes by `weights` (one per
+    /// [`Model::morph_targets`]; missing ones are 0, extra ones ignored).
+    /// Primitives already asked for are morphed again when next asked.
+    pub fn set_morph_weights(&mut self, weights: &[f32]) {
+        let count = self.morph_weights.len();
+        self.morph_weights.clear();
+        self.morph_weights
+            .extend((0..count).map(|index| weights.get(index).copied().unwrap_or(0.0)));
+        for slot in &mut self.posed {
+            *slot = OnceLock::new();
+        }
+        self.version = NEXT_VERSION.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether any blend shape is leaned toward at all.
+    pub fn is_morphed(&self) -> bool {
+        self.morph_weights.iter().any(|weight| *weight != 0.0)
+    }
+
     /// Primitive `index` of `model` (the model this is a pose of) at level
     /// of detail `level`: 0 is the primitive itself, 1 its first simpler
     /// copy ([`Primitive::lods`](super::Primitive::lods)), and so on. A level
@@ -339,8 +369,9 @@ impl Posed {
             .collect()
     }
 
-    /// `primitive`'s corners moved by the pose. Vertices weighted to
-    /// nothing stay where they are.
+    /// `primitive`'s corners moved by the pose: leaned toward its blend
+    /// shapes, then moved by the joints. Vertices weighted to no joint
+    /// stay where their shapes put them.
     fn skin(&self, primitive: &super::Primitive) -> PosedPrimitive {
         let joints = &self.joints;
         let mut posed = PosedPrimitive {
@@ -348,6 +379,12 @@ impl Posed {
             normals: primitive.normals.clone(),
             tangents: primitive.tangents.clone(),
         };
+        super::morph::apply(
+            &primitive.morphs,
+            &self.morph_weights,
+            &mut posed.positions,
+            &mut posed.normals,
+        );
         let count = primitive.joints.len().min(primitive.weights.len());
         for vertex in 0..count.min(posed.positions.len()) {
             let (indices, weights) = (primitive.joints[vertex], primitive.weights[vertex]);
@@ -389,7 +426,22 @@ impl Model {
     /// asked for (see [`Posed::primitive`]).
     pub fn pose(&self, pose: &[BoneTransform]) -> Option<Posed> {
         let rig = self.rig.as_ref()?;
-        let joints = rig.joint_matrices(pose);
+        Some(self.posed(rig.joint_matrices(pose)))
+    }
+
+    /// The model at rest (its rig's rest pose, if it has one), to lean
+    /// toward its blend shapes with [`Posed::set_morph_weights`]: how a
+    /// model with blend shapes and no skeleton is posed.
+    pub fn rest_posed(&self) -> Posed {
+        let joints = self
+            .rig
+            .as_ref()
+            .map(|rig| rig.joint_matrices(&rig.rest_pose()))
+            .unwrap_or_default();
+        self.posed(joints)
+    }
+
+    fn posed(&self, joints: Vec<Mat4>) -> Posed {
         // Normals are turned by the inverse transpose, so they stay
         // perpendicular to stretched surfaces.
         let normal_matrices = joints
@@ -403,16 +455,21 @@ impl Model {
             .map(|primitive| primitive.lods.len())
             .max()
             .unwrap_or(0);
-        Some(Posed {
+        Posed {
             model_key: self.key(),
             version: NEXT_VERSION.fetch_add(1, Ordering::Relaxed),
             joints,
             normal_matrices,
+            morph_weights: self
+                .morph_targets
+                .iter()
+                .map(|target| target.default_weight)
+                .collect(),
             primitive_count,
             posed: (0..levels * primitive_count)
                 .map(|_| OnceLock::new())
                 .collect(),
-        })
+        }
     }
 }
 
