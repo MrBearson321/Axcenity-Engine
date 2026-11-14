@@ -75,9 +75,9 @@ pub use default_humanoid::{
     COVERING, DEFAULT_CHARACTER_PREFAB_PATH, DEFAULT_HUMANOID_ANIMATIONS,
     DEFAULT_HUMANOID_ANIMATIONS_PATH, DEFAULT_HUMANOID_CLIPS_FOLDER, DEFAULT_HUMANOID_MODEL,
     DEFAULT_HUMANOID_MODEL_PATH, DEFAULT_HUMANOID_PARTS, DEFAULT_HUMANOID_PARTS_PATH,
-    DEFAULT_HUMANOID_STATE_MACHINE_PATH, HUMANOID_PARTS, ROOT_PART_SIZE, STUDS_PER_METRE,
-    add_default_humanoid, add_humanoid_parts, default_character, default_humanoid_animation_files,
-    humanoid_part, humanoid_part_mesh_id, modular_character,
+    DEFAULT_HUMANOID_STATE_MACHINE_PATH, HUMANOID_PARTS, HUMANOID_SOCKETS, ROOT_PART_SIZE,
+    STUDS_PER_METRE, add_default_humanoid, add_humanoid_parts, default_character,
+    default_humanoid_animation_files, humanoid_part, humanoid_part_mesh_id, modular_character,
 };
 pub use default_sky::{
     DEFAULT_SKY, DEFAULT_SKY_CLOCK_TIME, DEFAULT_SKY_LATITUDE, DEFAULT_SKY_PATH, add_default_sky,

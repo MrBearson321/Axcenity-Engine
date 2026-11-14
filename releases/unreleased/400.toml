@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Characters have body sliders and sockets for accessories"
+details = "Attributes on a skinned MeshPart (BodyHeight, LegLength, ArmLength, ShoulderWidth, WaistWidth, HipWidth, HeadSize, HandSize, FootSize) reshape a humanoid character, with its feet kept on the ground and its parts shaped the same. Attachments with a Bone attribute follow that bone, and a Part with an Attachment of the same name hangs from it, so hats, backpacks and held props move with the body. The default character has sockets on its head, back, hips, hands and feet."
+features = ["animation.clips"]
+fixes = []
+introduces_issues = []
+prs = [400]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

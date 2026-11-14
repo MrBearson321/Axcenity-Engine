@@ -39,6 +39,7 @@ flowchart LR
 - Debugging (AP6): `Model::pose` also keeps each bone's posed origin (`Posed::bones`), which the viewport's **Skeletons** overlay draws (rest skeletons from `Rig::skeleton` while editing); `Animators::inspect` is a read-only snapshot of one runner (state, fade, layers, tracks over it, parameters, the last 8 things it fired, root motion) for the editor's Debug > Animator Inspector.
 - `Posed::primitive` skins on the CPU only on request (tests, tools, the Model Studio's pose test), per LOD level.
 - **Followers** (default humanoid HD4, `Animators::follow`): a skinned MeshPart inside a posed one with no runner of its own takes its pose by bone name and is placed by its skeleton (`place_follower` writes its Size, Position and Orientation when they differ), so modular parts on one skeleton wear as one character from one Animator; a part swaps by `MeshId`. A follower's blend shapes stay at rest.
+- **Body sliders and sockets** (HD4): attributes on a skinned MeshPart (`BodyHeight`, `LegLength`, `ArmLength`, `ShoulderWidth`, `WaistWidth`, `HipWidth`, `HeadSize`, `HandSize`, `FootSize`) reshape the pose by humanoid role before IK; each bone's own scale goes into its joint matrix only (`Model::pose_shaped`), so children don't shear. Attachments with a `Bone` attribute follow that bone (sockets), and a part with an Attachment named like one is placed on it (accessories).
 
 ## Dependencies
 

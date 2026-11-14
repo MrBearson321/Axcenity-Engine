@@ -341,3 +341,184 @@ fn a_part_inside_the_body_follows_its_pose_and_place() {
     );
     game.no_errors();
 }
+
+/// Where bone `name` of the skinned MeshPart `part` is in the world, as
+/// posed now.
+fn bone_world(
+    game: &Game,
+    part: InstanceId,
+    mesh: &str,
+    name: &str,
+) -> axcenity_render::glam::Vec3 {
+    let rig = game
+        .assets
+        .model_blocking(mesh)
+        .unwrap()
+        .rig
+        .clone()
+        .unwrap();
+    let bone = rig.bone(name).unwrap();
+    let posed = game.animators.poses().get(&part).cloned();
+    let matrix =
+        axcenity_anim::ragdoll::bone_in_world(&game.world, part, &rig, posed.as_deref(), bone)
+            .unwrap();
+    matrix.w_axis.truncate()
+}
+
+/// A Part's or Attachment's Position and Orientation as one transform.
+fn frame_of(game: &Game, id: InstanceId) -> axcenity_render::glam::Mat4 {
+    let orientation = game.vector(id, "Orientation");
+    let rotation = axcenity_render::glam::Quat::from_euler(
+        axcenity_render::glam::EulerRot::YXZ,
+        orientation.y.to_radians(),
+        orientation.x.to_radians(),
+        orientation.z.to_radians(),
+    );
+    let position = game.vector(id, "Position");
+    axcenity_render::glam::Mat4::from_rotation_translation(
+        rotation,
+        axcenity_render::glam::Vec3::new(position.x, position.y, position.z),
+    )
+}
+
+/// HD4: the default character's sockets follow their bones, and an
+/// accessory with an Attachment named like one hangs from it.
+#[test]
+fn the_default_characters_sockets_follow_their_bones_and_carry_accessories() {
+    let mut game = Game::new("sockets");
+    game.frames(10, MoveInput::default());
+    let character = game.character();
+    let body = game.world.find_first_child(character, "Body").unwrap();
+    // A hat: a Part whose Attachment named HeadSocket is 0.4 studs below
+    // its middle.
+    let hat = game.world.create(ClassName::Part).unwrap();
+    game.world.set_name(hat, "Hat").unwrap();
+    game.world
+        .set_property(hat, "CanCollide", Value::Bool(false))
+        .unwrap();
+    game.world
+        .set_property(
+            hat,
+            "Size",
+            Value::Vector3(axcenity_core::Vector3::new(1.0, 0.8, 1.0)),
+        )
+        .unwrap();
+    let grip = game.world.create(ClassName::Attachment).unwrap();
+    game.world.set_name(grip, "HeadSocket").unwrap();
+    game.world
+        .set_property(
+            grip,
+            "Position",
+            Value::Vector3(axcenity_core::Vector3::new(0.0, -0.4, 0.0)),
+        )
+        .unwrap();
+    game.world.set_parent(grip, Some(hat)).unwrap();
+    game.world.set_parent(hat, Some(body)).unwrap();
+    game.frames(40, walk());
+    game.frames(
+        20,
+        MoveInput {
+            right: true,
+            ..walk()
+        },
+    );
+    let checks = [
+        ("HeadSocket", "Head"),
+        ("RightHandSocket", "RightHand"),
+        ("LeftFootSocket", "LeftFoot"),
+    ];
+    let body_frame = frame_of(&game, body);
+    for (socket_name, bone) in checks {
+        let socket = game.world.find_first_child(body, socket_name).unwrap();
+        let at = body_frame.transform_point3(frame_of(&game, socket).w_axis.truncate());
+        let expected = bone_world(&game, body, MODEL, bone);
+        assert!(
+            at.distance(expected) < 1e-3,
+            "{socket_name}: {at:?} vs {expected:?}"
+        );
+    }
+    // The hat's Attachment is on the head socket.
+    let socket = game.world.find_first_child(body, "HeadSocket").unwrap();
+    let socket_world = body_frame * frame_of(&game, socket);
+    let grip_world = frame_of(&game, hat) * frame_of(&game, grip);
+    assert!(
+        socket_world.abs_diff_eq(grip_world, 1e-3),
+        "{socket_world:?} vs {grip_world:?}"
+    );
+    // At rest a socket faces the way the character does: the hat's up is
+    // about up, and the head socket is near the top of the body.
+    let up = frame_of(&game, hat).transform_vector3(axcenity_render::glam::Vec3::Y);
+    assert!(up.y > 0.8, "{up:?}");
+    game.no_errors();
+}
+
+/// HD4: body sliders reshape the skeleton: longer legs keep the feet on
+/// the ground, a bigger head grows what's on it, and a part inside the
+/// body (hair) is shaped the same.
+#[test]
+fn body_sliders_reshape_the_default_character_and_its_parts() {
+    let mut plain = Game::new("plain");
+    let mut shaped = Game::new("shaped");
+    let setup = |game: &mut Game, sliders: &[(&str, f64)]| {
+        axcenity_project::add_humanoid_parts(&game.folder).unwrap();
+        game.frames(5, MoveInput::default());
+        let body = game
+            .world
+            .find_first_child(game.character(), "Body")
+            .unwrap();
+        for (name, value) in sliders {
+            game.world
+                .set_attribute(body, name, Some(Value::Number(*value)))
+                .unwrap();
+        }
+        let hair = axcenity_project::humanoid_part(&mut game.world, body, "Hair_Short");
+        let _ = game
+            .assets
+            .model_blocking(&axcenity_project::humanoid_part_mesh_id("Hair_Short"));
+        game.frames(20, MoveInput::default());
+        (body, hair)
+    };
+    let (plain_body, _) = setup(&mut plain, &[]);
+    let (body, hair) = setup(&mut shaped, &[("LegLength", 1.3), ("HeadSize", 1.4)]);
+    let ground = |game: &Game, body| {
+        let feet = bone_world(game, body, MODEL, "LeftFoot");
+        feet.y - (game.vector(body, "Position").y - game.vector(body, "Size").y * 0.5)
+    };
+    let hips = |game: &Game, body| bone_world(game, body, MODEL, "Hips").y;
+    assert!(
+        (ground(&shaped, body) - ground(&plain, plain_body)).abs() < 0.05,
+        "the ankle stays as high: {} vs {}",
+        ground(&shaped, body),
+        ground(&plain, plain_body)
+    );
+    assert!(
+        hips(&shaped, body) > hips(&plain, plain_body) + 0.4,
+        "longer legs raise the hips"
+    );
+    let eye_from_head = |game: &Game, body| {
+        bone_world(game, body, MODEL, "LeftEye").distance(bone_world(game, body, MODEL, "Head"))
+    };
+    let grew = eye_from_head(&shaped, body) / eye_from_head(&plain, plain_body);
+    assert!((grew - 1.4).abs() < 0.02, "{grew}");
+    // The hair takes the same head: its Head bone and its scale match.
+    let hair_mesh = axcenity_project::humanoid_part_mesh_id("Hair_Short");
+    let head = |part, mesh: &str| {
+        let rig = shaped
+            .assets
+            .model_blocking(mesh)
+            .unwrap()
+            .rig
+            .clone()
+            .unwrap();
+        let bone = rig.bone("Head").unwrap();
+        let posed = shaped.animators.poses().get(&part).cloned();
+        axcenity_anim::ragdoll::bone_in_world(&shaped.world, part, &rig, posed.as_deref(), bone)
+            .unwrap()
+    };
+    assert!(
+        head(body, MODEL).abs_diff_eq(head(hair, &hair_mesh), 1e-3),
+        "the hair's head is the body's, scaled the same"
+    );
+    plain.no_errors();
+    shaped.no_errors();
+}

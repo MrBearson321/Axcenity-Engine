@@ -31,6 +31,7 @@
 
 mod animators;
 mod blend_space;
+mod body_shape;
 mod bones;
 mod cleanup;
 mod clip;
@@ -48,6 +49,7 @@ mod property_clip;
 pub mod ragdoll;
 mod retarget;
 pub mod sequence;
+mod sockets;
 mod threads;
 
 pub use animators::{
@@ -55,6 +57,7 @@ pub use animators::{
     MachineView, PlayingView, Poses, load_clip, read_retarget_profile, read_state_machine,
 };
 pub use blend_space::{blend_space_weights, triangulate};
+pub use body_shape::{BODY_SLIDERS, BodyShape};
 pub use bones::{
     bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, convert_to_keys_with, find_bone,
     pose_bones, take_bones,
@@ -97,6 +100,7 @@ pub use retarget::{
     RigProblem, RigReport, RoleSetting, Segment, Severity, Side, check_pair, check_rig,
     is_retarget_profile, rest_arm_angle,
 };
+pub use sockets::SOCKET_BONE;
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
 
 // Facial LOD's counters (F7a), kept apart from the list above so pull
