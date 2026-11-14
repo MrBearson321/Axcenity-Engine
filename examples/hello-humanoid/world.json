@@ -1,0 +1,159 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "Color": [
+            0.42,
+            0.45,
+            0.48
+          ],
+          "Material": "Plastic",
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Roughness": 0.6,
+          "Shape": "Block",
+          "Size": [
+            60,
+            1,
+            60
+          ],
+          "Transparency": 0
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "Idle",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "MeshId": "assets/models/Humanoid/Humanoid.glb",
+          "Orientation": [
+            0,
+            30,
+            0
+          ],
+          "Position": [
+            -2.6,
+            2.546,
+            3.0
+          ],
+          "Size": [
+            3.8029,
+            5.092,
+            0.9786
+          ],
+          "Transparency": 0,
+          "WindAffected": false
+        },
+        "children": [
+          {
+            "class": "Animator",
+            "name": "Animator",
+            "properties": {
+              "Enabled": true,
+              "Speed": 1,
+              "StateMachine": "assets/animations/Humanoid/Idle.statemachine.json"
+            }
+          }
+        ]
+      },
+      {
+        "class": "MeshPart",
+        "name": "Walk",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "MeshId": "assets/models/Humanoid/Humanoid.glb",
+          "Orientation": [
+            0,
+            70,
+            0
+          ],
+          "Position": [
+            1.2,
+            2.546,
+            0.0
+          ],
+          "Size": [
+            3.8029,
+            5.092,
+            0.9786
+          ],
+          "Transparency": 0,
+          "WindAffected": false
+        },
+        "children": [
+          {
+            "class": "Animator",
+            "name": "Animator",
+            "properties": {
+              "Enabled": true,
+              "Speed": 1,
+              "StateMachine": "assets/animations/Humanoid/Walk.statemachine.json"
+            }
+          }
+        ]
+      },
+      {
+        "class": "MeshPart",
+        "name": "Wave",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "MeshId": "assets/models/Humanoid/Humanoid.glb",
+          "Orientation": [
+            0,
+            20,
+            0
+          ],
+          "Position": [
+            4.6,
+            2.546,
+            -3.0
+          ],
+          "Size": [
+            3.8029,
+            5.092,
+            0.9786
+          ],
+          "Transparency": 0,
+          "WindAffected": false
+        },
+        "children": [
+          {
+            "class": "Animator",
+            "name": "Animator",
+            "properties": {
+              "Enabled": true,
+              "Speed": 1,
+              "StateMachine": "assets/animations/Humanoid/Wave.statemachine.json"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false
+    }
+  }
+}
