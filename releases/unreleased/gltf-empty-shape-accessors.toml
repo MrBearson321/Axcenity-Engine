@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "assets"
+title = "Blender glTF files whose shape keys move only some meshes load again"
+details = "Blender's glTF exporter (with its default Try sparse shape keys) writes a shape key that doesn't move a mesh as an empty accessor, which glTF reads as zeros. Such files were refused as invalid; they now load, and that mesh simply doesn't move for that shape."
+features = ["assets.model-import"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
