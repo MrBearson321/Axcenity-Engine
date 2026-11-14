@@ -55,7 +55,7 @@ flowchart LR
 - Format 1 clip files still read (converted).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
-- Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Bone maps and profiles are edited in the Animation tab's Retargeting section (AP3). Plan: `docs/research/animation-production.md` (AP4-AP7).
+- Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Bone maps and profiles are edited in the Animation tab's Retargeting section (AP3). Keyed clips have Cleanup tools (AP4, `anim/src/cleanup.rs`): mirror (by the humanoid map and side words, baked a frame apart), smooth, reduce keys, fix the loop seam, re-time a range; they work on keys only, so a linked clip is converted first. Plan: `docs/research/animation-production.md` (AP5-AP7).
 
 ## Development guidance
 
