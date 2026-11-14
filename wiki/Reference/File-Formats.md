@@ -32,6 +32,7 @@ Every file the engine reads or writes, with its owner and where the full format 
 | `*.behaviortree.json`, `*.dialogue.json` | Behavior trees, dialogues | `nav`, `script` | — | `docs/architecture/navigation.md`, `docs/scripting/api-dialogue.md` |
 | `*.meshedit.json` | Model Studio sidecar (modifiers, paint layers, sculpt masks) | `mesh_edit::sidecar` | — | `docs/editor/model-studio.md` |
 | `<asset>.import.json` | Stable asset ID `ax://…`, import preset, the file it was converted from (`converted_from`, P7.2) | `assets::asset_id` | format_version 1 | `docs/editor/assets.md` |
+| `import-presets.json` | Texture import presets and folders' presets (R12), model import presets (`model_presets`, P7.3) | `assets::import_presets`, `assets::model_presets` | format_version 1 | `docs/editor/assets.md`, `docs/editor/import.md` |
 | `tests/**/*.spec.lua` | Game tests | `testing` | — | `docs/project/game-tests.md` |
 | `objects/**/*.lua` | Scripts inside objects, named by a script node's `SourceFile` (G2); world, level and prefab files holding such nodes are written as format `2` | `project` | — | `docs/project/world.md` |
 | `build-profiles.json`; beside a built game `build-report.json`, `build-report.txt` | Build profiles (R13; not packed); what a build put in the game and with what settings | `project::build_profiles` | format_version 1 | `docs/project/export.md` |

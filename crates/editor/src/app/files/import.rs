@@ -332,6 +332,7 @@ impl EditorApp {
         let mut dialog =
             ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
         dialog.source = self.converted.get(file).cloned();
+        self.start_with_preset(&mut dialog);
         if dialog.worth_asking() {
             // The model already loaded is what the dialog's preview draws.
             self.importing = Some(dialog.with_preview(model, takes));
@@ -357,8 +358,9 @@ impl EditorApp {
             .unwrap_or_default();
         let materials = surface::materials_maps(model.primitives.iter().map(|p| &p.material));
         let animation = AnimationImport::new(model.rig.as_deref(), &takes, &model_name);
-        let dialog =
+        let mut dialog =
             ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
+        self.start_with_preset(&mut dialog);
         self.import_chosen(&dialog);
         Ok(())
     }
@@ -374,7 +376,11 @@ impl EditorApp {
         let Some(dialog) = &mut self.importing else {
             return;
         };
-        match dialog.show(ctx, render_state) {
+        let answer = dialog.show(ctx, render_state);
+        if let Some((name, settings)) = dialog.save_preset.take() {
+            self.save_model_preset(&name, settings);
+        }
+        match answer {
             Some(Answer::Import) => {
                 let dialog = self.importing.take().expect("checked above");
                 if dialog.package.is_some() {
@@ -451,6 +457,7 @@ impl EditorApp {
         ));
         let copy_path = copy.to_owned();
         self.note_converted(dialog, &copy_path);
+        self.remember_preset(dialog);
         self.toolbox_imported(file, &copy_path);
         self.plugins_asset_imported(&copy_path);
         let animation = dialog
@@ -488,6 +495,7 @@ impl EditorApp {
                 self.world.set_name(id, &file_name).expect("just made");
                 self.add_surfaces(id, &model, dialog, &folder, &mut copied);
                 self.add_animator(id, &model, animation.as_ref());
+                self.apply_model_settings(&[id], position, &dialog.settings);
                 self.place_imported(parent, vec![id], format!("Import {file_name}"), &before);
             }
             Placement::Separate => {
@@ -505,6 +513,7 @@ impl EditorApp {
                         id
                     })
                     .collect();
+                self.apply_model_settings(&ids, position, &dialog.settings);
                 self.place_imported(parent, ids, format!("Import {file_name}"), &before);
             }
             Placement::Grouped => {
@@ -523,6 +532,7 @@ impl EditorApp {
                 }
                 let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
                 let mut groups = HashMap::new();
+                let mut made = Vec::new();
                 for (&i, (mesh_id, model)) in chosen.iter().zip(parts) {
                     let at = Vector3::new(
                         position.x + model.center[0] - middle[0],
@@ -530,6 +540,7 @@ impl EditorApp {
                         position.z + model.center[2] - middle[2],
                     );
                     let id = self.new_mesh_part(mesh_id, &model, at);
+                    made.push(id);
                     self.add_surfaces(id, &model, dialog, &folder, &mut copied);
                     self.add_animator(id, &model, animation.as_ref());
                     let container = self.group_of(dialog, i, root, &mut groups);
@@ -543,6 +554,9 @@ impl EditorApp {
                         .set_parent(id, Some(container))
                         .expect("a new part can go in a new Model");
                 }
+                // Scaled and turned before welding, so welds hold the
+                // parts where they end up.
+                self.apply_model_settings(&made, position, &dialog.settings);
                 // Welded inside the Model, so they're in the same undo step.
                 if dialog.weld {
                     crate::constraints::weld_model(&mut self.world, root);
