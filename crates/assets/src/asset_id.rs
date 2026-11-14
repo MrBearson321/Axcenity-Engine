@@ -154,7 +154,8 @@ pub fn takes_asset_id(path: &str) -> bool {
     };
     let extension = extension.to_ascii_lowercase();
     let extension = extension.as_str();
-    ["gltf", "glb", "fbx", "ttf", "otf"].contains(&extension)
+    crate::MODEL_EXTENSIONS.contains(&extension)
+        || ["ttf", "otf"].contains(&extension)
         || TEXTURE_EXTENSIONS.contains(&extension)
         || HDR_SKY_EXTENSIONS.contains(&extension)
         || AUDIO_EXTENSIONS.contains(&extension)

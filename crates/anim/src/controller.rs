@@ -220,7 +220,7 @@ impl Compiled {
             if path.is_empty() {
                 return None;
             }
-            match load_clip(path).and_then(|(clip, takes)| Clip::bind(clip, takes, rig)) {
+            match load_clip(path).and_then(|loaded| loaded.bind(rig)) {
                 Ok(clip) => Some(clip),
                 Err(problem) => {
                     problems.push(format!(

@@ -123,6 +123,13 @@ fn settings(lua: &Lua) -> GraphicsSettings {
         .unwrap_or_default()
 }
 
+/// What the GPU can do, as the host last said.
+fn capabilities(lua: &Lua) -> Capabilities {
+    lua.app_data_ref::<UserGraphics>()
+        .map(|graphics| graphics.capabilities)
+        .unwrap_or_default()
+}
+
 /// Changes the settings with `apply`, and marks them changed.
 fn change(lua: &Lua, apply: impl FnOnce(&mut GraphicsSettings, &Capabilities)) {
     if let Some(mut graphics) = lua.app_data_mut::<UserGraphics>() {
@@ -519,6 +526,23 @@ impl UserData for LuaUserGameSettings {
                 Ok(())
             },
         );
+
+        // Hardware ray tracing opens the GPU with ray queries, so a change
+        // is saved now and takes effect at the game's next start (RL2).
+        fields.add_field_method_get("HardwareRayTracing", |lua, _| {
+            Ok(settings(lua).ray_tracing())
+        });
+        fields.add_field_method_set("HardwareRayTracing", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "HardwareRayTracing", value)?;
+            change(lua, |settings, _| settings.ray_tracing = chosen);
+            Ok(())
+        });
+        fields.add_field_method_get("RayTracingSupported", |lua, _| {
+            Ok(capabilities(lua).ray_tracing_offered)
+        });
+        fields.add_field_method_get("RayTracingActive", |lua, _| {
+            Ok(capabilities(lua).ray_queries)
+        });
 
         fields.add_field_method_get("MasterVolume", |lua, _| Ok(world(lua)?.master_volume()));
         fields.add_field_method_set("MasterVolume", |lua, _, value: mlua::Value| {

@@ -130,7 +130,10 @@ fn load(path: &str, takes: &Arc<Vec<Take>>) -> Result<crate::animators::LoadedCl
         .into_iter()
         .find(|&d| clip_path(d) == path)
         .ok_or_else(|| format!("no clip `{path}`"))?;
-    Ok((strafe_clip(direction), Some(takes.clone())))
+    Ok(crate::LoadedClip::new(
+        strafe_clip(direction),
+        Some(takes.clone()),
+    ))
 }
 
 fn move_parameters(value: [f64; 2]) -> Parameters {
@@ -377,7 +380,7 @@ fn expected(assets: &Assets, run_phase: f64, reload: Option<(f64, f32)>) -> Vec<
     let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let rig = model.rig.as_deref().unwrap();
     let bind = |path: &str| {
-        let (file, takes) = crate::load_clip(assets, path).unwrap();
+        let crate::LoadedClip { file, takes, .. } = crate::load_clip(assets, path).unwrap();
         Clip::bind(file, takes, Some(rig)).unwrap()
     };
     let mut pose = rig.rest_pose();
@@ -439,13 +442,13 @@ fn an_upper_body_reload_layer_plays_while_running_and_the_legs_keep_running() {
     let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let rig = model.rig.as_deref().unwrap();
     let root_bone = rig.bone("Root").unwrap();
-    let (file, takes) = crate::load_clip(&assets, RELOAD).unwrap();
+    let crate::LoadedClip { file, takes, .. } = crate::load_clip(&assets, RELOAD).unwrap();
     let mut hop = rig.rest_pose();
     Clip::bind(file, takes, Some(rig))
         .unwrap()
         .sample(0.7, rig, &mut hop);
     let mut run = rig.rest_pose();
-    let (file, takes) = crate::load_clip(&assets, RUN).unwrap();
+    let crate::LoadedClip { file, takes, .. } = crate::load_clip(&assets, RUN).unwrap();
     Clip::bind(file, takes, Some(rig))
         .unwrap()
         .sample(3.2, rig, &mut run);

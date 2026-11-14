@@ -162,6 +162,8 @@ pub(super) enum Command {
     WaitForScript,
     /// File ▸ Build Game's Developer Console switch (Phase 71).
     DeveloperConsole,
+    /// File ▸ Build Game's Ray Traced Look by Default switch (RL2).
+    RayTracedByDefault,
     OpenStylesheet,
     NewStylesheet,
     CheckAssets,
@@ -188,6 +190,8 @@ pub(super) enum Command {
     /// Stream While Editing (roadmap R16.3).
     StreamEditing,
     ViewCube,
+    /// Viewport > Ray Tracing Badge.
+    RayBadge,
     Grid,
     MovementGuide,
     ViewportSettings,
@@ -550,6 +554,14 @@ impl EditorApp {
                 None,
                 Ok(()),
             );
+            add(
+                Command::RayTracedByDefault,
+                "Ray Traced Look by Default in Built Games",
+                "File › Build Game",
+                &["Ray Traced Look by Default"],
+                None,
+                Ok(()),
+            );
         }
         add(
             Command::OpenStylesheet,
@@ -796,6 +808,14 @@ impl EditorApp {
             "View Cube",
             "Viewport",
             &[],
+            None,
+            Ok(()),
+        );
+        add(
+            Command::RayBadge,
+            "Ray Tracing Badge",
+            "Viewport",
+            &["RTX", "Hide ray tracing badge"],
             None,
             Ok(()),
         );
@@ -1189,6 +1209,12 @@ impl EditorApp {
                     self.set_developer_console(on);
                 }
             }
+            Command::RayTracedByDefault => {
+                if let Some(project) = &self.project {
+                    let on = !project.ray_traced_by_default;
+                    self.set_ray_traced_by_default(on);
+                }
+            }
             Command::WaitForScript => {
                 if let Some(project) = &self.project {
                     let mut loading = project.loading_screen.clone();
@@ -1244,6 +1270,7 @@ impl EditorApp {
                 self.overlays.stream_editing = !self.overlays.stream_editing;
             }
             Command::ViewCube => self.view_cube = !self.view_cube,
+            Command::RayBadge => self.ray_badge = !self.ray_badge,
             Command::Grid => self.grid = !self.grid,
             Command::MovementGuide => self.move_guide = !self.move_guide,
             Command::ViewportSettings => {

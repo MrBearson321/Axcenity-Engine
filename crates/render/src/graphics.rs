@@ -38,6 +38,11 @@ pub fn read_capabilities(
         ray_queries: device
             .features()
             .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY),
+        // The device's own adapter was the last one `with_ray_queries` saw.
+        ray_tracing_offered: device
+            .features()
+            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
+            || crate::adapters::adapter_can_ray_trace(),
     }
 }
 

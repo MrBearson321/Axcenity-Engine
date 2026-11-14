@@ -50,7 +50,13 @@ const CUT_OUT_NEAR_CLOSE: f32 = 0.03;
 const CUT_OUT_NEAR_PER_STUD: f32 = 0.005;
 const CUT_OUT_NEAR: f32 = 0.35;
 
-fn cut_out_near(distance: f32) -> f32 {
+// The prepass normal's w on a cut-out's pixel (shader.wgsl's).
+const PREPASS_CUT_OUT: f32 = 0.875;
+
+fn cut_out_near(distance: f32, on_cut_out: bool) -> f32 {
+    if on_cut_out {
+        return CUT_OUT_NEAR;
+    }
     return min(CUT_OUT_NEAR_CLOSE + distance * CUT_OUT_NEAR_PER_STUD, CUT_OUT_NEAR);
 }
 
@@ -79,11 +85,11 @@ fn view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 
 // How near what the ray from `origin` along `direction` hits is, as a
 // share of `radius` (1 touching, 0 at the radius or nothing hit).
-// `distance` is how far the surface is from the camera.
-fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32, distance: f32) -> f32 {
+// `near` is how near a cut-out may be and not count (`cut_out_near`).
+fn hidden_along(origin: vec3<f32>, direction: vec3<f32>, radius: f32, near: f32) -> f32 {
     let nearest = min(
         nearest_hit(origin, direction, MASK_SOLID, 0.0, radius),
-        nearest_hit(origin, direction, MASK_CUT_OUTS, min(cut_out_near(distance), radius), radius));
+        nearest_hit(origin, direction, MASK_CUT_OUTS, min(near, radius), radius));
     return 1.0 - nearest / radius;
 }
 
@@ -116,8 +122,10 @@ fn fs_ray_occlusion(@builtin(position) position: vec4<f32>) -> @location(0) vec4
     if distance >= reach {
         return vec4<f32>(1.0, 1.0, 1.0, 0.0);
     }
-    let view_normal = normalize(textureLoad(normal_texture, pixel, 0).xyz);
+    let normal_texel = textureLoad(normal_texture, pixel, 0);
+    let view_normal = normalize(normal_texel.xyz);
     let n = normalize((rays.view_to_world * vec4<f32>(view_normal, 0.0)).xyz);
+    let near = cut_out_near(distance, abs(normal_texel.w - PREPASS_CUT_OUT) < 0.05);
     // A frame around the normal.
     let helper = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.99);
     let t = normalize(cross(helper, n));
@@ -137,7 +145,7 @@ fn fs_ray_occlusion(@builtin(position) position: vec4<f32>) -> @location(0) vec4
         let angle = turn + f32(i) * 2.3999632;
         let side = sqrt(k);
         let direction = t * (cos(angle) * side) + b * (sin(angle) * side) + n * sqrt(1.0 - k);
-        hidden += hidden_along(origin, direction, radius, distance);
+        hidden += hidden_along(origin, direction, radius, near);
     }
     let open = 1.0 - hidden / f32(count);
     let weight = 1.0 - smoothstep(reach * 0.85, reach, distance);

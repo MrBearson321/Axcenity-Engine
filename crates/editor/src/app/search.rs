@@ -460,6 +460,9 @@ fn command_description(command: &Command) -> String {
             "What a built game shows while it loads."
         }
         Command::DeveloperConsole => "Let players open the Developer Console (F9) in built games.",
+        Command::RayTracedByDefault => {
+            "Start built games with hardware ray tracing on GPUs that can ray trace."
+        }
         Command::OpenStylesheet => "Open a UI stylesheet to edit.",
         Command::NewStylesheet => "Make a new UI stylesheet.",
         Command::CheckAssets => {
@@ -492,6 +495,7 @@ fn command_description(command: &Command) -> String {
             "With Workspace streaming on, leave out what's far from the camera while editing, as in Play."
         }
         Command::ViewCube => "The cube in the viewport's corner that turns the camera to a face.",
+        Command::RayBadge => "Show or hide the badge saying which ray traced effects are drawing.",
         Command::Grid => "Lines and distances in studs on the baseplate, while editing.",
         Command::MovementGuide => {
             "While moving, resizing or turning a part: the guide line, snap points and distance."

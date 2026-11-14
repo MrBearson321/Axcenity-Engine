@@ -45,10 +45,14 @@ mod retarget;
 pub mod sequence;
 mod threads;
 
-pub use animators::{AnimatorEvent, Animators, Poses, load_clip, read_state_machine};
+pub use animators::{
+    AnimatorEvent, Animators, LoadedClip, Poses, load_clip, read_retarget_profile,
+    read_state_machine,
+};
 pub use blend_space::{blend_space_weights, triangulate};
 pub use bones::{
-    bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, find_bone, pose_bones, take_bones,
+    bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, convert_to_keys_with, find_bone,
+    pose_bones, take_bones,
 };
 pub use clip::{Clip, RootMotion};
 pub use controller::{
@@ -69,7 +73,11 @@ pub use property_clip::{
     current_numbers, model_pivot, numbers_of, resolve_target, sample_time, sample_track,
     target_path, value_from_numbers,
 };
-pub use retarget::{HumanBone, HumanoidMap};
+pub use retarget::{
+    Digit, HipsTravel, HumanBone, HumanoidMap, RETARGET_EXTENSION, ROLE_COUNT, RetargetProfile,
+    RigProblem, RigReport, RoleSetting, Segment, Severity, Side, check_pair, check_rig,
+    is_retarget_profile, rest_arm_angle,
+};
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
 
 #[cfg(test)]
