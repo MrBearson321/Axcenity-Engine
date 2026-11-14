@@ -1,0 +1,67 @@
+{
+  "format_version": 1,
+  "name": "VRoid",
+  "controls": {
+    "Blink_Left": "Fcl_EYE_Close_L",
+    "Blink_Right": "Fcl_EYE_Close_R",
+    "Eye_Closed_Left": "Fcl_EYE_Close_L",
+    "Eye_Closed_Right": "Fcl_EYE_Close_R",
+    "Eye_Squint_Left": [
+      { "shape": "Fcl_EYE_Joy_L", "weight": 0.5 }
+    ],
+    "Eye_Squint_Right": [
+      { "shape": "Fcl_EYE_Joy_R", "weight": 0.5 }
+    ],
+    "Eye_Wide_Left": [
+      { "shape": "Fcl_EYE_Surprised", "weight": 0.5 }
+    ],
+    "Eye_Wide_Right": [
+      { "shape": "Fcl_EYE_Surprised", "weight": 0.5 }
+    ],
+    "Brow_Raise_Left": [
+      { "shape": "Fcl_BRW_Surprised", "weight": 0.5 }
+    ],
+    "Brow_Raise_Right": [
+      { "shape": "Fcl_BRW_Surprised", "weight": 0.5 }
+    ],
+    "Brow_Lower_Left": [
+      { "shape": "Fcl_BRW_Angry", "weight": 0.5 }
+    ],
+    "Brow_Lower_Right": [
+      { "shape": "Fcl_BRW_Angry", "weight": 0.5 }
+    ],
+    "Brow_Inward_Left": [
+      { "shape": "Fcl_BRW_Sorrow", "weight": 0.5 }
+    ],
+    "Brow_Inward_Right": [
+      { "shape": "Fcl_BRW_Sorrow", "weight": 0.5 }
+    ],
+    "Mouth_Smile_Left": [
+      { "shape": "Fcl_MTH_Fun", "weight": 0.5 }
+    ],
+    "Mouth_Smile_Right": [
+      { "shape": "Fcl_MTH_Fun", "weight": 0.5 }
+    ],
+    "Mouth_Frown_Left": [
+      { "shape": "Fcl_MTH_Angry", "weight": 0.5 }
+    ],
+    "Mouth_Frown_Right": [
+      { "shape": "Fcl_MTH_Angry", "weight": 0.5 }
+    ],
+    "Mouth_Open": [
+      { "shape": "Fcl_MTH_A", "weight": 0.4 }
+    ],
+    "Mouth_Wide": [
+      { "shape": "Fcl_MTH_I", "weight": 0.7 }
+    ],
+    "Mouth_Narrow": "Fcl_MTH_Small",
+    "Mouth_Pucker": "Fcl_MTH_U",
+    "Upper_Lip_Raise": "Fcl_MTH_Up",
+    "Lower_Lip_Lower": "Fcl_MTH_Down",
+    "Jaw_Open": "Fcl_MTH_A"
+  },
+  "bones": {
+    "LeftEye": "J_Adj_L_FaceEye",
+    "RightEye": "J_Adj_R_FaceEye"
+  }
+}
