@@ -1418,6 +1418,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Terrain => icons::MOUNTAINS,
         ClassName::TerrainLayer => icons::STACK,
         ClassName::ScatterRule => icons::TREE_STRUCTURE,
+        ClassName::Biome => icons::MOUNTAINS,
+        ClassName::TerrainPath => icons::PATH,
         ClassName::ThirdPersonController => icons::PERSON_SIMPLE_WALK,
         ClassName::FirstPersonController => icons::EYE,
         ClassName::NavigationAgent => icons::ROBOT,
@@ -1525,9 +1527,10 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::ParticleEmitter => pick((232, 150, 108), (175, 80, 30)),
         ClassName::Animator => AnimKind::Animator.color(visuals),
         ClassName::Animation | ClassName::AnimationTrack => AnimKind::Animation.color(visuals),
-        ClassName::Terrain | ClassName::TerrainLayer | ClassName::ScatterRule => {
-            pick((140, 200, 110), (60, 125, 35))
-        }
+        ClassName::Terrain
+        | ClassName::TerrainLayer
+        | ClassName::ScatterRule
+        | ClassName::Biome => pick((140, 200, 110), (60, 125, 35)),
         ClassName::ThirdPersonController
         | ClassName::FirstPersonController
         | ClassName::NavigationAgent
@@ -1537,7 +1540,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::SplinePoint
         | ClassName::SplineFollower
         | ClassName::SplineMesh
-        | ClassName::SplineScatter => pick((90, 200, 160), (20, 130, 100)),
+        | ClassName::SplineScatter
+        | ClassName::TerrainPath => pick((90, 200, 160), (20, 130, 100)),
         class
             if class == ClassName::Attachment
                 || class == ClassName::WeldConstraint

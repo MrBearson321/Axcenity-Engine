@@ -294,5 +294,9 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
 // The depth and normal prepass, for ambient occlusion.
 @fragment
 fn fs_terrain_prepass(in: TerrainOut) -> @location(0) vec4<f32> {
-    return prepass_normal(normalize(in.normal));
+    // Marked rough (1 plus the roughness, as `fs_prepass` does), so ray
+    // traced reflections (ray_reflections.wgsl) leave terrain to the probes.
+    var normal = prepass_normal(normalize(in.normal));
+    normal.w = 1.999;
+    return normal;
 }

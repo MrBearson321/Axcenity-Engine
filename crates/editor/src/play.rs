@@ -764,6 +764,17 @@ impl Session {
         self.sim.animators.poses()
     }
 
+    /// What the animated thing `id` is, is in or holds is doing, for the
+    /// Animator Inspector (AP6). Reading it changes nothing.
+    pub fn inspect_animator(&self, id: InstanceId) -> Option<axcenity_anim::AnimatorView> {
+        self.sim.animators.inspect(self.world(), id)
+    }
+
+    /// Every animated thing, for the Animator Inspector to offer.
+    pub fn animated(&self) -> Vec<InstanceId> {
+        self.sim.animators.animated()
+    }
+
     /// The moving parts to draw between physics steps (roadmap G3), for
     /// the viewport.
     pub fn blends(&self) -> axcenity_scene::Blends {

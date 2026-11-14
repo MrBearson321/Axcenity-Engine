@@ -426,6 +426,7 @@
   },
   "starter_player": {
     "properties": {
+      "StarterCharacter": "assets/prefabs/Character.prefab.json",
       "CharacterFootPlacement": true
     }
   },

@@ -269,6 +269,9 @@ struct Body {
     feet_y: f32,
     height: f32,
     radius: f32,
+    /// True when `parts[0]` is a root part that alone is the body's box
+    /// (`root_part`); a crouch then squashes only it.
+    rooted: bool,
 }
 
 /// The part a character stands on and where that part was after the
@@ -633,6 +636,11 @@ impl Controllers {
             .map(|fall| fall.velocity)
     }
 
+    /// Whether the character `id` drives is crouched.
+    pub fn crouched(&self, id: InstanceId) -> bool {
+        self.crouches.contains_key(&id)
+    }
+
     /// The controllers that landed since the last call, each with how fast
     /// it was falling in studs a second. Hosts fire `Landed` with
     /// `ScriptRuntime::fire_landed`, which also applies fall damage.
@@ -810,6 +818,20 @@ fn parts_of(world: &World, controller: InstanceId) -> Vec<InstanceId> {
     }
 }
 
+/// The part a character is measured by, if it has one: its Model's
+/// `PrimaryPart`, else a part of it named `HumanoidRootPart` (as
+/// multiplayer ownership checks a character by). Only one of `parts`.
+fn root_part(world: &World, controller: InstanceId, parts: &[InstanceId]) -> Option<InstanceId> {
+    let holder = world.get(controller)?.parent()?;
+    let primary = world
+        .get(holder)?
+        .property("PrimaryPart")
+        .and_then(Value::as_instance);
+    primary
+        .or_else(|| world.find_first_child(holder, "HumanoidRootPart"))
+        .filter(|root| parts.contains(root))
+}
+
 /// Whether the character `controller` drives has a Ragdoll that's on.
 fn ragdolled(world: &World, controller: InstanceId) -> bool {
     let Some(holder) = world.get(controller).and_then(|c| c.parent()) else {
@@ -881,14 +903,30 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
 
 impl Body {
     fn read(world: &World, controller: InstanceId) -> Option<Self> {
-        let parts = parts_of(world, controller);
+        let mut parts = parts_of(world, controller);
         if parts.is_empty() {
             return None;
         }
+        // A character with a root part (its Model's PrimaryPart, else a
+        // part named HumanoidRootPart) is measured by that part alone, so
+        // a skinned mesh in an A-pose doesn't make the body as wide as its
+        // arms; every part still moves and turns with it. The root goes
+        // first, since turning and the collision group read the first.
+        let root = root_part(world, controller, &parts);
+        if let Some(root) = root
+            && let Some(at) = parts.iter().position(|&id| id == root)
+        {
+            parts.remove(at);
+            parts.insert(0, root);
+        }
+        let measured = match root {
+            Some(root) => vec![root],
+            None => parts.clone(),
+        };
         let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
         let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
         let mut any = false;
-        for id in &parts {
+        for id in &measured {
             let Some(instance) = world.get(*id) else {
                 continue;
             };
@@ -927,6 +965,7 @@ impl Body {
             feet_y: min.y,
             height: (max.y - min.y).max(0.5),
             radius: ((max.x - min.x).max(max.z - min.z) * 0.5).max(0.25),
+            rooted: root.is_some(),
         })
     }
 
@@ -1047,7 +1086,8 @@ fn crouch_speed_scale(world: &World, id: InstanceId) -> f32 {
 
 /// Crouches the character, or stands it back up, to match `wanted`. A
 /// crouch squashes every part toward the feet until the body is
-/// `CrouchHeight` tall. Standing waits while something overhead would cut
+/// `CrouchHeight` tall (only the root part, for a character that has one:
+/// its mesh crouches by animation). Standing waits while something overhead would cut
 /// into the standing height.
 fn set_crouch(
     world: &mut World,
@@ -1070,8 +1110,13 @@ fn set_crouch(
             .max(MIN_CROUCH_HEIGHT)
             .min(body.height);
         let ratio = target / body.height;
+        let squashed = if body.rooted {
+            &body.parts[..1]
+        } else {
+            &body.parts[..]
+        };
         let mut parts = Vec::new();
-        for &part in &body.parts {
+        for &part in squashed {
             let Some((position, size)) = placement(world, part) else {
                 continue;
             };

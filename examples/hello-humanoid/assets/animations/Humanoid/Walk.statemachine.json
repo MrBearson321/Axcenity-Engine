@@ -1,0 +1,19 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "Walk",
+  "states": [
+    {
+      "name": "Walk",
+      "motion": {
+        "clip": "assets/animations/Humanoid/Walk.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "transitions": []
+}

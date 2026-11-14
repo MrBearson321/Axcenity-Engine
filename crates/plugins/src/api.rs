@@ -17,7 +17,8 @@ use mlua::{
 use serde_json::Value as Json;
 
 use crate::{
-    DockWidget, MouseState, Request, Toolbar, ToolbarButton, Waypoint, assets, draw, files, rows,
+    DockWidget, MouseState, Request, Toolbar, ToolbarButton, Waypoint, actions, assets, draw,
+    files, rows,
 };
 
 /// An event of the plugin API.
@@ -45,6 +46,12 @@ pub(crate) enum SignalKey {
     Imported(u64),
     AssetAction(u64),
     AssetImported,
+    /// API 3: a command's `Triggered` and an Explorer item's `Activated`,
+    /// by number; `plugin.ModelImported` and `plugin.Unloading`.
+    ActionTriggered(u64),
+    ExplorerActivated(u64),
+    ModelImported,
+    Unloading,
 }
 
 /// A handler connected to a plugin event.
@@ -90,6 +97,8 @@ pub(crate) struct PluginState {
     pub(crate) rows: crate::rows::Rows,
     /// Its importers and Assets panel actions.
     pub(crate) assets: crate::assets::AssetHooks,
+    /// Its commands and Explorer items (API 3).
+    pub(crate) actions: crate::actions::ActionHooks,
 }
 
 pub(crate) fn state(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, PluginState>> {
@@ -149,6 +158,10 @@ impl UserData for LuaPlugin {
         fields.add_field_method_get("AssetImported", |_, _| {
             Ok(LuaSignal(SignalKey::AssetImported))
         });
+        fields.add_field_method_get("ModelImported", |_, _| {
+            Ok(LuaSignal(SignalKey::ModelImported))
+        });
+        fields.add_field_method_get("Unloading", |_, _| Ok(LuaSignal(SignalKey::Unloading)));
         fields.add_field_method_get("ApiVersion", |_, _| Ok(crate::PLUGIN_API_VERSION));
     }
 
@@ -242,6 +255,35 @@ impl UserData for LuaPlugin {
         });
         methods.add_method("AddImporter", |lua, _, info| assets::importer(lua, info));
         methods.add_method("AddAssetAction", |lua, _, info| assets::action(lua, info));
+        methods.add_method("CreateAction", |lua, _, info| actions::create(lua, info));
+        methods.add_method("AddExplorerAction", |lua, _, info| {
+            actions::explorer(lua, info)
+        });
+        methods.add_method(
+            "OpenScript",
+            |lua, _, (script, line): (LuaInstance, Option<i64>)| {
+                let is_script = lent_world(lua)?
+                    .get(script.0)
+                    .is_some_and(|instance| instance.class().is_script());
+                if !is_script {
+                    return Err(mlua::Error::runtime(
+                        "OpenScript needs a Script, LocalScript or ModuleScript",
+                    ));
+                }
+                let line = line.filter(|&line| line > 0).map(|line| line as usize);
+                state(lua)?
+                    .requests
+                    .push(Request::OpenScript(script.0, line));
+                Ok(())
+            },
+        );
+        methods.add_method("Notify", |lua, _, text: String| {
+            let text: String = text.trim().chars().take(200).collect();
+            if !text.is_empty() {
+                state(lua)?.requests.push(Request::Notify(text));
+            }
+            Ok(())
+        });
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("Plugin"));
     }
 }

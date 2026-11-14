@@ -120,7 +120,7 @@ pub fn built_in_presets() -> [(&'static str, TextureSettings); 4] {
 }
 
 /// A project's `import-presets.json`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportPresets {
     #[serde(default = "format_version")]
@@ -133,6 +133,10 @@ pub struct ImportPresets {
     /// the files under them.
     #[serde(default)]
     pub folders: BTreeMap<String, String>,
+    /// The project's own model presets by name (P7.3, `model_presets.rs`);
+    /// one named like a built-in one takes its place.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_presets: BTreeMap<String, crate::ModelSettings>,
 }
 
 fn format_version() -> u32 {

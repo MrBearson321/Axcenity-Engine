@@ -117,6 +117,10 @@ pub struct Explorer {
     /// What hidden data layers leave out of the viewport (R16.2): their
     /// rows are dimmed. The app fills it in.
     pub hidden: std::collections::HashSet<InstanceId>,
+    /// The running plugins' items for the right-click menu (plugin API 3):
+    /// each plugin's place in the list, its name, and the item. The app
+    /// fills it in each frame.
+    pub plugin_items: Vec<(usize, String, axcenity_plugins::ExplorerAction)>,
     /// The text in Filter: while it isn't blank, only the Instances whose
     /// name or class has it in them show, with the branches above them.
     pub filter: String,
@@ -225,6 +229,12 @@ pub enum Action {
     Prefab(crate::prefab_menu::PrefabAction),
     /// Report a bug about `id` on the Team Board (teamwork T2).
     ReportBug(InstanceId),
+    /// A plugin's Explorer item (plugin API 3): the plugin at `plugin` in
+    /// the list, its item numbered `action`. It gets the selection.
+    Plugin {
+        plugin: usize,
+        action: u64,
+    },
 }
 
 /// What happened in the Explorer this frame.
@@ -277,6 +287,7 @@ impl Explorer {
             renaming: None,
             warnings: HashMap::new(),
             others: HashMap::new(),
+            plugin_items: Vec::new(),
             hidden: Default::default(),
             filter: String::new(),
             keys: Vec::new(),
@@ -755,7 +766,8 @@ impl Explorer {
                     if let Some(action) = drop_onto(ui, &label, world, dragged, row.id) {
                         output.action = Some(action);
                     }
-                    label.context_menu(|ui| match row_menu(ui, world, row.id) {
+                    let plugin_items = &self.plugin_items;
+                    label.context_menu(|ui| match row_menu(ui, world, row.id, plugin_items) {
                         Some(RowCommand::Rename) => start_rename = Some(row.id),
                         Some(RowCommand::Open) => output.open = Some(row.id),
                         Some(RowCommand::View) => output.view = Some(row.id),
@@ -1099,6 +1111,8 @@ enum RowCommand {
     Delete,
     /// Turn `Locked` on or off.
     SetLocked(bool),
+    /// A plugin's item: its plugin's place in the list and its number.
+    Plugin(usize, u64),
 }
 
 impl RowCommand {
@@ -1122,6 +1136,7 @@ impl RowCommand {
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
             RowCommand::SetLocked(on) => Some(Action::SetLocked(id, on)),
+            RowCommand::Plugin(plugin, action) => Some(Action::Plugin { plugin, action }),
         }
     }
 }
@@ -1211,7 +1226,12 @@ pub(crate) fn scene_bounds(
 /// The right-click menu of `id`'s row: Open (for scripts) or Animate (for
 /// what can animate), Insert ▸, then Rename, Duplicate and Delete, greyed
 /// out (with the reason on hover) where they can't be done.
-fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowCommand> {
+fn row_menu(
+    ui: &mut egui::Ui,
+    world: &World,
+    id: InstanceId,
+    plugin_items: &[(usize, String, axcenity_plugins::ExplorerAction)],
+) -> Option<RowCommand> {
     let mut chosen = None;
     let is_script = world
         .get(id)
@@ -1428,6 +1448,30 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .clicked()
     {
         chosen = Some(RowCommand::ReportBug);
+    }
+    // Plugins' items (API 3), for rows of their class.
+    if let Some(class) = world.get(id).map(|instance| instance.class()) {
+        let offered: Vec<_> = plugin_items
+            .iter()
+            .filter(|(_, _, item)| item.offered_for(class))
+            .collect();
+        if !offered.is_empty() {
+            ui.separator();
+        }
+        for (plugin, name, item) in offered {
+            let hint = if item.tooltip.is_empty() {
+                format!("From the plugin \"{name}\"")
+            } else {
+                format!("{}\nFrom the plugin \"{name}\"", item.tooltip)
+            };
+            if ui
+                .button(theme::menu_item(ui.ctx(), icons::PUZZLE_PIECE, &item.label))
+                .on_hover_text(hint)
+                .clicked()
+            {
+                chosen = Some(RowCommand::Plugin(*plugin, item.id));
+            }
+        }
     }
     ui.separator();
 
@@ -1740,6 +1784,11 @@ pub fn insert_hint(what: Insertable) -> String {
             "Insert a Spline Scatter into the selected Spline (or a new one): it places models \
              along the curve, or inside a closed one, from a seed. Click models in the Assets \
              panel while it's selected to add them."
+        }
+        Insertable::TerrainPath => {
+            "Insert a Terrain Path into the selected Spline (or a new one): a road or path on \
+             the terrain. Scatter rules keep off it; Apply flattens and paints the ground \
+             under it, and Route lays its points over hills within Max Grade."
         }
         Insertable::Checkpoint => {
             "Insert a Checkpoint on top of the selected part: a place \
