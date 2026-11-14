@@ -10,6 +10,7 @@
 mod collision;
 pub(crate) mod cooked_model;
 mod fbx;
+mod gltf_takes;
 mod lod;
 mod lod_cache;
 mod lod_report;
@@ -867,10 +868,11 @@ fn file_origin(project: Option<&Path>, folder: &Path, file: Option<&str>) -> Ima
 }
 
 /// Every take (animation timeline) in a model file's `bytes`, baked into
-/// keys per bone. Only FBX files give takes for now; a glTF file has none.
+/// keys per bone: an FBX file's animation stacks, or a glTF file's
+/// animations (their node channels; see `model/gltf_takes.rs`).
 pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
-        ModelFormat::Gltf => Ok(Vec::new()),
+        ModelFormat::Gltf => gltf_takes::load_takes(bytes),
         ModelFormat::Fbx => fbx::load_takes(bytes),
         ModelFormat::Obj => Ok(Vec::new()),
     }))
@@ -890,6 +892,34 @@ pub fn list_objects(bytes: &[u8], format: ModelFormat) -> Result<Vec<ModelObject
     .unwrap_or(Err(ModelError::Damaged))
 }
 
+/// Reads a glTF or GLB file's document, checked as `gltf` checks it,
+/// except that an accessor may have no buffer view and no sparse values.
+/// The glTF spec reads such an accessor as all zeros, and Blender's
+/// exporter writes one for each blend shape that doesn't move a primitive
+/// (its "Try sparse shape keys" option, on by default), but `gltf` refuses
+/// the whole file over it. Its reader gives nothing for such an accessor,
+/// which reading blend shapes takes as no moves.
+fn read_gltf(bytes: &[u8]) -> Result<gltf::Gltf, gltf::Error> {
+    use gltf::json::validation::{Error, Validate};
+    let file = gltf::Gltf::from_slice_without_validation(bytes)?;
+    let root = file.document.as_json();
+    let mut errors = Vec::new();
+    root.validate(root, gltf::json::Path::new, &mut |path, error| {
+        let path = path();
+        let zeros = matches!(error, Error::Missing)
+            && path.as_str().starts_with("accessors[")
+            && path.as_str().ends_with("].bufferView");
+        if !zeros {
+            errors.push((path, error));
+        }
+    });
+    if errors.is_empty() {
+        Ok(file)
+    } else {
+        Err(gltf::Error::Validation(errors))
+    }
+}
+
 /// The files a model in `folder` uses besides itself, as paths inside
 /// `folder`, for copying it with them. A glTF's must all be there; an
 /// FBX's textures are left out when they aren't.
@@ -900,7 +930,7 @@ pub(crate) fn files_used(
 ) -> Result<Vec<PathBuf>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => {
-            let document = gltf::Gltf::from_slice(bytes)?;
+            let document = read_gltf(bytes)?;
             external_files(&document)
                 .into_iter()
                 .map(|uri| uri_path(&uri))
@@ -975,7 +1005,7 @@ fn obj_library(bytes: &[u8], folder: &Path) -> ObjLibrary {
 }
 
 fn gltf_embedded_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
-    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
+    let gltf::Gltf { document, blob } = read_gltf(bytes)?;
     let names = embedded_image_names(&document);
     if names.is_empty() {
         return Ok(Vec::new());
@@ -1070,7 +1100,7 @@ fn read(
     in_project: Option<InProject<'_>>,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
-    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
+    let gltf::Gltf { document, blob } = read_gltf(bytes)?;
     // Checked here, not left to `gltf`, so nothing outside `folder` is read
     // and a missing file is named.
     for uri in external_files(&document) {
@@ -1131,17 +1161,35 @@ fn read(
 /// matrix): their nodes and every node above them, parents first, each
 /// resting where its node is.
 fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> Rig {
+    let (bones, index_of) = gltf_bones(document, joints.iter().map(|&(node, _)| node));
+    let joints = joints
+        .iter()
+        .map(|&(node, inverse_bind)| Joint {
+            bone: index_of.get(&node).copied().unwrap_or(0),
+            inverse_bind,
+        })
+        .collect();
+    Rig { bones, joints, fit }
+}
+
+/// The nodes `wanted` and every node above them, parents first, each
+/// resting at its node's transform, and each node's index among them: the
+/// bones of a glTF skin, or of the skeleton a file's animations move.
+fn gltf_bones(
+    document: &gltf::Document,
+    wanted: impl IntoIterator<Item = usize>,
+) -> (Vec<Bone>, HashMap<usize, usize>) {
     let mut parent_of: HashMap<usize, usize> = HashMap::new();
     for node in document.nodes() {
         for child in node.children() {
             parent_of.insert(child.index(), node.index());
         }
     }
-    let mut wanted = HashSet::new();
-    for &(node, _) in joints {
+    let mut keep = HashSet::new();
+    for node in wanted {
         let mut at = Some(node);
         while let Some(current) = at {
-            if !wanted.insert(current) {
+            if !keep.insert(current) {
                 break;
             }
             at = parent_of.get(&current).copied();
@@ -1162,7 +1210,7 @@ fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> R
             continue;
         }
         let mut parent = parent;
-        if wanted.contains(&node) {
+        if keep.contains(&node) {
             let (translation, rotation, scale) = nodes[node].transform().decomposed();
             index_of.insert(node, bones.len());
             bones.push(Bone {
@@ -1180,20 +1228,13 @@ fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> R
             stack.push((child.index(), parent, depth + 1));
         }
     }
-    let joints = joints
-        .iter()
-        .map(|&(node, inverse_bind)| Joint {
-            bone: index_of.get(&node).copied().unwrap_or(0),
-            inverse_bind,
-        })
-        .collect();
-    Rig { bones, joints, fit }
+    (bones, index_of)
 }
 
 /// The objects in a glTF file: the default scene's nodes, or every mesh
 /// if it has no scenes.
 fn list(bytes: &[u8]) -> Result<Vec<ModelObject>, ModelError> {
-    let document = gltf::Gltf::from_slice(bytes)?.document;
+    let document = read_gltf(bytes)?.document;
     let mut visits = 0;
     let mut siblings = Siblings::default();
     let tree = match default_scene(&document) {

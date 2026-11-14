@@ -30,6 +30,7 @@ use crate::{css_syntax, lua_syntax};
 pub use axcenity_editor_kit::widgets::locked_banner;
 
 mod assist;
+mod hover_docs;
 mod others;
 
 pub use others::OtherCursor;
@@ -275,6 +276,43 @@ impl ScriptTabs {
     /// The script tab used last, if the viewport wasn't.
     pub fn active(&self) -> Option<&ScriptTab> {
         self.tabs.get(self.active?)
+    }
+
+    /// The active tab's file name when it's Lua code an API example can
+    /// go into.
+    pub fn insert_target(&self) -> Option<String> {
+        let tab = self.active()?;
+        let code = tab.path.ends_with(".lua") && tab.editing_elsewhere.is_none();
+        code.then(|| tab.path.rsplit('/').next().unwrap_or(&tab.path).to_owned())
+    }
+
+    /// Puts `code` into the active Lua tab as whole lines: after the line
+    /// its cursor is on (or at the end, when it has none), then moves the
+    /// cursor there. Returns the tab's path.
+    pub fn insert_lines(&mut self, code: &str) -> Option<String> {
+        self.insert_target()?;
+        let tab = self.tabs.get_mut(self.active?)?;
+        let at = match tab.cursor {
+            Some((_, cursor)) => {
+                let byte = assist::byte_of_char(&tab.text, cursor);
+                tab.text[byte..]
+                    .find('\n')
+                    .map_or(tab.text.len(), |end| byte + end + 1)
+            }
+            None => tab.text.len(),
+        };
+        let mut block = String::new();
+        if at > 0 && !tab.text[..at].ends_with('\n') {
+            block.push('\n');
+        }
+        block.push_str(code.trim_end());
+        block.push('\n');
+        tab.text.insert_str(at, &block);
+        tab.highlighted = None;
+        let first = at + usize::from(block.starts_with('\n'));
+        tab.go_to_line = Some(tab.text[..first].matches('\n').count() + 1);
+        self.focus = Some(tab.id);
+        Some(tab.path.clone())
     }
 
     #[cfg(test)]
@@ -921,6 +959,12 @@ fn code_editor(
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::F12)
                     });
+                // Help (scripting P2 PR 5): F1 opens the API Reference on
+                // the name at the cursor.
+                let help = focused
+                    && !stylesheet
+                    && ui
+                        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F1));
                 if let Some(span) = tab.remote_span.take() {
                     keep_cursor(ui.ctx(), id, span);
                 }
@@ -975,10 +1019,23 @@ fn code_editor(
                         found => tab.definition = found,
                     }
                 }
+                if help && let Some((_, cursor)) = tab.cursor {
+                    let byte = assist::byte_of_char(&tab.text, cursor);
+                    tab.definition = match script_completion::definition_at(&tab.text, byte, world)
+                    {
+                        Some(Definition::Api(name)) => Some(Definition::Api(name)),
+                        // Not the API's: the reference searches for the word.
+                        _ => script_completion::word_at(&tab.text, byte)
+                            .map(|word| Definition::Api(word.to_owned())),
+                    };
+                }
                 others::paint(ui, &tab.text, &output, &tab.others);
                 if !stylesheet {
                     underline_problems(ui, &tab.text, &tab.problems, &output);
                     assist(ui, tab, &output, keys, world);
+                    if !tab.assist.is_open() {
+                        hover_docs::show(ui, &tab.text, &output, world);
+                    }
                 }
                 if stylesheet {
                     let galley_pos = output.galley_pos.to_vec2();
@@ -1868,6 +1925,188 @@ mod tests {
         // Bytes inside a character are kept to its start.
         assert_eq!(at(&problem(2, 7, 7, Severity::Warning)), "");
         assert_eq!(at(&problem(9, 1, 2, Severity::Error)), "");
+    }
+
+    /// Draws `tabs` showing `path` for each frame's events, at the given
+    /// times, and returns the last frame's text.
+    fn run_frames(
+        tabs: &mut ScriptTabs,
+        path: &str,
+        frames: Vec<(f64, Vec<egui::Event>)>,
+    ) -> Vec<String> {
+        let ctx = theme::test_context();
+        let mut texts = Vec::new();
+        for (time, events) in frames {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(520.0, 320.0),
+                )),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            let output = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, path, &World::default()));
+            });
+            texts = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+        }
+        texts
+    }
+
+    #[test]
+    fn resting_on_an_engine_name_shows_its_docs_and_f1_opens_the_reference() {
+        let path = "scripts/wait.server.lua";
+        let code = "task.wait(1)\nlocal speed = 4\n";
+        let mut tabs = ScriptTabs::default();
+        tabs.open(path, code, None);
+        // The pointer rests on `wait`, in the first line.
+        let on_wait = egui::pos2(95.0, 16.0);
+        let moved = vec![egui::Event::PointerMoved(on_wait)];
+        let texts = run_frames(
+            &mut tabs,
+            path,
+            vec![(0.0, Vec::new()), (0.1, moved.clone())],
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("F1 opens it")),
+            "not before the pointer has rested: {texts:?}"
+        );
+        let texts = run_frames(
+            &mut tabs,
+            path,
+            vec![
+                (0.0, Vec::new()),
+                (0.1, moved),
+                (0.8, Vec::new()),
+                (0.9, Vec::new()),
+            ],
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == "F1 opens it in the API Reference"),
+            "{texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.starts_with("task.wait(")),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "Example"), "{texts:?}");
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            let frames = vec![
+                (0.0, Vec::new()),
+                (0.1, vec![egui::Event::PointerMoved(on_wait)]),
+                (0.8, Vec::new()),
+                (0.9, Vec::new()),
+            ];
+            let mut shown = ScriptTabs::default();
+            shown.open(
+                path,
+                "\n\n\n\n\n\n\n\ntask.wait(1)\nlocal speed = 4\n",
+                None,
+            );
+            crate::snapshot::snapshot_timed(
+                &std::path::PathBuf::from(folder).join("script-hover-docs.png"),
+                egui::vec2(560.0, 340.0),
+                frames
+                    .into_iter()
+                    .map(|(time, events)| {
+                        let events = events
+                            .into_iter()
+                            .map(|_| egui::Event::PointerMoved(egui::pos2(95.0, 160.0)))
+                            .collect();
+                        (time, events)
+                    })
+                    .collect(),
+                |ui, _| {
+                    egui::CentralPanel::default()
+                        .show(ui, |ui| shown.show(ui, path, &World::default()));
+                },
+            );
+        }
+
+        // On a local, nothing shows.
+        let on_speed = egui::pos2(95.0, 34.0);
+        let texts = run_frames(
+            &mut tabs,
+            path,
+            vec![
+                (0.0, vec![egui::Event::PointerMoved(on_speed)]),
+                (0.8, Vec::new()),
+                (0.9, Vec::new()),
+            ],
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("F1 opens it")),
+            "{texts:?}"
+        );
+
+        // F1 with the cursor on `wait` opens its entry.
+        let click = |pressed| egui::Event::PointerButton {
+            pos: on_wait,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let f1 = egui::Event::Key {
+            key: egui::Key::F1,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run_frames(
+            &mut tabs,
+            path,
+            vec![
+                (0.0, vec![egui::Event::PointerMoved(on_wait)]),
+                (0.1, vec![click(true)]),
+                (0.2, vec![click(false)]),
+                (0.3, vec![f1]),
+                (0.4, Vec::new()),
+            ],
+        );
+        assert_eq!(
+            tabs.take_definition(),
+            Some(Definition::Api("task.wait".to_owned()))
+        );
+    }
+
+    #[test]
+    fn an_example_goes_in_after_the_cursors_line() {
+        let path = "scripts/door.server.lua";
+        let mut tabs = ScriptTabs::default();
+        tabs.open(path, "local door = workspace.Door\nprint(door)", None);
+        tabs.activate(tabs.ids()[0]);
+        assert_eq!(tabs.insert_target().as_deref(), Some("door.server.lua"));
+        // No cursor yet: at the end, on a line of its own.
+        assert_eq!(tabs.insert_lines("task.wait(1)\n").as_deref(), Some(path));
+        assert_eq!(
+            tabs.get_mut(path).unwrap().text,
+            "local door = workspace.Door\nprint(door)\ntask.wait(1)\n"
+        );
+        // With the cursor in the first line: after it.
+        tabs.get_mut(path).unwrap().cursor = Some((3, 3));
+        tabs.insert_lines("print(1)");
+        let tab = tabs.get_mut(path).unwrap();
+        assert_eq!(
+            tab.text,
+            "local door = workspace.Door\nprint(1)\nprint(door)\ntask.wait(1)\n"
+        );
+        assert_eq!(tab.go_to_line, Some(2));
+
+        let mut sheet = ScriptTabs::default();
+        sheet.open("ui/menu.css", "", None);
+        sheet.activate(sheet.ids()[0]);
+        assert_eq!(sheet.insert_target(), None, "only Lua code");
     }
 
     #[test]

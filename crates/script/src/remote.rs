@@ -588,6 +588,12 @@ fn player_arg(lua: &Lua, method: &str, value: &Value) -> mlua::Result<InstanceId
     )))
 }
 
+/// How deep tables may nest in what a RemoteEvent or RemoteFunction sends:
+/// a table in an argument is 1 deep, a table in that 2, and so on. The
+/// sender raises an error past it, and the receiving device drops a
+/// message nested deeper as it reads it (multiplayer readiness MP3).
+pub const MAX_TABLE_DEPTH: usize = 32;
+
 fn remote_args(lua: &Lua, method: &str, args: MultiValue) -> mlua::Result<Vec<RemoteValue>> {
     args.into_iter()
         .map(|arg| to_remote(lua, method, &arg, &mut BTreeSet::new()))
@@ -614,6 +620,11 @@ fn to_remote(
             if !tables.insert(address) {
                 return Err(mlua::Error::runtime(format!(
                     "{method} can't send a table that contains itself"
+                )));
+            }
+            if tables.len() > MAX_TABLE_DEPTH {
+                return Err(mlua::Error::runtime(format!(
+                    "{method} can't send tables nested more than {MAX_TABLE_DEPTH} deep"
                 )));
             }
             let mut pairs = Vec::new();

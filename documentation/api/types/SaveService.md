@@ -48,6 +48,13 @@ SaveService:SetPlayerData(name: string, value: any): ()
 
 Keeps `value` for the player under `name`, such as `SaveService:SetPlayerData("Coins", 10)`: a boolean, number, string, Vector3, Vector2, Color3, UDim2 or EnumItem. nil removes it. Saved in slots and captured at checkpoints.
 
+```lua
+local SaveService = game:GetService("SaveService")
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+	SaveService:SetPlayerData(player, "Coins", player:GetAttribute("Coins") or 0)
+end)
+```
+
 #### GetPlayerData
 
 ```luau
