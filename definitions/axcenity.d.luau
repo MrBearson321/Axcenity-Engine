@@ -5871,6 +5871,27 @@ declare extern type Biome extends Instance with
 	[string]: any
 end
 
+--- Inside a Spline: a road or path on the terrain (procedural worlds PW4), Width studs across along the Spline's curve. ScatterRules keep off it (ClearScatter) wherever it goes, on every device, without changing the terrain. In the editor, Apply to Terrain flattens the ground under it to the curve and paints its Layer, blending in over Falloff (one undo step), and Route lays the Spline's points over the terrain from its first point to its last, no stretch climbing more than MaxGrade degrees, so a road winds round or up a hill (one undo step). Put a SplineMesh in the same Spline for the road's surface.
+declare extern type TerrainPath extends Instance with
+	--- If false, scatter rules don't keep off it and the editor's Apply and Route do nothing. True by default.
+	Enabled: boolean
+	--- Studs across the road or path. Apply flattens and paints this strip fully. 8 by default.
+	Width: number
+	--- Studs past each edge over which Apply's flattening and paint blend into the ground around. 4 by default.
+	Falloff: number
+	--- If true (the default), Apply levels the strip to the height of its Spline's curve.
+	Flatten: boolean
+	--- The name of the TerrainLayer Apply paints the strip with. Empty (the default) paints nothing.
+	Layer: string
+	--- If true (the default), the terrain's ScatterRules place nothing within Width / 2 + ClearMargin studs of the curve, seen from above. They keep off it as soon as it's there and wherever its points move, on every device.
+	ClearScatter: boolean
+	--- Studs past each edge that scatter rules keep clear, so trees don't stand on the verge. 1 by default.
+	ClearMargin: number
+	--- The steepest the editor's Route lets the road climb, in degrees. 8 by default.
+	MaxGrade: number
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -6015,6 +6036,7 @@ declare extern type InstanceLibrary with
 		& ((className: "DataLayer") -> DataLayer)
 		& ((className: "ScatterRule") -> ScatterRule)
 		& ((className: "Biome") -> Biome)
+		& ((className: "TerrainPath") -> TerrainPath)
 		& ((className: string) -> Instance)
 end
 

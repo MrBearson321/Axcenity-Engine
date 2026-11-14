@@ -216,6 +216,7 @@
     * [DataLayer](api/classes/DataLayer.md)
     * [ScatterRule](api/classes/ScatterRule.md)
     * [Biome](api/classes/Biome.md)
+    * [TerrainPath](api/classes/TerrainPath.md)
   * [Data types](api/types.md)
     * [Vector3](api/types/Vector3.md)
     * [Vector2](api/types/Vector2.md)
