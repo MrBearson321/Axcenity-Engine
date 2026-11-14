@@ -5,8 +5,8 @@
 //! off and not opened.
 
 use axcenity_render::{
-    EffectiveGraphics, RayTracedAmbientOcclusion, RayTracedGlobalIllumination, RayTracedShadows,
-    RayTracingStats,
+    EffectiveGraphics, RayTracedAmbientOcclusion, RayTracedGlobalIllumination,
+    RayTracedReflections, RayTracedShadows, RayTracingStats,
 };
 use eframe::egui;
 
@@ -52,6 +52,12 @@ pub(super) fn traced_effects(effective: &EffectiveGraphics) -> Vec<String> {
         effects.push(format!(
             "GI {}",
             effective.ray_traced_global_illumination.label()
+        ));
+    }
+    if effective.ray_traced_reflections != RayTracedReflections::Off {
+        effects.push(format!(
+            "Reflections {}",
+            effective.ray_traced_reflections.label()
         ));
     }
     effects
@@ -362,6 +368,7 @@ mod tests {
             ray_traced_shadows: Some(RayTracedShadows::High),
             ray_traced_ambient_occlusion: Some(RayTracedAmbientOcclusion::Low),
             ray_traced_global_illumination: Some(RayTracedGlobalIllumination::Medium),
+            ray_traced_reflections: Some(RayTracedReflections::High),
             ..GraphicsSettings::default()
         }
         .effective(&Capabilities {
@@ -370,7 +377,7 @@ mod tests {
         });
         assert_eq!(
             traced_effects(&both),
-            ["Shadows High", "AO Low", "GI Medium"]
+            ["Shadows High", "AO Low", "GI Medium", "Reflections High"]
         );
         let empty = badge(&on, true, true, None, false, &RayTracingStats::default()).unwrap();
         assert!(

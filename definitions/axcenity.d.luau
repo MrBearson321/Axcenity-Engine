@@ -615,6 +615,8 @@ declare extern type UserGameSettings with
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
 	--- Ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, the rays are traced in software instead: slower (Low suits it), with leaves' holes guessed. Only a GPU without compute shaders keeps the bakes (or real-time GI, as set).
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
+	--- Hardware ray traced reflections on glossy surfaces: Off, Low (surfaces smoother than 0.15 roughness, traced at half size), Medium (smoother than 0.3) or High (smoother than 0.5). Off at every preset. On, a smooth part mirrors what's around it, even off the screen, fading into the reflection probes as it gets rougher; see-through parts, water and terrain keep the probes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only the reflection probes are used.
+	RayTracedReflections: EnumRayTracedReflections
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1394,6 +1396,18 @@ declare extern type EnumRayTracedGlobalIlluminationItems with
 	High: EnumRayTracedGlobalIllumination
 end
 
+--- One choice of `Enum.RayTracedReflections`.
+declare extern type EnumRayTracedReflections extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedReflections`.
+declare extern type EnumRayTracedReflectionsItems with
+	Off: EnumRayTracedReflections
+	Low: EnumRayTracedReflections
+	Medium: EnumRayTracedReflections
+	High: EnumRayTracedReflections
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1447,6 +1461,7 @@ declare extern type EnumLibrary with
 	ParticleFlipbookMode: EnumParticleFlipbookModeItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
+	RayTracedReflections: EnumRayTracedReflectionsItems
 end
 
 -- Instances -----------------------------------------------------------------
