@@ -752,3 +752,69 @@ mod decal_section_tests {
         }
     }
 }
+
+mod sky_control_tests {
+    use super::*;
+
+    /// Lighting's SkyImage row with a long file name, in a Properties form
+    /// `width` wide: the hint and the Follow time of day button go under the
+    /// file, as wide as the column, so the row stays a few lines tall.
+    /// Returns the control's rect and the panel's.
+    fn draw_sky_row(width: f32, snapshot: &str) -> (egui::Rect, egui::Rect) {
+        let path = "assets/sky/kloofendal_overcast_puresky_2k.hdr";
+        let size = egui::vec2(width, 300.0);
+        let mut drawn = None;
+        let mut draw = |ui: &mut egui::Ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let room = ui.max_rect();
+                crate::responsive::form(ui, "sky row", |ui| {
+                    ui.label("SkyImage");
+                    let control = ui.scope(|ui| sky_control(ui, path, &Assets::default()));
+                    assert_eq!(control.inner, None);
+                    drawn = Some((control.response.rect, room));
+                    ui.end_row();
+                });
+            });
+        };
+        let ctx = theme::test_context();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
+        }
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join(snapshot),
+                size,
+                vec![Vec::new(); 3],
+                &mut draw,
+            );
+        }
+        drawn.unwrap()
+    }
+
+    #[test]
+    fn the_sky_hint_goes_under_the_file_instead_of_wrapping_letter_by_letter() {
+        // A grid (wide panel) and a stacked form (narrow panel).
+        for (width, snapshot) in [
+            (440.0, "properties-sky-image-wide.png"),
+            (260.0, "properties-sky-image-narrow.png"),
+        ] {
+            let (control, room) = draw_sky_row(width, snapshot);
+            // The file row, two lines of hint and the button: about 70
+            // points. Squeezed beside the file it was hundreds.
+            assert!(
+                control.height() < 110.0,
+                "{width} wide: the row is {} tall",
+                control.height()
+            );
+            assert!(
+                control.right() <= room.right() + 0.5,
+                "{width} wide: drawn to {} in {room:?}",
+                control.right()
+            );
+        }
+    }
+}
