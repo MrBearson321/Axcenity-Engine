@@ -56,6 +56,7 @@ mod validate;
 mod versions;
 mod watch;
 mod world_file;
+mod world_presets;
 
 mod collision_groups;
 mod input_map;
@@ -157,6 +158,11 @@ pub use watch::{Watched, Watcher, is_asset_path};
 pub use world_file::{
     WorldError, json_to_attribute, json_to_value, parse_prefab, parse_world, write_prefab,
     write_world,
+};
+pub use world_presets::{
+    WORLD_PRESET_EXTENSION, WORLD_PRESET_FORMAT, WORLD_PRESETS_FOLDER, WorldPreset,
+    WorldPresetError, list_world_presets, preset_objects, save_world_preset,
+    world_preset_file_name,
 };
 
 pub const MANIFEST_FILE: &str = "axcenity.json";

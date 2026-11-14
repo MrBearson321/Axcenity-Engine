@@ -24,6 +24,7 @@ mod layers;
 pub(crate) mod scatter;
 mod tool_settings;
 mod water;
+pub(crate) mod world_presets;
 
 use layers::*;
 
@@ -52,6 +53,7 @@ pub use axcenity_editor_tools::terrain_tool::TerrainTool;
 pub use biomes::{BiomePreset, biome_of};
 pub use presets::{LayerPreset, layers_for};
 pub use scatter::{RulePreset, scatter_rules};
+pub use world_presets::built_in_world_presets;
 
 /// A TerrainLayer's map properties, with what the studio calls them.
 pub const LAYER_MAPS: [(&str, &str); 6] = [
@@ -153,6 +155,15 @@ pub enum TerrainAction {
     /// Add ScatterRules from these presets to the end, as one undo step
     /// with this label.
     AddScatterRules(Vec<RulePreset>, String),
+    /// Generate the landscape of world preset N (of the context's list);
+    /// applying the preview also sets up its objects and water.
+    GenerateWorldPreset(usize),
+    /// Replace the terrain's layers, biomes, rules and water with world
+    /// preset N's, keeping its shape, as one undo step.
+    ApplyWorldPreset(usize),
+    /// Save the terrain's setup as a world preset with this name in the
+    /// project's presets folder.
+    SaveWorldPreset(String),
     /// Add a Biome from this preset (with its ground layer and rules), as
     /// one undo step.
     AddBiome(BiomePreset),
@@ -282,6 +293,13 @@ pub struct TerrainStudio {
     /// new preview once they stop changing.
     pub changed_at: Option<f64>,
     pub stroke: Option<ActiveStroke>,
+    /// The world preset picked in the Generate tool (of the context's list).
+    pub world_preset: usize,
+    /// The world preset whose objects and water the preview's Apply puts
+    /// in, if the preview was made from one.
+    pub pending_world: Option<axcenity_project::WorldPreset>,
+    /// The name Save as preset uses.
+    pub preset_name: String,
 }
 
 impl Default for TerrainStudio {
@@ -324,6 +342,9 @@ impl Default for TerrainStudio {
             comparing: false,
             changed_at: None,
             stroke: None,
+            world_preset: 0,
+            pending_world: None,
+            preset_name: String::new(),
         }
     }
 }
@@ -342,6 +363,9 @@ pub struct StudioContext<'a> {
     /// Thumbnails of the layers' maps by path, once read: every layer's
     /// color map, and all the open layer's maps.
     pub pictures: &'a HashMap<String, egui::TextureHandle>,
+    /// The world presets the Generate tool offers: the built-in ones, then
+    /// the project's own.
+    pub world_presets: &'a [axcenity_project::WorldPreset],
 }
 
 /// Every Terrain in the Workspace, in tree order.

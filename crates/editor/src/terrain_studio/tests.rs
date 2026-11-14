@@ -50,6 +50,7 @@ fn the_panel_draws_with_and_without_a_terrain() {
                         time: 0.0,
                         textures: &[],
                         pictures: &HashMap::new(),
+                        world_presets: &[],
                     },
                 );
             });
@@ -121,6 +122,7 @@ fn the_panel_snapshots_with_its_main_tools() {
                                 time: 0.0,
                                 textures: &[],
                                 pictures: &HashMap::new(),
+                                world_presets: &[],
                             },
                         );
                     });
@@ -198,6 +200,7 @@ fn an_open_layer_and_its_texture_menu_snapshot() {
                             time: 0.0,
                             textures: &textures,
                             pictures: &HashMap::new(),
+                            world_presets: &[],
                         },
                     );
                 });
@@ -247,6 +250,7 @@ fn a_wide_panel_names_its_tools() {
                             time: 0.0,
                             textures: &[],
                             pictures: &HashMap::new(),
+                            world_presets: &[],
                         },
                     );
                 });
@@ -296,6 +300,7 @@ fn texts_drawn(
                         time: 0.0,
                         textures: &[],
                         pictures: &HashMap::new(),
+                        world_presets: &[],
                     },
                 );
             });

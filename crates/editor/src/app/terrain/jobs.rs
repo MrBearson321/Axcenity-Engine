@@ -191,6 +191,9 @@ impl EditorApp {
         if self.world.get(preview.terrain).is_none() {
             return;
         }
+        if self.apply_world_preview(&preview) {
+            return;
+        }
         self.replace_terrain(
             preview.terrain,
             preview.label.clone(),
