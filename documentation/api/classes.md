@@ -106,6 +106,7 @@ Instance classes: everything that can be in the tree.
 | [VehicleWheel](classes/VehicleWheel.md) | A wheel of the car whose part it's parented to: a spring and a ray to the ground, so no wheel collider touches it. |
 | [Ragdoll](classes/Ragdoll.md) | A ragdoll for the skinned MeshPart it's in: a capsule Part per main bone, named after the bone, and a BallSocketConstraint per joint, which Build (in its Properties) makes from the skeleton with a humanoid preset's limits. |
 | [IKControl](classes/IKControl.md) | Inverse kinematics during the game, for the skinned MeshPart it's in (or its Animator). |
+| [FaceControls](classes/FaceControls.md) | The face of the MeshPart it's in: one number property per standard facial control, 0 to 1 (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Jaw_Open …). |
 | [Fracture](classes/Fracture.md) | Breaks the Part or MeshPart it's in into pieces. |
 | [Health](classes/Health.md) | How much a Model can take: Health out of MaxHealth, put in any Model. |
 | [ProximityPrompt](classes/ProximityPrompt.md) | A prompt to do something, under a part or an Attachment. |
@@ -145,3 +146,5 @@ Instance classes: everything that can be in the tree.
 | [DataLayerService](classes/DataLayerService.md) | The service that holds the project's DataLayers (roadmap R16). |
 | [DataLayer](classes/DataLayer.md) | A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. |
 | [ScatterRule](classes/ScatterRule.md) | Inside a Terrain: places plants, props or models (Models) over the ground by itself, where its height, slope, layer and water settings allow, about Spacing studs apart at Density, gathered into clumps by Clumping and keeping AvoidRadius from what the rules before it placed. |
+| [Biome](classes/Biome.md) | Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). |
+| [TerrainPath](classes/TerrainPath.md) | Inside a Spline: a road or path on the terrain (procedural worlds PW4), Width studs across along the Spline's curve. |

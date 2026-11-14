@@ -553,10 +553,25 @@ pub enum EnumType {
     ParticleFlipbookMode,
     RayTracedAmbientOcclusion,
     RayTracedGlobalIllumination,
+    RayTracedReflections,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 51] = [
+    /// Every enum, in the order of `LIST`. It's built from `LIST` so that
+    /// no count needs keeping up to date: pull requests that each added an
+    /// enum changed that one number, and two of them merged to a wrong one.
+    pub const ALL: [EnumType; EnumType::LIST.len()] = {
+        let mut all = [EnumType::Material; EnumType::LIST.len()];
+        let mut i = 0;
+        while i < all.len() {
+            all[i] = EnumType::LIST[i];
+            i += 1;
+        }
+        all
+    };
+
+    /// Every enum; `ALL` is this list as an array.
+    const LIST: &[EnumType] = &[
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -608,6 +623,7 @@ impl EnumType {
         EnumType::ParticleFlipbookMode,
         EnumType::RayTracedAmbientOcclusion,
         EnumType::RayTracedGlobalIllumination,
+        EnumType::RayTracedReflections,
     ];
 
     pub fn name(self) -> &'static str {
@@ -639,6 +655,7 @@ impl EnumType {
             EnumType::ParticleFlipbookMode => "ParticleFlipbookMode",
             EnumType::RayTracedAmbientOcclusion => "RayTracedAmbientOcclusion",
             EnumType::RayTracedGlobalIllumination => "RayTracedGlobalIllumination",
+            EnumType::RayTracedReflections => "RayTracedReflections",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::AssetFetchStatus => "AssetFetchStatus",
@@ -694,6 +711,7 @@ impl EnumType {
             EnumType::RayTracedGlobalIllumination => {
                 user_settings::ray_traced_global_illumination_names()
             }
+            EnumType::RayTracedReflections => user_settings::ray_traced_reflections_names(),
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             // How a file went, for `ContentProvider:PreloadAsync`'s callback.
@@ -863,6 +881,7 @@ impl LuaEnumItem {
             | EnumType::RayTracedShadows
             | EnumType::RayTracedAmbientOcclusion
             | EnumType::RayTracedGlobalIllumination
+            | EnumType::RayTracedReflections
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::AssetFetchStatus

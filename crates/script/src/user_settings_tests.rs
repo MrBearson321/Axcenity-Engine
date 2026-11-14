@@ -235,21 +235,26 @@ fn ray_traced_shadows_are_a_setting_for_local_scripts() {
         "scripts/rays.client.lua",
         "local s = game:GetService('UserGameSettings')
         print(s.RayTracedShadows, s.RayTracedAmbientOcclusion, s.RayTracedGlobalIllumination)
+        print(s.RayTracedReflections)
         s.RayTracedShadows = Enum.RayTracedShadows.Medium
         s.RayTracedAmbientOcclusion = Enum.RayTracedAmbientOcclusion.High
         s.RayTracedGlobalIllumination = Enum.RayTracedGlobalIllumination.Low
+        s.RayTracedReflections = Enum.RayTracedReflections.Medium
         print(s.RayTracedShadows, s.RayTracedAmbientOcclusion, s.RayTracedGlobalIllumination)
+        print(s.RayTracedReflections)
         print(pcall(function() s.RayTracedShadows = Enum.MotionBlur.Low end))",
     );
     assert_eq!(
         printed[0],
         "Enum.RayTracedShadows.Off\tEnum.RayTracedAmbientOcclusion.Off\tEnum.RayTracedGlobalIllumination.Off"
     );
+    assert_eq!(printed[1], "Enum.RayTracedReflections.Off");
     assert_eq!(
-        printed[1],
+        printed[2],
         "Enum.RayTracedShadows.Medium\tEnum.RayTracedAmbientOcclusion.High\tEnum.RayTracedGlobalIllumination.Low"
     );
-    assert!(printed[2].starts_with("false\t"), "{printed:?}");
+    assert_eq!(printed[3], "Enum.RayTracedReflections.Medium");
+    assert!(printed[4].starts_with("false\t"), "{printed:?}");
     let change = runtime.take_graphics_change().unwrap();
     assert_eq!(
         change,
@@ -261,6 +266,7 @@ fn ray_traced_shadows_are_a_setting_for_local_scripts() {
             ray_traced_global_illumination: Some(
                 axcenity_render_types::RayTracedGlobalIllumination::Low
             ),
+            ray_traced_reflections: Some(axcenity_render_types::RayTracedReflections::Medium),
             ..GraphicsSettings::preset(Quality::High)
         }
     );

@@ -29,7 +29,28 @@ use crate::widgets;
 pub(crate) mod outcome;
 mod package;
 mod preview;
+mod settings;
 mod tabs;
+
+/// What a FaceControls could move on `model` with the built-in profile
+/// that fits its blend shapes best, such as "a face (41 of 48 controls,
+/// axcenity profile)"; `None` without blend shapes.
+fn face_summary(model: &Model) -> Option<String> {
+    if model.morph_targets.is_empty() {
+        return None;
+    }
+    let (name, profile) =
+        axcenity_anim::choose_face_profile(model, &Default::default(), "").ok()?;
+    let (face, _) = axcenity_anim::FaceRig::bind(model, &name, &profile);
+    let used = face.controls_used();
+    (used > 0).then(|| {
+        format!(
+            "a face ({used} of {} controls, {name} profile)",
+            axcenity_core::face::FACE_CONTROLS.len()
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -61,6 +82,8 @@ pub enum Tab {
     /// What's in an asset package, and what to do with files the project
     /// already has.
     Package,
+    /// Scale, up axis, Anchored and collision (P7.3, `settings.rs`).
+    Settings,
 }
 
 impl Tab {
@@ -70,6 +93,7 @@ impl Tab {
             Tab::Materials => "Materials",
             Tab::Animation => "Animation",
             Tab::Package => "Package",
+            Tab::Settings => "Settings",
         }
     }
 }
@@ -105,6 +129,9 @@ pub struct ImportDialog {
     /// How many blend shapes (morph targets) the model has, once it's
     /// loaded for the preview.
     blend_shapes: usize,
+    /// Which face profile fits the model's blend shapes and how many
+    /// facial controls it gets, once it's loaded for the preview.
+    face: Option<String>,
     /// One per object. Only the ticks of objects with meshes matter; a
     /// group shows its contents' ticks.
     ticked: Vec<bool>,
@@ -133,6 +160,20 @@ pub struct ImportDialog {
     /// read itself (a USD file made into a `.glb`, ADR-0027): named in the
     /// title and Output, and noted in the copy's sidecar.
     pub source: Option<PathBuf>,
+    /// The model preset picked (P7.3), and the choices it doesn't hold
+    /// elsewhere in the dialog: scale, up axis, Anchored, collision. Bring
+    /// in as, Weld parts and Add an Animator are `placement`, `weld` and
+    /// the animation's `add_animator`.
+    pub preset: String,
+    pub settings: axcenity_assets::ModelSettings,
+    /// The presets to pick from, in menu order; empty with no project
+    /// (a test), when the Preset row isn't shown.
+    pub presets: Vec<(String, axcenity_assets::ModelSettings)>,
+    /// The name typed for Save as preset…, while it's open.
+    saving: Option<String>,
+    /// A preset to save, asked for with Save as preset…: the app writes it
+    /// to `import-presets.json` as an undo step and clears this.
+    pub save_preset: Option<(String, axcenity_assets::ModelSettings)>,
     /// The tab shown (the first tab if it isn't one of [`tabs`](Self::tabs)).
     pub tab: Tab,
     /// The model drawn beside the tabs; `None` without one (an
@@ -171,9 +212,15 @@ impl ImportDialog {
             animation_only: false,
             package: None,
             source: None,
+            preset: axcenity_assets::DEFAULT_MODEL_PRESET.to_owned(),
+            settings: axcenity_assets::ModelSettings::default(),
+            presets: Vec::new(),
+            saving: None,
+            save_preset: None,
             tab: Tab::Objects,
             preview: None,
             blend_shapes: 0,
+            face: None,
             previewing: 0,
             buttons: None,
             import_button: None,
@@ -217,6 +264,7 @@ impl ImportDialog {
     /// clips made from its `takes`.
     pub fn with_preview(mut self, model: Model, takes: Vec<Take>) -> Self {
         self.blend_shapes = model.morph_targets.len();
+        self.face = face_summary(&model);
         self.preview = Some(ImportPreview::new(&self.file, model, takes));
         self
     }
@@ -246,6 +294,9 @@ impl ImportDialog {
         }
         if self.animation.is_some() {
             tabs.push(Tab::Animation);
+        }
+        if !self.animation_only {
+            tabs.push(Tab::Settings);
         }
         tabs
     }
@@ -382,6 +433,9 @@ impl ImportDialog {
             if self.blend_shapes > 0 {
                 parts.push(plural(self.blend_shapes, "blend shape"));
             }
+            if let Some(face) = &self.face {
+                parts.push(face.clone());
+            }
         }
         if let Some(animation) = &self.animation {
             if !animation.bones.is_empty() {
@@ -464,6 +518,10 @@ impl ImportDialog {
             Some(&self.holds()),
         );
         let tabs = self.tabs();
+        if !self.presets.is_empty() && self.package.is_none() && !self.animation_only {
+            ui.add_space(6.0);
+            settings::preset_row(self, ui);
+        }
         if tabs.len() > 1 {
             ui.add_space(8.0);
             let problem = self.problem_tab();
@@ -638,6 +696,10 @@ impl ImportDialog {
             Tab::Materials => {
                 part_title(ui, "Texture maps");
                 tabs::materials(self, ui);
+            }
+            Tab::Settings => {
+                part_title(ui, "Settings");
+                settings::settings(self, ui);
             }
             Tab::Package => {
                 part_title(ui, "Package");

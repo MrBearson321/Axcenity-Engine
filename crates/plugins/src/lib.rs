@@ -11,6 +11,7 @@
 //! [`Plugin::take_drawings`]) and asked
 //! for ([`Plugin::take_requests`]), and its output.
 
+mod actions;
 mod api;
 mod assets;
 pub mod bundle;
@@ -26,6 +27,7 @@ use axcenity_core::{InstanceId, RecordedChange, Value, Vector3, World};
 use axcenity_script::{EditRuntime, OutputLine};
 use mlua::{IntoLuaMulti, MultiValue};
 
+pub use actions::{Action, ExplorerAction, MAX_ACTIONS, Shortcut};
 pub use assets::{AssetAction, Importer, MAX_ASSET_HOOKS, MAX_IMPORT_BYTES, extension_of};
 pub use bundle::{
     Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
@@ -46,9 +48,11 @@ use api::{PluginState, SignalKey};
 /// The plugin API's version, `plugin.ApiVersion`: 1 was Phase 54's
 /// (toolbars, dock widgets, selection, undo, settings, files, the mouse);
 /// 2 added viewport drawing, handles, Properties rows, importers and
-/// Assets panel items (roadmap G10). Raise it when the API grows, and list
-/// what came in `docs/editor/plugins.md`; never take a name away.
-pub const PLUGIN_API_VERSION: u32 = 2;
+/// Assets panel items (roadmap G10); 3 added commands with shortcuts,
+/// Explorer items, `ModelImported`, `Unloading`, `OpenScript` and `Notify`
+/// (P7.4). Raise it when the API grows, and list what came in
+/// `docs/editor/plugins.md`; never take a name away.
+pub const PLUGIN_API_VERSION: u32 = 3;
 
 /// The luau-lsp definitions of the plugin API, to load after the engine's
 /// (`definitions/axcenity-plugin.d.luau`).
@@ -99,6 +103,10 @@ pub enum Request {
     Waypoint(Waypoint),
     Undo,
     Redo,
+    /// `plugin:OpenScript(script, line)`: open its code at that line.
+    OpenScript(InstanceId, Option<usize>),
+    /// `plugin:Notify(text)`: a toast.
+    Notify(String),
 }
 
 /// `ChangeHistoryService:SetWaypoint(name)`: the edits since the last
@@ -184,6 +192,7 @@ impl Plugin {
             handles: Default::default(),
             rows: Default::default(),
             assets: Default::default(),
+            actions: Default::default(),
         });
         let message = |err: mlua::Error| err.to_string();
         let env = runtime.environment(world).map_err(message)?;
@@ -329,6 +338,63 @@ impl Plugin {
     /// fires `plugin.AssetImported(path)`.
     pub fn asset_imported(&self, world: &mut World, path: &str) {
         self.fire(world, SignalKey::AssetImported, path.to_owned());
+    }
+
+    /// Its commands and Explorer items, when they changed since the last
+    /// call.
+    pub fn take_actions(&self) -> Option<(Vec<Action>, Vec<ExplorerAction>)> {
+        let mut state = api::state(self.runtime.lua()).ok()?;
+        let hooks = &mut state.actions;
+        std::mem::take(&mut hooks.changed).then(|| {
+            (
+                hooks.actions.values().cloned().collect(),
+                hooks.explorer.values().cloned().collect(),
+            )
+        })
+    }
+
+    /// Its command numbered `action` was run (Ctrl+K or its shortcut):
+    /// fires its `Triggered`.
+    pub fn trigger_action(&self, world: &mut World, action: u64) {
+        let known = self
+            .state()
+            .is_some_and(|state| state.actions.actions.contains_key(&action));
+        if known {
+            self.fire(world, SignalKey::ActionTriggered(action), ());
+        }
+    }
+
+    /// Its Explorer item numbered `action` was picked with `instances`
+    /// selected: fires its `Activated(instances)`.
+    pub fn explorer_action(&self, world: &mut World, action: u64, instances: &[InstanceId]) {
+        let known = self
+            .state()
+            .is_some_and(|state| state.actions.explorer.contains_key(&action));
+        if !known {
+            return;
+        }
+        let list: Vec<axcenity_script::LuaInstance> = instances
+            .iter()
+            .filter(|&&id| world.contains(id))
+            .map(|&id| axcenity_script::LuaInstance(id))
+            .collect();
+        self.fire(world, SignalKey::ExplorerActivated(action), list);
+    }
+
+    /// The editor imported the model file now at `path` in the project and
+    /// made `root` from it (not yet in the tree): fires
+    /// `plugin.ModelImported(root, path)`.
+    pub fn model_imported(&self, world: &mut World, root: InstanceId, path: &str) {
+        if world.contains(root) {
+            let root = axcenity_script::LuaInstance(root);
+            self.fire(world, SignalKey::ModelImported, (root, path.to_owned()));
+        }
+    }
+
+    /// It's about to be stopped or loaded again: fires `plugin.Unloading`,
+    /// so it can save its state with `SetSetting`.
+    pub fn unloading(&self, world: &mut World) {
+        self.fire(world, SignalKey::Unloading, ());
     }
 
     fn has_row(&self, row: u64) -> bool {

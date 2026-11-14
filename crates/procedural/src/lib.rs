@@ -16,7 +16,11 @@
 
 mod bend;
 mod flatten;
+pub mod paths;
+#[cfg(test)]
+mod paths_tests;
 mod rng;
+pub mod route;
 mod scatter;
 mod surface;
 pub mod terrain_scatter;
@@ -37,6 +41,8 @@ use glam::{EulerRot, Quat, Vec2, Vec3};
 
 pub use bend::{MAX_PIECES, Piece, bend, frame, piece_count};
 pub use flatten::flatten_along;
+pub use paths::{KeepOff, PathSettings, apply_path, keep_offs};
+pub use route::route;
 pub use scatter::{MAX_MODELS, Placed, Settings, layout};
 pub use surface::Surfaces;
 

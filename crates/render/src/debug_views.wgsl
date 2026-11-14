@@ -47,7 +47,10 @@ struct DebugOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) base_color: vec4<f32>,
+    // Flat: the item's own, the same at every corner. Interpolated, the
+    // opacity of a solid item could come out a hair under 1 in places,
+    // which then weren't treated as solid.
+    @location(2) @interpolate(flat) base_color: vec4<f32>,
     @location(3) emissive: vec3<f32>,
     @location(4) surface: vec3<f32>,
     @location(5) uv: vec2<f32>,

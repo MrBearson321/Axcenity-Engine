@@ -19,6 +19,7 @@
 
 use std::path::Path;
 
+use axcenity_core::face::FACE_CONTROLS;
 use serde::{Deserialize, Serialize};
 
 use crate::easing::{DEFAULT_BEZIER, Easing, cubic_bezier};
@@ -194,8 +195,10 @@ pub enum Interp {
 /// What a track drives. On a Model, `Position` and `Orientation` are its
 /// pivot (see `property_clip.rs`); on a UI element, `Position` and `Size`
 /// are UDim2s. `Bone` is a bone's transform, for a track whose target
-/// names a bone.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// names a bone. `Face` is one of a FaceControls' standard controls (by
+/// its index in `core::face::FACE_CONTROLS`), written by its name
+/// (`"Jaw_Open"`), facial animation F4b.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PropertyName {
     Position,
     Orientation,
@@ -210,9 +213,28 @@ pub enum PropertyName {
     /// A Camera's (and a sequence's own camera keys', Phase 51).
     FieldOfView,
     Bone,
+    Face(u8),
+}
+
+impl Serialize for PropertyName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PropertyName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        PropertyName::from_name(&name).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "`{name}` isn't a property a track can key (Position, Orientation, Size, Color, Transparency, BackgroundColor3, BackgroundTransparency, TextColor3, TextSize, ImageTransparency, FieldOfView, Bone, or a face control such as Jaw_Open)"
+            ))
+        })
+    }
 }
 
 impl PropertyName {
+    /// Every property but the face controls ([`PropertyName::face`]).
     pub const ALL: [PropertyName; 12] = [
         PropertyName::Position,
         PropertyName::Orientation,
@@ -242,11 +264,40 @@ impl PropertyName {
             PropertyName::ImageTransparency => "ImageTransparency",
             PropertyName::FieldOfView => "FieldOfView",
             PropertyName::Bone => "Bone",
+            PropertyName::Face(control) => FACE_CONTROLS
+                .get(control as usize)
+                .map_or("Face", |control| control.name),
         }
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.as_str() == name)
+        Self::ALL
+            .into_iter()
+            .find(|p| p.as_str() == name)
+            .or_else(|| Self::face(name))
+    }
+
+    /// The standard face control `name` (`"Jaw_Open"`), keyed on a
+    /// FaceControls.
+    pub fn face(name: &str) -> Option<Self> {
+        let index = axcenity_core::face::face_control(name)?;
+        Some(PropertyName::Face(index as u8))
+    }
+
+    /// Every face control, in the standard order.
+    pub fn face_controls() -> impl Iterator<Item = PropertyName> {
+        (0..FACE_CONTROLS.len()).map(|index| PropertyName::Face(index as u8))
+    }
+
+    /// Every property a track can key: [`PropertyName::ALL`], then the
+    /// face controls.
+    pub fn keyable() -> impl Iterator<Item = PropertyName> {
+        Self::ALL.into_iter().chain(Self::face_controls())
+    }
+
+    /// Whether this is a FaceControls' control.
+    pub fn is_face(self) -> bool {
+        matches!(self, PropertyName::Face(_))
     }
 
     /// How many numbers a key of this property may hold: 3 for a Vector3 or
@@ -264,7 +315,8 @@ impl PropertyName {
             | PropertyName::BackgroundTransparency
             | PropertyName::TextSize
             | PropertyName::ImageTransparency
-            | PropertyName::FieldOfView => &[1],
+            | PropertyName::FieldOfView
+            | PropertyName::Face(_) => &[1],
             PropertyName::Bone => &[10],
         }
     }

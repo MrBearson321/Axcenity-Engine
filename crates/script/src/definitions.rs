@@ -603,7 +603,9 @@ fn function_type(library: &Library, function: &Function) -> String {
         .map(|class| format!("((className: \"{class}\") -> {class})"))
         .collect();
     overloads.push(format!("({plain})"));
-    overloads.join(" & ")
+    // One overload per line, so pull requests that add classes in different
+    // places don't all rewrite (and conflict on) one long line.
+    overloads.join("\n\t\t& ")
 }
 
 /// `doc`, saying where it works if `name` is a side-only API.
@@ -668,8 +670,18 @@ fn property_doc(class: ClassName, property: &str) -> Option<&'static str> {
             .iter()
             .find(|(c, p, _)| *c == class && *p == property)
             .map(|(_, _, doc)| *doc)
+            .or_else(|| face_control_doc(class, property))
     };
     doc_line(class).find_map(own)
+}
+
+/// A FaceControls' standard controls are described with the controls
+/// themselves (`core::face::FACE_CONTROLS`).
+fn face_control_doc(class: ClassName, property: &str) -> Option<&'static str> {
+    (class == ClassName::FaceControls)
+        .then(|| axcenity_core::face::face_control(property))
+        .flatten()
+        .map(|index| axcenity_core::face::FACE_CONTROLS[index].doc)
 }
 
 #[cfg(test)]

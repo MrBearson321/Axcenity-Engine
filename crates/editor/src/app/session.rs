@@ -395,6 +395,11 @@ impl EditorApp {
     /// Puts `world` in place of the world being edited, with nothing
     /// selected and a new undo history (its steps belong to the old world).
     pub(super) fn replace_world(&mut self, world: World) {
+        // Plugins hold the old world's Instances: they hear `Unloading` and
+        // stop on it, then start again on the new one.
+        for index in 0..self.plugins.entries.len() {
+            self.stop_plugin(index);
+        }
         self.world = world;
         self.selected = None;
         self.selection.clear();
@@ -404,11 +409,6 @@ impl EditorApp {
         self.forget_terrain_work();
         if let Some(project) = &mut self.project {
             project.saved_terrains = terrain::terrain_revisions(&self.world);
-        }
-        // Plugins hold the old world's Instances: they start again on this one.
-        for entry in &mut self.plugins.entries {
-            entry.running = None;
-            entry.widgets.clear();
         }
         self.load_plugins();
     }
