@@ -158,7 +158,10 @@ impl Writer {
     }
 
     fn indices(&mut self, indices: &[u32]) -> usize {
-        let bytes: Vec<u8> = indices.iter().flat_map(|index| index.to_le_bytes()).collect();
+        let bytes: Vec<u8> = indices
+            .iter()
+            .flat_map(|index| index.to_le_bytes())
+            .collect();
         let view = self.view(&bytes, Some(ELEMENT_ARRAY_BUFFER));
         self.accessors.push(json!({
             "bufferView": view,
@@ -184,10 +187,12 @@ pub(crate) fn write(scene: &Scene) -> Vec<u8> {
                     let mut attributes =
                         json!({ "POSITION": writer.floats(&primitive.positions, "VEC3", true) });
                     if !primitive.normals.is_empty() {
-                        attributes["NORMAL"] = json!(writer.floats(&primitive.normals, "VEC3", false));
+                        attributes["NORMAL"] =
+                            json!(writer.floats(&primitive.normals, "VEC3", false));
                     }
                     if !primitive.uvs.is_empty() {
-                        attributes["TEXCOORD_0"] = json!(writer.floats(&primitive.uvs, "VEC2", false));
+                        attributes["TEXCOORD_0"] =
+                            json!(writer.floats(&primitive.uvs, "VEC2", false));
                     }
                     let mut out = json!({
                         "attributes": attributes,

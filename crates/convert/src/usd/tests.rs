@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 use axcenity_assets::{ModelFormat, list_objects, load_model};
 
 fn temp_folder(name: &str) -> PathBuf {
-    let folder =
-        std::env::temp_dir().join(format!("axcenity-usd-{name}-{}", std::process::id()));
+    let folder = std::env::temp_dir().join(format!("axcenity-usd-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(&folder).unwrap();
     folder
@@ -170,7 +169,12 @@ fn a_usd_scene_becomes_a_glb_the_engine_reads_with_units_and_up_axis() {
     let paths: Vec<&str> = objects.iter().map(|object| object.path.as_str()).collect();
     assert_eq!(
         paths,
-        ["World", "World/Furniture", "World/Furniture/Table", "World/Furniture/Chair"]
+        [
+            "World",
+            "World/Furniture",
+            "World/Furniture/Table",
+            "World/Furniture/Chair"
+        ]
     );
 }
 
@@ -250,10 +254,8 @@ fn missing_textures_and_unsupported_prims_are_warnings() {
     let (converted, model) = convert_and_load(&folder.join("kitchen.usda"));
     assert_eq!(model.primitives.len(), 2);
     assert!(
-        converted
-            .warnings
-            .iter()
-            .any(|warning| warning == "its texture `./textures/wood.png` isn't there, so it's drawn without it"),
+        converted.warnings.iter().any(|warning| warning
+            == "its texture `./textures/wood.png` isn't there, so it's drawn without it"),
         "{:?}",
         converted.warnings
     );
@@ -313,6 +315,14 @@ fn polygons_are_fanned_and_left_handed_meshes_turned_round() {
     let (_, left) = convert_and_load(&file);
     assert_eq!(right.primitives[0].indices.len(), 9);
     // Facing +Z when right-handed; the left-handed one faces -Z.
-    assert!(right.primitives[0].normals[0][2] > 0.9, "{:?}", right.primitives[0].normals);
-    assert!(left.primitives[0].normals[0][2] < -0.9, "{:?}", left.primitives[0].normals);
+    assert!(
+        right.primitives[0].normals[0][2] > 0.9,
+        "{:?}",
+        right.primitives[0].normals
+    );
+    assert!(
+        left.primitives[0].normals[0][2] < -0.9,
+        "{:?}",
+        left.primitives[0].normals
+    );
 }

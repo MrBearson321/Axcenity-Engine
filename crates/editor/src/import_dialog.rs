@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axcenity_assets::{Model, ModelObject, Take};
 use axcenity_core::ClassName;
@@ -126,6 +126,10 @@ pub struct ImportDialog {
     /// The asset package being imported, for a `.axpkg` file (then there's
     /// no model).
     pub package: Option<PackageImport>,
+    /// The file `file` was converted from, for a format the engine doesn't
+    /// read itself (a USD file made into a `.glb`, ADR-0027): named in the
+    /// title and Output, and noted in the copy's sidecar.
+    pub source: Option<PathBuf>,
     /// The tab shown (the first tab if it isn't one of [`tabs`](Self::tabs)).
     pub tab: Tab,
     /// The model drawn beside the tabs; `None` without one (an
@@ -163,6 +167,7 @@ impl ImportDialog {
             animation: None,
             animation_only: false,
             package: None,
+            source: None,
             tab: Tab::Objects,
             preview: None,
             previewing: 0,
@@ -187,6 +192,11 @@ impl ImportDialog {
             package: Some(package),
             ..Self::new(file, Vec::new(), Vec::new())
         }
+    }
+
+    /// The file the person picked: the one converted, if it was, else `file`.
+    pub fn shown_file(&self) -> &Path {
+        self.source.as_deref().unwrap_or(&self.file)
     }
 
     /// Adds the file's animation. An animated file comes in as one
@@ -434,7 +444,7 @@ impl ImportDialog {
     /// The title, what the file holds, and the tabs.
     fn header(&mut self, ui: &mut egui::Ui) {
         let file_name = self
-            .file
+            .shown_file()
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();

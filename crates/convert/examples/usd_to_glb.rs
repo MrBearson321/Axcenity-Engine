@@ -9,7 +9,11 @@ fn main() {
             Ok(converted) => {
                 let out = path.with_extension("glb");
                 if let Err(err) = std::fs::write(&out, &converted.glb) {
-                    eprintln!("{}: couldn't write {}: {err}", path.display(), out.display());
+                    eprintln!(
+                        "{}: couldn't write {}: {err}",
+                        path.display(),
+                        out.display()
+                    );
                     continue;
                 }
                 println!(

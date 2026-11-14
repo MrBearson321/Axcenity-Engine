@@ -179,15 +179,21 @@ pub(crate) fn pack_metal_rough(
 ) -> Option<EmbeddedImage> {
     let metal = metal.and_then(|(bytes, channel)| Some((decode(bytes)?, channel)));
     let rough = rough.and_then(|(bytes, channel)| Some((decode(bytes)?, channel)));
-    let size = largest([metal.as_ref(), rough.as_ref()].into_iter().flatten().map(|(image, _)| image))?;
+    let size = largest(
+        [metal.as_ref(), rough.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(|(image, _)| image),
+    )?;
     let metal = metal.map(|(image, channel)| (fit(image, size), channel));
     let rough = rough.map(|(image, channel)| (fit(image, size), channel));
     let packed = RgbaImage::from_fn(size.0, size.1, |x, y| {
         // A factor of 1 times the image: 255 where a map is missing, so the
         // material's own number (put in its factor) is what counts.
         let read = |map: &Option<(RgbaImage, Channel)>| {
-            map.as_ref()
-                .map_or(255, |(image, channel)| image.get_pixel(x, y)[channel.index()])
+            map.as_ref().map_or(255, |(image, channel)| {
+                image.get_pixel(x, y)[channel.index()]
+            })
         };
         image::Rgba([0, read(&rough), read(&metal), 255])
     });
@@ -233,7 +239,9 @@ pub(crate) fn single_channel(name: &str, bytes: &[u8], channel: Channel) -> Opti
 }
 
 fn decode(bytes: &[u8]) -> Option<RgbaImage> {
-    image::load_from_memory(bytes).ok().map(|image| image.to_rgba8())
+    image::load_from_memory(bytes)
+        .ok()
+        .map(|image| image.to_rgba8())
 }
 
 /// Decodes `bytes`, by their contents or else by `name`'s extension (TGA
@@ -289,7 +297,12 @@ mod tests {
 
     #[test]
     fn metal_and_rough_maps_pack_into_blue_and_green() {
-        let metal = tiny([[10, 0, 0, 255], [20, 0, 0, 255], [30, 0, 0, 255], [40, 0, 0, 255]]);
+        let metal = tiny([
+            [10, 0, 0, 255],
+            [20, 0, 0, 255],
+            [30, 0, 0, 255],
+            [40, 0, 0, 255],
+        ]);
         let rough = tiny([[0, 0, 7, 255]; 4]);
         let packed = pack_metal_rough(
             "m.png",
@@ -301,13 +314,21 @@ mod tests {
         assert_eq!(image.get_pixel(1, 0).0, [0, 7, 20, 255]);
         // Without a metal map, blue is 255 (the factor decides).
         let only = pack_metal_rough("m.png", None, Some((&rough, Channel::Blue))).unwrap();
-        assert_eq!(decode(&only.bytes).unwrap().get_pixel(0, 0).0, [0, 7, 255, 255]);
+        assert_eq!(
+            decode(&only.bytes).unwrap().get_pixel(0, 0).0,
+            [0, 7, 255, 255]
+        );
         assert!(pack_metal_rough("m.png", None, None).is_none());
     }
 
     #[test]
     fn opacity_goes_into_the_colors_alpha() {
-        let opacity = tiny([[0, 0, 0, 255], [255, 0, 0, 255], [128, 0, 0, 255], [64, 0, 0, 255]]);
+        let opacity = tiny([
+            [0, 0, 0, 255],
+            [255, 0, 0, 255],
+            [128, 0, 0, 255],
+            [64, 0, 0, 255],
+        ]);
         let combined =
             with_opacity("c.png", None, [1.0, 0.5, 0.0], (&opacity, Channel::Red)).unwrap();
         let image = decode(&combined.bytes).unwrap();
@@ -323,17 +344,25 @@ mod tests {
             .write_to(&mut tga, ImageFormat::Tga)
             .unwrap();
         let converted = embed("b.tga", tga.into_inner()).unwrap();
-        assert_eq!((converted.name.as_str(), converted.mime), ("b.png", "image/png"));
+        assert_eq!(
+            (converted.name.as_str(), converted.mime),
+            ("b.png", "image/png")
+        );
         assert!(embed("c.png", b"not an image".to_vec()).is_none());
     }
 
     #[test]
     fn asset_paths_are_found_in_any_of_their_spellings() {
-        let folder = std::env::temp_dir().join(format!("axcenity-convert-files-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-convert-files-{}", std::process::id()));
         std::fs::create_dir_all(folder.join("textures")).unwrap();
         std::fs::write(folder.join("textures/wood.png"), b"wood").unwrap();
         let files = Files::new(&folder.join("scene.usda"), &[]);
-        for spelling in ["./textures/wood.png", "textures\\wood.png", "@textures/wood.png@"] {
+        for spelling in [
+            "./textures/wood.png",
+            "textures\\wood.png",
+            "@textures/wood.png@",
+        ] {
             assert_eq!(
                 files.read(spelling),
                 Some(("wood.png".to_owned(), b"wood".to_vec())),

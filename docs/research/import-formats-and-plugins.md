@@ -80,8 +80,8 @@ Lua plugins run sandboxed, survive bad code (errors are caught and listed), relo
 | Stage | What | Status |
 |---|---|---|
 | P7.0 | This investigation, ADR-0027, wiki | This PR |
-| P7.1 | OBJ import: `ModelFormat::Obj` through `ufbx` (with the `.mtl` and its textures from the model's folder), in Import…, drag and drop, the Assets panel and the player | Planned |
-| P7.2 | USD import: the `convert` crate (`openusd` + `openusd-schemas`), `.usd`/`.usda`/`.usdc`/`.usdz` converted to `.glb` before the Import dialog opens, `"converted_from"` in the sidecar | Planned |
+| P7.1 | OBJ import: `ModelFormat::Obj` through `ufbx` (with the `.mtl` and its textures from the model's folder), in Import…, drag and drop, the Assets panel and the player | PR #351 |
+| P7.2 | USD import: the `convert` crate (`openusd` + `openusd-schemas`), `.usd`/`.usda`/`.usdc`/`.usdz` converted to `.glb` before the Import dialog opens, `"converted_from"` in the sidecar | This PR |
 | P7.3 | Mesh import presets: `model_presets` in `import-presets.json`, the Preset dropdown and Save as preset… in the Import dialog, Scale, Up axis, Anchored and Collision fidelity | Planned |
 | P7.4 | Plugin API 3: actions with shortcuts in Ctrl+K, Explorer menu items, `ModelImported`, `Unloading`, `OpenScript`, `Notify` | Planned |
 | P7.5 | Alembic | Deferred (see above) |

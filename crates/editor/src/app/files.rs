@@ -37,6 +37,7 @@ use crate::theme::icons;
 use crate::tree::{self, Insertable};
 
 mod attach_script;
+mod convert;
 mod export;
 mod import;
 mod packages;
@@ -596,6 +597,8 @@ impl EditorApp {
     }
 }
 
+#[cfg(test)]
+mod convert_tests;
 #[cfg(test)]
 mod package_tests;
 #[cfg(test)]

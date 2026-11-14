@@ -761,6 +761,7 @@ dependencies = [
  "axcenity-blocks",
  "axcenity-character",
  "axcenity-collab",
+ "axcenity-convert",
  "axcenity-cook",
  "axcenity-core",
  "axcenity-editor-benchmark",
@@ -1398,7 +1399,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "ttf-parser",
- "tungstenite",
  "typenum",
  "uuid",
  "windows",
@@ -1407,6 +1407,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "winnow",
  "zeroize",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -6082,7 +6083,6 @@ version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
 dependencies = [
- "serde",
  "version_check",
 ]
 

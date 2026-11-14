@@ -200,7 +200,11 @@ impl<'a> Reader<'a> {
         let world = match self.transforms.local_transformation(prim) {
             Ok((local, resets)) => {
                 let local = DMat4::from_cols_array(&local.0);
-                if resets { self.root * local } else { parent * local }
+                if resets {
+                    self.root * local
+                } else {
+                    parent * local
+                }
             }
             Err(_) => parent,
         };
@@ -245,7 +249,8 @@ impl<'a> Reader<'a> {
             );
             return None;
         }
-        let left_handed = token(&prim.attribute("orientation"), None).as_deref() == Some("leftHanded");
+        let left_handed =
+            token(&prim.attribute("orientation"), None).as_deref() == Some("leftHanded");
         let double_sided = matches!(
             self.value(&prim.attribute("doubleSided")),
             Some(sdf::Value::Bool(true))
@@ -313,8 +318,16 @@ impl<'a> Reader<'a> {
             .filter(|(_, builder)| !builder.indices.is_empty())
             .map(|(material, builder)| Primitive {
                 positions: builder.positions,
-                normals: if normals.is_some() { builder.normals } else { Vec::new() },
-                uvs: if uvs.is_some() { builder.uvs } else { Vec::new() },
+                normals: if normals.is_some() {
+                    builder.normals
+                } else {
+                    Vec::new()
+                },
+                uvs: if uvs.is_some() {
+                    builder.uvs
+                } else {
+                    Vec::new()
+                },
                 indices: builder.indices,
                 material,
             })
@@ -336,7 +349,11 @@ impl<'a> Reader<'a> {
 
     /// A primvar (or `normals`): its values, flattened through its indices,
     /// and how they're spread over the mesh.
-    fn primvar(&self, prim: &usd::Prim, name: &str) -> Option<(sdf::Value, Spread, Option<Vec<i32>>)> {
+    fn primvar(
+        &self,
+        prim: &usd::Prim,
+        name: &str,
+    ) -> Option<(sdf::Value, Spread, Option<Vec<i32>>)> {
         let attribute = prim.attribute(name);
         let values = self.value(&attribute)?;
         let spread = match attribute.get_metadata::<sdf::Value>("interpolation") {
@@ -403,7 +420,9 @@ impl<'a> Reader<'a> {
             .filter(|child| {
                 let family = token(&child.attribute("familyName"), None);
                 let element = token(&child.attribute("elementType"), None);
-                family.as_deref().is_none_or(|family| family == "materialBind")
+                family
+                    .as_deref()
+                    .is_none_or(|family| family == "materialBind")
                     && element.as_deref().is_none_or(|element| element == "face")
             })
             .filter_map(|child| {
@@ -450,7 +469,9 @@ impl<'a> Reader<'a> {
         }
         let color_key = display.unwrap_or([0.18; 3]).map(f32::to_bits);
         let key = (
-            path.as_ref().map(|path| path.as_str().to_owned()).unwrap_or_default(),
+            path.as_ref()
+                .map(|path| path.as_str().to_owned())
+                .unwrap_or_default(),
             double_sided,
             color_key,
         );
@@ -499,7 +520,12 @@ impl<'a> Reader<'a> {
                     .surface_outputs()
                     .ok()?
                     .iter()
-                    .filter_map(|output| output.base_name().strip_suffix(":surface").map(String::from))
+                    .filter_map(|output| {
+                        output
+                            .base_name()
+                            .strip_suffix(":surface")
+                            .map(String::from)
+                    })
                     .collect();
                 contexts.sort();
                 let contexts: Vec<&str> = contexts.iter().map(String::as_str).collect();
@@ -556,8 +582,15 @@ impl<'a> Reader<'a> {
             let name = diffuse
                 .as_ref()
                 .map_or_else(|| opacity_bytes.0.clone(), |(name, _, _)| name.clone());
-            let color = [material.base_color[0], material.base_color[1], material.base_color[2]];
-            let key = format!("opacity {:?} {:?} {color:?}", surface.diffuse.texture, surface.opacity.texture);
+            let color = [
+                material.base_color[0],
+                material.base_color[1],
+                material.base_color[2],
+            ];
+            let key = format!(
+                "opacity {:?} {:?} {color:?}",
+                surface.diffuse.texture, surface.opacity.texture
+            );
             material.base_color_texture = self.image(key, || {
                 textures::with_opacity(
                     &textures::with_extension(&name, "png"),
@@ -604,7 +637,10 @@ impl<'a> Reader<'a> {
             let key = if packed {
                 as_is(&surface.metallic)
             } else {
-                format!("mr {:?} {:?}", surface.metallic.texture, surface.roughness.texture)
+                format!(
+                    "mr {:?} {:?}",
+                    surface.metallic.texture, surface.roughness.texture
+                )
             };
             let whole = packed.then(|| metal.clone()).flatten();
             material.metallic_roughness_texture = self.image(key, || {
@@ -613,8 +649,12 @@ impl<'a> Reader<'a> {
                 }
                 textures::pack_metal_rough(
                     &format!("metallic_roughness_{name}"),
-                    metal.as_ref().map(|(_, bytes, channel)| (bytes.as_slice(), *channel)),
-                    rough.as_ref().map(|(_, bytes, channel)| (bytes.as_slice(), *channel)),
+                    metal
+                        .as_ref()
+                        .map(|(_, bytes, channel)| (bytes.as_slice(), *channel)),
+                    rough
+                        .as_ref()
+                        .map(|(_, bytes, channel)| (bytes.as_slice(), *channel)),
                 )
             });
             if metal.is_some() {
@@ -635,7 +675,11 @@ impl<'a> Reader<'a> {
             };
             material.occlusion_texture = self.image(key, || match channel {
                 Channel::Red | Channel::Color => textures::embed(&name, bytes),
-                channel => textures::single_channel(&textures::with_extension(&name, "png"), &bytes, channel),
+                channel => textures::single_channel(
+                    &textures::with_extension(&name, "png"),
+                    &bytes,
+                    channel,
+                ),
             });
         }
         if let Some((name, bytes, _)) = self.texture_bytes(&surface.emissive) {
@@ -654,7 +698,9 @@ impl<'a> Reader<'a> {
         if asset.contains("<UDIM>") {
             self.warn_once(
                 asset.clone(),
-                format!("its texture `{asset}` is a UDIM set, which glTF can't hold, so it's left out"),
+                format!(
+                    "its texture `{asset}` is a UDIM set, which glTF can't hold, so it's left out"
+                ),
             );
             return None;
         }
@@ -671,7 +717,11 @@ impl<'a> Reader<'a> {
     }
 
     /// The scene's image made by `make`, made once per `key`.
-    fn image(&mut self, key: String, make: impl FnOnce() -> Option<EmbeddedImage>) -> Option<usize> {
+    fn image(
+        &mut self,
+        key: String,
+        make: impl FnOnce() -> Option<EmbeddedImage>,
+    ) -> Option<usize> {
         if let Some(found) = self.images.get(&key) {
             return *found;
         }
@@ -693,7 +743,10 @@ impl<'a> Reader<'a> {
 /// The image key of a texture file embedded as it is, so maps that share a
 /// file (an ARM map's occlusion and metal-roughness) share one image.
 fn as_is(input: &Input) -> String {
-    let asset = input.texture.as_ref().map_or("", |(asset, _)| asset.as_str());
+    let asset = input
+        .texture
+        .as_ref()
+        .map_or("", |(asset, _)| asset.as_str());
     format!("file {asset}")
 }
 
@@ -743,7 +796,8 @@ fn connected_texture(input: &shade::Input) -> Option<(String, Channel)> {
         .ok()?;
     let source = produced.first()?;
     let channel = Channel::from_output(source.path().name().unwrap_or_default());
-    let shader = shade::Shader::get(input.attribute().stage(), source.path().prim_path()).ok()??;
+    let shader =
+        shade::Shader::get(input.attribute().stage(), source.path().prim_path()).ok()??;
     let texture = shade::nodes::UVTexture::from_shader(shader).ok()??;
     let file = texture.file_input();
     let produced = file
@@ -906,9 +960,12 @@ fn vec2s(value: &sdf::Value) -> Option<Vec<[f32; 2]>> {
         sdf::Value::Vec2dVec(values) => {
             Some(values.iter().map(|v| [v.x as f32, v.y as f32]).collect())
         }
-        sdf::Value::Vec2hVec(values) => {
-            Some(values.iter().map(|v| [v.x.to_f32(), v.y.to_f32()]).collect())
-        }
+        sdf::Value::Vec2hVec(values) => Some(
+            values
+                .iter()
+                .map(|v| [v.x.to_f32(), v.y.to_f32()])
+                .collect(),
+        ),
         _ => None,
     }
 }
