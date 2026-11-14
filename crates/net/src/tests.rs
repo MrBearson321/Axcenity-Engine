@@ -519,6 +519,70 @@ fn a_lan_host_is_not_secured_and_still_joins() {
     assert_eq!(host.network.tokens_issued(), 0);
 }
 
+#[test]
+fn a_secured_host_asks_its_router_to_forward_the_port_and_removes_it_on_stopping() {
+    use crate::port_map::tests::{FakePmp, OUTSIDE, silent};
+    let router = FakePmp::start(false);
+    let mut host = Game::new("1.0", 47_940);
+    host.network.set_port_mapping(true);
+    host.network.map_gateways = Some(crate::port_map::Gateways {
+        ssdp: silent(),
+        pmp: Some(vec![router.address]),
+        wait: Duration::from_millis(100),
+    });
+    let port = host.host_udp();
+    let start = Instant::now();
+    while host.network.public_address().is_none() {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "no mapping: {:?}",
+            host.output
+        );
+        host.frame();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let outside = std::net::SocketAddr::from((OUTSIDE, port));
+    assert_eq!(host.network.public_address(), Some(outside));
+    let fingerprint = host.network.fingerprint().unwrap();
+    assert!(
+        host.said(&format!(
+            "The router forwards {outside} to this game (PCP); players on the internet join \
+             with axcenity://join/{outside}#{fingerprint}"
+        )),
+        "{:?}",
+        host.output
+    );
+    host.network.disconnect(&mut host.world, &mut host.scripts);
+    assert_eq!(host.network.public_address(), None);
+    let removed = router
+        .asked()
+        .iter()
+        .filter(|(_, _, lifetime)| *lifetime == 0)
+        .count();
+    assert_eq!(removed, 2, "UDP and TCP removed: {:?}", router.asked());
+}
+
+#[test]
+fn a_lan_host_never_asks_its_router() {
+    use crate::port_map::tests::FakePmp;
+    let router = FakePmp::start(false);
+    let mut host = Game::new("1.0", 47_941);
+    host.network.set_port_mapping(true);
+    host.network.set_secure(false);
+    host.network.map_gateways = Some(crate::port_map::Gateways {
+        ssdp: crate::port_map::tests::silent(),
+        pmp: Some(vec![router.address]),
+        wait: Duration::from_millis(100),
+    });
+    host.host_udp();
+    for _ in 0..20 {
+        host.frame();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(router.asked().is_empty());
+    assert!(!host.said("router"), "{:?}", host.output);
+}
+
 /// A relay on a free port, and a host of "Castle" on it with its code.
 fn relayed_host(discovery: u16) -> (axcenity_relay::Relay, String, Game) {
     let relay = axcenity_relay::Relay::start(axcenity_relay::RelaySettings {

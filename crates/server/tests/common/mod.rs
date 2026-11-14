@@ -90,6 +90,8 @@ pub fn server_with(game: &str, port: u16, arguments: &[&str], envs: &[(&str, &Pa
     command
         .arg(game)
         .args(["--port", &port.to_string()])
+        // Tests leave the router alone.
+        .arg("--no-port-map")
         .args(arguments)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

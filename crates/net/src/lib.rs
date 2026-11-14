@@ -14,6 +14,8 @@
 //!   port, and fetching a token over TLS checked against a fingerprint.
 //! - `relayed` and `host_socket`: MP5's join codes through an
 //!   `axcenity-relay`, hole punching, and relayed players on the host.
+//! - `port_map`: MP5b's port mapping on the host's router (UPnP, PCP,
+//!   NAT-PMP).
 //! - `discovery`: LAN games found by broadcast.
 //! - `wire`: values and remote messages as plain data, Instances as
 //!   network IDs; `replicate`: the snapshot and each frame's changes.
@@ -29,6 +31,7 @@ pub mod limits;
 mod motion;
 mod movement;
 mod ownership;
+mod port_map;
 mod relayed;
 mod replay;
 mod replicate;
@@ -47,6 +50,7 @@ pub use motion::{
 pub use ownership::{
     ASSEMBLY_SPEED, CharacterCheck, Owned, OwnedSender, Sender, TELEPORT_DISTANCE,
 };
+pub use port_map::{MapEvent, MapMethod, PortMapper, is_public};
 pub use relayed::{PUNCH_TIME, RelayEvent, Route};
 pub use replay::{
     BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
