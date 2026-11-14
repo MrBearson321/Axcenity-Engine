@@ -38,6 +38,15 @@ Humanoid.WalkSpeed: number
 
 Its controller's WalkSpeed.
 
+```lua
+workspace.SpeedPad.Touched:Connect(function(hit)
+	local humanoid = hit.Parent:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = 32
+	end
+end)
+```
+
 #### RunSpeed
 
 ```luau
@@ -94,6 +103,13 @@ Humanoid.Health: number
 
 Its Health's Health; setting it fires HealthChanged (and Died at 0).
 
+```lua
+local humanoid = workspace.Hero.Humanoid
+humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+	print("Health is now", humanoid.Health, "of", humanoid.MaxHealth)
+end)
+```
+
 #### MaxHealth
 
 ```luau
@@ -144,6 +160,13 @@ Humanoid.Died: Signal
 
 Fires once when the character's Health reaches 0, after the Health's own Died and StateChanged to Dead. By then the controller has stopped and RagdollOnDeath and BreakJointsOnDeath are done.
 
+```lua
+local humanoid = workspace.Hero:WaitForChild("Humanoid")
+humanoid.Died:Connect(function()
+	print("Game over")
+end)
+```
+
 ### Functions
 
 #### MoveTo
@@ -153,6 +176,13 @@ Humanoid:MoveTo(position: Vector3, part: (Part | MeshPart)?): ()
 ```
 
 Walks the character to `position` along a path on the navigation mesh, by its controller's MoveDirection, and fires MoveToFinished(true) when it's there (within half a stud across the ground), or MoveToFinished(false) if there's no path, 8 seconds pass or it dies. With `part`, it walks to the place `position` was relative to the part, as the part moves. A new MoveTo, or Move, replaces it.
+
+```lua
+local guard = workspace.Guard.Humanoid
+guard:MoveTo(workspace.Gate.Position)
+guard.MoveToFinished:Wait()
+print("The guard reached the gate")
+```
 
 #### Move
 

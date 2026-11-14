@@ -122,6 +122,9 @@ impl Brain {
     }
 }
 
+/// UserIds between one generation of a bot and the next (`--churn`).
+const GENERATION_IDS: u64 = 100_000;
+
 /// One bot's device.
 pub struct Bot {
     pub index: usize,
@@ -129,6 +132,8 @@ pub struct Bot {
     network: Network,
     schedule: Schedule,
     following: bool,
+    /// `Network::follows` when the world last became the server's.
+    followed: u64,
     brain: Brain,
     idle: bool,
     roam: f32,
@@ -148,7 +153,9 @@ pub struct Bot {
 
 impl Bot {
     /// Loads the game from `settings.game` and starts joining.
-    pub fn start(index: usize, settings: &BotSettings) -> Result<Bot> {
+    /// Bot `index`'s `generation`th device: each churned bot (`--churn`) is
+    /// a new install, with a UserId of its own.
+    pub fn start(index: usize, generation: u64, settings: &BotSettings) -> Result<Bot> {
         let project = axcenity_project::load(&settings.game).with_context(|| {
             format!(
                 "could not open the project in `{}`",
@@ -167,7 +174,8 @@ impl Bot {
         let assets = Assets::new(folder);
         let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
-        scripts.set_user_id((settings.first_user_id + index as u64) as f64);
+        let user_id = settings.first_user_id + index as u64 + generation * GENERATION_IDS;
+        scripts.set_user_id(user_id as f64);
         let _ = axcenity_project::load_starter_character(folder, &mut world);
         scripts.set_input_map(project.input_map.clone());
         let worlds = levels.values().chain([&world]);
@@ -198,6 +206,7 @@ impl Bot {
             network,
             schedule: Schedule::for_host(Hosts::PLAYER),
             following: false,
+            followed: 0,
             brain: Brain::new(index),
             idle: settings.idle,
             roam: settings.roam,
@@ -261,9 +270,12 @@ impl Bot {
             sent_per_second: link.bytes_sent_per_second,
             received_per_second: link.bytes_received_per_second,
             corrections: self.network.corrections(),
+            rejoins: self.network.rejoins(),
+            rejoining: self.network.is_rejoining(),
             script_errors: self.script_errors,
             frame_ms,
             instances: self.sim.world.len(),
+            ..BotSample::default()
         }
     }
 }
@@ -317,8 +329,11 @@ impl HostIo for Bot {
             self.ended = Some(failure.unwrap_or_else(|| "the connection ended".to_owned()));
             return ControlFlow::Break(());
         }
-        if self.sim.scripts.is_client_only() && !self.following {
+        // On joining, and again on each rejoin (a new world).
+        if self.sim.scripts.is_client_only() && self.followed != self.network.follows() {
+            self.followed = self.network.follows();
             self.following = true;
+            self.home = None;
             self.sim.follow_server();
         }
         if self.joined_after.is_none() && self.network.is_joined() && self.following {

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "assets"
+title = "Animations in glTF and GLB files play as takes, like FBX animation stacks"
+details = "Each animation in a .gltf or .glb file (Blender's export, for one) is a take: a clip can link it, state machines play it, and it retargets onto other skeletons by its own skeleton."
+features = ["assets.model-import", "animation.clips"]
+fixes = []
+introduces_issues = []
+prs = [368]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
