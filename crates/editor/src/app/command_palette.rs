@@ -190,6 +190,8 @@ pub(super) enum Command {
     /// Stream While Editing (roadmap R16.3).
     StreamEditing,
     ViewCube,
+    /// Viewport > Ray Tracing Badge.
+    RayBadge,
     Grid,
     MovementGuide,
     ViewportSettings,
@@ -809,6 +811,14 @@ impl EditorApp {
             None,
             Ok(()),
         );
+        add(
+            Command::RayBadge,
+            "Ray Tracing Badge",
+            "Viewport",
+            &["RTX", "Hide ray tracing badge"],
+            None,
+            Ok(()),
+        );
         add(Command::Grid, "Grid", "Viewport", &[], None, Ok(()));
         add(
             Command::MovementGuide,
@@ -1260,6 +1270,7 @@ impl EditorApp {
                 self.overlays.stream_editing = !self.overlays.stream_editing;
             }
             Command::ViewCube => self.view_cube = !self.view_cube,
+            Command::RayBadge => self.ray_badge = !self.ray_badge,
             Command::Grid => self.grid = !self.grid,
             Command::MovementGuide => self.move_guide = !self.move_guide,
             Command::ViewportSettings => {

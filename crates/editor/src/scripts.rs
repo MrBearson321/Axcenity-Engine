@@ -179,6 +179,28 @@ pub struct ScriptTabs {
     breakpoints_changed: bool,
     /// Where Play is paused, if it is. The app sets it.
     pub paused: Option<Pause>,
+    /// What to say about the Luau language server above Lua code tabs
+    /// (`app/luau_checks.rs`). The app sets it each frame.
+    pub server: Option<ServerNote>,
+    /// The bar's button pressed, until the app takes it.
+    pub server_request: Option<ServerRequest>,
+}
+
+/// The language server type checking needs, when it's missing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ServerNote {
+    /// Not found: offer to download it.
+    Missing,
+    /// Downloading, this far (0 to 1).
+    Downloading(f32),
+    /// The last download failed, for this reason.
+    Failed(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServerRequest {
+    Download,
+    Dismiss,
 }
 
 impl ScriptTabs {
@@ -281,6 +303,11 @@ impl ScriptTabs {
             .iter()
             .find(|tab| tab.id == id)
             .map(|tab| tab.path.as_str())
+    }
+
+    /// Every open tab.
+    pub fn iter(&self) -> impl Iterator<Item = &ScriptTab> {
+        self.tabs.iter()
     }
 
     /// Every open tab.
@@ -505,6 +532,13 @@ impl ScriptTabs {
             if ui.add(label).on_hover_text("Go to this line").clicked() {
                 tab.go_to_line = Some(side_warning.line);
             }
+        }
+        if !tab.is_stylesheet()
+            && tab.path.ends_with(".lua")
+            && let Some(note) = &self.server
+            && let Some(request) = server_bar(ui, note)
+        {
+            self.server_request = Some(request);
         }
         if let Some(line) = problems_bar(ui, &tab.problems) {
             tab.go_to_line = Some(line);
@@ -992,6 +1026,59 @@ fn code_editor(
             });
         });
     clicked
+}
+
+/// The bar above a Lua code tab while the Luau language server is
+/// missing: type checking needs it, so offer the version packages ship.
+fn server_bar(ui: &mut egui::Ui, note: &ServerNote) -> Option<ServerRequest> {
+    let palette = theme::palette(ui.ctx());
+    let mut request = None;
+    ui.horizontal_wrapped(|ui| match note {
+        ServerNote::Downloading(fraction) => {
+            ui.add(
+                egui::ProgressBar::new(*fraction)
+                    .desired_width(120.0)
+                    .show_percentage(),
+            );
+            ui.label(
+                egui::RichText::new("Downloading the Luau language server…")
+                    .color(palette.text_weak),
+            );
+        }
+        ServerNote::Missing | ServerNote::Failed(_) => {
+            let text = match note {
+                ServerNote::Failed(reason) => {
+                    format!("Couldn't download the Luau language server: {reason}")
+                }
+                _ => "Type checking needs the Luau language server, which this build \
+                          doesn't include."
+                    .to_owned(),
+            };
+            ui.label(
+                egui::RichText::new(theme::with_icon(icons::INFO, &text))
+                    .size(theme::type_scale::SMALL)
+                    .color(palette.text_weak),
+            );
+            let size = crate::luau_lsp::pinned()
+                .asset()
+                .map(|asset| asset.size.div_ceil(1 << 20))
+                .unwrap_or(0);
+            if ui
+                .small_button(format!("Download ({size} MB)"))
+                .on_hover_text(
+                    "Downloads luau-lsp, the version the editor's packages include, into \
+                         the editor's data folder. Then errors are underlined as you type.",
+                )
+                .clicked()
+            {
+                request = Some(ServerRequest::Download);
+            }
+            if ui.small_button("Not now").clicked() {
+                request = Some(ServerRequest::Dismiss);
+            }
+        }
+    });
+    request
 }
 
 /// One line above the code saying how many problems luau-lsp found, and
@@ -1862,5 +1949,35 @@ mod tests {
         let state = egui::TextEdit::load_state(&ctx, editor_id(path)).unwrap();
         let cursor = state.cursor.char_range().unwrap().primary;
         assert_eq!(cursor.index.0, char_index_of_line(code, 1));
+    }
+
+    /// Without the language server a Lua tab offers it, a stylesheet
+    /// doesn't, and a download in progress shows how far it's got.
+    #[test]
+    fn a_lua_tab_offers_the_language_server_while_its_missing() {
+        let mut tabs = ScriptTabs::default();
+        let path = "scripts/door.server.lua";
+        tabs.open(path, "print('hi')\n", None);
+        tabs.server = Some(ServerNote::Missing);
+        let ctx = theme::test_context();
+        frame(&ctx, &mut tabs);
+        assert_eq!(tabs.server_request, None);
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
+            for (name, note) in [
+                ("missing", ServerNote::Missing),
+                ("downloading", ServerNote::Downloading(0.4)),
+            ] {
+                tabs.server = Some(note);
+                crate::snapshot::snapshot(
+                    &folder.join(format!("script-language-server-{name}.png")),
+                    egui::vec2(560.0, 140.0),
+                    vec![Vec::new(); 2],
+                    |ui| {
+                        egui::CentralPanel::default()
+                            .show(ui, |ui| tabs.show(ui, path, &World::default()));
+                    },
+                );
+            }
+        }
     }
 }

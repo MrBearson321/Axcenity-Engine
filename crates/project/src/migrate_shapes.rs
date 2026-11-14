@@ -197,6 +197,7 @@ pub(crate) fn read_clip(text: &str) -> Result<ClipFile, String> {
             start,
             end,
             root_motion: clip.root_motion,
+            retarget: None,
         }),
         tracks: Vec::new(),
         events,
