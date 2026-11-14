@@ -5,7 +5,8 @@
 // `fog.wgsl` and `lighting.wgsl`, for the frame's bindings and shadows.
 //
 // 1. `cs_scatter` works out each cell's fog and the light it scatters
-//    toward the camera.
+//    toward the camera, at points that shift through the cell each frame,
+//    and blends it with what last frame's grid had there (its history).
 // 2. `cs_gather` adds the cells up along each ray, front to back, each
 //    dimmed by the fog in front of it.
 // 3. `fs_composite` adds what was gathered up to each pixel's solid
@@ -30,6 +31,19 @@ const LAMP_FORWARD: f32 = 0.3;
 @group(1) @binding(4) var gathered_sampler: sampler;
 // Solid items' depth, from the prepass.
 @group(1) @binding(5) var scene_depth: texture_depth_2d;
+// Last frame's scattered light (`cs_scatter`'s output), and where it was.
+@group(1) @binding(6) var history: texture_3d<f32>;
+@group(1) @binding(7) var history_sampler: sampler;
+@group(1) @binding(8) var<uniform> last: FogHistory;
+
+// Must match `FogHistoryRaw` in renderer/fog.rs.
+struct FogHistory {
+    // Last frame's camera, world to clip space (as its `frame.view_proj`).
+    view_proj: mat4x4<f32>,
+    // xyz: last frame's camera, w: how much of last frame's light each
+    // cell keeps (0: none, as on the first frame).
+    camera: vec4<f32>,
+}
 
 // How far along its ray slice `s` ends (0 at the camera, the reach at the
 // last).
@@ -117,12 +131,45 @@ const CELL_POINTS = array<vec3<f32>, 8>(
     vec3<f32>(0.0625, 0.888889, 0.64),
 );
 
+// The radical inverse of `n` in `base`: the Halton sequence's `n`th.
+fn radical_inverse(n: u32, base: u32) -> f32 {
+    var i = n;
+    var scale = 1.0 / f32(base);
+    var value = 0.0;
+    while i > 0u {
+        value += f32(i % base) * scale;
+        i /= base;
+        scale /= f32(base);
+    }
+    return value;
+}
+
+// How far (0 to 1 each way, wrapping) cell `id`'s points are shifted on
+// turn `turn` (`frame.fog.dust_count.z`): the Halton (2, 3, 5) sequence's
+// `turn`th point, plus a shift of the cell's own, so neighbouring cells
+// don't sample alike. Over the frames the history keeps, each cell is
+// looked at all through, not at the same few points: fine shadows (leaves
+// over a window) averaged over 4 or 8 fixed points made cell-sized blocks.
+// Turn 0 shifts nothing. A copy is in ray_shadows.wgsl (`air_shift`).
+fn cell_shift(id: vec3<u32>, turn: u32) -> vec3<f32> {
+    if turn == 0u {
+        return vec3<f32>(0.0);
+    }
+    var h = id * vec3<u32>(1664525u, 1013904223u, 2654435761u) + vec3<u32>(id.z, id.x, id.y);
+    h ^= h >> vec3<u32>(16u);
+    h *= vec3<u32>(0x7feb352du);
+    h ^= h >> vec3<u32>(15u);
+    let own = vec3<f32>(h >> vec3<u32>(8u)) / 16777216.0;
+    let step = vec3<f32>(radical_inverse(turn, 2u), radical_inverse(turn, 3u), radical_inverse(turn, 5u));
+    return fract(own + step);
+}
+
 // How much of the sun reaches cell `id`'s air: its shadow looked up at
-// points spread through the whole cell and averaged, so a shaft's edge
-// crossing a cell counts by how much of it is lit. One point in the middle
-// made shafts step from cell to cell, and the steps crawled as the view
-// moved.
-fn cell_sun_visibility(id: vec3<u32>) -> f32 {
+// points spread through the whole cell (shifted by `shift`) and averaged,
+// so a shaft's edge crossing a cell counts by how much of it is lit. One
+// point in the middle made shafts step from cell to cell, and the steps
+// crawled as the view moved.
+fn cell_sun_visibility(id: vec3<u32>, shift: vec3<f32>) -> f32 {
     // Traced by rays (LE3), fading into the cascades toward the reach.
     let traced = traced_air(id);
     let near = slice_distance(f32(id.z));
@@ -132,9 +179,9 @@ fn cell_sun_visibility(id: vec3<u32>) -> f32 {
         if weight >= 1.0 {
             return traced;
         }
-        return mix(cell_cascade_sun(id), traced, weight);
+        return mix(cell_cascade_sun(id, shift), traced, weight);
     }
-    return cell_cascade_sun(id);
+    return cell_cascade_sun(id, shift);
 }
 
 // How much sunlight reaches cell `id`'s air by ray_shadows.wgsl's
@@ -153,7 +200,7 @@ fn traced_air(id: vec3<u32>) -> f32 {
 }
 
 // The same from the sun's shadow maps.
-fn cell_cascade_sun(id: vec3<u32>) -> f32 {
+fn cell_cascade_sun(id: vec3<u32>, shift: vec3<f32>) -> f32 {
     if frame.shadow.x == 0.0 {
         return 1.0;
     }
@@ -161,7 +208,7 @@ fn cell_cascade_sun(id: vec3<u32>) -> f32 {
     let far = slice_distance(f32(id.z) + 1.0);
     var lit = 0.0;
     for (var k = 0u; k < SUN_SAMPLES; k++) {
-        let point = CELL_POINTS[k];
+        let point = fract(CELL_POINTS[k] + shift);
         let uv = (vec2<f32>(id.xy) + point.xy) / vec2<f32>(GRID.xy);
         let position = frame.camera_position.xyz + view_ray(uv) * mix(near, far, point.z);
         lit += air_sun_visibility(position);
@@ -201,25 +248,57 @@ fn openness(around: vec3<f32>) -> f32 {
 // the light they scatter toward the camera per stud (rgb): the sun's where
 // it isn't shadowed, the lamps', and the light around (height fog's own
 // color by how open the air is, and for dust the light probes' light).
+// Worked out at this frame's point in the cell, then blended with what
+// last frame's grid had where the cell's middle was (`with_history`).
 @compute @workgroup_size(4, 4, 4)
 fn cs_scatter(@builtin(global_invocation_id) id: vec3<u32>) {
     if any(id >= GRID) {
         return;
     }
-    let fog = frame.fog;
+    textureStore(scatter_out, id, with_history(id, cell_scatter(id)));
+}
+
+// What last frame's grid had where cell `id`'s middle is, blended into
+// this frame's `now` by `last.camera.w`; `now` alone where last frame's
+// grid didn't reach (newly in view) or on the first frame.
+fn with_history(id: vec3<u32>, now: vec4<f32>) -> vec4<f32> {
+    let keep = last.camera.w;
+    if keep <= 0.0 {
+        return now;
+    }
     let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(GRID.xy);
+    let position = frame.camera_position.xyz + view_ray(uv) * slice_distance(f32(id.z) + 0.5);
+    let clip = last.view_proj * vec4<f32>(position, 1.0);
+    if clip.w <= 0.0 {
+        return now;
+    }
+    let last_uv = vec2<f32>(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
+    let w = distance_slice(length(position - last.camera.xyz)) / f32(GRID.z);
+    if any(last_uv < vec2<f32>(0.0)) || any(last_uv > vec2<f32>(1.0)) || w > 1.0 {
+        return now;
+    }
+    let before = textureSampleLevel(history, history_sampler, vec3<f32>(last_uv, w), 0.0);
+    return mix(now, before, keep);
+}
+
+// Cell `id`'s fog and light this frame, as `cs_scatter` says.
+fn cell_scatter(id: vec3<u32>) -> vec4<f32> {
+    let fog = frame.fog;
+    // This frame's point in the cell: its middle, shifted.
+    let shift = cell_shift(id, fog.dust_count.z);
+    let point = fract(vec3<f32>(0.5) + shift);
+    let uv = (vec2<f32>(id.xy) + point.xy) / vec2<f32>(GRID.xy);
     let dir = view_ray(uv);
-    let middle = 0.5 * (slice_distance(f32(id.z)) + slice_distance(f32(id.z) + 1.0));
-    let position = frame.camera_position.xyz + dir * middle;
+    let along = mix(slice_distance(f32(id.z)), slice_distance(f32(id.z) + 1.0), point.z);
+    let position = frame.camera_position.xyz + dir * along;
     let air = dust_at(fog, position, dir);
     let fog_density = fog.height.x * fog_thickness(fog, position.y) * air.keep;
     let dust = air.density;
     let density = fog_density + dust;
     if density <= 0.0 {
-        textureStore(scatter_out, id, vec4<f32>(0.0));
-        return;
+        return vec4<f32>(0.0);
     }
-    let sun = cell_sun_visibility(id) * cloud_shadow(frame.clouds, position, fog.sun_direction.xyz);
+    let sun = cell_sun_visibility(id, shift) * cloud_shadow(frame.clouds, position, fog.sun_direction.xyz);
     let lamps = lamp_air_light(position, dir, uv);
     var light = fog_density * (fog.sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.sun.w) * sun
         + fog.distance.z * lamps);
@@ -232,7 +311,7 @@ fn cs_scatter(@builtin(global_invocation_id) id: vec3<u32>) {
         light += air.scatter * (around + lamps);
     }
     light += air.sun * sun;
-    textureStore(scatter_out, id, vec4<f32>(light, density));
+    return vec4<f32>(light, density);
 }
 
 // 2. Along each ray, front to back: the light gathered up to the end of
@@ -288,6 +367,36 @@ fn fs_composite(in: CompositeOut) -> @location(0) vec4<f32> {
     // the first slice's end is a share of it.
     let s = distance_slice(distance);
     let w = clamp((s - 0.5) / f32(GRID.z), 0.5 / f32(GRID.z), 1.0 - 0.5 / f32(GRID.z));
-    let light = textureSampleLevel(gathered, gathered_sampler, vec3<f32>(uv, w), 0.0).rgb;
-    return vec4<f32>(light * min(s, 1.0), 0.0);
+    return vec4<f32>(smooth_gathered(uv, w) * min(s, 1.0), 0.0);
+}
+
+// The gathered light at `uv` across the screen and `w` along the rays:
+// across, a cubic B-spline over the 4 × 4 cells around (4 filtered
+// looks), along, straight between slices. Straight across too, each cell
+// showed as a soft diamond, and a shaft's edge as a row of them.
+fn smooth_gathered(uv: vec2<f32>, w: f32) -> vec3<f32> {
+    let size = vec2<f32>(GRID.xy);
+    let p = uv * size - 0.5;
+    let f = fract(p);
+    let corner = floor(p);
+    let f2 = f * f;
+    let f3 = f2 * f;
+    let w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    let w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    let w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    let w3 = f3 / 6.0;
+    // Each pair of cells' weights, and where one filtered look between
+    // them gives their weighted sum.
+    let low = w0 + w1;
+    let high = w2 + w3;
+    let at_low = (corner - 0.5 + w1 / low) / size;
+    let at_high = (corner + 1.5 + w3 / high) / size;
+    return low.y * (low.x * gathered_at(vec2<f32>(at_low.x, at_low.y), w)
+            + high.x * gathered_at(vec2<f32>(at_high.x, at_low.y), w))
+        + high.y * (low.x * gathered_at(vec2<f32>(at_low.x, at_high.y), w)
+            + high.x * gathered_at(vec2<f32>(at_high.x, at_high.y), w));
+}
+
+fn gathered_at(uv: vec2<f32>, w: f32) -> vec3<f32> {
+    return textureSampleLevel(gathered, gathered_sampler, vec3<f32>(uv, w), 0.0).rgb;
 }

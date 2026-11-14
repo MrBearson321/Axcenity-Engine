@@ -33,7 +33,8 @@ struct RayShadows {
     // tile in pixels, z: how many tiles across.
     lamps: vec4<u32>,
     // x: how wide a lamp's bulb is taken to be, in studs (0 for hard
-    // shadows), y: rays per lamp for soft shadows.
+    // shadows), y: rays per lamp for soft shadows, z: the volumetric fog's
+    // turn (`air_shift`; `Fog.dust_count.z`).
     lamp: vec4<f32>,
 }
 
@@ -424,8 +425,10 @@ const AIR_NEAR_SLICE: f32 = 2.0;
 // A cell past the reach: the fog uses the shadow maps there.
 const AIR_UNTRACED: u32 = 0xffffffffu;
 // Rays a cell, toward the sun from points spread through it: the first of
-// volumetric_fog.wgsl's `CELL_POINTS` (the Halton (2, 3, 5) sequence), so a
-// shaft's edge crossing a cell counts by how much of it is lit.
+// volumetric_fog.wgsl's `CELL_POINTS` (the Halton (2, 3, 5) sequence),
+// shifted each frame by `air_shift`, so a shaft's edge crossing a cell
+// counts by how much of it is lit, and the fog's history averages the
+// whole cell over the frames.
 const AIR_SAMPLES: u32 = 4u;
 const AIR_POINTS = array<vec3<f32>, 4>(
     vec3<f32>(0.5, 0.333333, 0.2),
@@ -433,6 +436,37 @@ const AIR_POINTS = array<vec3<f32>, 4>(
     vec3<f32>(0.75, 0.111111, 0.6),
     vec3<f32>(0.125, 0.444444, 0.8),
 );
+
+// volumetric_fog.wgsl's `radical_inverse`.
+fn air_radical_inverse(n: u32, base: u32) -> f32 {
+    var i = n;
+    var scale = 1.0 / f32(base);
+    var value = 0.0;
+    while i > 0u {
+        value += f32(i % base) * scale;
+        i /= base;
+        scale /= f32(base);
+    }
+    return value;
+}
+
+// volumetric_fog.wgsl's `cell_shift`: keep them matching.
+fn air_shift(id: vec3<u32>, turn: u32) -> vec3<f32> {
+    if turn == 0u {
+        return vec3<f32>(0.0);
+    }
+    var h = id * vec3<u32>(1664525u, 1013904223u, 2654435761u) + vec3<u32>(id.z, id.x, id.y);
+    h ^= h >> vec3<u32>(16u);
+    h *= vec3<u32>(0x7feb352du);
+    h ^= h >> vec3<u32>(15u);
+    let own = vec3<f32>(h >> vec3<u32>(8u)) / 16777216.0;
+    let step = vec3<f32>(
+        air_radical_inverse(turn, 2u),
+        air_radical_inverse(turn, 3u),
+        air_radical_inverse(turn, 5u),
+    );
+    return fract(own + step);
+}
 
 // How far along its ray slice `s` ends (volumetric_fog.wgsl's
 // `slice_distance`, for the grid reaching `reach`).
@@ -466,9 +500,10 @@ fn cs_air(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let far = air_slice_distance(f32(id.z) + 1.0, fog_reach);
     let sun = rays.sun.xyz;
+    let shift = air_shift(id, u32(rays.lamp.z));
     var lit = 0.0;
     for (var k = 0u; k < AIR_SAMPLES; k++) {
-        let point = AIR_POINTS[k];
+        let point = fract(AIR_POINTS[k] + shift);
         let uv = (vec2<f32>(id.xy) + point.xy) / vec2<f32>(AIR_GRID.xy);
         let position = rays.camera.xyz + air_view_ray(uv) * mix(near, far, point.z);
         if blocked_at(position, sun) == 0.0 {

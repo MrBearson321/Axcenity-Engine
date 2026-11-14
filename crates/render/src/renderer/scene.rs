@@ -451,6 +451,12 @@ impl ScenePipeline {
         if !self.graphics.volumetric_fog {
             self.volumetric_fog = None;
         }
+        // New settings (ray traced shadows on or off, a new shadow quality)
+        // light the fog differently: its grid starts again rather than
+        // fade from the old look.
+        if let Some(fog) = &mut self.volumetric_fog {
+            fog.forget_history();
+        }
         // The Path Traced view's pass comes and goes with ray queries.
         #[cfg(feature = "debug-views")]
         if let Some(view) = self.debug_views.as_ref().map(|debug| debug.view) {
@@ -788,6 +794,17 @@ impl ScenePipeline {
                 0.0
             },
         );
+        // The grid's history: which grid to write, where last frame's
+        // camera was, and how this frame's points shift in each cell.
+        if let Some(fog) = &mut self.volumetric_fog {
+            frame_uniform.fog.dust_count[2] = fog.begin_frame(
+                &self.queue,
+                fog::FogCamera {
+                    view_proj: drawn_view_proj,
+                    position: glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
+                },
+            );
+        }
         let drift = self.cloud_drift.advance(&list.clouds, list.time);
         frame_uniform.clouds =
             clouds::CloudsRaw::new(&list.clouds, drift, self.graphics.cloud_quality);
@@ -890,7 +907,7 @@ impl ScenePipeline {
                             (planned_lights.tile_size, planned_lights.tiles_across)
                         },
                     ),
-                    turn,
+                    (turn, frame_uniform.fog.dust_count[2]),
                 ))
             }
         };
