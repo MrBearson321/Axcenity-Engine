@@ -37,7 +37,7 @@ sed -e "s/__VERSION__/${VERSION}/g" -e "s/__SHORT_VERSION__/${SHORT_VERSION}/g" 
 cp -R "$STAGE/." "$MACOS/"
 cp "$STAGE/LICENSE" "$STAGE/NOTICE" "$STAGE/INSTALL.txt" "$RES/"
 # Other-OS players a local stage left out aren't there.
-for file in axcenity-editor axcenity-player players/macos/axcenity-player players/linux/axcenity-player; do
+for file in axcenity-editor axcenity-player tools/luau-lsp players/macos/axcenity-player players/linux/axcenity-player; do
   if [ -e "$MACOS/$file" ]; then chmod +x "$MACOS/$file"; fi
 done
 

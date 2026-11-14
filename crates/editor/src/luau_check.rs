@@ -2,11 +2,12 @@
 //! luau-lsp run as a child process: `luau-lsp analyze` on the tab's text,
 //! with the engine's definitions, on a background thread.
 //!
-//! luau-lsp isn't shipped with the engine. [`find`] looks for it where a
-//! developer would have it: `AXCENITY_LUAU_LSP`, `luau-lsp` on the PATH, or
-//! the server bundled with VS Code's Luau extension (File > Set Up VS Code
-//! Autocomplete suggests that extension). Without it, tabs simply show no
-//! squiggles.
+//! Every package ships luau-lsp in `tools/` beside the editor, and an
+//! editor built from source can download the same version (`luau_lsp.rs`).
+//! [`find`] takes `AXCENITY_LUAU_LSP` first, then those, then where a
+//! developer would have one: `luau-lsp` on the PATH, or the server bundled
+//! with VS Code's Luau extension. Without any, tabs get only the editor's
+//! own checks (`script_completion/lint.rs`).
 //!
 //! Each run writes the text to `script.lua` in a folder of its own under
 //! the system's temp folder, beside the definitions
@@ -137,28 +138,91 @@ fn split_kind(line: &str) -> Option<((&str, &str), &str)> {
     None
 }
 
-/// Where luau-lsp is: `AXCENITY_LUAU_LSP`, else `luau-lsp` on the PATH,
-/// else the newest server inside VS Code's Luau extension.
-pub fn find() -> Option<PathBuf> {
-    if let Some(program) = std::env::var_os(PROGRAM_VARIABLE) {
-        let program = PathBuf::from(program);
-        return program.is_file().then_some(program);
+/// Where the luau-lsp a check uses came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// `AXCENITY_LUAU_LSP` names it.
+    Variable,
+    /// Shipped beside the editor (`tools/`).
+    Bundled,
+    /// Downloaded into the editor's data folder (`luau_lsp.rs`).
+    Downloaded,
+    /// `luau-lsp` on the PATH.
+    Path,
+    /// VS Code's Luau extension's server.
+    VsCode,
+}
+
+impl Source {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Source::Variable => "named by AXCENITY_LUAU_LSP",
+            Source::Bundled => "shipped with the editor",
+            Source::Downloaded => "downloaded by the editor",
+            Source::Path => "found on the PATH",
+            Source::VsCode => "from VS Code's Luau extension",
+        }
     }
-    let name = if cfg!(windows) {
-        "luau-lsp.exe"
-    } else {
-        "luau-lsp"
-    };
-    if let Some(paths) = std::env::var_os("PATH") {
-        for folder in std::env::split_paths(&paths) {
+}
+
+/// The places luau-lsp is looked for, so tests can pick them.
+#[derive(Default)]
+pub struct Places {
+    pub variable: Option<PathBuf>,
+    pub bundled: Option<PathBuf>,
+    pub downloaded: Option<PathBuf>,
+    pub path: Option<std::ffi::OsString>,
+    pub vs_code_extensions: Option<PathBuf>,
+}
+
+impl Places {
+    /// This computer's.
+    pub fn here() -> Places {
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+        Places {
+            variable: std::env::var_os(PROGRAM_VARIABLE).map(PathBuf::from),
+            bundled: crate::luau_lsp::bundled(),
+            downloaded: crate::luau_lsp::data_folder()
+                .map(|data| crate::luau_lsp::downloaded(&data)),
+            path: std::env::var_os("PATH"),
+            vs_code_extensions: home
+                .map(|home| PathBuf::from(home).join(".vscode").join("extensions")),
+        }
+    }
+}
+
+/// Where luau-lsp is: `AXCENITY_LUAU_LSP`, else the one shipped beside the
+/// editor, else the one the editor downloaded (both the version
+/// `packaging/luau-lsp.toml` pins), else `luau-lsp` on the PATH, else the
+/// newest server inside VS Code's Luau extension.
+pub fn find() -> Option<(PathBuf, Source)> {
+    find_in(&Places::here())
+}
+
+pub fn find_in(places: &Places) -> Option<(PathBuf, Source)> {
+    if let Some(program) = &places.variable {
+        return program
+            .is_file()
+            .then(|| (program.clone(), Source::Variable));
+    }
+    for (program, source) in [
+        (&places.bundled, Source::Bundled),
+        (&places.downloaded, Source::Downloaded),
+    ] {
+        if let Some(program) = program.as_ref().filter(|program| program.is_file()) {
+            return Some((program.clone(), source));
+        }
+    }
+    let name = crate::luau_lsp::program_name();
+    if let Some(paths) = &places.path {
+        for folder in std::env::split_paths(paths) {
             let program = folder.join(name);
             if program.is_file() {
-                return Some(program);
+                return Some((program, Source::Path));
             }
         }
     }
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
-    vs_code_server(&PathBuf::from(home).join(".vscode").join("extensions"))
+    vs_code_server(places.vs_code_extensions.as_ref()?).map(|program| (program, Source::VsCode))
 }
 
 /// The server in the newest `johnnymorganz.luau-lsp-<version>` folder in

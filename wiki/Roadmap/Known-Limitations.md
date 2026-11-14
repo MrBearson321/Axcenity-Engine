@@ -41,7 +41,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 
 ## Editor
 
-- Script completion and Go to Definition (F12) follow chains and declarations but doesn't type-check: a value it can't follow (a function's result, a table field, a module's return) offers nothing, Error underlines need luau-lsp installed (it isn't shipped), check one script at a time without the others (a `require`d module's types are unknown), and check only open tabs.
+- Script completion and Go to Definition (F12) follow chains and declarations but doesn't type-check: a value it can't follow (a function's result, a table field, a module's return) offers nothing, luau-lsp ships in every package (a source build downloads it on request) but checks one script at a time without the others (a `require`d module's types are unknown), and check only open tabs.
 - Panics while drawing the Play world aren't caught.
 - Model files aren't watched for changes while the editor runs (read again on open).
 - Bakes (reflection probes, light probe volumes) go stale and must be rebaked by hand (flagged). A bake runs a little each frame with progress and Cancel, but each probe still reads its six faces back one at a time, so thousands of probes take minutes.
