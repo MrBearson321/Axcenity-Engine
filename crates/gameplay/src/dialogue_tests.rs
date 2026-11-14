@@ -514,3 +514,42 @@ fn a_loop_with_nothing_to_read_stops_with_an_error() {
     assert!(lines.contains(&"ended ".to_owned()), "{lines:?}");
     assert!(!dialogue_active(&runtime));
 }
+
+#[test]
+fn a_voiced_line_plays_its_lip_sync_on_the_speakers_face() {
+    let folder = project("lip-sync");
+    let node = |id: u32, kind: &str, values: serde_json::Value| json!({ "id": id, "kind": kind, "position": [0.0, 0.0], "values": values });
+    let wire = |from: u32, to: u32| json!({ "from": { "node": from, "pin": "" }, "to": { "node": to, "pin": "" } });
+    let dialogue = json!({
+        "format_version": 1,
+        "nodes": [
+            node(1, "start", json!({})),
+            node(2, "line", json!({ "Text": "Hello!", "Audio": "assets/voice/hello.ogg" })),
+            node(3, "end", json!({ "Ending": "done" })),
+        ],
+        "wires": [wire(1, 2), wire(2, 3)],
+    });
+    std::fs::write(
+        folder.join("assets/dialogue/Farmer.dialogue.json"),
+        dialogue.to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(folder.join("assets/voice")).unwrap();
+    std::fs::write(
+        folder.join("assets/voice/hello.lipsync.json"),
+        r#"{ "format_version": 1, "duration": 1, "visemes": [ { "time": 0, "viseme": "E" } ] }"#,
+    )
+    .unwrap();
+    let (mut world, mut runtime, farmer) = farm(&folder);
+    let face = world.create(ClassName::FaceControls).unwrap();
+    world.set_parent(face, Some(farmer)).unwrap();
+    frame(&mut runtime, &mut world, &[]);
+    press(&mut runtime, &mut world, KeyCode::E);
+    assert_eq!(dialogue_view(&runtime, &world).unwrap().text, "Hello!");
+    let play = world.face(face).and_then(|state| state.lip_sync.clone());
+    let play = play.expect("the farmer's face says the line");
+    assert_eq!(play.path, "assets/voice/hello.lipsync.json");
+    let voice = play.sound.and_then(|sound| world.get(sound)).unwrap();
+    assert_eq!(voice.name(), "DialogueVoice");
+    assert_eq!(output(&mut runtime), Vec::<String>::new());
+}

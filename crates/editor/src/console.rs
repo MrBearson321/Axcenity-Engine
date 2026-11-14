@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 16] = [
+pub const BUILT_INS: [(&str, &str); 17] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -68,6 +68,11 @@ pub const BUILT_INS: [(&str, &str); 16] = [
         "resolve <mine|theirs|both> [file] — choose what to keep of a conflicting file (all \
          of them without a file); the merge is made once every file is chosen",
     ),
+    (
+        "lipsync",
+        "lipsync <sound or timings> — make a lip sync (`*.lipsync.json`) beside a sound file \
+         from how it sounds, or from a phoneme timings file (`start end phoneme` per line)",
+    ),
 ];
 
 /// The most commands the history keeps.
@@ -97,6 +102,8 @@ pub enum Command<'a> {
     Conflicts,
     /// The choice and file after `resolve`.
     Resolve(&'a str),
+    /// The file after `lipsync`.
+    LipSync(&'a str),
     /// Anything else.
     Lua(&'a str),
 }
@@ -132,6 +139,7 @@ pub fn parse(input: &str) -> Command<'_> {
         ("host", true) => Command::Host,
         ("conflicts", true) => Command::Conflicts,
         ("resolve", false) => Command::Resolve(rest),
+        ("lipsync", false) => Command::LipSync(rest),
         _ => Command::Lua(line),
     }
 }

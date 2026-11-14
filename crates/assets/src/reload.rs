@@ -171,6 +171,20 @@ impl Assets {
             shared.fonts = None;
             return Reload::Reloaded;
         }
+        if crate::is_viseme_map(file) {
+            let mut shared = self.lock();
+            return match shared.viseme_maps.take() {
+                Some(_) => Reload::Reloaded,
+                None => Reload::Unused,
+            };
+        }
+        if crate::is_lip_sync(file) {
+            let mut shared = self.lock();
+            return match shared.lip_syncs.remove(file) {
+                Some(_) => Reload::Reloaded,
+                None => Reload::Unused,
+            };
+        }
         if crate::is_face_expression(file) {
             let mut shared = self.lock();
             return match shared.expressions.take() {

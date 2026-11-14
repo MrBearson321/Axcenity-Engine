@@ -1,0 +1,58 @@
+{
+  "format_version": 1,
+  "name": "default",
+  "jaw_share": 0.4,
+  "visemes": {
+    "AI": {
+      "Lower_Lip_Lower": 0.2,
+      "Mouth_Open": 0.75,
+      "Mouth_Wide": 0.25
+    },
+    "E": {
+      "Lip_Corner_Pull_Left": 0.2,
+      "Lip_Corner_Pull_Right": 0.2,
+      "Mouth_Open": 0.45,
+      "Mouth_Wide": 0.6
+    },
+    "FV": {
+      "Mouth_Open": 0.1,
+      "Upper_Lip_Raise": 0.35
+    },
+    "KG": {
+      "Mouth_Open": 0.4,
+      "Mouth_Wide": 0.15
+    },
+    "L": {
+      "Mouth_Open": 0.35,
+      "Tongue_Up": 0.7
+    },
+    "MBP": {
+      "Mouth_Pucker": 0.1
+    },
+    "O": {
+      "Mouth_Narrow": 0.5,
+      "Mouth_Open": 0.6,
+      "Mouth_Pucker": 0.3
+    },
+    "Silence": {},
+    "TDN": {
+      "Mouth_Open": 0.2,
+      "Mouth_Wide": 0.3,
+      "Tongue_Up": 0.3
+    },
+    "TH": {
+      "Mouth_Open": 0.25,
+      "Tongue_Out": 0.5
+    },
+    "U": {
+      "Mouth_Narrow": 0.6,
+      "Mouth_Open": 0.2,
+      "Mouth_Pucker": 0.8
+    },
+    "WQ": {
+      "Mouth_Narrow": 0.7,
+      "Mouth_Open": 0.15,
+      "Mouth_Pucker": 0.9
+    }
+  }
+}

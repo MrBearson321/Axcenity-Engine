@@ -43,6 +43,7 @@ mod feet;
 pub mod files;
 pub mod ik;
 mod ik_control;
+mod lip_sync;
 mod property_clip;
 pub mod ragdoll;
 mod retarget;
@@ -79,6 +80,10 @@ pub use files::{
     LayerMode, Motion, ParameterDef, PropertyKeyframe, PropertyName, PropertyTrack, ReturnDef,
     ReturnWhen, SHARED_FOLDER, STATE_MACHINE_EXTENSION, StateDef, StateMachineFile, TakeLink, Test,
     TransitionDef, blend_weights, with_returns,
+};
+pub use lip_sync::{
+    CompiledVisemes, LipTiming, default_viseme_map, find_viseme_map, lip_sync_from_audio,
+    lip_sync_from_phonemes, phoneme_viseme, viseme_weights,
 };
 pub use property_clip::{
     Applied, EvaluatedProperty, Placement, PropertyClip, apply_evaluated, blend_evaluated,

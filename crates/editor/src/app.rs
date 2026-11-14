@@ -54,6 +54,7 @@ mod input_settings;
 mod layers;
 mod layouts;
 mod levels;
+mod lip_sync;
 mod luau_checks;
 mod material_files;
 mod material_tab;

@@ -3125,6 +3125,40 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::FaceControls,
+        Function {
+            name: "PlayLipSync",
+            doc: "Plays the lip sync `path` (a `*.lipsync.json` file of timed visemes) on the face's Dialogue layer, through its VisemeMap. Given a Sound, it keeps time with it: it moves on only while the Sound plays (at its PlaybackSpeed) and fades out when the Sound has played and stopped, so call it just before `sound:Play()`. `options` may set `Speed` (1), `Weight` (0 to 1, how much it counts over the layers under it), `FadeTime` (seconds to fade in and out, 0.1) and `TimePosition` (where to start). A new line replaces the one playing.",
+            params: &[
+                ("path", "string"),
+                ("sound?", "Sound"),
+                (
+                    "options?",
+                    "{ Speed: number?, Weight: number?, FadeTime: number?, TimePosition: number? }",
+                ),
+            ],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "StopLipSync",
+            doc: "Fades the lip sync out over `fadeTime` seconds (its own fade time if left out); the mouth goes back to the layers under it.",
+            params: &[("fadeTime?", "number")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "GetLipSync",
+            doc: "The lip sync playing, as a table of `Path`, `TimePosition`, `Speed`, `Weight` and `Sound` (if it keeps time with one), or nil.",
+            params: &[],
+            returns: "{ Path: string, TimePosition: number, Speed: number, Weight: number, Sound: Sound? }?",
+        },
+    ),
+    (
         ClassName::Animator,
         Function {
             name: "SetLayerWeight",

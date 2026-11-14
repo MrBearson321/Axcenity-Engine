@@ -395,6 +395,74 @@ pub struct FaceState {
     /// Layer settings changed from the defaults.
     pub layers: std::collections::BTreeMap<FaceLayer, FaceLayerSetting>,
     pub next_order: u64,
+    /// The lip sync `PlayLipSync` started, while it plays or fades out.
+    pub lip_sync: Option<LipSyncPlay>,
+}
+
+/// A lip sync a script played on a face (facial animation F5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LipSyncPlay {
+    /// The `*.lipsync.json` file.
+    pub path: String,
+    /// Seconds into it.
+    pub time: f64,
+    /// How fast it goes; with a Sound, times the Sound's PlaybackSpeed.
+    pub speed: f64,
+    /// The Sound it keeps time with: it moves on only while the Sound
+    /// plays, and stops when the Sound has played and stopped.
+    pub sound: Option<crate::InstanceId>,
+    /// The Sound has been seen playing.
+    pub heard: bool,
+    /// How much it counts now (0 to 1) and where that's heading (0 once
+    /// stopped, when it's then dropped), and the seconds that takes.
+    pub weight: f64,
+    pub target_weight: f64,
+    pub fade: f64,
+}
+
+/// The 12 visemes (mouth shapes for speech) a lip sync is made of, in
+/// order: what each sounds like is in its doc.
+pub const VISEMES: [Viseme; 12] = [
+    Viseme::new("Silence", "The mouth at rest between words."),
+    Viseme::new("AI", "Open vowels: the a in father, the i in bite."),
+    Viseme::new("E", "The e in bed and the a in cat: open and wide."),
+    Viseme::new("O", "The o in go: open and round."),
+    Viseme::new("U", "The oo in boot: small and round."),
+    Viseme::new("FV", "F and V: the lower lip under the top teeth."),
+    Viseme::new(
+        "L",
+        "L: the tongue up behind the teeth, mouth a little open.",
+    ),
+    Viseme::new("MBP", "M, B and P: the lips pressed together."),
+    Viseme::new("WQ", "W and Q: pursed lips."),
+    Viseme::new("TH", "Th: the tongue between the teeth."),
+    Viseme::new("TDN", "T, D and N (and S, Z): the teeth almost closed."),
+    Viseme::new("KG", "K and G (and the ng in sing): open, the tongue back."),
+];
+
+/// One viseme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Viseme {
+    pub name: &'static str,
+    pub doc: &'static str,
+}
+
+impl Viseme {
+    const fn new(name: &'static str, doc: &'static str) -> Self {
+        Self { name, doc }
+    }
+}
+
+/// The index in [`VISEMES`] of the viseme `name`, any case, ignoring `/`,
+/// `_` and spaces (so `"A/I"` and `"m_b_p"` work).
+pub fn viseme(name: &str) -> Option<usize> {
+    let plain: String = name
+        .chars()
+        .filter(|c| !matches!(c, '/' | '_' | ' ' | '-'))
+        .collect();
+    VISEMES
+        .iter()
+        .position(|viseme| viseme.name.eq_ignore_ascii_case(&plain))
 }
 
 impl FaceState {
@@ -446,6 +514,14 @@ mod tests {
         }
         assert_eq!(FACE_CONTROLS.len(), 48);
         assert_eq!(face_control("Blink"), None);
+    }
+
+    #[test]
+    fn visemes_are_found_by_their_written_names() {
+        assert_eq!(viseme("A/I"), Some(1));
+        assert_eq!(viseme("m_b_p"), Some(7));
+        assert_eq!(viseme("silence"), Some(0));
+        assert_eq!(viseme("Q"), None);
     }
 
     #[test]

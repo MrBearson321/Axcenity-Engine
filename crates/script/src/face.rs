@@ -5,9 +5,10 @@
 use axcenity_assets::Assets;
 use axcenity_core::ClassName;
 use axcenity_core::face::{
-    ExpressionPlay, FaceBlend, FaceLayer, FaceLayerSetting, face_control, face_mask_controls,
+    ExpressionPlay, FaceBlend, FaceLayer, FaceLayerSetting, LipSyncPlay, face_control,
+    face_mask_controls,
 };
-use mlua::{Function, Lua, Table};
+use mlua::{FromLua, Function, Lua, Table};
 
 use crate::instance::{LuaInstance, destroyed, world, world_mut};
 use crate::types::type_name;
@@ -273,12 +274,117 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
             Ok(())
         },
     )?;
-    Ok(vec![
+    let mut methods = vec![
         (ClassName::FaceControls, "SetExpression", set_expression),
         (ClassName::FaceControls, "ClearExpression", clear_expression),
         (ClassName::FaceControls, "GetExpressions", get_expressions),
         (ClassName::FaceControls, "SetOverride", set_override),
         (ClassName::FaceControls, "ClearOverrides", clear_overrides),
         (ClassName::FaceControls, "SetLayer", set_layer),
+    ];
+    methods.extend(lip_sync_methods(lua)?);
+    Ok(methods)
+}
+
+/// `PlayLipSync`, `StopLipSync` and `GetLipSync` (facial animation F5).
+fn lip_sync_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let play = lua.create_function(
+        |lua, (this, path, sound, options): (LuaInstance, String, mlua::Value, Option<Table>)| {
+            const METHOD: &str = "PlayLipSync";
+            let sound = match sound {
+                mlua::Value::Nil => None,
+                other => {
+                    let sound = LuaInstance::from_lua(other.clone(), lua).map_err(|_| {
+                        mlua::Error::runtime(format!(
+                            "PlayLipSync's second argument is the Sound it keeps time with, or nil, not a {}",
+                            type_name(lua, &other)
+                        ))
+                    })?;
+                    let is_sound = world(lua)?
+                        .get(sound.0)
+                        .is_some_and(|instance| instance.class() == ClassName::Sound);
+                    if !is_sound {
+                        return Err(mlua::Error::runtime(
+                            "PlayLipSync's second argument must be a Sound",
+                        ));
+                    }
+                    Some(sound.0)
+                }
+            };
+            let option = |key: &str| -> mlua::Result<Option<f64>> {
+                match &options {
+                    Some(options) => options.get::<Option<f64>>(key),
+                    None => Ok(None),
+                }
+            };
+            let speed = number_in(option("Speed")?, 1.0, 0.0..=10.0, "Speed", METHOD)?;
+            let weight = number_in(option("Weight")?, 1.0, 0.0..=1.0, "Weight", METHOD)?;
+            let fade = seconds(option("FadeTime")?, "FadeTime", METHOD)?.unwrap_or(0.1);
+            let start = seconds(option("TimePosition")?, "TimePosition", METHOD)?.unwrap_or(0.0);
+            if let Some(assets) = lua.app_data_ref::<Assets>()
+                && let Err(why) = assets.lip_sync(&path)
+            {
+                return Err(mlua::Error::runtime(format!(
+                    "PlayLipSync can't play `{path}`: {why}"
+                )));
+            }
+            let mut world = world_mut(lua)?;
+            let state = world.face_mut(this.0).ok_or_else(destroyed)?;
+            // Starting again from silence fades in; over another line, it
+            // cuts to the new one at the weight it had.
+            let from = state.lip_sync.as_ref().map_or(0.0, |play| play.weight);
+            state.lip_sync = Some(LipSyncPlay {
+                path,
+                time: start,
+                speed,
+                sound,
+                heard: false,
+                weight: from,
+                target_weight: weight,
+                fade,
+            });
+            Ok(())
+        },
+    )?;
+    let stop = lua.create_function(|lua, (this, fade): (LuaInstance, Option<f64>)| {
+        let fade = seconds(fade, "fade time", "StopLipSync")?;
+        let mut world = world_mut(lua)?;
+        let state = world.face_mut(this.0).ok_or_else(destroyed)?;
+        if let Some(play) = &mut state.lip_sync {
+            play.target_weight = 0.0;
+            if let Some(fade) = fade {
+                play.fade = fade;
+            }
+        }
+        Ok(())
+    })?;
+    let get = lua.create_function(|lua, this: LuaInstance| {
+        let play = {
+            let world = world(lua)?;
+            if world.get(this.0).is_none() {
+                return Err(destroyed());
+            }
+            world
+                .face(this.0)
+                .and_then(|state| state.lip_sync.clone())
+                .filter(|play| play.target_weight > 0.0)
+        };
+        let Some(play) = play else {
+            return Ok(mlua::Value::Nil);
+        };
+        let table = lua.create_table()?;
+        table.set("Path", play.path)?;
+        table.set("TimePosition", play.time)?;
+        table.set("Speed", play.speed)?;
+        table.set("Weight", play.target_weight)?;
+        if let Some(sound) = play.sound {
+            table.set("Sound", LuaInstance(sound))?;
+        }
+        Ok(mlua::Value::Table(table))
+    })?;
+    Ok(vec![
+        (ClassName::FaceControls, "PlayLipSync", play),
+        (ClassName::FaceControls, "StopLipSync", stop),
+        (ClassName::FaceControls, "GetLipSync", get),
     ])
 }

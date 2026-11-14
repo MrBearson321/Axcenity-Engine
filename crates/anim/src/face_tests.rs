@@ -585,3 +585,87 @@ fn expressions_overrides_and_blinks_reach_the_shapes() {
     assert!(closed > 0.9, "{closed}");
     assert_eq!(world.face(face).unwrap().expressions.len(), 1);
 }
+
+#[test]
+fn a_lip_sync_keeps_time_with_its_sound_and_fades_out_when_it_stops() {
+    let folder = std::env::temp_dir().join(format!("axcenity-lip-sync-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(folder.join("voice")).unwrap();
+    std::fs::write(
+        folder.join("voice/hi.lipsync.json"),
+        r#"{ "format_version": 1, "duration": 2,
+            "visemes": [ { "time": 0, "viseme": "AI" }, { "time": 1, "viseme": "MBP" } ] }"#,
+    )
+    .unwrap();
+    let assets = Assets::new(&folder);
+    let model = head(Quat::IDENTITY);
+    let mut world = World::new();
+    let part = mesh_part(&mut world, "none.glb");
+    let face = face_controls(&mut world, part, &[("Mouth_Open", 0.1)]);
+    let sound = world.create(ClassName::Sound).unwrap();
+    world.set_parent(sound, Some(part)).unwrap();
+    world.face_mut(face).unwrap().lip_sync = Some(axcenity_core::face::LipSyncPlay {
+        path: "voice/hi.lipsync.json".into(),
+        time: 0.0,
+        speed: 1.0,
+        sound: Some(sound),
+        heard: false,
+        weight: 1.0,
+        target_weight: 1.0,
+        fade: 0.1,
+    });
+    let profile = crate::built_in_face_profile("axcenity").unwrap();
+    let (rig, _) = FaceRig::bind(&model, "axcenity", &profile);
+    let mut motion = crate::face_play::FaceMotion::new(1);
+    let mut step = |world: &mut World, dt: f64| {
+        let mut heads = std::collections::HashMap::new();
+        let mut problems = Vec::new();
+        let layers = crate::face_world::face_layers(
+            world,
+            &assets,
+            face,
+            part,
+            &model,
+            &mut motion,
+            crate::face_world::Lookers {
+                viewer: None,
+                heads: &mut heads,
+            },
+            dt,
+            &mut problems,
+        )
+        .unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        let controls = layers.compose(&rig, None, None);
+        let at = |name| controls[face_control(name).unwrap()];
+        (at("Mouth_Open"), at("Jaw_Open"))
+    };
+    let time = |world: &World| world.face(face).unwrap().lip_sync.as_ref().map(|p| p.time);
+    // The Sound hasn't started: the line waits on AI's first frame.
+    let (open, jaw) = step(&mut world, 0.5);
+    assert_eq!(time(&world), Some(0.0));
+    assert!(
+        (open - 0.45).abs() < 1e-5 && (jaw - 0.3).abs() < 1e-5,
+        "{open} {jaw}"
+    );
+    world
+        .set_property(sound, "Playing", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(sound, "PlaybackSpeed", Value::Number(2.0))
+        .unwrap();
+    step(&mut world, 0.6);
+    assert_eq!(time(&world), Some(1.2), "twice as fast as the Sound");
+    let (open, _) = step(&mut world, 0.0);
+    assert_eq!(open, 0.0, "MBP: closed, over the base's 0.1");
+    // The Sound stops: the line fades out over 0.1 s and the face is its
+    // own again.
+    world
+        .set_property(sound, "Playing", Value::Bool(false))
+        .unwrap();
+    step(&mut world, 0.05);
+    let (open, _) = step(&mut world, 0.05);
+    assert!((open - 0.1).abs() < 1e-5, "{open}");
+    assert!(world.face(face).unwrap().lip_sync.is_none());
+    let _ = std::fs::remove_dir_all(&folder);
+}

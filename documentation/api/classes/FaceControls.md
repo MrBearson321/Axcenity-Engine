@@ -134,6 +134,30 @@ FaceControls.IdleMotion: number
 
 Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.
 
+#### VisemeMap
+
+```luau
+FaceControls.VisemeMap: string
+```
+
+Which viseme map lip sync uses: what each of the 12 visemes (Silence, AI, E, O, U, FV, L, MBP, WQ, TH, TDN, KG) does to the controls, and how much of the opening the jaw carries. A `*.visemes.json` file's name or path in assets/faces/visemes, or empty for the built-in one.
+
+#### LipSyncSmoothing
+
+```luau
+FaceControls.LipSyncSmoothing: number
+```
+
+Seconds one viseme takes to blend into the next during lip sync.
+
+#### LipSyncAnticipation
+
+```luau
+FaceControls.LipSyncAnticipation: number
+```
+
+Seconds before its time each viseme starts, since mouths move a little before the sound comes.
+
 #### Blink_Left
 
 ```luau
@@ -567,4 +591,28 @@ FaceControls:SetLayer(layer: string, weight: number?, blend: string?, mask: (str
 ```
 
 Sets how the face layer `layer` (`"Base"`, `"Expression"`, `"Dialogue"`, `"Procedural"` or `"Override"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `"Override"` (replaces, the default) or `"Additive"` (adds), and `mask`, the controls it may move: a group (`"Eyes"`, `"Eyebrows"`, `"Mouth"`, `"CheeksAndNose"`, `"JawAndTongue"`), a control, or a list of them; nil for all.
+
+#### PlayLipSync
+
+```luau
+FaceControls:PlayLipSync(path: string, sound: Sound?, options: { Speed: number?, Weight: number?, FadeTime: number?, TimePosition: number? }?): ()
+```
+
+Plays the lip sync `path` (a `*.lipsync.json` file of timed visemes) on the face's Dialogue layer, through its VisemeMap. Given a Sound, it keeps time with it: it moves on only while the Sound plays (at its PlaybackSpeed) and fades out when the Sound has played and stopped, so call it just before `sound:Play()`. `options` may set `Speed` (1), `Weight` (0 to 1, how much it counts over the layers under it), `FadeTime` (seconds to fade in and out, 0.1) and `TimePosition` (where to start). A new line replaces the one playing.
+
+#### StopLipSync
+
+```luau
+FaceControls:StopLipSync(fadeTime: number?): ()
+```
+
+Fades the lip sync out over `fadeTime` seconds (its own fade time if left out); the mouth goes back to the layers under it.
+
+#### GetLipSync
+
+```luau
+FaceControls:GetLipSync(): { Path: string, TimePosition: number, Speed: number, Weight: number, Sound: Sound? }?
+```
+
+The lip sync playing, as a table of `Path`, `TimePosition`, `Speed`, `Weight` and `Sound` (if it keeps time with one), or nil.
 
