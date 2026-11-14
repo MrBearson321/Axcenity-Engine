@@ -37,6 +37,7 @@ pub mod branding;
 mod build_profiles;
 mod collaborate_file;
 mod compat;
+mod default_humanoid;
 mod default_sky;
 mod duplicates;
 mod levels;
@@ -68,6 +69,12 @@ mod user_templates;
 
 pub use collision_groups::{
     COLLISION_GROUPS_FILE, parse_collision_groups, save_collision_groups, write_collision_groups,
+};
+pub use default_humanoid::{
+    DEFAULT_CHARACTER_PREFAB_PATH, DEFAULT_HUMANOID_ANIMATIONS, DEFAULT_HUMANOID_ANIMATIONS_PATH,
+    DEFAULT_HUMANOID_CLIPS_FOLDER, DEFAULT_HUMANOID_MODEL, DEFAULT_HUMANOID_MODEL_PATH,
+    DEFAULT_HUMANOID_STATE_MACHINE_PATH, ROOT_PART_SIZE, STUDS_PER_METRE, add_default_humanoid,
+    default_character, default_humanoid_animation_files,
 };
 pub use default_sky::{
     DEFAULT_SKY, DEFAULT_SKY_CLOCK_TIME, DEFAULT_SKY_LATITUDE, DEFAULT_SKY_PATH, add_default_sky,
