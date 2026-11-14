@@ -34,6 +34,10 @@ const TOLERANCE: f64 = 1.15;
 /// The most distance saved up, in seconds of movement, plus [`SLACK`].
 const BURST: f64 = 0.25;
 const SLACK: f64 = 2.0;
+/// Movement smaller than this is the wire's rounding (positions go to
+/// 1/128 stud), not the character's: it costs nothing, so a character
+/// standing still is never moved back, even on its first update.
+const ROUNDING: f64 = 1.0 / 64.0;
 /// The Workspace's default gravity, at which `JumpHeight` is measured.
 const GRAVITY: f64 = 196.2;
 /// A device sends all of its parts this often, in seconds, besides the
@@ -260,8 +264,8 @@ impl CharacterCheck {
         self.rise = (self.rise + launch * TOLERANCE * dt).min(jump_height * 1.5 + SLACK);
         // What it stands on carried it this far; the rest is its own.
         let (carried_across, carried_up) = self.carried(world, was);
-        let across = (horizontal(was, to) - carried_across * TOLERANCE).max(0.0);
-        let up = (f64::from((to.y - was.y).max(0.0)) - carried_up * TOLERANCE).max(0.0);
+        let across = (horizontal(was, to) - carried_across * TOLERANCE - ROUNDING).max(0.0);
+        let up = (f64::from((to.y - was.y).max(0.0)) - carried_up * TOLERANCE - ROUNDING).max(0.0);
         if across > self.across || up > self.rise {
             return false;
         }

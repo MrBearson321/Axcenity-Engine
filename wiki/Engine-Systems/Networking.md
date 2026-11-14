@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: partial
 crates: [net, server, script]
-source: [crates/script/src/lag.rs, crates/script/src/replay.rs, crates/net/src/replay.rs, crates/player/src/replay_view.rs, crates/net/src/lib.rs, crates/net/src/transport.rs, crates/net/src/handshake.rs, crates/net/src/session.rs, crates/net/src/discovery.rs, crates/net/src/wire.rs, crates/net/src/replicate.rs, crates/net/src/motion.rs, crates/net/src/ownership.rs, crates/net/src/streaming.rs, crates/net/src/game.rs, crates/server/src/main.rs, crates/script/src/network.rs]
+source: [crates/server/src/bots/main.rs, crates/server/src/bots/bot.rs, crates/server/src/stats.rs, crates/script/src/lag.rs, crates/script/src/replay.rs, crates/net/src/replay.rs, crates/player/src/replay_view.rs, crates/net/src/lib.rs, crates/net/src/transport.rs, crates/net/src/handshake.rs, crates/net/src/session.rs, crates/net/src/discovery.rs, crates/net/src/wire.rs, crates/net/src/replicate.rs, crates/net/src/motion.rs, crates/net/src/ownership.rs, crates/net/src/streaming.rs, crates/net/src/game.rs, crates/server/src/main.rs, crates/script/src/network.rs]
 docs: [docs/architecture/networking.md, docs/architecture/streaming.md, crates/net/CLAUDE.md, crates/server/CLAUDE.md]
 verified: 2026-11-12
 verified_commit: db1ffa77
@@ -36,7 +36,7 @@ sequenceDiagram
 
 - **IDs**: replica Instances keep the server's IDs; device-local ones are numbered from 2³¹ (`InstanceId::is_local`). ServerScriptService and ServerStorage never leave the server.
 - **Handshake** checks protocol (`PROTOCOL_VERSION`, 10 since M7, 12 since Phase 81), class-defaults fingerprint, game name, version, password, `MaxPlayers` (8); `Hello`/`Refused` stay JSON forever so a newer engine can say why it refuses.
-- **Ownership** (Phase 66): `CharacterCheck` limits how far a character may move per packet (walk/run speed + 15%, jump height, never more than 30 studs); owned assemblies are held still on the server and placed where the owner says.
+- **Ownership** (Phase 66): `CharacterCheck` limits how far a character may move per packet (walk/run speed + 15%, jump height, never more than 30 studs; under 1/64 stud is the wire's rounding and free); owned assemblies are held still on the server and placed where the owner says.
 - **Lag compensation** (Phase 81, `script/src/lag.rs`): the host's send records a second of poses for parts that moved (`LagHistory`, by `motion_revision`) and each remote player's rewind (round trip + 0.1 s smoothing, at most 1 s). `workspace:Raycast` with `RaycastParams.CompensateFor`, or in a `LagCompensated` Tool's RemoteEvent handler before it waits, tests moving parts where the shooter saw them (`physics::raycast_rewound`); their own character stays where it is. Shape casts and overlaps aren't compensated.
 - **Replays** (Phase 81, `net/src/replay.rs`): `ReplayService` queues requests; `Network::send` feeds a `Recorder` (its own `Replicator` plus exact poses of parts whose `motion_revision` moved; a snapshot keyframe every 10 s). A `.replay` is `AXREPLAY` + format version + postcard. `Playback` rebuilds from the keyframe before a moment in `empty_replica` with the game's Terrains, then applies frames, so playback is pure data and the same every time ([ADR-0010](../Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) replicas, no re-simulation). `BufferSeconds` + `PlayBuffer(player)` is a kill cam drawn by the player's `replay_view.rs` instead of the live world; `axcenity-player --replay` watches a file.
 - **Streaming**: with `StreamingEnabled`, each player gets only their share ([World streaming](World-Streaming.md)).
@@ -56,11 +56,11 @@ sequenceDiagram
 
 ## Configuration
 
-Ports 47800 (game) and 47801 (LAN discovery). `--host [port]`, `--join addr:port`, `--password`; server `--port`, `--bench-clients n`. `AXCENITY_NET_JSON=1` makes a sending end use JSON instead of postcard, for debugging.
+Ports 47800 (game) and 47801 (LAN discovery). `--host [port]`, `--join addr:port`, `--password`; server `--port`, `--max-players n`, `--stats seconds`, `--bench-clients n`; `axcenity-bots <game> --join addr:port --count n` (MP1). `AXCENITY_NET_JSON=1` makes a sending end use JSON instead of postcard, for debugging.
 
 ## Testing
 
-`cargo nextest run -p axcenity-net` (55 tests; `lag_tests` proves a compensated shot hits a moving target an uncompensated one misses; `replay_tests` a two-minute match that replays exactly and a 5 s kill cam); `crates/server/tests/headless.rs` runs the real binary; editor `play/tests.rs` multi-client tests; LAN between two computers by hand: `cargo test -p axcenity-net -- --ignored --nocapture a_game_hosted_on_another_computer`.
+`cargo nextest run -p axcenity-net` (55 tests; `lag_tests` proves a compensated shot hits a moving target an uncompensated one misses; `replay_tests` a two-minute match that replays exactly and a 5 s kill cam); `crates/server/tests/headless.rs` runs the real binary; editor `play/tests.rs` multi-client tests; LAN between two computers by hand: `cargo test -p axcenity-net -- --ignored --nocapture a_game_hosted_on_another_computer`. **Scale** (multiplayer readiness MP1): `axcenity-bots` are headless players over real UDP, one process per machine; `scripts/net-scale.py run|join|report` drives server and bots and writes a report; `crates/server/tests/bots.rs` joins 12 bots in two processes. Plan for the rest (secure connections, NAT and relay, validation, operational tests, prediction): `docs/research/multiplayer-readiness.md`.
 
 ## Limitations
 
