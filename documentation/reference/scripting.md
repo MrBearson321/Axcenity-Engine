@@ -70,7 +70,7 @@ An error stops only the function it happens in. Output shows it as `path:line: m
 
 ## Tooling
 
-- The script tab highlights Lua, numbers lines and sets breakpoints. It offers completion (after `.` and `:`, or **Ctrl+Space**) and signature hints from the API description. With luau-lsp installed (`AXCENITY_LUAU_LSP`, the PATH, or VS Code's Luau extension), it underlines errors and lints a moment after typing stops, and lists a saved script's errors in Output. luau-lsp isn't shipped with the engine.
+- The script tab highlights Lua, numbers lines and sets breakpoints. It offers completion (after `.` and `:`, or **Ctrl+Space**) and signature hints from the API description. It type-checks with luau-lsp, the Luau language server, which the editor ships with: it underlines errors and lints a moment after typing stops, and lists a saved script's errors in Output. An editor built from source offers to download the same version (a bar above the script, or **Settings > External tools**); `AXCENITY_LUAU_LSP` names another one.
 - **File > Set Up VS Code Autocomplete** writes the engine's API definitions into the project for VS Code (with the Luau extension) or any editor that runs luau-lsp: completions, hovers and type checking.
 - The definitions are generated from the engine's own API description, the same one the **API Reference** shows, so they always match the engine.
 

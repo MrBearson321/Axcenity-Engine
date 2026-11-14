@@ -217,8 +217,11 @@ fn the_example_files_are_saved_as_the_engine_writes_them() {
 fn walk(root_motion: bool) -> (crate::Clip, std::sync::Arc<axcenity_assets::Model>) {
     let assets = Assets::new(example());
     let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
-    let (mut clip, takes) =
-        crate::load_clip(&assets, "assets/animations/noodle/Walk.anim.json").unwrap();
+    let crate::LoadedClip {
+        file: mut clip,
+        takes,
+        ..
+    } = crate::load_clip(&assets, "assets/animations/noodle/Walk.anim.json").unwrap();
     clip.link.as_mut().unwrap().root_motion = root_motion;
     let bound = crate::Clip::bind(clip, takes, model.rig.as_deref()).unwrap();
     (bound, model)

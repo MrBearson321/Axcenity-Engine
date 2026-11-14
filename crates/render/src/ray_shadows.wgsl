@@ -95,16 +95,27 @@ const TRACED_LAMPS: u32 = 8u;
 const MASK_SOLID: u32 = 1u;
 const MASK_CUT_OUT: u32 = 2u;
 // A cut-out nearer than this to the surface isn't counted
-// (`cut_out_near`): a little up close, so a fern or a grass clump shades
-// the ground at its foot, growing with the distance from the camera to
-// this, where depth is coarser and a card past the bent budget
-// (renderer/ray_sway.rs) is traced at rest while it's drawn swaying, so
-// its own card could graze the point the ray starts from.
+// (`cut_out_near`): from a cut-out's own pixel always this much, so its
+// own card (whose normals may be bent toward the plant's outside) and the
+// cards crossing it at its foot don't speckle it; from a solid surface a
+// little up close, so a fern or a grass clump shades the ground at its
+// foot, growing with the distance from the camera to this, where depth is
+// coarser and a card past the bent budget (renderer/ray_sway.rs) is traced
+// at rest while it's drawn swaying.
 const CUT_OUT_NEAR_CLOSE: f32 = 0.03;
 const CUT_OUT_NEAR_PER_STUD: f32 = 0.005;
 const CUT_OUT_NEAR: f32 = 0.35;
+// The prepass normal's w on a cut-out's pixel (shader.wgsl's
+// `PREPASS_CUT_OUT`).
+const PREPASS_CUT_OUT: f32 = 0.875;
+// The pixel being traced's `cut_out_near`, set by `cs_trace` and `cs_air`.
+var<private> cut_out_near_here: f32 = CUT_OUT_NEAR;
 // The widest a soft edge is smoothed, in pixels each way.
 const MAX_BLUR: i32 = 12;
+// The narrowest, so the few rays a pixel traces always even out with
+// their neighbours': under grass, every thin blade's shadow is all soft
+// edge, however near it is.
+const MIN_BLUR: f32 = 2.0;
 // Marks a pixel the soft passes have nothing for (sky, or past the reach).
 const NOTHING: f32 = -1.0;
 
@@ -183,9 +194,13 @@ fn first_hit(origin: vec3<f32>, direction: vec3<f32>, mask: u32, near: f32, far:
     return max(hit.t, 1e-3);
 }
 
-// How near a cut-out to a ray's `origin` may be and still not be counted
+// How near a cut-out to a ray's `origin` may be and still not be counted,
+// for rays from a cut-out's pixel (`on_cut_out`) or a solid one
 // (CUT_OUT_NEAR_CLOSE).
-fn cut_out_near(origin: vec3<f32>) -> f32 {
+fn cut_out_near(origin: vec3<f32>, on_cut_out: bool) -> f32 {
+    if on_cut_out {
+        return CUT_OUT_NEAR;
+    }
     let distance = length(origin - rays.camera.xyz);
     return min(CUT_OUT_NEAR_CLOSE + distance * CUT_OUT_NEAR_PER_STUD, CUT_OUT_NEAR);
 }
@@ -197,7 +212,7 @@ fn blocked_within(origin: vec3<f32>, direction: vec3<f32>, far: f32) -> f32 {
     if solid > 0.0 {
         return solid;
     }
-    return first_hit(origin, direction, MASK_CUT_OUT, cut_out_near(origin), far);
+    return first_hit(origin, direction, MASK_CUT_OUT, cut_out_near_here, far);
 }
 
 // One ray toward the sun: how far to what blocks it, or 0.
@@ -303,8 +318,9 @@ fn cs_trace(@builtin(global_invocation_id) id: vec3<u32>) {
         destination[index] = select(0u, pack_soft(NOTHING, 0.0), soft);
         return;
     }
-    let view_normal = textureLoad(normal_texture, pixel, 0).xyz;
-    let normal = normalize((rays.view_to_world * vec4<f32>(view_normal, 0.0)).xyz);
+    let view_normal = textureLoad(normal_texture, pixel, 0);
+    let normal = normalize((rays.view_to_world * vec4<f32>(view_normal.xyz, 0.0)).xyz);
+    cut_out_near_here = cut_out_near(point.xyz, abs(view_normal.w - PREPASS_CUT_OUT) < 0.05);
     if rays.lamps.x != 0u && index < arrayLength(&lamp_mask) {
         lamp_mask[index] = traced_lamps(pixel, point.xyz, normal, distance);
     }
@@ -355,7 +371,7 @@ fn cs_trace(@builtin(global_invocation_id) id: vec3<u32>) {
 fn blur_radius(distance: f32, blocker: f32) -> f32 {
     let edge = blocker * rays.sun.w;
     let pixel = max(distance * rays.settings.z, 1e-5);
-    return clamp(0.5 * edge / pixel, 1.0, f32(MAX_BLUR));
+    return clamp(0.5 * edge / pixel, MIN_BLUR, f32(MAX_BLUR));
 }
 
 // Smooths the soft passes' result along `step` (one pixel across or down),
@@ -518,6 +534,7 @@ fn cs_air(@builtin(global_invocation_id) id: vec3<u32>) {
         let point = fract(AIR_POINTS[k] + shift);
         let uv = (vec2<f32>(id.xy) + point.xy) / vec2<f32>(AIR_GRID.xy);
         let position = rays.camera.xyz + air_view_ray(uv) * mix(near, far, point.z);
+        cut_out_near_here = cut_out_near(position, false);
         if blocked_at(position, sun) == 0.0 {
             lit += 1.0;
         }

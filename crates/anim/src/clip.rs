@@ -7,13 +7,13 @@
 
 use std::sync::Arc;
 
-use axcenity_assets::{BoneTransform, Pose, Rig, Take};
+use axcenity_assets::{BoneTransform, Pose, Rig, RigDefinitions, Take};
 use glam::{Mat4, Quat, Vec3};
 
 use crate::bones::{bone_from_numbers, bone_paths, find_bone};
 use crate::files::{ClipFile, PropertyName, TakeLink};
 use crate::property_clip::{EvaluatedProperty, PropertyClip, sample_track};
-use crate::retarget::{HumanoidMap, Retarget};
+use crate::retarget::{HumanoidMap, Retarget, RetargetProfile};
 
 /// A clip ready to play on one thing: its property tracks checked and,
 /// with a rig, its take and bone tracks bound to the rig's bones (matched
@@ -96,13 +96,27 @@ impl Clip {
         takes: Option<Arc<Vec<Take>>>,
         rig: Option<&Rig>,
     ) -> Result<Self, String> {
+        Self::bind_with(file, takes, rig, &RigDefinitions::default(), None)
+    }
+
+    /// [`bind`](Self::bind), matching skeletons to humanoid roles through
+    /// the project's rig definitions `rigs` when a take is retargeted, as
+    /// `profile` (the clip's link's retarget profile, read) says. With a
+    /// profile, the take is retargeted even when bone names match.
+    pub fn bind_with(
+        file: ClipFile,
+        takes: Option<Arc<Vec<Take>>>,
+        rig: Option<&Rig>,
+        rigs: &RigDefinitions,
+        profile: Option<&RetargetProfile>,
+    ) -> Result<Self, String> {
         let clip = PropertyClip::from_file(file).map_err(|err| err.0)?;
         let mut animated = rig.map_or_else(Vec::new, |rig| vec![false; rig.bones.len()]);
         let take = match (&clip.file.link, rig) {
             (Some(link), Some(rig)) => {
                 let takes =
                     takes.ok_or_else(|| format!("its model `{}` can't be read", link.source))?;
-                let take = BoundTake::bind(link.clone(), takes, rig)?;
+                let take = BoundTake::bind(link.clone(), takes, rig, rigs, profile)?;
                 for bone in take.targets() {
                     if let Some(slot) = animated.get_mut(bone) {
                         *slot = true;
@@ -289,7 +303,13 @@ fn link_time(link: &TakeLink, through: f64) -> f64 {
 
 impl BoundTake {
     /// Binds `link`'s take, found by name in `takes`, to `rig`.
-    fn bind(link: TakeLink, takes: Arc<Vec<Take>>, rig: &Rig) -> Result<Self, String> {
+    fn bind(
+        link: TakeLink,
+        takes: Arc<Vec<Take>>,
+        rig: &Rig,
+        rigs: &RigDefinitions,
+        profile: Option<&RetargetProfile>,
+    ) -> Result<Self, String> {
         let take = takes
             .iter()
             .position(|take| take.name == link.take)
@@ -309,13 +329,13 @@ impl BoundTake {
         let binding = takes[take].bind(rig);
         // A take for another skeleton (other bone names) plays through
         // humanoid roles, unless it moves some of the model's humanoid
-        // bones by name (the same skeleton, or one named like it).
-        let named = HumanoidMap::detect(&rig.bones)
-            .bones()
-            .any(|bone| binding.contains(&Some(bone)));
+        // bones by name (the same skeleton, or one named like it) and the
+        // clip has no retarget profile asking for retargeting anyway.
+        let (map, _) = HumanoidMap::for_skeleton(&rig.bones, rigs);
+        let named = map.bones().any(|bone| binding.contains(&Some(bone)));
         let mut retarget = None;
-        if !named && !takes[take].tracks.is_empty() {
-            match Retarget::new(&takes[take], rig) {
+        if (profile.is_some() || !named) && !takes[take].tracks.is_empty() {
+            match Retarget::new(&takes[take], rig, rigs, profile) {
                 Ok(bound) => retarget = Some(bound),
                 Err(why) if !binding.iter().any(Option::is_some) => {
                     return Err(format!(

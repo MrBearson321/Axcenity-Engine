@@ -362,6 +362,8 @@ pub struct ViewportScene<'a> {
     pub light_cones: bool,
     /// Whether the view cube is drawn in the corner while editing.
     pub view_cube: bool,
+    /// Whether the ray tracing badge is drawn (Viewport > Ray Tracing Badge).
+    pub ray_badge: bool,
     /// Whether the measuring grid is drawn while editing.
     pub grid: bool,
     /// Whether the movement guide (`move_overlay`: the line along a move,
@@ -1122,6 +1124,7 @@ impl Viewport {
             console,
             light_cones,
             view_cube: show_cube,
+            ray_badge: show_ray_badge,
             grid: show_grid,
             move_guide,
             grid_strength,
@@ -1691,14 +1694,24 @@ impl Viewport {
         if legend::paint(ui, rect, view_mode, &render.stats, self.overdraw.as_ref()) {
             self.measure_overdraw = true;
         }
-        if let Some(badge) = ray_badge::badge(
-            target.renderer.graphics(),
-            graphics.ray_tracing(),
-            axcenity_render::adapters::adapter_can_ray_trace(),
-            axcenity_render::adapters::ray_tracing_override(),
-            self.rays_hidden,
-            &render.stats.ray_tracing,
-        ) {
+        // Hiding the badge also ends its Compare, so nothing stays hidden
+        // with no way back.
+        if !show_ray_badge {
+            self.rays_hidden = false;
+        }
+        if let Some(badge) = show_ray_badge
+            .then(|| {
+                ray_badge::badge(
+                    target.renderer.graphics(),
+                    graphics.ray_tracing(),
+                    axcenity_render::adapters::adapter_can_ray_trace(),
+                    axcenity_render::adapters::ray_tracing_override(),
+                    self.rays_hidden,
+                    &render.stats.ray_tracing,
+                )
+            })
+            .flatten()
+        {
             match ray_badge::paint(ui, rect, &badge) {
                 Some(ray_badge::Click::Restart) => self.restart_requested = true,
                 Some(ray_badge::Click::Compare) => self.rays_hidden = !self.rays_hidden,

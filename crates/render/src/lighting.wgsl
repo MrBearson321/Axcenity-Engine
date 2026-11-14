@@ -942,12 +942,14 @@ struct Arrival {
 }
 
 // The sun at `world_position`: its shadow, the clouds' and, for `solid`
-// surfaces (in the prepass), contact shadows.
+// surfaces (in the prepass) without ray traced shadows, contact shadows.
 fn sun_arrival(world_position: vec3<f32>, geometric: vec3<f32>, pixel: vec2<f32>, solid: bool)
     -> Arrival {
     var visible = sun_visibility(world_position, geometric, pixel)
         * cloud_shadow(frame.clouds, world_position, frame.sun_direction.xyz);
-    if solid {
+    // Not where rays traced the sun: they find what contact shadows look
+    // for, and their fixed per-pixel steps only add a speckle.
+    if solid && ray_traced_sun(world_position, pixel) < 0.0 {
         visible *= contact_visibility(world_position, geometric, frame.sun_direction.xyz,
             frame.contact.y, pixel);
     }

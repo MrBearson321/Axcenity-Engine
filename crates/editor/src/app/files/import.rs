@@ -113,8 +113,7 @@ impl EditorApp {
         if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
             return;
         }
-        const MODELS: [&str; 3] = ["gltf", "glb", "fbx"];
-        let mut everything: Vec<&str> = MODELS.to_vec();
+        let mut everything: Vec<&str> = axcenity_assets::MODEL_EXTENSIONS.to_vec();
         everything.extend(axcenity_assets::TEXTURE_EXTENSIONS);
         everything.extend(axcenity_assets::AUDIO_EXTENSIONS);
         everything.extend(axcenity_assets::HDR_SKY_EXTENSIONS);
@@ -136,7 +135,7 @@ impl EditorApp {
                 "Models, images, skies, sounds, prefabs and packages",
                 &everything,
             )
-            .add_filter("3D model", &MODELS)
+            .add_filter("3D model", &axcenity_assets::MODEL_EXTENSIONS)
             .add_filter("Image", &axcenity_assets::TEXTURE_EXTENSIONS)
             .add_filter("Sky (EXR or HDR)", &axcenity_assets::HDR_SKY_EXTENSIONS)
             .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)

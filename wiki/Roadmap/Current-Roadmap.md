@@ -66,7 +66,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107; card drag into the scene #238, onto the Assets panel, listening to sounds). Left: Freesound |
 | G2 | Scripts inside objects (`SourceFile` references, `objects/` folder) | **Done** (#91 design, #111, #114, #115, #117 on players' devices, in levels and characters, #120) |
 | G3 | Physics render interpolation | **Done** (#110) |
-| G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); Go to Definition (#239) |
+| G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); Go to Definition (#239); luau-lsp shipped in packages and downloaded by source builds (scripting priority 2) |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
 | G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; a coroutine the script made itself still can't pause |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats); history, peaks and budgets | **Done** (#125, #126; history, peaks and budgets #241) |
@@ -83,6 +83,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | C1–C12 | Collaborate (Team Create renamed; Paul's brief of 2026-11-12): audit and plan in `docs/research/collaborate.md`, [ADR-0021](../Architecture/Architecture-Decisions/ADR-0021-Collaborate-Tailscale-Live-Scripts-And-Identity-Seam.md); C1–C6 merged (audit, protocol and rename, Tailscale, setup wizard, recovery, scene presence; two-machine tests passed), C7 live scripts (`yrs`) merged; C8 chat and cursors merged; C9 host checkpoints and restores merged; C10 permissions and hardening built (identity seam, budgets per message kind, audit log, security review); C11 performance built (big messages packed with zstd, S10k measured: idle under 0.1 ms, and S10k's load 5.7 → 0.19 s); C12 Django account integration written as a document only (`docs/research/collaborate-accounts.md`) | **Done** (C10 #211, C11 #215, C12 #216); S10k join timing over Tailscale deferred by Paul |
 | P0–P7 | Collaborate 2.0 (Paul's brief of 2026-11-12, persistent collaboration and automatic host handoff): design in `docs/research/collaborate-persistent.md`, [ADR-0022](../Architecture/Architecture-Decisions/ADR-0022-Persistent-Collaborate-Projects-Git-Sync-And-Host-Handoff.md); P0 design done (#208); P1 repository integration (#209), P2 automatic sync and checkpoints (#212) P3 persistent projects (#213), P4 host election and handoff (#214), P5 conflicts and recovery (#217), P6 interface (#218) and P7 scenarios A–E end to end and the guide built; merged by 2026-11-12 13:57Z (#208–#219) | **Done**; Paul's hand checks listed in each PR |
 | RT0–RT5 | Optional hardware ray tracing (Paul, 2026-11-12, overriding the deferral): research, RX 9070 XT measurements and plan in `docs/research/hardware-ray-tracing.md`; wgpu ray queries on DX12, Vulkan and Metal; first effect sun shadows (RT1), then ray traced probe GI (RT2, part of R18), AO, reflections; off by default, today's renderer is the fallback | RT0 foundation built (ADR-0025, #251); hardware ray tracing opt-in (#264); RT1 sun shadows (#273) and RT3 ambient occlusion in review; RT2 probe GI next |
+| RL0–RL5 | Runtime lighting parity (Paul, 2026-11-14, Priority 5): what played games get of RT0–RT3 and LE1–LE7; characters in ray traced effects (RL1), games turning hardware ray tracing on (RL2), software-traced probe GI for GPUs without ray tracing (RL3), RT4 reflections (RL4), runtime benchmarks on the PC (RL5); `docs/research/runtime-lighting-parity.md` | RL0 audit in review |
 | Priority 4 | GPU-driven drawing, occlusion culling, AI assistant in the editor, Parallel Luau, … | Future, each with a trigger in the gap analysis |
 
 ## Competitive development roadmap (Paul's of 2026-11-12)
@@ -94,6 +95,10 @@ R16's plan for regions and data layers is `docs/research/world-regions-r16.md`: 
 Procedural world creation (Paul's Priority 3 of 2026-11-14) is planned in `docs/research/procedural-worlds.md`: scatter rules inside a Terrain that place plants and props live per chunk on every device (PW1), biomes (PW2), world presets (PW3), roads and paths (PW4), terrain and objects (PW5) and procedural buildings (PW6); for cliffs, caves and overhangs Paul chose heightfield holes plus cliff and cave pieces (PW7), then a spike of voxel terrain (PW8). **In progress**: PW1 scatter rules are built.
 
 R15 is built: sculpt brushes and the Mesh Filter (#317), masks saved (#322), `_COL` collision pieces (#319) and the Collision fold that makes them (#334), the Levels of detail fold (#320) and Edit in Blender (#321).
+
+## Import formats and extensibility (Paul's priority 7, 2026-11-14)
+
+`docs/research/import-formats-and-plugins.md`: OBJ read directly through `ufbx` (P7.1), USD converted to `.glb` on import by an editor-only `convert` crate ([ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md), P7.2), mesh import presets (P7.3), plugin API 3 (P7.4); Alembic deferred until a geometry-cache workflow needs it (P7.5), USD animation later (P7.6), native extensions deferred.
 
 ## Feature plan (unified plan, Phases 1–93)
 

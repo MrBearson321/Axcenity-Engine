@@ -35,6 +35,8 @@ pub struct LinkedClip {
     pub speed: f64,
     pub looping: bool,
     pub root_motion: bool,
+    /// The retarget profile the clip plays its take through, if any.
+    pub retarget: Option<String>,
     pub events: Vec<ClipEvent>,
     /// The rest of the clip (its tracks), kept as it was.
     rest: ClipFile,
@@ -49,6 +51,7 @@ impl LinkedClip {
             start: 0.0,
             end: file.duration,
             root_motion: false,
+            retarget: None,
         });
         let speed = file.speed();
         let backwards = link.end < link.start;
@@ -77,6 +80,7 @@ impl LinkedClip {
             speed,
             looping: file.looping,
             root_motion: link.root_motion,
+            retarget: link.retarget,
             events,
             rest: file,
         }
@@ -101,6 +105,7 @@ impl LinkedClip {
             start: if backwards { self.end } else { self.start },
             end: if backwards { self.start } else { self.end },
             root_motion: self.root_motion,
+            retarget: self.retarget.clone(),
         });
         file.events = self
             .events
