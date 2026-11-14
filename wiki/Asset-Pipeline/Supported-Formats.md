@@ -27,6 +27,6 @@ Source asset formats the engine reads. Project data files (JSON) are in [File fo
 | Cooked (generated) | `.axtex`, `.axlod`, `.axmodel` | `assets` | [Cooking](Cooking.md) |
 | Built games | `.axgame` (v1, v2) | `project/src/packed.rs` | v2: zstd per entry, mtimes |
 
-**Not supported**: `.psd`, `.dds`, KTX2 (a model naming one loads without that texture and says so), USD (planned: converted to `.glb` on import, stage P7.2), Alembic, STL, PLY, glTF animation (FBX takes are the animation source), audio formats kira can't decode.
+**Not supported**: `.psd`, `.dds`, KTX2 (a model naming one loads without that texture and says so), USD (planned: converted to `.glb` on import, stage P7.2), Alembic, STL, PLY, glTF morph-weight animation, audio formats kira can't decode.
 
 Downloads: the editor's [Toolbox](../Editor/Toolbox.md) fetches assets from ambientCG, Poly Haven and Openverse into a central asset directory and copies them into the project with provenance; the player never links it.
