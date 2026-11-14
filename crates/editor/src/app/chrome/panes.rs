@@ -165,9 +165,13 @@ impl EditorApp {
             self.terrain.tool == Some(crate::terrain_studio::TerrainTool::Foliage);
         // A selected SplineMesh or SplineScatter takes the models clicked.
         let spline_models = self.spline_models_picking();
+        // A selected ScatterRule takes the props and models clicked (PW1).
+        let scatter_models = self.scatter_rule_picking();
         let action = {
             let picking = if picking_foliage {
                 Some(Picking::Foliage(self.terrain.foliage_source.clone()))
+            } else if let Some((_, entries)) = &scatter_models {
+                Some(Picking::ScatterModels(entries.clone()))
             } else {
                 spline_models.map(|(_, models)| Picking::SplineModels(models))
             };
@@ -210,6 +214,13 @@ impl EditorApp {
                     && self.use_global_asset(&entry.path)
                 {
                     self.terrain.foliage_source = source;
+                }
+            }
+            Some(BrowserAction::Pick(entry)) if scatter_models.is_some() => {
+                if let (Some((rule, _)), Some(source)) = (&scatter_models, entry.foliage_source())
+                    && self.use_global_asset(&entry.path)
+                {
+                    self.pick_scatter_model(*rule, &source);
                 }
             }
             Some(BrowserAction::Pick(entry)) => {

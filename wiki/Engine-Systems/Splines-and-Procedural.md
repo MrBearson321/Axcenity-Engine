@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [core, procedural, script]
-source: [crates/core/src/spline.rs, crates/procedural/src/lib.rs, crates/procedural/src/bend.rs, crates/procedural/src/scatter.rs, crates/procedural/src/flatten.rs, crates/procedural/src/rng.rs, crates/script/src/spline.rs]
+source: [crates/core/src/spline.rs, crates/procedural/src/lib.rs, crates/procedural/src/bend.rs, crates/procedural/src/scatter.rs, crates/procedural/src/flatten.rs, crates/procedural/src/rng.rs, crates/procedural/src/terrain_scatter.rs, crates/script/src/spline.rs]
 docs: [docs/architecture/splines.md, crates/procedural/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -26,12 +26,14 @@ flowchart LR
   GEN --> BM["bend.rs: :runtime/spline&lt;N&gt;.glb in Assets"]
   GEN --> SC["scatter.rs on surface.rs probe;<br/>rng.rs per spot from seed"]
   C --> FL[flatten.rs: Flatten Terrain Along]
+  GEN --> TSC["terrain_scatter.rs: ScatterRules<br/>per terrain chunk (PW1)"]
 ```
 
 ## Development guidance
 
 - Deterministic: the same spline, settings and seed give the same layout; use `rng.rs`, never `rand`; never iterate a `HashMap` into output.
 - Anything that saves, sends or snapshots the tree must leave generated children out (`core::spline::is_generator`).
+- Terrain scatter rules (PW1) keep their results in `TerrainData`'s generated chunks, not as children; see [Terrain](Terrain.md).
 - `procedural` depends on `core`, `assets`, `terrain` only, so the server and player share it.
 
 ## Related documentation

@@ -422,7 +422,7 @@ fn stamp(world: &World, id: InstanceId) -> (u64, u64) {
     let revision = world.get(id).map_or(0, |instance| instance.revision());
     let terrain = world.terrain(id).map_or(0, |data| {
         let mut hasher = DefaultHasher::new();
-        (data.uid(), data.revision()).hash(&mut hasher);
+        (data.uid(), data.revision(), data.generated_version()).hash(&mut hasher);
         hasher.finish()
     });
     (revision, terrain)
@@ -441,6 +441,8 @@ fn part_key(world: &World, id: InstanceId) -> u64 {
     if let Some(data) = world.terrain(id) {
         data.uid().hash(&mut hasher);
         data.revision().hash(&mut hasher);
+        // What its scatter rules placed collides too, and isn't in the revision.
+        data.generated_version().hash(&mut hasher);
     }
     hasher.finish()
 }
