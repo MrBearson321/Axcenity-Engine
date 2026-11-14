@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::PROTOCOL_VERSION;
 use crate::handshake::{Admission, GameInfo, Message, Peer, admit, unique_name};
+use crate::limits::{Kind, Limits};
 use crate::replicate::Update;
 use crate::transport::{Channel, Client, ConnectionId, LinkStats, Server, ServerEvent};
 use crate::wire::WireMessage;
@@ -20,6 +21,13 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const REFUSAL_GRACE: Duration = Duration::from_secs(1);
 /// A listen server's own player.
 const HOST_PLAYER: u32 = 1;
+/// A player is flagged at most this often for each reason, however much
+/// their device sends.
+const FLAG_EVERY: Duration = Duration::from_secs(1);
+/// Why a player is flagged for a message the server can't read.
+pub const UNREADABLE: &str = "sent a message the server can't read";
+/// Why a player is flagged for a message only the server sends.
+pub const NOT_A_PLAYERS: &str = "sent a message only the server sends";
 
 /// Something a session tells its game.
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +40,10 @@ pub enum SessionEvent {
     Welcomed(Peer),
     /// The join failed or was refused, with why.
     Failed(String),
+    /// Player `from`'s device sent something breaking a rule (over a
+    /// budget, unreadable, or only the server's to send), so it was
+    /// dropped: at most once a second for each reason (MP3).
+    Flagged { from: u32, reason: &'static str },
     /// The connection to the host was lost after joining (it crashed,
     /// stopped or the network failed), with why: the device may rejoin
     /// (multiplayer readiness MP2).
@@ -94,6 +106,10 @@ pub struct Host {
     players: BTreeMap<ConnectionId, Peer>,
     /// Each player's rejoin key (see [`Message::Welcome`]).
     rejoin_keys: BTreeMap<ConnectionId, u64>,
+    /// What each player may still send (MP3).
+    limits: BTreeMap<ConnectionId, Limits>,
+    /// When each player was last flagged for each reason.
+    flagged: BTreeMap<(ConnectionId, &'static str), Duration>,
     clock: Duration,
     next_id: u32,
 }
@@ -133,6 +149,8 @@ impl Host {
             refused: BTreeMap::new(),
             players: BTreeMap::new(),
             rejoin_keys: BTreeMap::new(),
+            limits: BTreeMap::new(),
+            flagged: BTreeMap::new(),
             clock: Duration::ZERO,
             next_id: HOST_PLAYER + 1,
         }
@@ -174,6 +192,8 @@ impl Host {
                     self.waiting.remove(&id);
                     self.refused.remove(&id);
                     self.rejoin_keys.remove(&id);
+                    self.limits.remove(&id);
+                    self.flagged.retain(|&(connection, _), _| connection != id);
                     if let Some(peer) = self.players.remove(&id) {
                         log::info!("{} left: {reason}", peer.name);
                         self.broadcast(&Message::Left { id: peer.id });
@@ -202,37 +222,81 @@ impl Host {
                 None => {}
             }
         }
-        // Then the players' game messages.
+        // Then the players' game messages, each within its budget (MP3).
+        let clock = self.clock;
+        let mut flags: Vec<(ConnectionId, u32, &'static str)> = Vec::new();
         for (&id, peer) in &self.players {
+            let limits = self.limits.entry(id).or_insert_with(|| Limits::new(clock));
+            let mut flag = |reason: &'static str| flags.push((id, peer.id, reason));
             while let Some(bytes) = self.server.receive(id, Channel::ReliableOrdered) {
-                match Message::from_bytes(&bytes) {
-                    Some(Message::Remote { message }) => events.push(SessionEvent::Remote {
-                        from: peer.id,
-                        message,
-                    }),
-                    Some(Message::Chat { text }) => events.push(SessionEvent::Chat {
-                        from: peer.id,
-                        text,
-                    }),
-                    Some(Message::Console { line }) => events.push(SessionEvent::Console {
-                        from: peer.id,
-                        line,
-                    }),
-                    Some(Message::StreamAround { request, position }) => {
-                        events.push(SessionEvent::StreamAround {
+                if !limits.take(Kind::Bytes, bytes.len() as f64, clock) {
+                    flag(Kind::Bytes.reason());
+                    continue;
+                }
+                let (kind, event) = match Message::from_bytes(&bytes) {
+                    Some(Message::Remote { message }) => (
+                        Kind::Remote,
+                        SessionEvent::Remote {
+                            from: peer.id,
+                            message,
+                        },
+                    ),
+                    Some(Message::Chat { text }) => (
+                        Kind::Chat,
+                        SessionEvent::Chat {
+                            from: peer.id,
+                            text,
+                        },
+                    ),
+                    Some(Message::Console { line }) => (
+                        Kind::Console,
+                        SessionEvent::Console {
+                            from: peer.id,
+                            line,
+                        },
+                    ),
+                    Some(Message::StreamAround { request, position }) => (
+                        Kind::Stream,
+                        SessionEvent::StreamAround {
                             from: peer.id,
                             request,
                             position,
-                        });
+                        },
+                    ),
+                    // Tables nested too deep, or bytes that aren't a message.
+                    None => {
+                        flag(UNREADABLE);
+                        continue;
                     }
-                    _ => {}
+                    Some(_) => {
+                        flag(NOT_A_PLAYERS);
+                        continue;
+                    }
+                };
+                if limits.take(kind, 1.0, clock) {
+                    events.push(event);
+                } else {
+                    flag(kind.reason());
                 }
             }
             while let Some(bytes) = self.server.receive(id, Channel::Unreliable) {
-                events.push(SessionEvent::Datagram {
-                    from: peer.id,
-                    bytes,
-                });
+                if !limits.take(Kind::Bytes, bytes.len() as f64, clock) {
+                    flag(Kind::Bytes.reason());
+                } else if !limits.take(Kind::Datagram, 1.0, clock) {
+                    flag(Kind::Datagram.reason());
+                } else {
+                    events.push(SessionEvent::Datagram {
+                        from: peer.id,
+                        bytes,
+                    });
+                }
+            }
+        }
+        for (id, from, reason) in flags {
+            let last = self.flagged.entry((id, reason)).or_insert(Duration::MAX);
+            if *last == Duration::MAX || clock.saturating_sub(*last) >= FLAG_EVERY {
+                *last = clock;
+                events.push(SessionEvent::Flagged { from, reason });
             }
         }
         let clock = self.clock;
@@ -287,6 +351,7 @@ impl Host {
         let mut events = Vec::new();
         if let Some(old) = stale {
             self.rejoin_keys.remove(&old);
+            self.limits.remove(&old);
             if let Some(peer) = self.players.remove(&old) {
                 log::info!("{} is back: their lost connection is dropped", peer.name);
                 self.broadcast(&Message::Left { id: peer.id });
@@ -322,6 +387,7 @@ impl Host {
         });
         log::info!("{} joined{from}", peer.name);
         self.players.insert(id, peer.clone());
+        self.limits.insert(id, Limits::new(self.clock));
         events.push(SessionEvent::Joined(peer));
         events
     }
@@ -569,6 +635,15 @@ impl Join {
         if self.you().is_some() {
             self.client
                 .send(Channel::ReliableOrdered, message.to_bytes());
+        }
+    }
+
+    /// Sends `bytes` as they are, once taken in: for tests of what a
+    /// modified client might send.
+    #[cfg(test)]
+    pub(crate) fn send_bytes(&mut self, channel: Channel, bytes: Vec<u8>) {
+        if self.you().is_some() {
+            self.client.send(channel, bytes);
         }
     }
 

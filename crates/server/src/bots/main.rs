@@ -14,7 +14,7 @@
 //!
 //! Operational tests (MP2): `--churn <s>` has each bot leave after about
 //! that long and a new one (a new install) join in its place, for leak
-//! checks; `--flood silent|junk|spam` opens misbehaving connections
+//! checks; `--flood silent|junk|spam|deep` opens misbehaving connections
 //! instead of bots (`flood.rs`). A bot that loses its connection tries to
 //! rejoin for a minute, as a player's device does.
 
@@ -39,7 +39,7 @@ use stats::{BotSample, Summary};
 
 const USAGE: &str = "usage: axcenity-bots <project-folder> --join <address:port> [--count <n>] [--seconds <s>] \
                      [--threads <n>] [--stagger <ms>] [--password <text>] [--no-scripts] [--idle] [--roam <studs>] \
-                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood silent|junk|spam]\n\
+                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood silent|junk|spam|deep]\n\
                      example: cargo run -p axcenity-server --bin axcenity-bots -- examples/hello-character --join 127.0.0.1:47800 --count 16";
 
 /// Each frame is this long.
@@ -335,7 +335,7 @@ fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Some(Flood::Spam) | None => {}
+        Some(Flood::Spam | Flood::Deep) | None => {}
     }
     if summary.joined < summary.bots {
         bail!(
@@ -559,7 +559,10 @@ mod tests {
         assert_eq!(parsed.churn, Some(20.0));
         assert_eq!(parsed.flood, Some(Flood::Silent));
         let err = parse(&["castle", "--flood", "loud"]).unwrap_err();
-        assert!(err.to_string().contains("silent, junk or spam"), "{err}");
+        assert!(
+            err.to_string().contains("silent, junk, spam or deep"),
+            "{err}"
+        );
         let err = parse(&["castle", "--churn", "0.5"]).unwrap_err();
         assert!(err.to_string().contains("at least 1 second"), "{err}");
     }

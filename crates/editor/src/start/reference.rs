@@ -39,6 +39,11 @@ pub(super) struct Reference {
     pub(super) query: String,
     /// An index into `entries`.
     pub(super) open: Option<usize>,
+    /// The code tab an example can be put into (its file name), when one
+    /// is the active tab; set by the editor before each frame.
+    pub(super) insert_into: Option<String>,
+    /// An example whose Insert button was pressed, for the editor.
+    pub(super) inserted: Option<String>,
 }
 
 /// Where a click on the page goes.
@@ -47,6 +52,8 @@ enum Nav {
     Open(usize),
     /// A page of the documentation that explains the entry.
     Doc(usize),
+    /// Put this example into the active code tab.
+    Insert(&'static str),
 }
 
 impl Reference {
@@ -102,7 +109,13 @@ impl Reference {
         ui.add_space(20.0);
 
         let nav = match self.open {
-            Some(index) => entry_page(ui, &self.entries, index, &palette),
+            Some(index) => entry_page(
+                ui,
+                &self.entries,
+                index,
+                self.insert_into.as_deref(),
+                &palette,
+            ),
             None if self.query.trim().is_empty() => browse(ui, &self.entries),
             None => result_list(ui, &self.entries, &results, &palette),
         };
@@ -110,6 +123,7 @@ impl Reference {
             Some(Nav::Results) => self.open = None,
             Some(Nav::Open(index)) => self.open = Some(index),
             Some(Nav::Doc(page)) => return Some(DocAction::Open(page, None)),
+            Some(Nav::Insert(example)) => self.inserted = Some(example.to_owned()),
             None => {}
         }
         None
@@ -302,6 +316,7 @@ fn entry_page(
     ui: &mut egui::Ui,
     entries: &[ApiEntry],
     index: usize,
+    insert_into: Option<&str>,
     palette: &Palette,
 ) -> Option<Nav> {
     let Some(entry) = entries.get(index) else {
@@ -376,6 +391,21 @@ fn entry_page(
         widgets::section_label(ui, "Example");
         ui.add_space(4.0);
         docs::markdown::code_block(ui, index, "lua", example, palette);
+        if let Some(tab) = insert_into {
+            ui.add_space(4.0);
+            if ui
+                .add(widgets::button(
+                    Role::Secondary,
+                    Some(icons::TEXT_INDENT),
+                    &format!("Insert into {tab}"),
+                    palette,
+                ))
+                .on_hover_text("Put this example into the script at its cursor, as new lines")
+                .clicked()
+            {
+                nav = Some(Nav::Insert(example));
+            }
+        }
     }
     if let Some(page) = read_more(ui, &name, palette) {
         nav = Some(Nav::Doc(page));

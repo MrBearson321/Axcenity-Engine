@@ -108,6 +108,15 @@ UserInputService:IsKeyDown(key: EnumKeyCode): boolean
 
 True while keyboard key `key` is held down, such as `Enum.KeyCode.W`.
 
+```lua
+local UserInputService = game:GetService("UserInputService")
+game:GetService("RunService").Heartbeat:Connect(function()
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+		print("Sprinting")
+	end
+end)
+```
+
 #### IsMouseButtonPressed
 
 ```luau

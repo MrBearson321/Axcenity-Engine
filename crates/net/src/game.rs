@@ -33,6 +33,12 @@ use crate::{DEFAULT_PORT, DISCOVERY_PORT};
 /// who finds the game full is told so by the handshake.
 const SPARE_CONNECTIONS: usize = 4;
 
+/// A player flagged this many times in a minute is kicked, unless the host
+/// says otherwise (`Network::set_kick_flags`; MP3). A game client is never
+/// flagged; a device sending junk as fast as it can is flagged about once a
+/// second for each rule it breaks.
+pub const KICK_FLAGS: usize = 5;
+
 /// How long a device that lost its connection tries to rejoin, in seconds
 /// (multiplayer readiness MP2).
 pub const REJOIN_SECONDS: f64 = 60.0;
@@ -153,6 +159,14 @@ pub struct Network {
     rejoins: u64,
     /// Times this device's world became the server's (joins and rejoins).
     follows: u64,
+    /// Hosting: when each player was flagged in the last minute, by the
+    /// network clock (MP3).
+    flags: BTreeMap<u32, Vec<f64>>,
+    /// Hosting: every flag so far.
+    flag_count: u64,
+    /// Hosting: a player flagged this many times in a minute is kicked;
+    /// 0 never.
+    kick_flags: usize,
 }
 
 impl Network {
@@ -194,6 +208,9 @@ impl Network {
             rejoin_seconds: REJOIN_SECONDS,
             rejoins: 0,
             follows: 0,
+            flags: BTreeMap::new(),
+            flag_count: 0,
+            kick_flags: KICK_FLAGS,
         }
     }
 
@@ -268,6 +285,17 @@ impl Network {
     /// Times this device rejoined after losing its connection.
     pub fn rejoins(&self) -> u64 {
         self.rejoins
+    }
+
+    /// Hosting: kick a player flagged `flags` times in a minute; 0 never
+    /// kicks (scripts still hear `Players.PlayerFlagged`).
+    pub fn set_kick_flags(&mut self, flags: usize) {
+        self.kick_flags = flags;
+    }
+
+    /// Hosting: how many times players were flagged since hosting began.
+    pub fn flag_count(&self) -> u64 {
+        self.flag_count
     }
 
     /// Times this device's world became the server's: on joining and on
@@ -1080,6 +1108,7 @@ impl Network {
                     self.smoother.receive(world, &motion);
                 }
             }
+            SessionEvent::Flagged { from, reason } => self.flag(world, scripts, from, reason),
             SessionEvent::Chat { from, text } => {
                 let Some(&player) = self.players.get(&from) else {
                     return;
@@ -1404,6 +1433,45 @@ pub(crate) fn character_position(world: &World, player: InstanceId) -> Option<Ve
 }
 
 impl Network {
+    /// Player `from` was flagged: logged, `Players.PlayerFlagged` fires,
+    /// and they're kicked if it's their `kick_flags`th in a minute (MP3).
+    fn flag(
+        &mut self,
+        world: &mut World,
+        scripts: &mut ScriptRuntime,
+        from: u32,
+        reason: &'static str,
+    ) {
+        let Some(&player) = self.players.get(&from) else {
+            return;
+        };
+        self.flag_count += 1;
+        let name = world
+            .get(player)
+            .map(|p| p.name().to_owned())
+            .unwrap_or_default();
+        self.log.push(format!(
+            "warning: {name} was flagged: their device {reason}"
+        ));
+        let now = self.clock;
+        let times = self.flags.entry(from).or_default();
+        times.retain(|&at| now - at < 60.0);
+        times.push(now);
+        let count = times.len();
+        scripts.fire_player_flagged(world, player, reason);
+        if self.kick_flags > 0
+            && count >= self.kick_flags
+            && let Session::Hosting(host) = &mut self.session
+        {
+            self.flags.remove(&from);
+            let why = format!("Your device {reason}.");
+            self.log.push(format!(
+                "Kicked {name}: flagged {count} times in a minute ({reason})"
+            ));
+            host.kick(from, &why);
+        }
+    }
+
     /// Chat sent on this device and Scripts' system messages, and
     /// `Player:Kick`s (Phase 67). Joined, messages go to the server;
     /// otherwise the server's `OnIncomingMessage` decides on them here.
