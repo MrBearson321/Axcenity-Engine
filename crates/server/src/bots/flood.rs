@@ -1,0 +1,173 @@
+//! `--flood <kind>`: connections that misbehave, to check that a server
+//! keeps serving its players through them (multiplayer readiness MP2).
+//! None of them loads the game; each is a bare connection over UDP.
+//!
+//! - `silent`: connects and never says who it is. The server drops it
+//!   after the handshake's time (`HANDSHAKE_TIMEOUT`), freeing the slot.
+//! - `junk`: connects and sends bytes that aren't a join request. The
+//!   server refuses it and drops it.
+//! - `spam`: joins properly, then sends as much junk as the connection
+//!   carries on both channels, every frame. The server must keep its frame
+//!   rate for everyone else.
+
+use std::time::{Duration, Instant};
+
+use anyhow::{Result, bail};
+use axcenity_net::{Channel, Client, GameInfo, Message, PROTOCOL_VERSION, class_defaults};
+
+use crate::stats::BotSample;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Flood {
+    Silent,
+    Junk,
+    Spam,
+}
+
+impl Flood {
+    pub fn parse(text: &str) -> Result<Flood> {
+        Ok(match text {
+            "silent" => Flood::Silent,
+            "junk" => Flood::Junk,
+            "spam" => Flood::Spam,
+            _ => bail!("--flood takes silent, junk or spam, not `{text}`"),
+        })
+    }
+}
+
+/// Junk messages of `SPAM_BYTES` a spamming connection queues each frame:
+/// together about what renet sends in a frame (60 KB), so it's always at
+/// its limit without overflowing its own reliable channel's memory (which
+/// would end the connection on its side).
+const SPAM_RELIABLE: usize = 8;
+const SPAM_UNRELIABLE: usize = 48;
+const SPAM_BYTES: usize = 1024;
+
+pub struct FloodConnection {
+    index: usize,
+    kind: Flood,
+    client: Client,
+    hello: Message,
+    said: bool,
+    started: Instant,
+    joined_after: Option<f64>,
+    ended: Option<String>,
+    /// Seconds from starting until the server closed it.
+    ended_after: Option<f64>,
+    seed: u64,
+}
+
+impl FloodConnection {
+    pub fn start(
+        index: usize,
+        kind: Flood,
+        address: &str,
+        game: &GameInfo,
+        password: Option<String>,
+        user_id: u64,
+    ) -> Result<FloodConnection> {
+        let client = Client::connect(address)?;
+        Ok(FloodConnection {
+            index,
+            kind,
+            client,
+            hello: Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                game: game.name.clone(),
+                version: game.version.clone(),
+                name: format!("Spam{}", index + 1),
+                password,
+                user_id,
+                defaults: class_defaults(),
+                rejoin: 0,
+            },
+            said: false,
+            started: Instant::now(),
+            joined_after: None,
+            ended: None,
+            ended_after: None,
+            seed: 0x9e37_79b9_7f4a_7c15 ^ index as u64,
+        })
+    }
+
+    fn junk(&mut self, bytes: usize) -> Vec<u8> {
+        (0..bytes)
+            .map(|_| {
+                self.seed ^= self.seed << 13;
+                self.seed ^= self.seed >> 7;
+                self.seed ^= self.seed << 17;
+                self.seed as u8
+            })
+            .collect()
+    }
+
+    pub fn frame(&mut self, seconds: f64) {
+        if self.ended.is_some() {
+            return;
+        }
+        self.client.update(Duration::from_secs_f64(seconds));
+        if let Some(reason) = self.client.ended() {
+            self.ended = Some(reason.to_owned());
+            self.ended_after = Some(self.started.elapsed().as_secs_f64());
+            return;
+        }
+        while let Some(bytes) = self.client.receive(Channel::ReliableOrdered) {
+            if let Some(Message::Welcome { .. }) = Message::from_bytes(&bytes) {
+                self.joined_after = Some(self.started.elapsed().as_secs_f64());
+            }
+        }
+        while self.client.receive(Channel::Unreliable).is_some() {}
+        if self.client.is_connected() {
+            match self.kind {
+                Flood::Silent => {}
+                Flood::Junk if !self.said => {
+                    let junk = self.junk(64);
+                    self.client.send(Channel::ReliableOrdered, junk);
+                }
+                Flood::Junk => {}
+                Flood::Spam if !self.said => {
+                    self.client
+                        .send(Channel::ReliableOrdered, self.hello.to_bytes());
+                }
+                Flood::Spam => {
+                    if self.joined_after.is_some() {
+                        for _ in 0..SPAM_RELIABLE {
+                            let junk = self.junk(SPAM_BYTES);
+                            self.client.send(Channel::ReliableOrdered, junk);
+                        }
+                        for _ in 0..SPAM_UNRELIABLE {
+                            let junk = self.junk(SPAM_BYTES);
+                            self.client.send(Channel::Unreliable, junk);
+                        }
+                    }
+                }
+            }
+            self.said = true;
+        }
+        self.client.flush();
+    }
+
+    pub fn is_over(&self) -> bool {
+        self.ended.is_some()
+    }
+
+    pub fn leave(&mut self) {
+        self.client.disconnect();
+    }
+
+    pub fn sample(&self) -> BotSample {
+        let link = self.client.stats();
+        BotSample {
+            bot: self.index,
+            joined_after: self.joined_after,
+            connected: self.ended.is_none() && self.client.is_connected(),
+            ended: self.ended.clone(),
+            ended_after: self.ended_after,
+            rtt_ms: link.rtt * 1000.0,
+            packet_loss: link.packet_loss,
+            sent_per_second: link.bytes_sent_per_second,
+            received_per_second: link.bytes_received_per_second,
+            ..BotSample::default()
+        }
+    }
+}

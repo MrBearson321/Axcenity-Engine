@@ -50,13 +50,20 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 /// A chat message as sent on: trimmed, at most 200 characters, and not
 /// empty, whatever a modified client sends.
 pub(crate) fn chat_text(text: &str) -> Option<String> {
     let text: String = text.trim().chars().take(200).collect();
     (!text.is_empty()).then_some(text)
 }
+
+/// The log filter hosts start with unless `RUST_LOG` says otherwise:
+/// warnings, but none from `renetcode`, which logs an error for every
+/// packet it can't read. Anyone can send those (a client of a server that
+/// restarted does, many a second), so they'd flood the log (MP2); this
+/// crate reports the reasons connections end.
+pub const LOG_FILTER: &str = "warn,renetcode=off";
 
 /// The UDP port games are hosted on unless told another.
 pub const DEFAULT_PORT: u16 = 47800;
@@ -75,6 +82,8 @@ mod lag_tests;
 mod multiplayer_tests;
 #[cfg(test)]
 mod object_script_tests;
+#[cfg(test)]
+mod rejoin_tests;
 #[cfg(test)]
 mod replay_tests;
 #[cfg(test)]

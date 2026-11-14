@@ -14,13 +14,13 @@ tags: [system/animation]
 # Animation
 
 > [!summary]
-> `anim` plays **one clip type** (`*.anim.json`: property tracks, bone keys, an optional linked FBX take) through **Animators** running **state machines** (`*.statemachine.json`) with transitions, 1D blend trees, 2D blend spaces (Delaunay), layers with masks, root motion and events; then **AnimationTracks** over them, **runtime IK** (`IKControl`, foot placement), and **ragdolls** blending in and out. Posing is on the CPU; skinning is on the **GPU** (graphics Phase 14). Cutscene **sequences** share `SequenceRun::apply` between the editor preview and the Sequence Instance. **Implemented.**
+> `anim` plays **one clip type** (`*.anim.json`: property tracks, bone keys, an optional linked take from an FBX or glTF file) through **Animators** running **state machines** (`*.statemachine.json`) with transitions, 1D blend trees, 2D blend spaces (Delaunay), layers with masks, root motion and events; then **AnimationTracks** over them, **runtime IK** (`IKControl`, foot placement), and **ragdolls** blending in and out. Posing is on the CPU; skinning is on the **GPU** (graphics Phase 14). Cutscene **sequences** share `SequenceRun::apply` between the editor preview and the Sequence Instance. **Implemented.**
 
 ## Execution flow
 
 ```mermaid
 flowchart LR
-  F[FBX rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig<br/>by name, or by humanoid role: retarget.rs]
+  F[FBX or glTF rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig<br/>by name, or by humanoid role: retarget.rs]
   SM[statemachine.json] --> M[Compiled machine + layers]
   subgraph AN["Animators::update (frame step: animators)"]
     R1[runner per animated thing] --> R2[state machine: transitions,<br/>blend tree / blend space, layers]
@@ -56,7 +56,7 @@ flowchart LR
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
 - Blend shapes (morph targets) are imported (F1) and drawn morphed on the GPU (F2, before skinning, in every raster pass), but hardware ray tracing sees the unmorphed mesh. Faces are driven by a `FaceControls` (F3: 48 standard controls through a face profile, eye and jaw bones turned after IK) and F4's layers (expressions with priorities and asymmetry, overrides, masks, automatic blinks, gaze at the camera, a target or a point, idle darts), and clips and Sequences key face controls (F4b), but there's no lip sync yet and what scripts set on a face isn't replicated (F7). Plan: `docs/research/facial-animation.md` (F4–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
-- Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Bone maps and profiles are edited in the Animation tab's Retargeting section (AP3). Keyed clips have Cleanup tools (AP4, `anim/src/cleanup.rs`): mirror (by the humanoid map and side words, baked a frame apart), smooth, reduce keys, fix the loop seam, re-time a range; they work on keys only, so a linked clip is converted first. Plan: `docs/research/animation-production.md` (AP5-AP7).
+- Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Bone maps and profiles are edited in the Animation tab's Retargeting section (AP3). Keyed clips have Cleanup tools (AP4, `anim/src/cleanup.rs`): mirror (by the humanoid map and side words, baked a frame apart), smooth, reduce keys, fix the loop seam, re-time a range; they work on keys only, so a linked clip is converted first. The Sequencer's transport adds play backwards, loop, an In/Out play range and edit-point stepping (AP5, `transport::PlayMode`; preview only, never saved). Plan: `docs/research/animation-production.md` (AP6-AP7).
 
 ## Development guidance
 
