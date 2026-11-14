@@ -417,6 +417,7 @@ impl ScenePipeline {
             msaa_samples: real.msaa_samples & limits.msaa_samples,
             compute_shaders: real.compute_shaders && limits.compute_shaders,
             ray_queries: real.ray_queries && limits.ray_queries,
+            ray_tracing_offered: real.ray_tracing_offered && limits.ray_tracing_offered,
         };
         let settings = self.settings.clone();
         self.apply_graphics(&settings);

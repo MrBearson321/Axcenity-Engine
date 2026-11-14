@@ -1,4 +1,4 @@
-//! Reading glTF and FBX models into plain triangles, materials and
+//! Reading glTF, FBX and OBJ models into plain triangles, materials and
 //! textures. glTF is read here; FBX in [`fbx`].
 //!
 //! A model is fitted into the 1×1×1 cube centered on the origin, like the
@@ -74,7 +74,13 @@ pub enum ModelFormat {
     Gltf,
     /// FBX, binary or ASCII: a `.fbx` file.
     Fbx,
+    /// Wavefront OBJ: a `.obj` file, with the `.mtl` material library it
+    /// names next to it.
+    Obj,
 }
+
+/// The extensions of the model files the engine reads, lowercase.
+pub const MODEL_EXTENSIONS: [&str; 4] = ["gltf", "glb", "fbx", "obj"];
 
 impl ModelFormat {
     /// The format of the file at `path`, by its extension (in any case), or
@@ -84,6 +90,7 @@ impl ModelFormat {
         match extension.as_str() {
             "gltf" | "glb" => Some(Self::Gltf),
             "fbx" => Some(Self::Fbx),
+            "obj" => Some(Self::Obj),
             _ => None,
         }
     }
@@ -721,6 +728,9 @@ pub enum ModelError {
     /// `ufbx`'s explanation, such as "Truncated file".
     #[error("it isn't a valid FBX file: {0}")]
     Fbx(String),
+    /// `ufbx`'s explanation of a bad OBJ file.
+    #[error("it isn't a valid OBJ file: {0}")]
+    Obj(String),
     #[error("it uses `{0}`, which isn't inside its folder; keep the files a model uses next to it")]
     OutsideFolder(String),
     #[error("it uses `{0}`, which isn't there; put it next to the model")]
@@ -790,7 +800,20 @@ pub(crate) fn load_models_in(
 ) -> Result<Vec<Model>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => read(bytes, folder, in_project, picks),
-        ModelFormat::Fbx => fbx::load(bytes, folder, in_project, picks),
+        ModelFormat::Fbx => fbx::load(bytes, fbx::Source::Fbx, folder, in_project, picks),
+        ModelFormat::Obj => {
+            let library = obj_library(bytes, folder);
+            let source = fbx::Source::Obj {
+                library: library.found(),
+            };
+            let mut models = fbx::load(bytes, source, folder, in_project, picks)?;
+            if let Some(warning) = library.missing() {
+                for model in &mut models {
+                    model.warnings.push(warning.clone());
+                }
+            }
+            Ok(models)
+        }
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -849,6 +872,7 @@ pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelE
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => Ok(Vec::new()),
         ModelFormat::Fbx => fbx::load_takes(bytes),
+        ModelFormat::Obj => Ok(Vec::new()),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -858,7 +882,10 @@ pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelE
 pub fn list_objects(bytes: &[u8], format: ModelFormat) -> Result<Vec<ModelObject>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => list(bytes),
-        ModelFormat::Fbx => fbx::list(bytes),
+        ModelFormat::Fbx => fbx::list(bytes, fbx::Source::Fbx),
+        // Material names come from its `usemtl` lines, so the library
+        // isn't needed to list it.
+        ModelFormat::Obj => fbx::list(bytes, fbx::Source::Obj { library: None }),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -879,7 +906,14 @@ pub(crate) fn files_used(
                 .map(|uri| uri_path(&uri))
                 .collect()
         }
-        ModelFormat::Fbx => fbx::files_used(bytes, folder),
+        ModelFormat::Fbx => fbx::files_used(bytes, fbx::Source::Fbx, folder),
+        ModelFormat::Obj => {
+            let library = obj_library(bytes, folder);
+            let source = fbx::Source::Obj {
+                library: library.found(),
+            };
+            fbx::files_used(bytes, source, folder)
+        }
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -894,8 +928,50 @@ pub fn embedded_files(
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => gltf_embedded_files(bytes),
         ModelFormat::Fbx => fbx::embedded_textures(bytes),
+        // OBJ files can't embed anything.
+        ModelFormat::Obj => Ok(Vec::new()),
     }))
     .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// The material library an OBJ file names, read from its folder.
+struct ObjLibrary {
+    /// The `mtllib` path inside the folder, if the file names one.
+    path: Option<PathBuf>,
+    /// Its bytes, if it's there.
+    bytes: Option<Vec<u8>>,
+}
+
+impl ObjLibrary {
+    fn found(&self) -> Option<(&Path, &[u8])> {
+        Some((self.path.as_deref()?, self.bytes.as_deref()?))
+    }
+
+    /// The warning for a library the file names that isn't there.
+    fn missing(&self) -> Option<String> {
+        match (&self.path, &self.bytes) {
+            (Some(path), None) => Some(format!(
+                "uses the material library `{}`, which isn't next to it, so it's drawn without its materials",
+                path.to_string_lossy().replace('\\', "/")
+            )),
+            _ => None,
+        }
+    }
+}
+
+/// The material library an OBJ file's `bytes` name (`mtllib`), as a path
+/// inside its folder, whether or not it's there.
+pub(crate) fn obj_library_name(bytes: &[u8]) -> Option<PathBuf> {
+    fbx::obj_library(bytes)
+}
+
+/// Reads the `.mtl` file an OBJ file in `folder` names, if it's there.
+fn obj_library(bytes: &[u8], folder: &Path) -> ObjLibrary {
+    let path = fbx::obj_library(bytes);
+    let bytes = path
+        .as_ref()
+        .and_then(|path| std::fs::read(folder.join(path)).ok());
+    ObjLibrary { path, bytes }
 }
 
 fn gltf_embedded_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {

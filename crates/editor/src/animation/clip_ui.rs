@@ -116,7 +116,9 @@ impl AnimationStudio {
                             .id_salt("clip inspector stacked")
                             .default_open(true)
                             .icon(widgets::chevron)
-                            .show(ui, |ui| rename = self.clip_inspector(ui));
+                            .show(ui, |ui| {
+                                rename = self.clip_inspector(ui, assets, project, output)
+                            });
                     });
             });
         } else {
@@ -140,7 +142,9 @@ impl AnimationStudio {
                     .show(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("clip inspector scroll")
-                            .show(ui, |ui| rename = self.clip_inspector(ui))
+                            .show(ui, |ui| {
+                                rename = self.clip_inspector(ui, assets, project, output)
+                            })
                     });
             }
             if !self.clip.hide_drawer {
@@ -659,9 +663,19 @@ impl AnimationStudio {
     }
 
     /// The open clip's settings. Returns true if Rename was pressed.
-    pub(super) fn clip_inspector(&mut self, ui: &mut egui::Ui) -> bool {
+    pub(super) fn clip_inspector(
+        &mut self,
+        ui: &mut egui::Ui,
+        assets: &Assets,
+        project: &Path,
+        output: &mut Output,
+    ) -> bool {
         match &mut self.clip.doc {
-            Some(Clip::Take(doc)) => doc.inspector(ui),
+            Some(Clip::Take(doc)) => {
+                let rename = doc.inspector(ui);
+                self.clip.retarget.show(ui, doc, assets, project, output);
+                rename
+            }
             Some(Clip::Property(doc)) => doc.inspector(ui, self.clip.objects.root_name()),
             None => false,
         }

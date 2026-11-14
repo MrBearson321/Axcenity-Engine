@@ -79,6 +79,18 @@ impl Sim {
         }
     }
 
+    /// Starts afresh for a device that now follows a server (Phase 64):
+    /// the server's world replaced this one, so physics, the characters,
+    /// agents and Animators begin again on it.
+    pub fn follow_server(&mut self) {
+        self.physics = Physics::with_assets(self.assets.clone());
+        self.characters = Controllers::default();
+        self.agents = Agents::default();
+        axcenity_gameplay::share_nav_mesh(&self.scripts, self.agents.nav_mesh());
+        self.animators = Animators::with_ground(axcenity_character::foot_ground);
+        self.animators.update(&mut self.world, &self.assets, 0.0);
+    }
+
     /// The game's memory by kind (roadmap G7), for the profilers: Lua, the
     /// Instances by class, the asset caches and physics. Sounds are the
     /// host's (`GameAudio::memory`), so they're left at zero. Walks every

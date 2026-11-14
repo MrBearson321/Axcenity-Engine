@@ -176,6 +176,30 @@ UserGameSettings.MotionBlur: EnumMotionBlur
 
 How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.
 
+#### HardwareRayTracing
+
+```luau
+UserGameSettings.HardwareRayTracing: boolean
+```
+
+Whether the GPU is opened with hardware ray tracing, which every RayTraced setting needs. Off unless the player or the game turned it on (a project can make it the default on GPUs that can, in Settings > This project). A change is saved at once but takes effect at the game's next start: compare with RayTracingActive to tell the player to restart. Nil goes back to the default.
+
+#### RayTracingSupported
+
+```luau
+UserGameSettings.RayTracingSupported: boolean
+```
+
+Read only. Whether this GPU can trace rays in hardware, whether or not it was opened with them: offer HardwareRayTracing only where this is true.
+
+#### RayTracingActive
+
+```luau
+UserGameSettings.RayTracingActive: boolean
+```
+
+Read only. Whether the GPU was opened with hardware ray tracing this run, so the RayTraced settings draw. False after HardwareRayTracing is turned on until the game starts again.
+
 #### RayTracedShadows
 
 ```luau

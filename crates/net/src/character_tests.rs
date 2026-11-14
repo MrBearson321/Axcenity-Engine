@@ -530,3 +530,87 @@ fn a_ping_pong_lift_carries_a_joined_players_character_smoothly_without_correcti
         players[0].log
     );
 }
+
+/// A floor with one 12-stud SpawnLocation in the middle.
+fn spawn_arena() -> World {
+    let mut world = World::new();
+    for (class, name, position, size) in [
+        (
+            ClassName::Part,
+            "Floor",
+            Vector3::new(0.0, -0.5, 0.0),
+            Vector3::new(200.0, 1.0, 200.0),
+        ),
+        (
+            ClassName::SpawnLocation,
+            "Spawn",
+            Vector3::new(0.0, 0.5, 0.0),
+            Vector3::new(12.0, 1.0, 12.0),
+        ),
+    ] {
+        let id = world.create(class).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(world.workspace())).unwrap();
+        world
+            .set_property(id, "Position", Value::Vector3(position))
+            .unwrap();
+        world
+            .set_property(id, "Size", Value::Vector3(size))
+            .unwrap();
+        world
+            .set_property(id, "Anchored", Value::Bool(true))
+            .unwrap();
+    }
+    world
+}
+
+/// Found by the bots (multiplayer readiness MP1): characters made on top
+/// of each other pushed each other apart on their devices, further than
+/// the server lets a character go, so it moved them back every frame.
+#[test]
+fn players_who_spawn_on_one_spawn_location_stand_apart_and_are_never_moved_back() {
+    let (mut server, mut players) = game_in(spawn_arena, 4, Duration::ZERO);
+    frames(&mut server, &mut players, 120, &[]);
+    let places: Vec<Vector3> = players
+        .iter()
+        .map(|device| {
+            let me = device.scripts.local_player().expect("joined");
+            server.character_at(me).expect("spawned")
+        })
+        .collect();
+    for (i, a) in places.iter().enumerate() {
+        for b in &places[i + 1..] {
+            let apart = (a.x - b.x).hypot(a.z - b.z);
+            assert!(apart >= 2.9, "{a:?} and {b:?} are {apart} studs apart");
+        }
+        assert!(
+            a.x.abs() <= 6.0 && a.z.abs() <= 6.0,
+            "{a:?} is on the SpawnLocation"
+        );
+    }
+    for device in &players {
+        assert_eq!(device.network.corrections(), 0, "{:?}", device.log);
+    }
+}
+
+/// Only a 12-stud SpawnLocation, with nothing around it to stand on.
+fn ledge() -> World {
+    let mut world = spawn_arena();
+    let floor = world.find_first_child(world.workspace(), "Floor").unwrap();
+    world.set_parent(floor, None).unwrap();
+    world
+}
+
+/// Found by the bots (MP1): a character that walked off the edge of a map
+/// fell further each update than the teleport limit, so the server moved
+/// it back every frame from then on; and a character's first update had
+/// nothing saved up, so its first step was refused.
+#[test]
+fn a_character_that_walks_off_the_edge_falls_without_being_moved_back() {
+    let (mut server, mut players) = game_in(ledge, 1, Duration::ZERO);
+    let me = players[0].scripts.local_player().unwrap();
+    frames(&mut server, &mut players, 600, &[forward()]);
+    let fell = server.character_at(me).unwrap();
+    assert!(fell.y < -1000.0, "it fell a long way on the server too: {fell:?}");
+    assert_eq!(players[0].network.corrections(), 0, "{:?}", players[0].log);
+}

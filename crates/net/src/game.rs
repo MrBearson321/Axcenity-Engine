@@ -119,6 +119,11 @@ pub struct Network {
     viewer_requests: Vec<(u64, Vector3)>,
     /// `ReplayService`'s recording and buffer (Phase 81).
     replays: Replays,
+    /// The name to join with instead of the local Player's (bots, MP1).
+    join_name: Option<String>,
+    /// Joined: how many times the server moved this device's character
+    /// back (`Correction`), since the session started.
+    corrections: u64,
 }
 
 impl Network {
@@ -152,6 +157,8 @@ impl Network {
             finished_requests: Vec::new(),
             viewer_requests: Vec::new(),
             replays: Replays::default(),
+            join_name: None,
+            corrections: 0,
         }
     }
 
@@ -479,6 +486,18 @@ impl Network {
         Ok(())
     }
 
+    /// Joins with `name` instead of the local Player's name, which a
+    /// headless device such as a bot (`axcenity-bots`) doesn't have.
+    pub fn set_join_name(&mut self, name: impl Into<String>) {
+        self.join_name = Some(name.into());
+    }
+
+    /// Joined: how many times the server moved this device's character
+    /// back since it joined.
+    pub fn corrections(&self) -> u64 {
+        self.corrections
+    }
+
     /// Joins through `client`, such as a loopback one.
     pub fn join_through(
         &mut self,
@@ -488,7 +507,11 @@ impl Network {
         password: Option<String>,
     ) {
         self.disconnect(world, scripts);
-        let name = local_name(world, scripts);
+        let name = self
+            .join_name
+            .clone()
+            .unwrap_or_else(|| local_name(world, scripts));
+        self.corrections = 0;
         let user_id = scripts.user_id() as u64;
         let join = Join::start(client, &self.game, &name, password, user_id);
         self.session = Session::Joined(Box::new(join));
@@ -983,6 +1006,7 @@ impl Network {
             SessionEvent::Correction(update) => {
                 if !self.is_hosting() && scripts.is_client_only() {
                     apply(world, &update);
+                    self.corrections += 1;
                     self.log
                         .push("The server moved your character back.".to_owned());
                 }

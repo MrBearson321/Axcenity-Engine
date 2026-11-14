@@ -10,8 +10,14 @@ authors.workspace = true
 name = "axcenity-server"
 path = "src/main.rs"
 
+# Headless players for scale and soak tests (multiplayer readiness MP1).
+[[bin]]
+name = "axcenity-bots"
+path = "src/bots/main.rs"
+
 [dependencies]
 axcenity-assets.workspace = true
+axcenity-character.workspace = true
 axcenity-core.workspace = true
 axcenity-net.workspace = true
 axcenity-project.workspace = true
@@ -21,7 +27,9 @@ axcenity-script.workspace = true
 axcenity-sim.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
+log.workspace = true
 profiling.workspace = true
+serde_json.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [features]
