@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "scripting"
+title = "The Profiler shows which script handlers and functions are slow"
+details = "The Profiler has a new Scripts tab. Press Record and play: every event handler (Door.Touched, RunService.Heartbeat), script and task.spawn is listed by the time it took, with its share of all script time and its time per call, and every script function by the time spent in it and the functions it calls, with its busiest line. The costliest come first, and clicking one opens the script there."
+features = ["editor.script-editor"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

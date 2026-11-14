@@ -793,6 +793,10 @@ impl EditorApp {
         self.tabs.paused = None;
         self.pause_pressed = false;
         if let Some(session) = self.play.take() {
+            // The Scripts tab keeps everything recorded up to Stop.
+            if self.profiler.scripts_recording() {
+                self.profiler.record_scripts(session.script_profile());
+            }
             self.viewport.clear_particles();
             self.viewport.clear_ui();
             self.pending_emits.clear();
@@ -1033,6 +1037,14 @@ impl EditorApp {
                 }
             }
             self.profiler.record_game(cost, session.load());
+        }
+        // The Scripts tab: recording follows its Record button.
+        session.set_script_profiling(self.profiler.scripts_recording());
+        if self.profiler.take_clear_scripts() {
+            session.clear_script_profile();
+        }
+        if self.profiler.scripts_due() {
+            self.profiler.record_scripts(session.script_profile());
         }
         let network = session
             .network_stats()
