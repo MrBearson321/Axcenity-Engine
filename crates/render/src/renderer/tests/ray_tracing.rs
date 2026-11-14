@@ -426,7 +426,7 @@ mod sun_shadows {
     }
 
     #[test]
-    fn a_cut_out_right_on_a_surface_does_not_blot_it_but_one_farther_off_shades_it() {
+    fn a_cut_out_right_on_a_surface_shades_it_up_close_but_not_far_away() {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();
         };
@@ -441,8 +441,8 @@ mod sun_shadows {
         assert!(open[0] > far[0] + 40, "{far:?} vs {open:?}");
 
         // A thin card standing out of the wall beside the middle (a grass
-        // blade, a leaf on the ground), seen edge-on, with the sun low
-        // across the wall: its shadow would be a card-shaped blotch.
+        // blade at its foot), with the sun low across the wall, about a
+        // fifth of a stud from the middle along the ray.
         let mut list = shadowed_wall();
         list.sun.direction = Vec3::new(1.0, 0.0, 0.2);
         list.items[1].transform = Mat4::from_scale_rotation_translation(
@@ -451,15 +451,28 @@ mod sun_shadows {
             Vec3::new(0.25, 0.0, -9.35),
         );
         list.items[1].material.alpha_cutoff = 0.5;
-        let beside = middle_of(&mut renderer, &list);
-        list.items[1].casts_shadow = false;
-        let without = middle_of(&mut renderer, &list);
+        let shade = |renderer: &mut TextureRenderer, list: &DrawList| {
+            let mut without = list.clone();
+            without.items[1].casts_shadow = false;
+            (middle_of(renderer, list), middle_of(renderer, &without))
+        };
+        // Up close (10 studs) it shades the wall at its foot.
+        let (beside, without) = shade(&mut renderer, &list);
+        assert!(
+            without[0] > beside[0] + 40,
+            "up close a card shades its foot: {beside:?} vs {without:?}"
+        );
+        // From 70 studs (through a narrow lens, so the middle stays beside
+        // it), a card that near the surface is let off: depth is coarse
+        // there, and a card past the bent budget is traced at rest.
+        list.camera.position = Vec3::new(0.0, 0.0, 60.0);
+        list.camera.fov_y_degrees = 2.0;
+        let (beside, without) = shade(&mut renderer, &list);
         assert!(
             beside[0].abs_diff(without[0]) <= 4,
-            "a card on the surface blots it: {beside:?} vs {without:?}"
+            "far away a card on the surface doesn't blot it: {beside:?} vs {without:?}"
         );
         // A solid block there still shades it: only cut-outs are let off.
-        list.items[1].casts_shadow = true;
         list.items[1].material.alpha_cutoff = 0.0;
         let solid = middle_of(&mut renderer, &list);
         assert!(without[0] > solid[0] + 40, "{solid:?} vs {without:?}");
@@ -598,6 +611,36 @@ mod sun_shadows {
         assert!(
             holes[0].abs_diff(lit[0]) <= 6,
             "rays pass where it's cut out: {holes:?} vs {lit:?}"
+        );
+    }
+
+    /// Up close, a cut-out shades the ground right at its foot: a card
+    /// standing out from the wall a third of a stud beside the pixel
+    /// (nearer than the old fixed 0.35 studs skipped), between it and the
+    /// sun.
+    #[test]
+    fn a_cut_out_shades_the_ground_at_its_foot_up_close() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        let mut list = shadowed_wall();
+        let card = &mut list.items[1];
+        card.transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(0.05, 2.0, 2.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.325, 0.0, -8.5),
+        );
+        card.material.alpha_cutoff = 0.5;
+        card.material.base_color_texture = Some(std::sync::Arc::new(AlphaTexture::new(3, 255)));
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+        let foot = middle_of(&mut renderer, &list);
+        let mut open = shadowed_wall();
+        open.items.truncate(1);
+        let lit = middle_of(&mut renderer, &open);
+        assert!(
+            foot[0] + 40 < lit[0],
+            "the card's foot is in its shadow: {foot:?} vs {lit:?}"
         );
     }
 }
