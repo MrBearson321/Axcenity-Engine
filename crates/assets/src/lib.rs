@@ -40,6 +40,7 @@ mod fonts;
 mod import;
 mod import_presets;
 mod light_probes;
+mod lip_sync;
 mod loading;
 mod material;
 mod memory;
@@ -105,6 +106,11 @@ pub use light_probes::{
     LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, SkyLight,
     decode_light_probes, encode_light_probes, is_light_probes_file, light_probes_path,
     read_light_probes, write_light_probes,
+};
+pub use lip_sync::{
+    LIP_SYNC_EXTENSION, LipSync, VISEMES_EXTENSION, VISEMES_FOLDER, VisemeKey, VisemeMap,
+    VisemeMaps, is_lip_sync, is_viseme_map, read_lip_sync, read_viseme_maps, viseme_map_name,
+    write_lip_sync, write_viseme_map,
 };
 pub use loading::{LoadStatus, LoadTicket, Slot};
 pub use material::{
@@ -244,6 +250,10 @@ struct Shared {
     faces: Option<Arc<FaceProfiles>>,
     /// The project's expressions (see [`Assets::face_expressions`]).
     expressions: Option<Arc<FaceExpressions>>,
+    /// The project's viseme maps (see [`Assets::viseme_maps`]).
+    viseme_maps: Option<Arc<VisemeMaps>>,
+    /// Lip syncs read so far, by path, or why one couldn't be.
+    lip_syncs: HashMap<String, Result<Arc<LipSync>, String>>,
     /// Each model and texture file's stamp when it was read, so
     /// [`Assets::reload`] skips one that hasn't changed since (such as a
     /// model the editor just imported).
@@ -851,6 +861,10 @@ impl Assets {
         if is_face_expression(file) {
             shared.expressions = None;
         }
+        if is_viseme_map(file) {
+            shared.viseme_maps = None;
+        }
+        shared.lip_syncs.remove(file);
         forget_materials_using(&mut shared, file);
         loading::reread_loads(&mut shared, |key| {
             key.file() == file || key.kind == Kind::Material
@@ -976,6 +990,50 @@ impl Assets {
         shared.errors.extend(read.problems.iter().cloned());
         shared.expressions = Some(read.clone());
         read
+    }
+
+    /// The project's viseme maps (`assets/faces/visemes/**/*.visemes.json`),
+    /// read the first time they're asked for and again after one changes.
+    pub fn viseme_maps(&self) -> Arc<VisemeMaps> {
+        let folder = {
+            let shared = self.lock();
+            if let Some(maps) = &shared.viseme_maps {
+                return maps.clone();
+            }
+            shared.folder.clone()
+        };
+        let read =
+            Arc::new(folder.map_or_else(VisemeMaps::default, |folder| read_viseme_maps(&folder)));
+        let mut shared = self.lock();
+        if let Some(maps) = &shared.viseme_maps {
+            return maps.clone();
+        }
+        shared.errors.extend(read.problems.iter().cloned());
+        shared.viseme_maps = Some(read.clone());
+        read
+    }
+
+    /// The lip sync (`*.lipsync.json`) at `path`, read the first time and
+    /// again after it changes, or why it can't be (which the caller
+    /// reports).
+    pub fn lip_sync(&self, path: &str) -> Result<Arc<LipSync>, String> {
+        let folder = {
+            let shared = self.lock();
+            if let Some(read) = shared.lip_syncs.get(path) {
+                return read.clone();
+            }
+            shared.folder.clone()
+        };
+        let read = match folder {
+            Some(folder) => read_lip_sync(&folder, path).map(Arc::new),
+            None => Err("there is no project folder".to_owned()),
+        };
+        let mut shared = self.lock();
+        shared
+            .lip_syncs
+            .entry(path.to_owned())
+            .or_insert(read)
+            .clone()
     }
 
     /// Reads the project's fonts again next time, after one was added,

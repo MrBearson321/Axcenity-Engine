@@ -7,11 +7,14 @@
 use std::collections::HashMap;
 
 use axcenity_assets::{Assets, Model};
-use axcenity_core::face::{FACE_CONTROLS, FaceLayer};
+use axcenity_core::face::{FACE_CONTROLS, FaceLayer, FaceState};
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use glam::{Mat4, Vec3};
 
-use crate::face_play::{BlinkSettings, FaceLayers, FaceMotion, Procedural, advance_expressions};
+use crate::face_play::{
+    BlinkSettings, FaceLayers, FaceMotion, LayerValues, Procedural, advance_expressions, approach,
+};
+use crate::lip_sync::{CompiledVisemes, LipTiming, find_viseme_map, viseme_weights};
 use crate::ragdoll::{placement_with, to_vec3};
 use crate::retarget::{HumanBone, HumanoidMap};
 
@@ -82,6 +85,15 @@ pub(crate) fn face_layers(
         double_chance: number("DoubleBlinkChance", 0.15),
     };
     let idle = number("IdleMotion", 0.5) as f32;
+    let timing = LipTiming {
+        smoothing: number("LipSyncSmoothing", 0.06),
+        anticipation: number("LipSyncAnticipation", 0.04),
+    };
+    let map_name = instance
+        .property("VisemeMap")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let smoothing = number("GazeSmoothing", 0.12);
     let weight = number("GazeWeight", 1.0) as f32;
     let gaze_at = match text("GazeMode").as_str() {
@@ -109,8 +121,35 @@ pub(crate) fn face_layers(
         .map(|(point, place)| place.inverse().transform_point3(point))
         .filter(|point| point.is_finite());
 
+    // Whether the Sound a lip sync keeps time with plays, and how fast:
+    // `None` without one, `Some(None)` once it's gone.
+    let sound = world
+        .face(face)
+        .and_then(|state| state.lip_sync.as_ref())
+        .and_then(|play| play.sound)
+        .map(|sound| {
+            world.get(sound).map(|sound| {
+                (
+                    sound.property("Playing").and_then(Value::as_bool) == Some(true),
+                    sound
+                        .property("PlaybackSpeed")
+                        .and_then(Value::as_number)
+                        .unwrap_or(1.0),
+                )
+            })
+        });
+
     let expressions = assets.face_expressions();
     let state = world.face_mut(face)?;
+    let dialogue = advance_lip_sync(
+        state,
+        assets,
+        sound,
+        (&map_name, timing),
+        dt,
+        &name,
+        problems,
+    );
     let mut unknown = Vec::new();
     let expression = advance_expressions(state, &expressions, dt, &mut unknown);
     for missing in unknown {
@@ -131,6 +170,7 @@ pub(crate) fn face_layers(
     Some(FaceLayers {
         base,
         expression,
+        dialogue,
         procedural: Procedural {
             blink,
             gaze,
@@ -141,6 +181,71 @@ pub(crate) fn face_layers(
         order,
         settings,
     })
+}
+
+/// Moves the lip sync `state` plays on by `dt` (while its Sound plays, if
+/// it has one) and returns the Dialogue layer, dropping it once it has
+/// faded out. `sound` is whether its Sound plays and how fast (`None`
+/// without one, `Some(None)` once the Sound is gone).
+fn advance_lip_sync(
+    state: &mut FaceState,
+    assets: &Assets,
+    sound: Option<Option<(bool, f64)>>,
+    (map_name, timing): (&str, LipTiming),
+    dt: f64,
+    name: &str,
+    problems: &mut Vec<String>,
+) -> LayerValues {
+    let Some(play) = state.lip_sync.as_mut() else {
+        return LayerValues::empty();
+    };
+    let clip = match assets.lip_sync(&play.path) {
+        Ok(clip) => clip,
+        Err(why) => {
+            problems.push(format!(
+                "The FaceControls `{name}` can't play the lip sync `{}`: {why}.",
+                play.path
+            ));
+            state.lip_sync = None;
+            return LayerValues::empty();
+        }
+    };
+    let rate = match sound {
+        None => Some(1.0),
+        Some(None) => None,
+        Some(Some((true, speed))) => {
+            play.heard = true;
+            Some(speed)
+        }
+        Some(Some((false, _))) => None,
+    };
+    let sound_ended = matches!(sound, Some(None)) || (play.heard && rate.is_none());
+    if let Some(rate) = rate {
+        play.time += dt * play.speed * rate;
+    }
+    let over = play.time > clip.duration + timing.smoothing.max(0.0) + timing.anticipation.abs();
+    if sound_ended || over {
+        play.target_weight = 0.0;
+    }
+    let step = if play.fade > 0.0 { dt / play.fade } else { 1.0 };
+    play.weight = approach(play.weight, play.target_weight, step);
+    if play.weight <= 0.0 && play.target_weight <= 0.0 {
+        state.lip_sync = None;
+        return LayerValues::empty();
+    }
+    let maps = assets.viseme_maps();
+    let map = find_viseme_map(&maps, map_name).unwrap_or_else(|| {
+        problems.push(format!(
+            "The FaceControls `{name}` has VisemeMap `{map_name}`, which isn't a `*.visemes.json` file in assets/faces/visemes, so the built-in one is used."
+        ));
+        crate::lip_sync::default_viseme_map()
+    });
+    let (compiled, map_problems) = CompiledVisemes::new(map);
+    for problem in map_problems {
+        problems.push(format!("The viseme map `{map_name}`: {problem}."));
+    }
+    let weights = viseme_weights(&clip, play.time, timing);
+    compiled.layer(&weights, play.weight as f32)
 }
 
 /// Where in the world to look at `target`: a part's or Attachment's

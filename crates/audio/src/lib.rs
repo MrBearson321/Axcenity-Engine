@@ -1143,6 +1143,19 @@ fn loop_region(looped: bool) -> Option<kira::sound::Region> {
     looped.then_some(kira::sound::Region::from(0.0..))
 }
 
+/// Decodes a sound file's bytes (WAV, OGG, MP3 or FLAC) into one channel
+/// (the channels averaged) and its samples per second, for tools that
+/// look at a recording, such as making a lip sync from it.
+pub fn decode_mono(sound_id: &str, bytes: Vec<u8>) -> Result<(Vec<f32>, u32), AudioError> {
+    let data = decode_sound(sound_id, bytes)?;
+    let samples = data
+        .frames
+        .iter()
+        .map(|frame| (frame.left + frame.right) * 0.5)
+        .collect();
+    Ok((samples, data.sample_rate))
+}
+
 fn decode_sound(sound_id: &str, bytes: Vec<u8>) -> Result<StaticSoundData, AudioError> {
     StaticSoundData::from_cursor(Cursor::new(bytes)).map_err(|err| AudioError::Decode {
         sound_id: sound_id.to_owned(),

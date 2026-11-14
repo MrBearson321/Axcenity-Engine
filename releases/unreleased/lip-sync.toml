@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Characters say their lines with lip sync"
+details = "FaceControls:PlayLipSync plays a *.lipsync.json of timed visemes (12 mouth shapes) on a face in time with its Sound, blending neighbours smoothly and a little early, with the jaw carrying part of the opening. A viseme map (built in, or the project's own *.visemes.json) says what each viseme does to the face. The Console's lipsync command makes a lip sync from a recording or from phoneme timings, and voiced dialogue lines play the lip sync beside their sound on the speaker's face."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = [389]
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

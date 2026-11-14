@@ -3283,6 +3283,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.",
     ),
     (
+        ClassName::FaceControls,
+        "VisemeMap",
+        "Which viseme map lip sync uses: what each of the 12 visemes (Silence, AI, E, O, U, FV, L, MBP, WQ, TH, TDN, KG) does to the controls, and how much of the opening the jaw carries. A `*.visemes.json` file's name or path in assets/faces/visemes, or empty for the built-in one.",
+    ),
+    (
+        ClassName::FaceControls,
+        "LipSyncSmoothing",
+        "Seconds one viseme takes to blend into the next during lip sync.",
+    ),
+    (
+        ClassName::FaceControls,
+        "LipSyncAnticipation",
+        "Seconds before its time each viseme starts, since mouths move a little before the sound comes.",
+    ),
+    (
         ClassName::IKControl,
         "Type",
         "How it turns the bones: `\"Position\"` puts EndEffector at the Target, `\"Rotation\"` turns it as the Target is turned from the MeshPart, `\"Transform\"` does both, and `\"LookAt\"` faces it at the Target.",

@@ -2788,6 +2788,13 @@ impl ClassName {
                     // Small idle movements (eye darts, brow drift), 0 (none)
                     // to 1.
                     ("IdleMotion", Value::Number(0.5)),
+                    // Lip sync (F5): the viseme map (a name or
+                    // `*.visemes.json` path; empty: the built-in one), the
+                    // seconds each viseme takes to blend in and out, and
+                    // how much earlier than its time it starts.
+                    ("VisemeMap", Value::String(String::new())),
+                    ("LipSyncSmoothing", Value::Number(0.06)),
+                    ("LipSyncAnticipation", Value::Number(0.04)),
                 ];
                 properties.extend(
                     crate::face::FACE_CONTROLS

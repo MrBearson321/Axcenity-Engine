@@ -885,6 +885,13 @@ function helpers.line(speaker, audio, animation)
         voice.Name = "DialogueVoice"
         voice.SoundId = audio
         voice.Parent = holder
+        -- The speaker's face says the line from the lip sync made beside
+        -- its sound, if there is one (`lipsync` in the Console).
+        local face = speaker and speaker:FindFirstChildWhichIsA("FaceControls", true)
+        if face then
+            local lip = string.gsub(audio, "%.[^%./]*$", "") .. ".lipsync.json"
+            pcall(face.PlayLipSync, face, lip, voice)
+        end
         voice:Play()
     end
     if animation ~= "" and speaker then

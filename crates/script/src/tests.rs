@@ -1547,6 +1547,55 @@ fn face_controls_methods_set_expressions_overrides_and_layers() {
 }
 
 #[test]
+fn face_controls_play_and_stop_lip_syncs() {
+    let folder = std::env::temp_dir().join(format!("axcenity-lua-lip-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("hi.lipsync.json"),
+        r#"{ "format_version": 1, "duration": 1, "visemes": [ { "time": 0, "viseme": "O" } ] }"#,
+    )
+    .unwrap();
+    let mut world = World::new();
+    let face = world.create(ClassName::FaceControls).unwrap();
+    world.set_parent(face, Some(world.workspace())).unwrap();
+    let sound = world.create(ClassName::Sound).unwrap();
+    world.set_parent(sound, Some(world.workspace())).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_assets(axcenity_assets::Assets::new(&folder));
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/lip.server.lua",
+        "local face = workspace.FaceControls
+         print(face:GetLipSync())
+         face:PlayLipSync('hi.lipsync.json', workspace.Sound, { Speed = 2, FadeTime = 0.2 })
+         local playing = face:GetLipSync()
+         print(playing.Path, playing.Speed, playing.Weight, playing.Sound == workspace.Sound)
+         print(pcall(face.PlayLipSync, face, 'nope.lipsync.json'))
+         print(pcall(face.PlayLipSync, face, 'hi.lipsync.json', workspace))
+         face:StopLipSync(0.5)
+         print(face:GetLipSync())",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[0], "nil");
+    assert_eq!(output[1], "hi.lipsync.json\t2\t1\ttrue");
+    assert!(
+        output[2].contains("there's no file `nope.lipsync.json`"),
+        "{}",
+        output[2]
+    );
+    assert!(output[3].contains("must be a Sound"), "{}", output[3]);
+    assert_eq!(output[4], "nil", "stopping: fading out");
+    let play = world.face(face).unwrap().lip_sync.clone().unwrap();
+    assert_eq!(
+        (play.target_weight, play.fade, play.sound),
+        (0.0, 0.5, Some(sound))
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn animators_take_play_requests_and_report_their_state() {
     let mut world = World::new();
     let animator = world.create(ClassName::Animator).unwrap();

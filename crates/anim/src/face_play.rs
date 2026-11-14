@@ -111,7 +111,7 @@ pub fn expression_names(project: &FaceExpressions) -> Vec<String> {
 /// One layer's say over each control: how much it covers it (0 to 1) and
 /// its value times that ("premultiplied").
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct LayerValues {
+pub struct LayerValues {
     pub value: Vec<f32>,
     pub cover: Vec<f32>,
 }
@@ -139,7 +139,7 @@ fn smooth(t: f64) -> f64 {
 }
 
 /// Moves `value` toward `target` by `step`.
-fn approach(value: f64, target: f64, step: f64) -> f64 {
+pub(crate) fn approach(value: f64, target: f64, step: f64) -> f64 {
     if (target - value).abs() <= step {
         target
     } else {
@@ -231,6 +231,8 @@ pub(crate) struct Procedural {
 pub(crate) struct FaceLayers {
     pub base: Vec<f32>,
     pub expression: LayerValues,
+    /// Lip sync (F5).
+    pub dialogue: LayerValues,
     pub procedural: Procedural,
     pub overrides: Vec<(usize, f32)>,
     pub order: Vec<FaceLayer>,
@@ -250,7 +252,7 @@ impl FaceLayers {
                     cover: vec![1.0; FACE_CONTROLS.len()],
                 },
                 FaceLayer::Expression => self.expression.clone(),
-                FaceLayer::Dialogue => continue,
+                FaceLayer::Dialogue => self.dialogue.clone(),
                 FaceLayer::Procedural => self.procedural(&out, face, rig, pose),
                 FaceLayer::Override => {
                     let mut values = LayerValues::empty();

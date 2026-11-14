@@ -9,7 +9,7 @@ A dialogue is `assets/dialogue/<Name>.dialogue.json`, a node graph in the same s
 | Node | Does |
 |---|---|
 | **Start** | Where it starts. One per dialogue. |
-| **Line** *Speaker, Text, Audio, Animation* | Shows Text said by Speaker (empty: the speaker Model's name) until the player goes on. Text and Speaker may be string table keys. Audio plays a sound file from the speaker (a `Sound` called `DialogueVoice`, stopped at the next line); Animation plays that state of the speaker's Animator. A Line wired straight to a Choice shows the choices under it. |
+| **Line** *Speaker, Text, Audio, Animation* | Shows Text said by Speaker (empty: the speaker Model's name) until the player goes on. Text and Speaker may be string table keys. Audio plays a sound file from the speaker (a `Sound` called `DialogueVoice`, stopped at the next line), and when a lip sync was made beside it (`assets/voice/hello.ogg` → `assets/voice/hello.lipsync.json`, the Console's `lipsync`) a FaceControls in the speaker says it (facial animation F5); Animation plays that state of the speaker's Animator. A Line wired straight to a Choice shows the choices under it. |
 | **Choice** *Option 1–4* | Lets the player pick an option (empty ones aren't shown); each goes on from its pin. Options may be string table keys. |
 | **Attribute?** *Of, Attribute, Equals* | True when the player's character (else the Player) or the speaker has the attribute and it isn't false, 0 or empty; with Equals, when it's that value (a number, true or false, or text). |
 | **Has Tag?** *Of, Tag* | True when it has the tag. |

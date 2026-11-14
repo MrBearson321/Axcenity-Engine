@@ -90,6 +90,7 @@ impl EditorApp {
             Command::Host => self.host_command(),
             Command::Conflicts => self.conflicts_command(),
             Command::Resolve(rest) => self.resolve_command(rest),
+            Command::LipSync(path) => self.lip_sync_command(path),
             Command::Lua(source) => self.run_lua(source),
         }
     }

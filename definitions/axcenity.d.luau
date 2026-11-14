@@ -4912,6 +4912,12 @@ declare extern type FaceControls extends Instance with
 	GazeWeight: number
 	--- Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.
 	IdleMotion: number
+	--- Which viseme map lip sync uses: what each of the 12 visemes (Silence, AI, E, O, U, FV, L, MBP, WQ, TH, TDN, KG) does to the controls, and how much of the opening the jaw carries. A `*.visemes.json` file's name or path in assets/faces/visemes, or empty for the built-in one.
+	VisemeMap: string
+	--- Seconds one viseme takes to blend into the next during lip sync.
+	LipSyncSmoothing: number
+	--- Seconds before its time each viseme starts, since mouths move a little before the sound comes.
+	LipSyncAnticipation: number
 	--- Closes the left eye in a blink, 0 to 1.
 	Blink_Left: number
 	--- Closes the right eye in a blink, 0 to 1.
@@ -5021,6 +5027,12 @@ declare extern type FaceControls extends Instance with
 	function ClearOverrides(self): ()
 	--- Sets how the face layer `layer` (`"Base"`, `"Expression"`, `"Dialogue"`, `"Procedural"` or `"Override"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `"Override"` (replaces, the default) or `"Additive"` (adds), and `mask`, the controls it may move: a group (`"Eyes"`, `"Eyebrows"`, `"Mouth"`, `"CheeksAndNose"`, `"JawAndTongue"`), a control, or a list of them; nil for all.
 	function SetLayer(self, layer: string, weight: number?, blend: string?, mask: (string | { string })?): ()
+	--- Plays the lip sync `path` (a `*.lipsync.json` file of timed visemes) on the face's Dialogue layer, through its VisemeMap. Given a Sound, it keeps time with it: it moves on only while the Sound plays (at its PlaybackSpeed) and fades out when the Sound has played and stopped, so call it just before `sound:Play()`. `options` may set `Speed` (1), `Weight` (0 to 1, how much it counts over the layers under it), `FadeTime` (seconds to fade in and out, 0.1) and `TimePosition` (where to start). A new line replaces the one playing.
+	function PlayLipSync(self, path: string, sound: Sound?, options: { Speed: number?, Weight: number?, FadeTime: number?, TimePosition: number? }?): ()
+	--- Fades the lip sync out over `fadeTime` seconds (its own fade time if left out); the mouth goes back to the layers under it.
+	function StopLipSync(self, fadeTime: number?): ()
+	--- The lip sync playing, as a table of `Path`, `TimePosition`, `Speed`, `Weight` and `Sound` (if it keeps time with one), or nil.
+	function GetLipSync(self): { Path: string, TimePosition: number, Speed: number, Weight: number, Sound: Sound? }?
 end
 
 --- Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime.
