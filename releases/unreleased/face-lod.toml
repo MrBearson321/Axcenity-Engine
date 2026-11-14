@@ -1,0 +1,12 @@
+category = "performance"
+subsystem = "animation"
+title = "Faces cost less far away and out of view"
+details = "A FaceControls' LodDistance (30 studs) sets where its face starts costing less: beyond it the face updates 15 times a second without idle motion, beyond twice it only its expressions 4 times a second, and beyond four times it, or out of the camera's view, it rests while its expressions and lip sync keep time. ProceduralEnabled turns blinking, gaze and idle motion off for a character, and the Profiler's Faces section shows how many faces are at each level, how many were worked out and what they cost. The network protocol is now 15."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = [393]
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

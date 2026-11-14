@@ -2837,6 +2837,14 @@ impl ClassName {
                     ("VisemeMap", Value::String(String::new())),
                     ("LipSyncSmoothing", Value::Number(0.06)),
                     ("LipSyncAnticipation", Value::Number(0.04)),
+                    // Blinking, gaze and idle motion together (F7): off,
+                    // the face shows only what's set and played on it.
+                    ("ProceduralEnabled", Value::Bool(true)),
+                    // Facial LOD (F7): studs from the camera where the face
+                    // starts updating less often (twice that: only its
+                    // expressions, four times: not at all); 0 keeps it
+                    // whole at any distance.
+                    ("LodDistance", Value::Number(30.0)),
                 ];
                 properties.extend(
                     crate::face::FACE_CONTROLS

@@ -688,6 +688,7 @@ impl Session {
         self.laps = laps;
         let mut cost = FrameCost::from_laps(&self.laps, physics_steps, started.elapsed());
         cost.posing = crate::profiler::PosingThreads::of(self.sim.animators.thread_times());
+        cost.faces = self.sim.animators.face_stats();
         self.cost = Some(cost);
         result?;
         // The controller owns the camera, so a LocalScript's move is not

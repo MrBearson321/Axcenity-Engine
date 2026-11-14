@@ -72,7 +72,9 @@ pub use face::{
     BUILT_IN_FACE_PROFILES, FaceBoneRole, FaceProblem, FaceRig, GazeAim, built_in_face_profile,
     check_face, choose_face_profile, face_point, pose_face,
 };
-pub use face_play::{BUILT_IN_EXPRESSIONS, built_in_expression, expression_names, find_expression};
+pub use face_play::{
+    BUILT_IN_EXPRESSIONS, FaceLod, built_in_expression, expression_names, find_expression,
+};
 pub use feet::{GroundHit, GroundProbe};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendSpace, BlendSpaceChild, BlendTree,
@@ -96,6 +98,10 @@ pub use retarget::{
     is_retarget_profile, rest_arm_angle,
 };
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
+
+// Facial LOD's counters (F7a), kept apart from the list above so pull
+// requests that add to that list don't conflict with this one.
+pub use animators::FaceStats;
 
 #[cfg(test)]
 mod face_tests;

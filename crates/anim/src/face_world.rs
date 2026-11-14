@@ -12,7 +12,8 @@ use axcenity_core::{ClassName, InstanceId, Value, World};
 use glam::{Mat4, Vec3};
 
 use crate::face_play::{
-    BlinkSettings, FaceLayers, FaceMotion, LayerValues, Procedural, advance_expressions, approach,
+    BlinkSettings, FaceDetail, FaceLayers, FaceMotion, LayerValues, Procedural,
+    advance_expressions, approach,
 };
 use crate::lip_sync::{CompiledVisemes, LipTiming, find_viseme_map, viseme_weights};
 use crate::ragdoll::{placement_with, to_vec3};
@@ -27,7 +28,8 @@ pub(crate) struct Lookers<'a> {
 
 /// The layers of the FaceControls `face` in `owner` (whose model is
 /// `model`) this frame, with its expressions and own motion moved on by
-/// `dt` seconds. What's wrong goes in `problems`, one sentence each.
+/// `dt` seconds, working out only what `detail` says. What's wrong goes
+/// in `problems`, one sentence each.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn face_layers(
     world: &mut World,
@@ -37,6 +39,7 @@ pub(crate) fn face_layers(
     model: &Model,
     motion: &mut FaceMotion,
     lookers: Lookers,
+    detail: FaceDetail,
     dt: f64,
     problems: &mut Vec<String>,
 ) -> Option<FaceLayers> {
@@ -71,7 +74,8 @@ pub(crate) fn face_layers(
         FaceLayer::ALL.to_vec()
     });
     let blink = BlinkSettings {
-        enabled: instance.property("BlinkEnabled").and_then(Value::as_bool) != Some(false),
+        enabled: detail.procedural
+            && instance.property("BlinkEnabled").and_then(Value::as_bool) != Some(false),
         eyes: match text("BlinkEyes").as_str() {
             "left" => [true, false],
             "right" => [false, true],
@@ -84,7 +88,11 @@ pub(crate) fn face_layers(
         duration: number("BlinkDuration", 0.15),
         double_chance: number("DoubleBlinkChance", 0.15),
     };
-    let idle = number("IdleMotion", 0.5) as f32;
+    let idle = if detail.idle {
+        number("IdleMotion", 0.5) as f32
+    } else {
+        0.0
+    };
     let timing = LipTiming {
         smoothing: number("LipSyncSmoothing", 0.06),
         anticipation: number("LipSyncAnticipation", 0.04),
@@ -96,7 +104,12 @@ pub(crate) fn face_layers(
         .to_owned();
     let smoothing = number("GazeSmoothing", 0.12);
     let weight = number("GazeWeight", 1.0) as f32;
-    let gaze_at = match text("GazeMode").as_str() {
+    let gaze_mode = if detail.procedural {
+        text("GazeMode")
+    } else {
+        String::new()
+    };
+    let gaze_at = match gaze_mode.as_str() {
         "camera" => lookers.viewer,
         "target" => instance
             .property("GazeTarget")
@@ -141,7 +154,7 @@ pub(crate) fn face_layers(
 
     let expressions = assets.face_expressions();
     let state = world.face_mut(face)?;
-    let dialogue = advance_lip_sync(
+    let mut dialogue = advance_lip_sync(
         state,
         assets,
         sound,
@@ -150,6 +163,10 @@ pub(crate) fn face_layers(
         &name,
         problems,
     );
+    if !detail.dialogue {
+        // Kept in time, but not shown.
+        dialogue = LayerValues::empty();
+    }
     let mut unknown = Vec::new();
     let expression = advance_expressions(state, &expressions, dt, &mut unknown);
     for missing in unknown {

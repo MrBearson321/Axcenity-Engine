@@ -3398,6 +3398,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Seconds before its time each viseme starts, since mouths move a little before the sound comes.",
     ),
     (
+        ClassName::FaceControls,
+        "ProceduralEnabled",
+        "If false, the face doesn't blink, look about or move by itself: it shows only its controls, expressions, lip sync and overrides. For background characters, or a face a cutscene keys whole.",
+    ),
+    (
+        ClassName::FaceControls,
+        "LodDistance",
+        "Studs from the camera where the face starts costing less: beyond it the face updates 15 times a second without idle motion, beyond twice it only its expressions 4 times a second, and beyond four times it (or out of view) it rests. 0 keeps it whole at any distance.",
+    ),
+    (
         ClassName::IKControl,
         "Type",
         "How it turns the bones: `\"Position\"` puts EndEffector at the Target, `\"Rotation\"` turns it as the Target is turned from the MeshPart, `\"Transform\"` does both, and `\"LookAt\"` faces it at the Target.",

@@ -914,10 +914,10 @@ impl Context {
         }
     }
 
-    /// Where the camera is now, as scripts see it.
-    pub fn camera_position(&self) -> Option<axcenity_core::Vector3> {
+    /// Where the camera is now and which way it turns, as scripts see it.
+    pub fn camera_state(&self) -> Option<CameraState> {
         let camera = self.lua.app_data_ref::<Camera>()?;
-        Some(camera.state.position)
+        Some(camera.state)
     }
 
     /// The view's size in pixels, for `ViewportSize` and screen points.
