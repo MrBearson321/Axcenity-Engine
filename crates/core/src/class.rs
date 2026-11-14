@@ -344,6 +344,12 @@ pub enum ClassName {
     /// bones from `ChainRoot` down to `EndEffector` toward its `Target`, as
     /// `Type` says. `Weight` says how much, fading over `SmoothTime`.
     IKControl,
+    /// The face of the skinned MeshPart it's in (facial animation F3): one
+    /// number property per standard facial control (`FACE_CONTROLS`, 0 to
+    /// 1), which a face profile (`Profile`, or the best fit) turns into the
+    /// model's blend shape weights and eye and jaw bone turns, after the
+    /// body's pose and before drawing.
+    FaceControls,
     /// Breaks the Part or MeshPart it's parented to into pieces (Phase 42):
     /// Generate in the editor cuts it into `Pieces` Voronoi pieces, saved
     /// as `<name>.fracture.glb` (`PiecesId`). An impact faster than
@@ -458,7 +464,21 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 136] = [
+    /// Every class, in the order of `LIST`. It's built from `LIST` so that
+    /// no count needs keeping up to date: every pull request that added a
+    /// class used to change that one number, so any two of them conflicted.
+    pub const ALL: [ClassName; ClassName::LIST.len()] = {
+        let mut all = [ClassName::DataModel; ClassName::LIST.len()];
+        let mut i = 0;
+        while i < all.len() {
+            all[i] = ClassName::LIST[i];
+            i += 1;
+        }
+        all
+    };
+
+    /// Every class; `ALL` is this list as an array.
+    const LIST: &[ClassName] = &[
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -556,6 +576,7 @@ impl ClassName {
         ClassName::VehicleWheel,
         ClassName::Ragdoll,
         ClassName::IKControl,
+        ClassName::FaceControls,
         ClassName::Fracture,
         ClassName::Health,
         ClassName::ProximityPrompt,
@@ -700,6 +721,7 @@ impl ClassName {
             ClassName::VehicleWheel => "VehicleWheel",
             ClassName::Ragdoll => "Ragdoll",
             ClassName::IKControl => "IKControl",
+            ClassName::FaceControls => "FaceControls",
             ClassName::Fracture => "Fracture",
             ClassName::Health => "Health",
             ClassName::ProximityPrompt => "ProximityPrompt",
@@ -2656,6 +2678,56 @@ impl ClassName {
                 // own axes. Zero works it out from the skeleton's toes.
                 ("Forward", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
             ],
+            ClassName::FaceControls => {
+                let mut properties = vec![
+                    // Off, the face rests: the model's own blend shape
+                    // values, and the eyes and jaw as the body's pose has them.
+                    ("Enabled", Value::Bool(true)),
+                    // The face profile mapping the controls to the model:
+                    // a built-in one's name ("axcenity", "arkit", "vroid"),
+                    // a `*.face.json` file's path, or empty for the one that
+                    // names the most of the model's blend shapes.
+                    ("Profile", Value::String(String::new())),
+                    // The layers' order, lowest first; layers left out keep
+                    // their place after the named ones.
+                    (
+                        "LayerOrder",
+                        Value::String("Base, Expression, Dialogue, Procedural, Override".into()),
+                    ),
+                    // Procedural blinking: on, which eyes ("Both", "Left",
+                    // "Right"), seconds between blinks (a random time from
+                    // min to max), seconds a blink takes, and how often a
+                    // blink is a double one (0 to 1).
+                    ("BlinkEnabled", Value::Bool(true)),
+                    ("BlinkEyes", Value::String("Both".into())),
+                    ("BlinkIntervalMin", Value::Number(2.0)),
+                    ("BlinkIntervalMax", Value::Number(6.0)),
+                    ("BlinkDuration", Value::Number(0.15)),
+                    ("DoubleBlinkChance", Value::Number(0.15)),
+                    // What the eyes look at: "Animation" (what the controls
+                    // say), "Camera", "Target" (GazeTarget: a part,
+                    // Attachment or character) or "Position" (GazePosition).
+                    ("GazeMode", Value::String("Animation".into())),
+                    ("GazeTarget", Value::Instance(None)),
+                    (
+                        "GazePosition",
+                        Value::Vector3(crate::Vector3::new(0.0, 0.0, 0.0)),
+                    ),
+                    // Seconds the eyes take to catch up with a moving target.
+                    ("GazeSmoothing", Value::Number(0.12)),
+                    // How much the gaze counts, 0 to 1.
+                    ("GazeWeight", Value::Number(1.0)),
+                    // Small idle movements (eye darts, brow drift), 0 (none)
+                    // to 1.
+                    ("IdleMotion", Value::Number(0.5)),
+                ];
+                properties.extend(
+                    crate::face::FACE_CONTROLS
+                        .iter()
+                        .map(|control| (control.name, Value::Number(0.0))),
+                );
+                properties
+            }
             ClassName::Fracture => vec![
                 // How many pieces Generate cuts the part into.
                 ("Pieces", Value::Number(12.0)),
@@ -3076,6 +3148,7 @@ impl ClassName {
             | ClassName::VehicleWheel
             | ClassName::Ragdoll
             | ClassName::IKControl
+            | ClassName::FaceControls
             | ClassName::LinearVelocity
             | ClassName::AngularVelocity
             | ClassName::VectorForce

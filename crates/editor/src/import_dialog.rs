@@ -30,6 +30,26 @@ pub(crate) mod outcome;
 mod package;
 mod preview;
 mod tabs;
+
+/// What a FaceControls could move on `model` with the built-in profile
+/// that fits its blend shapes best, such as "a face (41 of 48 controls,
+/// axcenity profile)"; `None` without blend shapes.
+fn face_summary(model: &Model) -> Option<String> {
+    if model.morph_targets.is_empty() {
+        return None;
+    }
+    let (name, profile) =
+        axcenity_anim::choose_face_profile(model, &Default::default(), "").ok()?;
+    let (face, _) = axcenity_anim::FaceRig::bind(model, &name, &profile);
+    let used = face.controls_used();
+    (used > 0).then(|| {
+        format!(
+            "a face ({used} of {} controls, {name} profile)",
+            axcenity_core::face::FACE_CONTROLS.len()
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -105,6 +125,9 @@ pub struct ImportDialog {
     /// How many blend shapes (morph targets) the model has, once it's
     /// loaded for the preview.
     blend_shapes: usize,
+    /// Which face profile fits the model's blend shapes and how many
+    /// facial controls it gets, once it's loaded for the preview.
+    face: Option<String>,
     /// One per object. Only the ticks of objects with meshes matter; a
     /// group shows its contents' ticks.
     ticked: Vec<bool>,
@@ -174,6 +197,7 @@ impl ImportDialog {
             tab: Tab::Objects,
             preview: None,
             blend_shapes: 0,
+            face: None,
             previewing: 0,
             buttons: None,
             import_button: None,
@@ -217,6 +241,7 @@ impl ImportDialog {
     /// clips made from its `takes`.
     pub fn with_preview(mut self, model: Model, takes: Vec<Take>) -> Self {
         self.blend_shapes = model.morph_targets.len();
+        self.face = face_summary(&model);
         self.preview = Some(ImportPreview::new(&self.file, model, takes));
         self
     }
@@ -381,6 +406,9 @@ impl ImportDialog {
             parts.push(plural(self.materials.len(), "material"));
             if self.blend_shapes > 0 {
                 parts.push(plural(self.blend_shapes, "blend shape"));
+            }
+            if let Some(face) = &self.face {
+                parts.push(face.clone());
             }
         }
         if let Some(animation) = &self.animation {

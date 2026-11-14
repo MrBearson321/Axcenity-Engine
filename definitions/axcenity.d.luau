@@ -4865,6 +4865,149 @@ declare extern type IKControl extends Instance with
 	[string]: any
 end
 
+--- The face of the MeshPart it's in: one number property per standard facial control, 0 to 1 (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Jaw_Open …). After the Animator and before drawing, its face profile turns them into the model's blend shape weights and turns its eye and jaw bones. Scripts and TweenService animate a face by setting these properties.
+declare extern type FaceControls extends Instance with
+	--- If false, the face rests: the model's own blend shape values, and the eyes and jaw as the body's pose has them.
+	Enabled: boolean
+	--- The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`"axcenity"`, `"arkit"` or `"vroid"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.
+	Profile: string
+	--- The face layers' order, lowest first, as names separated by commas (`"Base, Expression, Dialogue, Procedural, Override"`): Base is these properties, Expression is `SetExpression`'s, Dialogue is lip sync, Procedural is blinking, gaze and idle motion, and Override is `SetOverride`'s. Layers left out keep their place after the named ones.
+	LayerOrder: string
+	--- Whether the eyes blink by themselves, now and then.
+	BlinkEnabled: boolean
+	--- Which eyes blink by themselves: `"Both"`, `"Left"` or `"Right"`.
+	BlinkEyes: string
+	--- The fewest seconds between blinks; each wait is a random time from this to BlinkIntervalMax.
+	BlinkIntervalMin: number
+	--- The most seconds between blinks.
+	BlinkIntervalMax: number
+	--- Seconds a blink takes, closing and opening.
+	BlinkDuration: number
+	--- How often a blink is followed straight away by another, from 0 (never) to 1 (always).
+	DoubleBlinkChance: number
+	--- What the eyes look at: `"Animation"` (only what the controls say), `"Camera"`, `"Target"` (GazeTarget) or `"Position"` (GazePosition). The eyes turn within the face profile's limits and look ahead again when the target is too far round.
+	GazeMode: string
+	--- With GazeMode `"Target"`: the part, Attachment or character (a Model, looked at in its Head) to look at.
+	GazeTarget: Instance?
+	--- With GazeMode `"Position"`: the point in the world to look at.
+	GazePosition: Vector3
+	--- About how many seconds the eyes take to catch up with a moving target; 0 follows at once.
+	GazeSmoothing: number
+	--- How much the gaze counts over the eye controls, from 0 to 1.
+	GazeWeight: number
+	--- Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.
+	IdleMotion: number
+	--- Closes the left eye in a blink, 0 to 1.
+	Blink_Left: number
+	--- Closes the right eye in a blink, 0 to 1.
+	Blink_Right: number
+	--- Holds the left eye closed, 0 to 1, as in sleep or a wink, apart from blinking.
+	Eye_Closed_Left: number
+	--- Holds the right eye closed, 0 to 1, as in sleep or a wink, apart from blinking.
+	Eye_Closed_Right: number
+	--- Narrows the left eye, 0 to 1.
+	Eye_Squint_Left: number
+	--- Narrows the right eye, 0 to 1.
+	Eye_Squint_Right: number
+	--- Opens the left eye wide, 0 to 1.
+	Eye_Wide_Left: number
+	--- Opens the right eye wide, 0 to 1.
+	Eye_Wide_Right: number
+	--- Turns both eyes up, 0 to 1 (1 is the face profile's up limit, 25° by default). Turns the eye bones when the model has them, otherwise its look shapes.
+	Eye_Look_Up: number
+	--- Turns both eyes down, 0 to 1 (1 is the face profile's down limit, 20° by default).
+	Eye_Look_Down: number
+	--- Turns both eyes to the character's left, 0 to 1 (1 is the face profile's sideways limit, 30° by default).
+	Eye_Look_Left: number
+	--- Turns both eyes to the character's right, 0 to 1 (1 is the face profile's sideways limit, 30° by default).
+	Eye_Look_Right: number
+	--- Raises the left eyebrow, 0 to 1.
+	Brow_Raise_Left: number
+	--- Raises the right eyebrow, 0 to 1.
+	Brow_Raise_Right: number
+	--- Lowers the left eyebrow, 0 to 1.
+	Brow_Lower_Left: number
+	--- Lowers the right eyebrow, 0 to 1.
+	Brow_Lower_Right: number
+	--- Draws the left eyebrow's inner end in and up, 0 to 1, as in worry.
+	Brow_Inward_Left: number
+	--- Draws the right eyebrow's inner end in and up, 0 to 1, as in worry.
+	Brow_Inward_Right: number
+	--- Pulls the left corner of the mouth up into a smile, 0 to 1.
+	Mouth_Smile_Left: number
+	--- Pulls the right corner of the mouth up into a smile, 0 to 1.
+	Mouth_Smile_Right: number
+	--- Pulls the left corner of the mouth down, 0 to 1.
+	Mouth_Frown_Left: number
+	--- Pulls the right corner of the mouth down, 0 to 1.
+	Mouth_Frown_Right: number
+	--- Parts the lips, 0 to 1, without the jaw (Jaw_Open drops the jaw).
+	Mouth_Open: number
+	--- Stretches the mouth wide, 0 to 1.
+	Mouth_Wide: number
+	--- Narrows the mouth into a round opening, 0 to 1, as for "oo".
+	Mouth_Narrow: number
+	--- Pushes the lips forward together, 0 to 1, as for a kiss.
+	Mouth_Pucker: number
+	--- Moves the whole mouth to the character's left, 0 to 1.
+	Mouth_Left: number
+	--- Moves the whole mouth to the character's right, 0 to 1.
+	Mouth_Right: number
+	--- Raises the upper lip, 0 to 1.
+	Upper_Lip_Raise: number
+	--- Lowers the lower lip, 0 to 1.
+	Lower_Lip_Lower: number
+	--- Raises the left side of the upper lip, 0 to 1.
+	Upper_Lip_Raise_Left: number
+	--- Raises the right side of the upper lip, 0 to 1.
+	Upper_Lip_Raise_Right: number
+	--- Lowers the left side of the lower lip, 0 to 1.
+	Lower_Lip_Lower_Left: number
+	--- Lowers the right side of the lower lip, 0 to 1.
+	Lower_Lip_Lower_Right: number
+	--- Pulls the left corner of the lips back, 0 to 1.
+	Lip_Corner_Pull_Left: number
+	--- Pulls the right corner of the lips back, 0 to 1.
+	Lip_Corner_Pull_Right: number
+	--- Raises the left cheek, 0 to 1, as in a broad smile.
+	Cheek_Raise_Left: number
+	--- Raises the right cheek, 0 to 1, as in a broad smile.
+	Cheek_Raise_Right: number
+	--- Puffs both cheeks out, 0 to 1.
+	Cheek_Puff: number
+	--- Wrinkles the left side of the nose up, 0 to 1.
+	Nose_Sneer_Left: number
+	--- Wrinkles the right side of the nose up, 0 to 1.
+	Nose_Sneer_Right: number
+	--- Drops the jaw, 0 to 1 (1 is the face profile's jaw limit, 25° by default). Turns the jaw bone when the model has one, and drives a Jaw_Open shape too when it has one.
+	Jaw_Open: number
+	--- Pushes the jaw forward, 0 to 1.
+	Jaw_Forward: number
+	--- Moves the jaw to the character's left, 0 to 1. Turns the jaw bone when the model has one.
+	Jaw_Left: number
+	--- Moves the jaw to the character's right, 0 to 1. Turns the jaw bone when the model has one.
+	Jaw_Right: number
+	--- Sticks the tongue out, 0 to 1.
+	Tongue_Out: number
+	--- Curls the tongue's tip up, 0 to 1.
+	Tongue_Up: number
+	--- Curls the tongue's tip down, 0 to 1.
+	Tongue_Down: number
+	[string]: any
+	--- Shows the expression `name` (a built-in one such as `"Happy"`, `"Sad"` or `"Sleepy"`, or a `*.expression.json` file's name or path) at `intensity` (0 to 1, 1 if left out), blending in over `duration` seconds (the expression's own time if left out). `options` may set `Weight` (0 to 1, how much it counts over the expressions under it), `Priority` (higher goes over lower; equal ones go in the order they were set) and `Asymmetry` (-1 shows only the left side, 1 only the right). Setting a shown expression again changes it.
+	function SetExpression(self, name: string, intensity: number?, duration: number?, options: { Weight: number?, Priority: number?, Asymmetry: number? }?): ()
+	--- Fades the expression `name` out over `duration` seconds (its own time if left out), or every expression if `name` is nil.
+	function ClearExpression(self, name: string?, duration: number?): ()
+	--- The expressions being shown, in the order they were set: each a table of `Name`, `Intensity`, `Weight`, `Priority` and `Asymmetry`.
+	function GetExpressions(self): { { Name: string, Intensity: number, Weight: number, Priority: number, Asymmetry: number } }
+	--- Holds the control `control` (such as `"Jaw_Open"`) at `value` (0 to 1) over everything else on the Override layer, such as a character's mouth while eating; nil lets it go.
+	function SetOverride(self, control: string, value: number?): ()
+	--- Lets go of every control SetOverride holds.
+	function ClearOverrides(self): ()
+	--- Sets how the face layer `layer` (`"Base"`, `"Expression"`, `"Dialogue"`, `"Procedural"` or `"Override"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `"Override"` (replaces, the default) or `"Additive"` (adds), and `mask`, the controls it may move: a group (`"Eyes"`, `"Eyebrows"`, `"Mouth"`, `"CheeksAndNose"`, `"JawAndTongue"`), a control, or a list of them; nil for all.
+	function SetLayer(self, layer: string, weight: number?, blend: string?, mask: (string | { string })?): ()
+end
+
 --- Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime.
 declare extern type Fracture extends Instance with
 	--- How many pieces Generate (in its Properties) cuts the part into.
@@ -5736,7 +5879,130 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "SunRaysEffect") -> SunRaysEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: "DataLayer") -> DataLayer) & ((className: "ScatterRule") -> ScatterRule) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part)
+		& ((className: "MeshPart") -> MeshPart)
+		& ((className: "UnionOperation") -> UnionOperation)
+		& ((className: "NegateOperation") -> NegateOperation)
+		& ((className: "Seat") -> Seat)
+		& ((className: "VehicleSeat") -> VehicleSeat)
+		& ((className: "DamageZone") -> DamageZone)
+		& ((className: "ReverbZone") -> ReverbZone)
+		& ((className: "SpawnLocation") -> SpawnLocation)
+		& ((className: "Script") -> Script)
+		& ((className: "LocalScript") -> LocalScript)
+		& ((className: "ModuleScript") -> ModuleScript)
+		& ((className: "RemoteEvent") -> RemoteEvent)
+		& ((className: "RemoteFunction") -> RemoteFunction)
+		& ((className: "BindableEvent") -> BindableEvent)
+		& ((className: "BindableFunction") -> BindableFunction)
+		& ((className: "Model") -> Model)
+		& ((className: "Folder") -> Folder)
+		& ((className: "SurfaceAppearance") -> SurfaceAppearance)
+		& ((className: "ScreenGui") -> ScreenGui)
+		& ((className: "Frame") -> Frame)
+		& ((className: "TextLabel") -> TextLabel)
+		& ((className: "TextButton") -> TextButton)
+		& ((className: "ImageLabel") -> ImageLabel)
+		& ((className: "TextBox") -> TextBox)
+		& ((className: "PageLayout") -> PageLayout)
+		& ((className: "Table") -> Table)
+		& ((className: "ScrollingFrame") -> ScrollingFrame)
+		& ((className: "Slider") -> Slider)
+		& ((className: "Toggle") -> Toggle)
+		& ((className: "Dropdown") -> Dropdown)
+		& ((className: "ProgressBar") -> ProgressBar)
+		& ((className: "BillboardGui") -> BillboardGui)
+		& ((className: "Sound") -> Sound)
+		& ((className: "SoundGroup") -> SoundGroup)
+		& ((className: "ReverbSoundEffect") -> ReverbSoundEffect)
+		& ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect)
+		& ((className: "CompressorSoundEffect") -> CompressorSoundEffect)
+		& ((className: "EchoSoundEffect") -> EchoSoundEffect)
+		& ((className: "DistortionSoundEffect") -> DistortionSoundEffect)
+		& ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect)
+		& ((className: "LowPassSoundEffect") -> LowPassSoundEffect)
+		& ((className: "HighPassSoundEffect") -> HighPassSoundEffect)
+		& ((className: "PointLight") -> PointLight)
+		& ((className: "SpotLight") -> SpotLight)
+		& ((className: "RectLight") -> RectLight)
+		& ((className: "ReflectionProbe") -> ReflectionProbe)
+		& ((className: "LightProbeVolume") -> LightProbeVolume)
+		& ((className: "Atmosphere") -> Atmosphere)
+		& ((className: "Clouds") -> Clouds)
+		& ((className: "Weather") -> Weather)
+		& ((className: "OutlineEffect") -> OutlineEffect)
+		& ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect)
+		& ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect)
+		& ((className: "VignetteEffect") -> VignetteEffect)
+		& ((className: "FilmGrainEffect") -> FilmGrainEffect)
+		& ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect)
+		& ((className: "SharpenEffect") -> SharpenEffect)
+		& ((className: "SunRaysEffect") -> SunRaysEffect)
+		& ((className: "MotionBlurEffect") -> MotionBlurEffect)
+		& ((className: "GraphicsVolume") -> GraphicsVolume)
+		& ((className: "ExposureEffect") -> ExposureEffect)
+		& ((className: "FogEffect") -> FogEffect)
+		& ((className: "BloomEffect") -> BloomEffect)
+		& ((className: "ParticleEmitter") -> ParticleEmitter)
+		& ((className: "Animator") -> Animator)
+		& ((className: "Animation") -> Animation)
+		& ((className: "AnimationTrack") -> AnimationTrack)
+		& ((className: "Sequence") -> Sequence)
+		& ((className: "Spline") -> Spline)
+		& ((className: "SplinePoint") -> SplinePoint)
+		& ((className: "SplineFollower") -> SplineFollower)
+		& ((className: "SplineMesh") -> SplineMesh)
+		& ((className: "SplineScatter") -> SplineScatter)
+		& ((className: "Decal") -> Decal)
+		& ((className: "ProjectedDecal") -> ProjectedDecal)
+		& ((className: "Terrain") -> Terrain)
+		& ((className: "TerrainLayer") -> TerrainLayer)
+		& ((className: "ThirdPersonController") -> ThirdPersonController)
+		& ((className: "FirstPersonController") -> FirstPersonController)
+		& ((className: "NavigationAgent") -> NavigationAgent)
+		& ((className: "Checkpoint") -> Checkpoint)
+		& ((className: "Camera") -> Camera)
+		& ((className: "Attachment") -> Attachment)
+		& ((className: "VehicleWheel") -> VehicleWheel)
+		& ((className: "Ragdoll") -> Ragdoll)
+		& ((className: "IKControl") -> IKControl)
+		& ((className: "FaceControls") -> FaceControls)
+		& ((className: "Fracture") -> Fracture)
+		& ((className: "Health") -> Health)
+		& ((className: "ProximityPrompt") -> ProximityPrompt)
+		& ((className: "ClickDetector") -> ClickDetector)
+		& ((className: "Tool") -> Tool)
+		& ((className: "Inventory") -> Inventory)
+		& ((className: "Humanoid") -> Humanoid)
+		& ((className: "Ability") -> Ability)
+		& ((className: "Effect") -> Effect)
+		& ((className: "ForceField") -> ForceField)
+		& ((className: "Team") -> Team)
+		& ((className: "WeldConstraint") -> WeldConstraint)
+		& ((className: "HingeConstraint") -> HingeConstraint)
+		& ((className: "BallSocketConstraint") -> BallSocketConstraint)
+		& ((className: "PrismaticConstraint") -> PrismaticConstraint)
+		& ((className: "CylindricalConstraint") -> CylindricalConstraint)
+		& ((className: "SpringConstraint") -> SpringConstraint)
+		& ((className: "RopeConstraint") -> RopeConstraint)
+		& ((className: "RodConstraint") -> RodConstraint)
+		& ((className: "LinearVelocity") -> LinearVelocity)
+		& ((className: "AngularVelocity") -> AngularVelocity)
+		& ((className: "VectorForce") -> VectorForce)
+		& ((className: "Torque") -> Torque)
+		& ((className: "AlignPosition") -> AlignPosition)
+		& ((className: "AlignOrientation") -> AlignOrientation)
+		& ((className: "IntValue") -> IntValue)
+		& ((className: "NumberValue") -> NumberValue)
+		& ((className: "StringValue") -> StringValue)
+		& ((className: "BoolValue") -> BoolValue)
+		& ((className: "Vector3Value") -> Vector3Value)
+		& ((className: "Color3Value") -> Color3Value)
+		& ((className: "CFrameValue") -> CFrameValue)
+		& ((className: "ObjectValue") -> ObjectValue)
+		& ((className: "DataLayer") -> DataLayer)
+		& ((className: "ScatterRule") -> ScatterRule)
+		& ((className: string) -> Instance)
 end
 
 --- Creates Instances.

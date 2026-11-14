@@ -18,7 +18,10 @@
 //!
 //! Over a skeleton's pose (not while its Ragdoll is on) come its character
 //! controller's foot placement ([`crate::feet`]) and then its IKControls
-//! ([`crate::ik_control`]), all before drawing.
+//! ([`crate::ik_control`]), all before drawing. Last, a FaceControls in
+//! the MeshPart turns its eye and jaw bones and sets its blend shapes
+//! ([`crate::face`]); a model with blend shapes and no skeleton is posed
+//! for its face alone.
 //!
 //! A clip, state machine or model file that changed on disk
 //! ([`Animators::reload`]) is bound again at the next update, and each
@@ -27,7 +30,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, RigDefinitions, Slot, Take};
+use axcenity_assets::{
+    Assets, FaceProfiles, Model, ModelFormat, Posed, Rig, RigDefinitions, Slot, Take,
+};
 use axcenity_core::{
     ClassName, InstanceId, LayerWeight, Parameter, PlayRequest, Value, Vector3, World,
 };
@@ -35,6 +40,9 @@ use glam::{EulerRot, Quat, Vec3};
 
 use crate::clip::{Clip, RootMotion};
 use crate::controller::{Compiled, Machine, Playing};
+use crate::face::{FaceRig, choose_face_profile};
+use crate::face_play::{FaceLayers, FaceMotion};
+use crate::face_world::{Lookers, face_layers};
 use crate::feet::{self, GroundProbe, Legs};
 use crate::files::{
     CLIP_EXTENSION, ClipFile, DEFAULT_BLEND, STATE_MACHINE_EXTENSION, StateMachineFile,
@@ -134,6 +142,11 @@ pub struct Animators {
     threads: Threads,
     /// How long each thread spent posing in the last update.
     thread_times: ThreadTimes,
+    /// Where the camera is, which faces with GazeMode Camera look at.
+    viewer: Option<Vec3>,
+    /// The resting head of each skinned model a face has looked at, in
+    /// its file's space, by model key.
+    heads: HashMap<u64, Option<Vec3>>,
 }
 
 /// A pose to work out off the calling thread: everything it needs from
@@ -148,6 +161,55 @@ struct PoseJob {
     layer_weights: Vec<f32>,
     /// What plays over the state machine and moves bones, in order.
     bone_layers: Vec<Layer>,
+    /// Its face, over the body's pose.
+    face: Option<FaceFrame>,
+}
+
+/// A face's layers this frame, and the profile matched to its model.
+struct FaceFrame {
+    rig: Arc<FaceRig>,
+    layers: FaceLayers,
+}
+
+impl FaceFrame {
+    /// Composes the face over the body's `pose` (of `skeleton`), turns the
+    /// eye and jaw bones in it, poses `model` and sets its blend shapes.
+    fn pose(
+        &self,
+        model: &Model,
+        skeleton: &Rig,
+        mut pose: axcenity_assets::Pose,
+    ) -> Option<Posed> {
+        let controls = self.layers.compose(&self.rig, Some(skeleton), Some(&pose));
+        self.rig.turn(&mut pose, &controls);
+        let mut posed = model.pose(&pose)?;
+        self.set_shapes(model, &controls, &mut posed);
+        Some(posed)
+    }
+
+    /// A model with blend shapes and no skeleton, posed for its face.
+    fn shapes_only(&self, model: &Model) -> Posed {
+        let controls = self.layers.compose(&self.rig, None, None);
+        let mut posed = model.rest_posed();
+        self.set_shapes(model, &controls, &mut posed);
+        posed
+    }
+
+    fn set_shapes(&self, model: &Model, controls: &[f32], posed: &mut Posed) {
+        let mut weights = Vec::with_capacity(model.morph_targets.len());
+        self.rig.weights(model, controls, &mut weights);
+        posed.set_morph_weights(&weights);
+    }
+}
+
+/// The profile a FaceControls was matched to its model with.
+struct FaceRun {
+    model_key: u64,
+    /// Its `Profile` when it was matched.
+    wanted: String,
+    /// The project's profiles then; new ones (a file changed) match again.
+    profiles: Arc<FaceProfiles>,
+    rig: Option<Arc<FaceRig>>,
 }
 
 /// One animated thing being played.
@@ -170,6 +232,9 @@ struct Running {
     /// The skeleton's legs (found again for a new model), if it has them.
     legs: Option<Legs>,
     feet: feet::Run,
+    face: Option<FaceRun>,
+    /// Its face's blinks, darts and gaze, carried from frame to frame.
+    face_motion: Option<FaceMotion>,
 }
 
 /// Where a thing's Ragdoll has got to.
@@ -214,6 +279,7 @@ struct Parts {
     animations: Vec<InstanceId>,
     ragdoll: Option<InstanceId>,
     ik: Vec<InstanceId>,
+    face: Option<InstanceId>,
 }
 
 impl Animators {
@@ -245,6 +311,13 @@ impl Animators {
             ground: Some(probe),
             ..Self::default()
         }
+    }
+
+    /// Where the camera is in the world (the viewer), which faces with
+    /// GazeMode Camera look at. Hosts set it before each update; `None`
+    /// (a dedicated server) leaves those faces looking ahead.
+    pub fn set_viewer(&mut self, at: Option<axcenity_core::Vector3>) {
+        self.viewer = at.map(crate::ragdoll::to_vec3);
     }
 
     /// The posed models, by MeshPart, after the last [`update`](Self::update).
@@ -338,6 +411,7 @@ impl Animators {
                     | ClassName::Animation
                     | ClassName::Ragdoll
                     | ClassName::IKControl
+                    | ClassName::FaceControls
             )
         });
         for id in animated {
@@ -376,6 +450,9 @@ impl Animators {
                     parts.ragdoll.get_or_insert(id);
                 }
                 ClassName::IKControl => parts.ik.push(id),
+                ClassName::FaceControls => {
+                    parts.face.get_or_insert(id);
+                }
                 _ => parts.animations.push(id),
             }
         }
@@ -413,7 +490,10 @@ impl Animators {
                 &job.layer_weights,
                 &job.bone_layers,
             );
-            let posed = job.model.pose(&pose);
+            let posed = match &job.face {
+                Some(face) => face.pose(&job.model, &job.rig, pose.clone()),
+                None => job.model.pose(&pose),
+            };
             (pose, posed)
         });
         self.thread_times = times;
@@ -456,7 +536,7 @@ impl Animators {
                 if self.running.contains_key(&child) || posed.contains(&child) {
                     continue;
                 }
-                let Some(model) = skeleton_model(world, assets, child) else {
+                let Some(model) = mesh_model(world, assets, child) else {
                     continue;
                 };
                 let Some(own) = model.rig.clone() else {
@@ -497,7 +577,8 @@ impl Animators {
         events: &mut Vec<AnimatorEvent>,
         jobs: &mut Vec<PoseJob>,
     ) -> bool {
-        let model = skeleton_model(world, assets, owner);
+        let mesh = mesh_model(world, assets, owner);
+        let model = mesh.clone().filter(|model| model.rig.is_some());
         let rig = model.as_ref().and_then(|model| model.rig.clone());
         let model_key = model.as_ref().map(|model| model.key());
         let (enabled, speed) = parts.animator.map_or((true, 1.0), |id| settings(world, id));
@@ -707,6 +788,19 @@ impl Animators {
             }
         }
 
+        // The face's controls, read now so the pose can be made anywhere.
+        let face = parts.face.and_then(|face| {
+            self.face_frame(
+                world,
+                assets,
+                face,
+                owner,
+                mesh.as_deref(),
+                &mut running,
+                game_dt,
+            )
+        });
+
         // Bones: the state machine's pose, then each layer over it.
         let mut posed = false;
         if let (Some(model), Some(rig)) = (&model, &rig) {
@@ -725,6 +819,7 @@ impl Animators {
                 || !parts.ik.is_empty()
                 || wants_feet
                 || running.feet.busy()
+                || face.is_some()
             {
                 let live = parts.animator.and_then(|animator| world.animator(animator));
                 let parameters = live.map(|live| live.parameters.clone()).unwrap_or_default();
@@ -759,6 +854,7 @@ impl Animators {
                         parameters,
                         layer_weights,
                         bone_layers,
+                        face,
                     });
                     posed = true;
                 } else {
@@ -822,13 +918,21 @@ impl Animators {
                             self.report(problem);
                         }
                     }
-                    if let Some(made) = model.pose(&pose) {
+                    let made = match &face {
+                        Some(face) => face.pose(model, rig, pose.clone()),
+                        None => model.pose(&pose),
+                    };
+                    if let Some(made) = made {
                         self.poses.insert(owner, Arc::new(made));
                         self.local.insert(owner, (Arc::clone(rig), pose));
                         posed = true;
                     }
                 }
             }
+        } else if let (Some(face), Some(mesh)) = (&face, &mesh) {
+            // Blend shapes and no skeleton: posed for the face alone.
+            self.poses.insert(owner, Arc::new(face.shapes_only(mesh)));
+            posed = true;
         } else if let Some(&control) = parts.ik.first() {
             let name = world.full_name(control).unwrap_or_default();
             self.report(format!(
@@ -1230,6 +1334,109 @@ impl Animators {
         Some(Arc::new(compiled))
     }
 
+    /// The FaceControls `face`'s controls this frame and the profile matched
+    /// to `model`, or `None` when it's off or has nothing to move (said
+    /// once).
+    #[allow(clippy::too_many_arguments)]
+    fn face_frame(
+        &mut self,
+        world: &mut World,
+        assets: &Assets,
+        face: InstanceId,
+        owner: InstanceId,
+        model: Option<&Model>,
+        running: &mut Running,
+        dt: f64,
+    ) -> Option<FaceFrame> {
+        let instance = world.get(face)?;
+        if instance.property("Enabled").and_then(Value::as_bool) == Some(false) {
+            return None;
+        }
+        let name = || world.full_name(face).unwrap_or_default();
+        let in_mesh_part = instance
+            .parent()
+            .and_then(|parent| world.get(parent))
+            .is_some_and(|parent| parent.class() == ClassName::MeshPart);
+        // A model still loading (or that can't be, which Assets reports)
+        // just has no face yet.
+        if in_mesh_part && model.is_none() {
+            return None;
+        }
+        let Some(model) =
+            model.filter(|model| !model.morph_targets.is_empty() || model.rig.is_some())
+        else {
+            self.report(format!(
+                "The FaceControls `{}` moves nothing: it works in a MeshPart whose model has blend shapes or eye and jaw bones.",
+                name()
+            ));
+            return None;
+        };
+        let wanted = instance
+            .property("Profile")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let profiles = assets.face_profiles();
+        let stale = running.face.as_ref().is_none_or(|run| {
+            run.model_key != model.key()
+                || run.wanted != wanted
+                || !Arc::ptr_eq(&run.profiles, &profiles)
+        });
+        if stale {
+            let rig = match choose_face_profile(model, &profiles, &wanted) {
+                Ok((profile_name, profile)) => {
+                    let (rig, problems) = FaceRig::bind(model, &profile_name, &profile);
+                    for problem in problems {
+                        if problem.severity() == crate::retarget::Severity::Error {
+                            self.report(format!(
+                                "The FaceControls `{}` (face profile `{profile_name}`): {problem}",
+                                name()
+                            ));
+                        }
+                    }
+                    Some(Arc::new(rig))
+                }
+                Err(why) => {
+                    self.report(format!("The FaceControls `{}`: {why}.", name()));
+                    None
+                }
+            };
+            running.face = Some(FaceRun {
+                model_key: model.key(),
+                wanted,
+                profiles,
+                rig,
+            });
+        }
+        let rig = running.face.as_ref()?.rig.clone()?;
+        let motion = running
+            .face_motion
+            .get_or_insert_with(|| FaceMotion::new(face.to_bits()));
+        let mut problems = Vec::new();
+        let lookers = Lookers {
+            viewer: self.viewer,
+            heads: &mut self.heads,
+        };
+        let layers = face_layers(
+            world,
+            assets,
+            face,
+            owner,
+            model,
+            motion,
+            lookers,
+            dt,
+            &mut problems,
+        );
+        for problem in problems {
+            self.report(problem);
+        }
+        Some(FaceFrame {
+            rig,
+            layers: layers?,
+        })
+    }
+
     fn report(&mut self, message: String) {
         if self.reported.insert(message.clone()) {
             self.errors.push(message);
@@ -1430,8 +1637,8 @@ fn place_follower(world: &mut World, leader: InstanceId, rig: &Rig, part: Instan
     }
 }
 
-/// The model of `owner` if it's a MeshPart whose model has a skeleton.
-fn skeleton_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<Arc<Model>> {
+/// The model of `owner` if it's a MeshPart whose model is loaded.
+pub(crate) fn mesh_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<Arc<Model>> {
     let part = world.get(owner)?;
     if part.class() != ClassName::MeshPart {
         return None;
@@ -1441,7 +1648,7 @@ fn skeleton_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<A
     let Slot::Ready(model) = assets.model_slot(mesh_id) else {
         return None;
     };
-    model.rig.is_some().then_some(model)
+    Some(model)
 }
 
 /// The phase of a clip `duration` seconds long at `time` seconds: a loop

@@ -413,6 +413,18 @@ impl EditorApp {
                 );
             }
         }
+        if what == Insertable::FaceControls {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let in_mesh_part = self
+                .world
+                .get(parent)
+                .is_some_and(|instance| instance.class() == ClassName::MeshPart);
+            if !in_mesh_part {
+                self.output.warning(
+                    "FaceControls move the face of the MeshPart they're inside (its blend shapes, eyes and jaw): select an imported character first.",
+                );
+            }
+        }
         if what == Insertable::Fracture {
             let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
             let in_part = self.world.get(parent).is_some_and(|instance| {
