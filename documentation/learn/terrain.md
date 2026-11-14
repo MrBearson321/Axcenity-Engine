@@ -41,7 +41,7 @@ The **Foliage** tool scatters the selected item from the Assets panel (a built-i
 
 ## Scatter rules
 
-Instead of painting by hand, a **scatter rule** (a ScatterRule object inside the terrain) covers the whole terrain for you. In the Terrain Studio, open **Scatter Rules** and pick **Add rule**: the **Forest set** adds trees, undergrowth and grass tufts at once, or add one preset. Select a rule to set how far apart things stand, how many, the heights and slopes they grow on, the material layer they need, how much they gather into patches, and how far they keep from what rules above them placed. With a rule selected, click plants, props or models in the Assets panel to add or remove them. The layout follows the ground as you sculpt and paint, and the same seed gives the same layout every time. It isn't saved: it's made again when the world opens. **Bake** turns what the rules placed into painted foliage, so you can brush and erase it by hand.
+Instead of painting by hand, a **scatter rule** (a ScatterRule object inside the terrain) covers the whole terrain for you. In the Terrain Studio, open **Scatter Rules** and pick **Add rule**: the **Forest set** adds trees, undergrowth and grass tufts at once, or add one preset. Select a rule to set how far apart things stand, how many, the heights and slopes they grow on, the material layer they need, how much they gather into patches, and how far they keep from what rules above them placed. With a rule selected, click plants, props or models in the Assets panel to add or remove them. The layout follows the ground as you sculpt and paint, and the same seed gives the same layout every time. Rules keep off anchored parts standing on the ground (a house, a fence, a rock you placed) unless you turn **Avoid Parts** off, and **Align To Slope** and **Sink Depth** lean what they place with the hillside and sink it into the ground. It isn't saved: it's made again when the world opens. **Bake** turns what the rules placed into painted foliage, so you can brush and erase it by hand.
 
 ## Biomes
 
@@ -56,6 +56,7 @@ A **world preset** sets up a whole landscape at once: its shape, materials, biom
 - A **SplineMesh** lays a road or fence along a spline, and **Flatten Terrain Along** levels the ground under it. See the **hello-roads** sample.
 - A **Terrain Path** (Insert ▸ Terrain Path, into the selected spline) makes the spline a road on the terrain. Scatter rules keep off it straight away, wherever you drag its points. In its Properties, set its **Width**, the **Layer** to paint it with and how far it blends in (**Falloff**), then click **Apply to Terrain** to flatten and paint the ground under it. **Route** lays the spline's points over the terrain from its first point to its last without climbing steeper than **Max Grade**, so the road winds round or up a hill. Both are one undo step each.
 - **Solid Modeling ▸ To Terrain** turns a selected part into ground: the terrain under it is raised to its top and painted.
+- **Solid Modeling ▸ Conform to Terrain** sets the selected parts or models down on the ground (or up out of it), and **Blend into Terrain** levels the ground under them to their bottom and paints it with the Terrain Studio's Paint layer, fading into the slope around. Each is one undo step.
 
 ## How it's saved
 

@@ -160,6 +160,8 @@ fn decode_foliage(bytes: &[u8]) -> Result<Vec<FoliageInstance>, String> {
             yaw: record.yaw,
             scale: record.scale.max(0.01),
             collide: record.collide,
+            lean: 0.0,
+            sink: 0.0,
         });
     }
     Ok(instances)
@@ -350,6 +352,8 @@ mod tests {
             yaw: 0.4,
             scale: 1.1,
             collide: true,
+            lean: 0.0,
+            sink: 0.0,
         });
         data
     }
@@ -408,6 +412,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: true,
+            lean: 0.0,
+            sink: 0.0,
         });
         let files: HashMap<&str, Vec<u8>> = encode(&data).into_iter().collect();
         let loaded = decode(|name| files.get(name).cloned()).unwrap();

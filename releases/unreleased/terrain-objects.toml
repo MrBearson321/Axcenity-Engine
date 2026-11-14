@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Scatter rules keep off buildings, lean with slopes, and models can be set into the terrain"
+details = "Scatter rules no longer place plants inside anchored parts standing on the ground (Avoid Parts, with a Part Margin), and moving a house remakes only the ground near it. Align To Slope leans what a rule places with the hillside and Sink Depth sinks it into the ground, for rocks, grass and tree trunks on slopes. Solid Modeling has Conform to Terrain, which sets the selected parts or models on the ground, and Blend into Terrain, which levels and paints the ground under them, fading into the slope around."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

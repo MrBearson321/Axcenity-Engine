@@ -732,7 +732,12 @@ pub fn foliage_forms(data: &TerrainData, size: Vec3, assets: &Assets) -> Vec<(Po
         let Some(ground) = foliage_ground(data, size, instance.x, instance.z) else {
             continue;
         };
-        let yaw = Quat::from_rotation_y(instance.yaw);
+        let ground = ground - Vec3::new(0.0, instance.sink, 0.0);
+        let (size_x, size_z) = data.size();
+        let cell = (size.x / (size_x - 1) as f32, size.z / (size_z - 1) as f32);
+        let up = to_vec3(instance.up(data, cell, size.y));
+        // Turned round its up, then leaned with the ground.
+        let yaw = Quat::from_rotation_arc(Vec3::Y, up) * Quat::from_rotation_y(instance.yaw);
         let scale = instance.scale.max(0.01);
         let (form, form_size, center) = match &instance.source {
             FoliageSource::Model(path) => {
