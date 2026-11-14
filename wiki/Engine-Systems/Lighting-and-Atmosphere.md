@@ -82,7 +82,8 @@ flowchart LR
 - Lights are tiled in 2D, not clustered; depth-heavy scenes may need clusters (`docs/rendering/lights.md`).
 - Rect lights light from a representative point, not a true area integral.
 - Bakes go stale when the world changes; the editor flags them but doesn't rebake automatically.
-- Real-time GI draws six faces of the whole scene per probe. With hardware ray tracing (planned RT2, `docs/research/hardware-ray-tracing.md`) rays would update the same light probe volumes instead.
+- Real-time GI draws six faces of the whole scene per probe. With hardware ray tracing, RT2 updates the same probes by rays instead, with camera cascades; GPUs without ray tracing get no dynamic GI in open worlds yet (RL3, software-traced probes, in `docs/research/runtime-lighting-parity.md`).
+- Played games: every ray traced effect runs in the player, but until RL2 a game can't turn hardware ray tracing on (only the player's own `graphics.json` can), and posed characters are left out of the ray traced scene until RL1, so with ray traced shadows on they cast none within the ray tracing distance. The Path Traced view is an editor reference mode, not a runtime feature.
 - Probes inside solid parts and the ground are left out since R18.2, but a wall thinner than the gap between probes can still leak (probe visibility is a later stage), Since R18.3 a sky that dims or changes color relights volumes baked since, but a sun that moves (its direct light's bounce) still needs real-time or ray traced GI, and bakes from before keep the sky as baked. R18.4 added Fill with Probes and real-time GI tiers; `bench_light_probes` measures bake, volume and tier costs (PC numbers pending). What's left of R18 (`docs/research/global-illumination.md`) is probe visibility, only if leaks remain, and RT2.
 
 ## Related documentation
