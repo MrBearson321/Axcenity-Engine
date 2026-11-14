@@ -537,6 +537,7 @@ fn command_description(command: &Command) -> String {
         Command::TerrainStudio => "Sculpt, paint, scatter foliage on and generate terrain.",
         Command::ModelStudio => "Make and edit models: meshes, UVs, painting, sculpting and rigs.",
         Command::PluginButton { .. } => "A button a plugin added.",
+        Command::PluginAction { .. } => "A command a plugin added.",
         Command::Palette => "Run any menu or ribbon command by typing part of its name.",
         Command::QuickOpen | Command::Search => {
             "Find anything: commands, tools, objects, assets, scripts, levels and settings."

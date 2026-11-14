@@ -83,6 +83,6 @@ Lua plugins run sandboxed, survive bad code (errors are caught and listed), relo
 | P7.1 | OBJ import: `ModelFormat::Obj` through `ufbx` (with the `.mtl` and its textures from the model's folder), in Import…, drag and drop, the Assets panel and the player | PR #351 |
 | P7.2 | USD import: the `convert` crate (`openusd` + `openusd-schemas`), `.usd`/`.usda`/`.usdc`/`.usdz` converted to `.glb` before the Import dialog opens, `"converted_from"` in the sidecar | PR #362 |
 | P7.3 | Mesh import presets: `model_presets` in `import-presets.json`, the Preset dropdown and Save as preset… in the Import dialog, Scale, Up axis, Anchored and Collision fidelity | PR #374 |
-| P7.4 | Plugin API 3: actions with shortcuts in Ctrl+K, Explorer menu items, `ModelImported`, `Unloading`, `OpenScript`, `Notify` | Planned |
+| P7.4 | Plugin API 3: actions with shortcuts in Ctrl+K, Explorer menu items, `ModelImported`, `Unloading`, `OpenScript`, `Notify` | PR #383 |
 | P7.5 | Alembic | Deferred (see above) |
 | P7.6 | USD skeletons and animation (UsdSkel to a rig and takes) | Later, after P7.2 is used |

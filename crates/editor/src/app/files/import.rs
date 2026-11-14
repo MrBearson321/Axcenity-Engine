@@ -496,6 +496,7 @@ impl EditorApp {
                 self.add_surfaces(id, &model, dialog, &folder, &mut copied);
                 self.add_animator(id, &model, animation.as_ref());
                 self.apply_model_settings(&[id], position, &dialog.settings);
+                self.plugins_model_imported(&[id], &copy_path);
                 self.place_imported(parent, vec![id], format!("Import {file_name}"), &before);
             }
             Placement::Separate => {
@@ -514,6 +515,7 @@ impl EditorApp {
                     })
                     .collect();
                 self.apply_model_settings(&ids, position, &dialog.settings);
+                self.plugins_model_imported(&ids, &copy_path);
                 self.place_imported(parent, ids, format!("Import {file_name}"), &before);
             }
             Placement::Grouped => {
@@ -561,6 +563,7 @@ impl EditorApp {
                 if dialog.weld {
                     crate::constraints::weld_model(&mut self.world, root);
                 }
+                self.plugins_model_imported(&[root], &copy_path);
                 self.place_imported(parent, vec![root], format!("Import {file_name}"), &before);
             }
         }
