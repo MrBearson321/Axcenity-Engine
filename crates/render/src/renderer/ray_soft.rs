@@ -234,7 +234,7 @@ impl SoftScene {
                 self.placed.insert(*key, base);
                 words.extend(bvh.words.iter().enumerate().map(|(index, word)| {
                     // A node's first child or thing moves along with it.
-                    if index < bvh.nodes * 2 && index % 2 == 0 {
+                    if index < bvh.nodes * 2 && index.is_multiple_of(2) {
                         let first = word[3].to_bits() + base;
                         [word[0], word[1], word[2], f32::from_bits(first)]
                     } else {
@@ -336,7 +336,7 @@ impl SoftScene {
         for (key, base) in placed {
             let bvh = &self.meshes[key];
             words.extend(bvh.words.iter().enumerate().map(|(index, word)| {
-                if index < bvh.nodes * 2 && index % 2 == 0 {
+                if index < bvh.nodes * 2 && index.is_multiple_of(2) {
                     [
                         word[0],
                         word[1],
@@ -633,10 +633,10 @@ mod tests {
             let count = bvh.words[node * 2 + 1][3].to_bits();
             let first = bvh.words[node * 2][3].to_bits() as usize;
             if count > 0 {
-                assert!(first >= bvh.nodes * 2 && (first - bvh.nodes * 2) % 3 == 0);
+                assert!(first >= bvh.nodes * 2 && (first - bvh.nodes * 2).is_multiple_of(3));
                 triangles += count;
             } else {
-                assert!(first % 2 == 0 && first < bvh.nodes * 2);
+                assert!(first.is_multiple_of(2) && first < bvh.nodes * 2);
             }
         }
         assert_eq!(triangles, 12);
