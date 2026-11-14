@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [assets, convert, editor]
-source: [crates/assets/src/import.rs, crates/assets/src/model.rs, crates/assets/src/model/fbx.rs, crates/assets/src/model/maps.rs, crates/assets/src/model/lod.rs, crates/assets/src/model/rig.rs, crates/assets/src/model/objects.rs, crates/assets/src/texture_set.rs, crates/assets/src/texture_pack.rs, crates/editor/src/app/files/import.rs, crates/editor/src/app/files/convert.rs, crates/convert/src/usd.rs]
+source: [crates/assets/src/import.rs, crates/assets/src/model.rs, crates/assets/src/model/fbx.rs, crates/assets/src/model/maps.rs, crates/assets/src/model/lod.rs, crates/assets/src/model/rig.rs, crates/assets/src/model/objects.rs, crates/assets/src/texture_set.rs, crates/assets/src/texture_pack.rs, crates/editor/src/app/files/import.rs, crates/editor/src/app/files/convert.rs, crates/editor/src/app/files/model_presets.rs, crates/assets/src/model_presets.rs, crates/convert/src/usd.rs]
 docs: [docs/editor/import.md, docs/rendering/models.md, docs/project/assets.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -14,7 +14,7 @@ tags: [asset-pipeline, import]
 # Importers
 
 > [!summary]
-> Models are read at load time by `assets`: **glTF 2.0** with the `gltf` crate **FBX** (binary or ASCII, any version) and **OBJ** (with its `.mtl`, P7.1) with `ufbx`, converted to glTF's space (Y up, right-handed, meters). Every model is **fitted into the 1×1×1 cube** so `Size` stretches it like a built-in part. Materials become metallic-roughness with their maps; texture **roles are also read from file names** (`_BaseColor`, `_N`, `ORM`, …) including channel-packed layouts. LODs come from the file's `_LOD1`/`_LOD2` objects or are simplified with **meshoptimizer**. Rigs, skins and takes (FBX animation stacks and glTF animations) are read for animation. USD files are **converted to `.glb`** by the editor-only `convert` crate before the Import dialog opens (P7.2, [ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md)). The editor's one **Import…** copies files into the project. **Implemented.**
+> Models are read at load time by `assets`: **glTF 2.0** with the `gltf` crate **FBX** (binary or ASCII, any version) and **OBJ** (with its `.mtl`, P7.1) with `ufbx`, converted to glTF's space (Y up, right-handed, meters). Every model is **fitted into the 1×1×1 cube** so `Size` stretches it like a built-in part. Materials become metallic-roughness with their maps; texture **roles are also read from file names** (`_BaseColor`, `_N`, `ORM`, …) including channel-packed layouts. LODs come from the file's `_LOD1`/`_LOD2` objects or are simplified with **meshoptimizer**. Rigs, skins and takes (FBX animation stacks and glTF animations) are read for animation. **Model presets** (P7.3) set how a model comes in (Bring in as, weld, Animator, scale, up axis, Anchored, collision); built-in Default, Static prop, Building kit and Character, plus a project's own in `import-presets.json`. USD files are **converted to `.glb`** by the editor-only `convert` crate before the Import dialog opens (P7.2, [ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md)). The editor's one **Import…** copies files into the project. **Implemented.**
 
 ## What the editor's import does
 

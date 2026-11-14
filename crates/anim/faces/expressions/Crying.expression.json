@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "intensity": 1.0,
+  "transition": 0.4,
+  "controls": {
+    "Brow_Inward_Left": 1.0,
+    "Brow_Inward_Right": 1.0,
+    "Cheek_Raise_Left": 0.4,
+    "Cheek_Raise_Right": 0.4,
+    "Eye_Closed_Left": 0.3,
+    "Eye_Closed_Right": 0.3,
+    "Eye_Squint_Left": 0.6,
+    "Eye_Squint_Right": 0.6,
+    "Jaw_Open": 0.25,
+    "Lower_Lip_Lower": 0.4,
+    "Mouth_Frown_Left": 0.8,
+    "Mouth_Frown_Right": 0.8,
+    "Mouth_Wide": 0.4,
+    "Nose_Sneer_Left": 0.2,
+    "Nose_Sneer_Right": 0.2
+  }
+}

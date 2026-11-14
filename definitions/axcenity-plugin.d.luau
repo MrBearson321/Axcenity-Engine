@@ -162,6 +162,44 @@ type AssetActionInfo = {
 	Tooltip: string?,
 }
 
+--- A command a plugin made (API 3).
+declare extern type PluginAction with
+	--- Fires when it's run: picked in Ctrl+K, or its shortcut pressed while editing. What the plugin changes is an undo step.
+	Triggered: PluginSignal
+	--- Takes the command away.
+	function Remove(self): ()
+end
+
+--- An item a plugin added to the Explorer's right-click menu (API 3).
+declare extern type PluginExplorerAction with
+	--- Fires with the selected Instances (the row right-clicked is one of them) when it's picked. What the plugin changes is an undo step.
+	Activated: PluginSignal
+	--- Takes the item out of the menu.
+	function Remove(self): ()
+end
+
+--- A command.
+type ActionInfo = {
+	--- Names it: CreateAction with the same Id again changes this one.
+	Id: string,
+	--- What Ctrl+K lists it as (left out: its Id).
+	Text: string?,
+	--- A keyboard shortcut while editing, such as "Ctrl+Shift+A" or "F9": Ctrl (Cmd on macOS), Shift and Alt with a letter, a digit or F1 to F12. Letters and digits need Ctrl or Alt. A shortcut the editor already uses stays the editor's.
+	Shortcut: string?,
+	--- Shown under it in Ctrl+K.
+	Tooltip: string?,
+}
+
+--- An Explorer menu item.
+type ExplorerActionInfo = {
+	--- The item's text.
+	Label: string,
+	--- It shows on rows of this class, or a class that is one (IsA), such as "Model" or "BasePart" (left out: every row).
+	Class: string?,
+	--- Shown when the mouse is over it.
+	Tooltip: string?,
+}
+
 --- What a dock widget starts with.
 type DockWidgetInfo = {
 	--- The tab's title (left out: the widget's id).
@@ -172,10 +210,14 @@ type DockWidgetInfo = {
 declare extern type Plugin with
 	--- Fires when the plugin loses the Scene View's left button.
 	Deactivation: PluginSignal
-	--- The plugin API's version: 1 for toolbars, dock widgets, selection, undo, settings, files and the mouse; 2 adds drawing, handles, Properties rows, importers and Assets panel items. Check it to work in older editors.
+	--- The plugin API's version: 1 for toolbars, dock widgets, selection, undo, settings, files and the mouse; 2 adds drawing, handles, Properties rows, importers and Assets panel items; 3 adds commands, Explorer items, ModelImported, Unloading, OpenScript and Notify. Check it to work in older editors.
 	ApiVersion: number
 	--- Fires with the new file's path in the project after the editor imports a file itself (a model, image, sound, sky or prefab).
 	AssetImported: PluginSignal
+	--- API 3. Fires with what an imported model made (its Model, or each MeshPart) and the model file's path in the project, before it's put in the world: name parts, add attributes and tags, set collision groups. Changes to it are part of the import's undo step.
+	ModelImported: PluginSignal
+	--- API 3. Fires before the plugin is stopped or loaded again (its files saved, turned off, the project closed): keep what it needs with SetSetting.
+	Unloading: PluginSignal
 	--- A ribbon group named `name` (the same one when asked again).
 	function CreateToolbar(self, name: string): PluginToolbar
 	--- A dock tab: a ScreenGui outside the game for the plugin's UI (Frame, TextButton, Slider and the rest), laid out and styled by the plugin's `.css` files. Its `Enabled` shows or hides the tab; closing the tab turns it off.
@@ -214,6 +256,14 @@ declare extern type Plugin with
 	function AddImporter(self, info: ImporterInfo): PluginImporter
 	--- Adds an item to the Assets panel's right-click menu for the project's assets.
 	function AddAssetAction(self, info: AssetActionInfo): PluginAssetAction
+	--- API 3. A command, listed in Ctrl+K under the plugin's name, with an optional shortcut. At most 32 commands and Explorer items together.
+	function CreateAction(self, info: ActionInfo): PluginAction
+	--- API 3. Adds an item to the Explorer's right-click menu.
+	function AddExplorerAction(self, info: ExplorerActionInfo): PluginExplorerAction
+	--- API 3. Opens a script's code in a tab, with the cursor on `line` if given.
+	function OpenScript(self, script: Instance, line: number?): ()
+	--- API 3. Shows `text` in a short notice at the bottom of the editor (up to 200 characters).
+	function Notify(self, text: string): ()
 	--- A handle at `position` the user can drag in the Scene View while editing; the Move snap applies. At most 256 at once.
 	function CreateHandle(self, position: Vector3, options: HandleOptions?): PluginHandle
 end

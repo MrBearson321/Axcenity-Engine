@@ -59,8 +59,8 @@ impl Kind {
 
 /// Somewhere in the world, and how it's turned.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Frame {
-    position: Vec3,
+pub(crate) struct Frame {
+    pub position: Vec3,
     rotation: Quat,
 }
 
@@ -240,7 +240,7 @@ fn pole_of(world: &World, control: InstanceId) -> Option<Vec3> {
 }
 
 /// Where a Part or Attachment is in the world.
-fn frame_of(world: &World, id: InstanceId) -> Option<Frame> {
+pub(crate) fn frame_of(world: &World, id: InstanceId) -> Option<Frame> {
     let instance = world.get(id)?;
     if instance.class() == ClassName::Attachment {
         let part = frame_of(world, instance.parent()?)?;
