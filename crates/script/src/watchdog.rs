@@ -118,7 +118,18 @@ pub fn install(lua: &Lua) -> mlua::Result<()> {
         finishing: None,
         ever_stopped,
     });
+    let sampling = crate::profile::install(lua, false);
     lua.set_interrupt(move |lua| {
+        // The script profiler, while recording (see `profile`).
+        if sampling.on.get() {
+            let count = sampling.count.get() + 1;
+            if count >= crate::profile::SAMPLE_EVERY {
+                sampling.count.set(0);
+                crate::profile::sample(lua);
+            } else {
+                sampling.count.set(count);
+            }
+        }
         if quick.counting_only.get() {
             let interrupts = quick.interrupts.get() + 1;
             if interrupts < CHECK_EVERY {

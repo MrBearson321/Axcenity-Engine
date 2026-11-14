@@ -37,6 +37,7 @@ use crate::viewport::{TerrainBrush, TerrainPointer};
 mod disk;
 mod jobs;
 mod layers;
+mod scatter;
 mod strokes;
 
 pub(super) use disk::terrain_revisions;
@@ -280,6 +281,16 @@ impl EditorApp {
                     None,
                 );
             }
+            TerrainAction::AddScatterRules(presets, label) => {
+                if let Some(terrain) = target {
+                    self.add_scatter_rules(terrain, &presets, label);
+                }
+            }
+            TerrainAction::BakeScatter => {
+                if let Some(terrain) = target {
+                    self.bake_scatter(terrain);
+                }
+            }
             TerrainAction::Resample(samples) => self.resample_terrain(samples),
             TerrainAction::ImportHeightmap => self.import_heightmap(),
             TerrainAction::ExportHeightmap => self.export_heightmap(),
@@ -378,5 +389,7 @@ impl EditorApp {
     }
 }
 
+#[cfg(test)]
+mod scatter_tests;
 #[cfg(test)]
 mod tests;

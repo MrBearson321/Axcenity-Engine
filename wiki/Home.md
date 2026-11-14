@@ -90,8 +90,8 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 |---|---|---|
 | 2026-11-14 | Lighting and atmosphere | Ray traced reflections: glossy surfaces mirror what's around them, even off screen |
 | 2026-11-14 | Lighting and atmosphere | Dynamic GI on graphics cards without ray tracing: the same probes, traced in software |
+| 2026-11-14 | ADR-0028, roadmap | Facial animation (F0–F7): GPU blend shapes, FaceControls, face profiles, lip sync, Character Studio |
 | 2026-11-14 | ADR-0027, roadmap | Import formats and plugins (P7): USD converted on import, OBJ, mesh import presets, plugin API 3 |
 | 2026-11-14 | Lighting and atmosphere, roadmap | What played games get of ray tracing, and the plan to close the gaps (RL1–RL5) |
-| 2026-11-13 | Rendering, lighting and atmosphere | Sun shafts in rooms: dust in a GraphicsVolume, volumetric fog that stays dark indoors, leaf-shaped ray traced shadows |
 
 Keep the five newest rows here; the full list is [Documentation history](Changelog/Documentation-History.md).

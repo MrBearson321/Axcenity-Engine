@@ -32,6 +32,7 @@
 mod animators;
 mod blend_space;
 mod bones;
+mod cleanup;
 mod clip;
 mod controller;
 mod easing;
@@ -53,6 +54,9 @@ pub use blend_space::{blend_space_weights, triangulate};
 pub use bones::{
     bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, convert_to_keys_with, find_bone,
     pose_bones, take_bones,
+};
+pub use cleanup::{
+    Mirrored, Tolerance, fix_loop_seam, mirror, partners, reduce_keys, retime, smooth,
 };
 pub use clip::{Clip, RootMotion};
 pub use controller::{
