@@ -51,4 +51,7 @@ A server on the network issues its own connect tokens: a player opens TLS to the
 ## Implementation references
 
 - Plan: `docs/research/multiplayer-readiness.md` phases MP4 (secure connections) and MP5 (NAT and relay)
-- `crates/net/src/transport.rs` (secure mode, once MP4 lands)
+- `crates/net/src/secure.rs` (MP4: `ServerCert`, the token port, `fetch_token`, `Trust`, join links, `known-servers.json`) and `secure_tests.rs`
+- `crates/net/src/transport.rs` (`Server::listen_secure`, `Client::join`: a token first, then encrypted netcode; unsecured only for a LAN game)
+- `crates/net/src/game.rs` (`Network::set_secure`, `set_data_folder`, `fingerprint`); `axcenity-player --host --lan`, `axcenity-server --insecure` and `--data`
+- One refinement in building it: tokens list `0.0.0.0:<port>` beside the address the player asked for, since a server behind a router doesn't know its public address; the per-run token key ties a token to one server

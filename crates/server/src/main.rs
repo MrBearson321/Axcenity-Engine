@@ -43,8 +43,11 @@ use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 mod stats;
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
-                     example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
+                     example: cargo run -p axcenity-server -- examples/hello-part --port 47800\n\
+                     The server is secured: players get a connect token from TCP on the same port, \
+                     and every packet is encrypted. --insecure turns that off (LAN only); \
+                     --data is where its certificate is kept (the engine's data folder unless given).";
 
 /// Each frame is this long.
 const FRAME: Duration = Duration::from_micros(16_667);
@@ -68,6 +71,10 @@ struct Arguments {
     stats: Option<f64>,
     /// `--stats-file <path>`: where to write them as JSON lines too.
     stats_file: Option<PathBuf>,
+    /// `--insecure`: no connect tokens or encryption (MP4), for a LAN.
+    insecure: bool,
+    /// `--data <folder>`: where the server's certificate is kept.
+    data: Option<PathBuf>,
 }
 
 impl Arguments {
@@ -152,6 +159,15 @@ impl Arguments {
                         bail!("--stats-file takes a path\n\n{USAGE}");
                     };
                     parsed.stats_file = Some(PathBuf::from(path));
+                }
+                "--insecure" => parsed.insecure = true,
+                "--data" => {
+                    let Some(folder) = arguments.next() else {
+                        bail!(
+                            "--data takes the folder the server keeps its certificate in\n\n{USAGE}"
+                        );
+                    };
+                    parsed.data = Some(PathBuf::from(folder));
                 }
                 "--help" | "-h" => bail!("{USAGE}"),
                 _ if text.starts_with("--") => bail!("unknown option `{text}`\n\n{USAGE}"),
@@ -268,6 +284,10 @@ fn main() -> Result<()> {
     if let Some(flags) = arguments.kick_flags {
         network.set_kick_flags(flags);
     }
+    // Secured unless `--insecure` (MP4); the certificate stays in the
+    // engine's data folder (or `--data`), never in the game.
+    network.set_secure(!arguments.insecure);
+    network.set_data_folder(arguments.data.clone().or_else(axcenity_save::saves_folder));
     // `ReplayService:StopRecording` saves beside the server's saves (Phase 81).
     network.set_replay_folder(
         axcenity_save::game_folder(&project.manifest.name).map(|data| data.join("replays")),
@@ -566,8 +586,14 @@ mod tests {
                 kick_flags: None,
                 stats: None,
                 stats_file: None,
+                insecure: false,
+                data: None,
             }
         );
+        let insecure = parse(&["castle", "--insecure", "--data", "keys"]).unwrap();
+        assert!(insecure.insecure);
+        assert_eq!(insecure.data, Some(PathBuf::from("keys")));
+        assert!(parse(&["castle", "--data"]).is_err());
     }
 
     #[test]

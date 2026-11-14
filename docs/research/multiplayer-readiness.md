@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5–MP7 not started.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -72,6 +72,24 @@ Stages: MP6a input-driven server characters with prediction and reconciliation; 
 
 Operational tests start the real `axcenity-server` and real bot processes over UDP on one machine, inject the failure (kill the server, cut a bot's packets, flood), and check the outcome: players back in after a restart, memory and Instance counts back to where they started after churn, the server still at frame rate under a flood. Short versions run with `cargo test`; long soaks are `--ignored` and run by hand. Players' devices learn to **reconnect**: when the connection is lost (not when kicked or refused), the player tries again for 60 seconds with back-off, and the server takes the same UserId back in place of a stale connection.
 
+### MP4: secure connections (cloud container, 2026-11-14)
+
+[networking.md](../architecture/networking.md#secure-connections). Every server on the network is now secured unless it's a LAN game (`--host --lan`, `axcenity-server --insecure`, which logs a warning): a player gets a connect token over TLS from the token port (TCP, same number), checked against the fingerprint in a join link or the one remembered for the address, and netcode encrypts everything after. The certificate is kept in the engine's data folder (`server-certificate.json`), never a project; the token key is new each run.
+
+| Test | Result |
+|---|---|
+| Join over UDP with the join link's fingerprint | In, encrypted (`Client::is_secured`); one token issued |
+| A link with another fingerprint, or a remembered address whose certificate changed | Refused before the password is sent: "isn't the one you expected", with both short fingerprints |
+| Wrong password, wrong version | Refused at the token port with the handshake's wording; no token |
+| A connection without a token, and `--flood tokenless` (20 connections) beside 2 bots | Never answered; holds no slot; both bots join |
+| A typed address with no token port (a LAN host) | Joined unsecured; with a fingerprint expected it fails with why instead |
+| Hosting twice from one data folder | Same fingerprint |
+| Every earlier UDP test (handshake, LAN search, rejoin after a crash, churn, floods, cheats) | Pass, now through tokens |
+
+Choices made while building it: a player falls back to unsecured only when nothing answers on the token port and it has no fingerprint for the server, so a secured server can't silently be swapped for an unsecured one; the per-address limit (30 tokens a minute) doesn't apply to this computer's own addresses, so bots and the scale run can join 32 players from one machine. Breaking: an engine from before MP4 can't join a secured server.
+
+Left: the PC–Mac join over Tailscale (a firewall must let TCP through as well as UDP on the game port); a join link in the player's UI and a "copy join link" for hosts (today the log prints it); NAT traversal is MP5.
+
 ## 4. What stays Paul's call
 
 - Running a public `axcenity-relay` or any hosted service (the policy's rule 1; costs money).
@@ -134,7 +152,7 @@ Debug builds, the server and bots as separate processes over UDP on one 4-vCPU c
 
 The plan said the server replaces a stale connection "with the same UserId". A UserId is whatever the device says, so anyone could knock another player out with it; the server instead gives each player a random rejoin key in `Welcome`, and only a Hello with that key replaces the old connection.
 
-**Left for later phases:** a spamming connection is only dropped once MP3's per-connection budgets exist (the test notes the loss rather than failing on it); silent connections can hold every spare slot for 10 s until MP4's connect tokens keep strangers out.
+**Left for later phases:** a spamming connection is only dropped once MP3's per-connection budgets exist (the test notes the loss rather than failing on it); silent connections can hold every spare slot for 10 s until MP4's connect tokens keep strangers out (done: see MP4).
 
 ### MP3a: budgets, flags and kicks (cloud container, 2026-11-14)
 

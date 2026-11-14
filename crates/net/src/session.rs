@@ -161,6 +161,10 @@ impl Host {
         self.server.port()
     }
 
+    pub fn server(&self) -> &Server {
+        &self.server
+    }
+
     pub fn server_mut(&mut self) -> &mut Server {
         &mut self.server
     }
@@ -525,6 +529,11 @@ impl Join {
     /// The key to rejoin with, once the host took this player in; 0 before.
     pub fn rejoin_key(&self) -> u64 {
         self.rejoin_key
+    }
+
+    /// Whether the connection is encrypted with a connect token (MP4).
+    pub fn is_secured(&self) -> bool {
+        self.client.is_secured()
     }
 
     /// This player, once the host took them in.

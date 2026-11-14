@@ -2,6 +2,11 @@
 //! keeps serving its players through them (multiplayer readiness MP2).
 //! None of them loads the game; each is a bare connection over UDP.
 //!
+//! Each gets a connect token first, as a modified client would, so the
+//! server's own checks are what stop it (MP4), except:
+//!
+//! - `tokenless`: connects without a token, as anyone on the internet
+//!   can try. A secured server never answers it, so it holds no slot.
 //! - `silent`: connects and never says who it is. The server drops it
 //!   after the handshake's time (`HANDSHAKE_TIMEOUT`), freeing the slot.
 //! - `junk`: connects and sends bytes that aren't a join request. The
@@ -17,14 +22,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use axcenity_net::{
-    Channel, Client, GameInfo, Message, PROTOCOL_VERSION, WireArg, WireKind, WireMessage,
-    class_defaults,
+    Channel, Client, GameInfo, Message, PROTOCOL_VERSION, TokenRequest, Trust, WireArg, WireKind,
+    WireMessage, class_defaults,
 };
 
 use crate::stats::BotSample;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Flood {
+    Tokenless,
     Silent,
     Junk,
     Spam,
@@ -34,11 +40,12 @@ pub enum Flood {
 impl Flood {
     pub fn parse(text: &str) -> Result<Flood> {
         Ok(match text {
+            "tokenless" => Flood::Tokenless,
             "silent" => Flood::Silent,
             "junk" => Flood::Junk,
             "spam" => Flood::Spam,
             "deep" => Flood::Deep,
-            _ => bail!("--flood takes silent, junk, spam or deep, not `{text}`"),
+            _ => bail!("--flood takes tokenless, silent, junk, spam or deep, not `{text}`"),
         })
     }
 }
@@ -76,7 +83,16 @@ impl FloodConnection {
         password: Option<String>,
         user_id: u64,
     ) -> Result<FloodConnection> {
-        let client = Client::connect(address)?;
+        let client = if kind == Flood::Tokenless {
+            Client::connect(address)?
+        } else {
+            let (game, password) = (game.clone(), password.clone());
+            Client::join(
+                address,
+                move |to| TokenRequest::new(&game, password, to),
+                Trust::Any,
+            )?
+        };
         Ok(FloodConnection {
             index,
             kind,
@@ -152,7 +168,7 @@ impl FloodConnection {
         while self.client.receive(Channel::Unreliable).is_some() {}
         if self.client.is_connected() {
             match self.kind {
-                Flood::Silent => {}
+                Flood::Tokenless | Flood::Silent => {}
                 Flood::Junk if !self.said => {
                     let junk = self.junk(64);
                     self.client.send(Channel::ReliableOrdered, junk);

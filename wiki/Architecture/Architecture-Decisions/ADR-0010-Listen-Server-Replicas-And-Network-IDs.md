@@ -29,7 +29,7 @@ Roblox-style games need a server world and client views, RemoteEvents between th
 
 ## Decision
 
-Each device has its own World; a joined device keeps a replica whose Instances have the server's IDs (`World::create_at`) and numbers its own from 2³¹. The server diffs and sends reliable updates and budgeted, quantized motion; players own their character and assigned assemblies, checked by the server. Single-player and editor Play are listen servers (chosen 2026-10-29; `dump_every_example` showed identical output for all 55 examples before and after). Wire: postcard since M7 (`Hello`/`Refused` stay JSON forever). Netcode runs unsecured; secure mode (M11) waits for internet hosting.
+Each device has its own World; a joined device keeps a replica whose Instances have the server's IDs (`World::create_at`) and numbers its own from 2³¹. The server diffs and sends reliable updates and budgeted, quantized motion; players own their character and assigned assemblies, checked by the server. Single-player and editor Play are listen servers (chosen 2026-10-29; `dump_every_example` showed identical output for all 55 examples before and after). Wire: postcard since M7 (`Hello`/`Refused` stay JSON forever). Netcode ran unsecured until multiplayer readiness MP4 secured servers on the network ([ADR-0026](ADR-0026-Secure-Game-Connections-And-Relay.md)).
 
 ## Consequences
 

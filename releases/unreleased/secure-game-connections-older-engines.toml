@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "networking"
+title = "Older Axcenity versions can't join a secured game"
+details = "Players on a version from before secure connections can't join a server hosted with this one (their connection requests carry no token and are dropped). Update every player, or host a LAN game with player --host --lan or axcenity-server --insecure. A secured server needs TCP as well as UDP open on its port."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
