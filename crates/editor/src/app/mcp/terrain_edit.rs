@@ -85,6 +85,7 @@ const PRESETS: &[&str] = &[
 
 const TOOLS: &[&str] = &[
     "raise", "lower", "smooth", "flatten", "noise", "hill", "basin", "ridge", "valley", "terrace",
+    "hole", "fill",
 ];
 
 /// The most stamps one call makes.
@@ -381,6 +382,9 @@ fn stroke(
                     }
                 }
                 "smooth" => Operation::Smooth,
+                "hole" | "fill" => Operation::Holes {
+                    fill: tool == "fill",
+                },
                 "flatten" => Operation::Flatten {
                     target: at.y,
                     mode: FlattenMode::Both,
@@ -404,9 +408,16 @@ fn stroke(
                     }
                 }
             };
-            let mut what = tool.to_owned();
-            what[..1].make_ascii_uppercase();
-            (operation, format!("{what} Terrain"))
+            let what = match tool {
+                "hole" => "Cut Terrain Holes".to_owned(),
+                "fill" => "Fill Terrain Holes".to_owned(),
+                _ => {
+                    let mut what = tool.to_owned();
+                    what[..1].make_ascii_uppercase();
+                    format!("{what} Terrain")
+                }
+            };
+            (operation, what)
         }
         "paint" if erase => (
             Operation::Erase {

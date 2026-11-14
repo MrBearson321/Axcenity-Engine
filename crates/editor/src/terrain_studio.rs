@@ -487,6 +487,7 @@ impl TerrainStudio {
                         TerrainTool::Sculpt => self.sculpt_settings(ui),
                         TerrainTool::Stamp => self.stamp_settings(ui, &mut actions),
                         TerrainTool::Noise => self.noise_settings(ui),
+                        TerrainTool::Holes => self.brush_settings(ui, None),
                         TerrainTool::Paint => self.paint_settings(ui),
                         TerrainTool::Foliage => self.foliage_settings(ui),
                         TerrainTool::Auto => {
@@ -871,6 +872,8 @@ fn foliage_icon(source: &FoliageSource) -> &'static str {
         FoliageSource::Prop(FoliageProp::Wall) => icons::WALL,
         FoliageSource::Prop(FoliageProp::Stairs) => icons::STEPS,
         FoliageSource::Prop(FoliageProp::Ramp) => icons::TRIANGLE,
+        FoliageSource::Prop(FoliageProp::Rock) => icons::POLYGON,
+        FoliageSource::Prop(FoliageProp::Cliff) => icons::MOUNTAINS,
         FoliageSource::Model(_) => icons::CUBE_TRANSPARENT,
     }
 }

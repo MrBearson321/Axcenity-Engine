@@ -483,7 +483,8 @@ impl Spots {
 }
 
 /// 0 to 1: how well `rule` likes the ground at `at` (studs from the
-/// terrain's corner): 0 off the terrain, under water it may not stand in,
+/// terrain's corner): 0 off the terrain, over a hole, under water it may
+/// not stand in,
 /// outside its height and slope windows, or off its layer; less away from
 /// its clumps.
 fn suitability(rule: &Rule, ground: &Ground, at: Vec2, clumps: &Noise) -> f32 {
@@ -494,6 +495,10 @@ fn suitability(rule: &Rule, ground: &Ground, at: Vec2, clumps: &Noise) -> f32 {
     let grid = at / cell;
     if grid.x < 0.0 || grid.y < 0.0 || grid.x > (size_x - 1) as f32 || grid.y > (size_z - 1) as f32
     {
+        return 0.0;
+    }
+    // Nothing stands over a hole (PW7).
+    if data.hole_at(grid.x, grid.y) {
         return 0.0;
     }
     let height = data.height_at(grid.x, grid.y);

@@ -134,3 +134,46 @@ fn rules_save_without_what_they_place_and_bake_keeps_it_as_paint() {
     assert_eq!((data.foliage().len(), data.generated_count()), (0, trees));
     std::fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn cliff_rocks_stand_only_on_the_steep_side_and_boulders_off_it() {
+    let (mut app, folder, terrain) = app_with_terrain("cliff");
+    // A step across the middle: flat, 16 studs climbing 32, flat again.
+    let data = app.world.terrain_mut(terrain).unwrap();
+    let (size_x, _) = data.size();
+    let all = data.bounds();
+    for (i, height) in data.heights_mut_in(all).iter_mut().enumerate() {
+        let x = (i % size_x) as f32;
+        *height = ((x - 28.0) / 8.0).clamp(0.0, 1.0);
+    }
+    app.terrain_action(TerrainAction::AddScatterRules(
+        vec![
+            crate::terrain_studio::scatter::CLIFF_ROCKS,
+            crate::terrain_studio::scatter::BOULDERS,
+        ],
+        "Add Rocks".into(),
+    ));
+    let data = app.world.terrain(terrain).unwrap();
+    let is = |prop| {
+        move |i: &&axcenity_core::FoliageInstance| {
+            i.source == axcenity_core::FoliageSource::Prop(prop)
+        }
+    };
+    let cliffs: Vec<_> = data
+        .generated_foliage()
+        .filter(is(axcenity_core::FoliageProp::Cliff))
+        .collect();
+    assert!(cliffs.len() > 10, "{} cliff rocks", cliffs.len());
+    for rock in &cliffs {
+        assert!((27.0..=37.0).contains(&rock.x), "{rock:?}");
+        assert!(rock.collide && rock.sink > 1.0 && rock.lean > 0.0);
+    }
+    // Flat ground is too gentle for boulders, and the cliff too steep.
+    assert_eq!(
+        data.generated_foliage()
+            .filter(is(axcenity_core::FoliageProp::Rock))
+            .count(),
+        0
+    );
+    std::fs::remove_dir_all(folder).unwrap();
+}

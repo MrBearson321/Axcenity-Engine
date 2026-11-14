@@ -14,6 +14,7 @@ pub enum TerrainTool {
     Sculpt,
     Stamp,
     Noise,
+    Holes,
     Paint,
     Foliage,
     Auto,
@@ -23,13 +24,14 @@ pub enum TerrainTool {
 }
 
 impl TerrainTool {
-    pub const SCULPTING: [TerrainTool; 6] = [
+    pub const SCULPTING: [TerrainTool; 7] = [
         TerrainTool::Raise,
         TerrainTool::Smooth,
         TerrainTool::Flatten,
         TerrainTool::Sculpt,
         TerrainTool::Stamp,
         TerrainTool::Noise,
+        TerrainTool::Holes,
     ];
     pub const MATERIALS: [TerrainTool; 3] =
         [TerrainTool::Paint, TerrainTool::Foliage, TerrainTool::Auto];
@@ -47,6 +49,7 @@ impl TerrainTool {
             TerrainTool::Sculpt => "Sculpt",
             TerrainTool::Stamp => "Stamp",
             TerrainTool::Noise => "Noise",
+            TerrainTool::Holes => "Holes",
             TerrainTool::Paint => "Paint",
             TerrainTool::Foliage => "Foliage",
             TerrainTool::Auto => "Auto Materials",
@@ -64,6 +67,7 @@ impl TerrainTool {
             TerrainTool::Sculpt => icons::MOUNTAINS,
             TerrainTool::Stamp => icons::STAMP,
             TerrainTool::Noise => icons::DOTS_NINE,
+            TerrainTool::Holes => icons::CIRCLE_DASHED,
             TerrainTool::Paint => icons::PAINT_BRUSH,
             TerrainTool::Foliage => icons::TREE,
             TerrainTool::Auto => icons::MAGIC_WAND,
@@ -105,6 +109,9 @@ impl TerrainTool {
             TerrainTool::Sculpt => "Drag to shape hills, ridges, valleys and cliffs.",
             TerrainTool::Stamp => "Click to stamp a shape. Shift stamps it upside down.",
             TerrainTool::Noise => "Drag to roughen the ground. Shift flips the bumps.",
+            TerrainTool::Holes => {
+                "Drag to cut holes for cave mouths and tunnels. Shift fills them back in."
+            }
             TerrainTool::Paint => {
                 "Drag to paint the chosen layer. Shift erases back to the automatic materials. Ctrl+click picks a layer."
             }

@@ -38,20 +38,29 @@ pub fn raycast_within(
     let cell = placement.cell_size(data).min_element().max(1e-4);
     let step = (cell * 0.5) / length;
     // How far above the ground a point on the ray is (negative below).
+    // Under the ground in a hole is `None`: the ray goes on through it.
     let above = |t: f32| {
         let point = origin + direction * t;
         let grid = placement.to_grid(data, point.x, point.z);
-        point.y - placement.world_y(data.height_at(grid.x, grid.y))
+        let above = point.y - placement.world_y(data.height_at(grid.x, grid.y));
+        (above > 0.0 || !data.hole_at(grid.x, grid.y)).then_some(above)
     };
     let mut t = enter.max(0.0);
-    if above(t) < 0.0 {
+    let start = above(t);
+    if start.is_some_and(|above| above < 0.0) {
         // Starts under the ground: that's the hit.
         return Some(t);
     }
+    // Only coming down onto the surface from above it is a hit: a ray
+    // that went in through a hole doesn't hit the ground's underside.
+    let mut was_above = start.is_some();
     while t < exit {
         let next = (t + step).min(exit);
         let now = above(next);
-        if now <= 0.0 {
+        let came_down = was_above && now.is_some_and(|above| above <= 0.0);
+        was_above = now.is_some_and(|above| above > 0.0);
+        if came_down {
+            let above = |t| above(t).unwrap_or(f32::INFINITY);
             // Somewhere between `t` and `next`: halve the gap a few times.
             let (mut a, mut b) = (t, next);
             for _ in 0..20 {
@@ -131,5 +140,31 @@ mod tests {
         let t = raycast(&data, &placement, from, Vec3::new(1.0, -0.2, 0.0)).unwrap();
         let hit = from + Vec3::new(1.0, -0.2, 0.0) * t;
         assert!(hit.x < 0.0 && hit.y > 0.0, "{hit}");
+    }
+
+    #[test]
+    fn a_ray_falls_through_a_hole_and_never_hits_the_ground_from_below() {
+        let mut data = TerrainData::flat(33, 33, 0.25).unwrap();
+        let placement = Placement {
+            position: Vec3::new(0.0, -10.0, 0.0),
+            size: Vec3::new(64.0, 40.0, 64.0),
+        };
+        // Cells 14 to 17 cut out round the middle: X and Z -4 to 4.
+        let rect = axcenity_core::SampleRect::new(14, 14, 18, 18);
+        let holes = data.holes_mut_in(rect);
+        for z in 14..18 {
+            for x in 14..18 {
+                holes[z * 33 + x] = true;
+            }
+        }
+        let down = Vec3::NEG_Y;
+        assert!(raycast(&data, &placement, Vec3::new(1.0, 50.0, 1.0), down).is_none());
+        assert!(raycast(&data, &placement, Vec3::new(6.0, 50.0, 1.0), down).is_some());
+        // Slanting down through the hole and on under the ground beyond
+        // it: no hit.
+        let slant = Vec3::new(1.0, -1.0, 0.0);
+        assert!(raycast(&data, &placement, Vec3::new(-3.0, 3.0, 0.0), slant).is_none());
+        // A ray from under the ground up through the hole meets nothing.
+        assert!(raycast(&data, &placement, Vec3::new(0.0, -8.0, 0.0), -down).is_none());
     }
 }

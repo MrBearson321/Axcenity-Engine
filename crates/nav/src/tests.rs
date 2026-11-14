@@ -103,6 +103,42 @@ fn a_floor_of_parts_is_walkable_and_a_gap_is_not() {
 }
 
 #[test]
+fn a_hole_is_not_walkable_and_a_cave_floor_under_holed_ground_is() {
+    let mut world = World::new();
+    let terrain = flat_terrain(&mut world, None);
+    // The ground is 8 studs up; a cave floor of parts 8 studs under it,
+    // reaching under the ground beside the hole.
+    {
+        let data = world.terrain_mut(terrain).unwrap();
+        let all = data.bounds();
+        data.heights_mut_in(all).fill(0.25);
+    }
+    part(&mut world, at(8.0, -0.5, 0.0), at(24.0, 1.0, 12.0));
+    let cave = at(16.0, 0.0, 0.0);
+    let mesh = build(&world);
+    assert!(mesh.is_walkable(at(0.0, 8.0, 0.0)));
+    assert!(!mesh.is_walkable(cave), "solid ground all the way down");
+    // Cells 14 to 17 (X and Z -4 to 4) cut out.
+    let data = world.terrain_mut(terrain).unwrap();
+    let holes = data.holes_mut_in(SampleRect::new(14, 14, 18, 18));
+    for z in 14..18 {
+        for x in 14..18 {
+            holes[z * 33 + x] = true;
+        }
+    }
+    let mesh = build(&world);
+    // Through the hole is the cave floor; beside it on top is still ground,
+    // and under the ground beside the hole is the cave.
+    assert!((ground(&mesh, at(0.0, 0.0, 0.0)).unwrap() - 0.0).abs() < 1e-3);
+    assert!(
+        !mesh.is_walkable(at(0.0, 8.0, 0.0)),
+        "nothing to stand on in the hole"
+    );
+    assert!(mesh.is_walkable(at(10.0, 8.0, 0.0)));
+    assert!(mesh.is_walkable(cave));
+}
+
+#[test]
 fn a_terrain_surface_is_walkable_and_a_steep_drop_is_not() {
     let mut world = World::new();
     let terrain = flat_terrain(&mut world, None);

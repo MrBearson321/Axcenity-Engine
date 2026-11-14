@@ -22,6 +22,13 @@
 //! inputs it was made from, so only chunks whose inputs changed are made
 //! again. [`TerrainData::all_foliage`] is both lists, for drawing and
 //! colliding.
+//!
+//! **Holes** (procedural worlds PW7) cut cells out of the surface, for cave
+//! mouths and tunnels: cell (`x`, `z`), between samples `x` and `x + 1`
+//! and `z` and `z + 1`, is a hole when sample (`x`, `z`)'s hole flag is
+//! set. It isn't drawn, collided with, walked on or hit by rays. A hole
+//! counts as a height change for the chunk versions, so everything built
+//! from the heights is rebuilt. A terrain without holes keeps no mask.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -174,10 +181,15 @@ pub enum FoliageProp {
     Table,
     Tree,
     Crate,
+    /// A boulder, for scatter rules (not in the Assets panel).
+    Rock,
+    /// A rock face for steep slopes, for scatter rules (not in the Assets
+    /// panel).
+    Cliff,
 }
 
 impl FoliageProp {
-    pub const ALL: [FoliageProp; 8] = [
+    pub const ALL: [FoliageProp; 10] = [
         FoliageProp::Floor,
         FoliageProp::Wall,
         FoliageProp::Stairs,
@@ -186,6 +198,8 @@ impl FoliageProp {
         FoliageProp::Table,
         FoliageProp::Tree,
         FoliageProp::Crate,
+        FoliageProp::Rock,
+        FoliageProp::Cliff,
     ];
 
     pub fn label(self) -> &'static str {
@@ -198,6 +212,8 @@ impl FoliageProp {
             FoliageProp::Table => "Table",
             FoliageProp::Tree => "Tree",
             FoliageProp::Crate => "Crate",
+            FoliageProp::Rock => "Rock",
+            FoliageProp::Cliff => "Cliff",
         }
     }
 
@@ -217,6 +233,8 @@ impl FoliageProp {
             FoliageProp::Table => (Vector3::new(6.0, 3.4, 4.0), Vector3::new(0.0, 1.7, 0.0)),
             FoliageProp::Tree => (Vector3::new(6.0, 10.5, 6.0), Vector3::new(0.0, 5.25, 0.0)),
             FoliageProp::Crate => (Vector3::new(3.0, 3.0, 3.0), Vector3::new(0.0, 1.5, 0.0)),
+            FoliageProp::Rock => (Vector3::new(5.0, 3.6, 4.4), Vector3::new(0.0, 1.8, 0.0)),
+            FoliageProp::Cliff => (Vector3::new(10.0, 12.0, 5.0), Vector3::new(0.0, 6.0, 0.0)),
         }
     }
 }
@@ -332,6 +350,8 @@ pub struct TerrainRegion {
     pub heights: Vec<f32>,
     pub paint: Vec<PaintWeights>,
     pub foliage: Vec<FoliageInstance>,
+    /// The hole flags, row by row; empty when there are none in it.
+    pub holes: Vec<bool>,
 }
 
 /// What a terrain's scatter rules placed in one chunk, and the key of the
@@ -352,6 +372,9 @@ pub struct TerrainData {
     heights: Vec<f32>,
     paint: Vec<PaintWeights>,
     foliage: Vec<FoliageInstance>,
+    /// One flag a sample, row by row: the cell from it to +X and +Z is cut
+    /// out. Empty while the terrain has never had a hole.
+    holes: Vec<bool>,
     /// Per chunk, row by row: bumped each time its heights or paint change.
     height_versions: Vec<u64>,
     paint_versions: Vec<u64>,
@@ -377,6 +400,7 @@ impl Clone for TerrainData {
             heights: self.heights.clone(),
             paint: self.paint.clone(),
             foliage: self.foliage.clone(),
+            holes: self.holes.clone(),
             height_versions: self.height_versions.clone(),
             paint_versions: self.paint_versions.clone(),
             generated: self.generated.clone(),
@@ -452,6 +476,7 @@ impl TerrainData {
             heights,
             paint,
             foliage: Vec::new(),
+            holes: Vec::new(),
             height_versions: vec![1; chunks],
             paint_versions: vec![1; chunks],
             generated: vec![GeneratedChunk::default(); chunks],
@@ -610,6 +635,76 @@ impl TerrainData {
         (&mut self.heights, &mut self.paint)
     }
 
+    /// The hole flags, one a sample row by row (see the module docs), or
+    /// empty if the terrain has never had a hole.
+    pub fn holes(&self) -> &[bool] {
+        &self.holes
+    }
+
+    /// Whether any cell is cut out.
+    pub fn has_holes(&self) -> bool {
+        self.holes.iter().any(|&hole| hole)
+    }
+
+    /// Whether cell (`x`, `z`) (from sample (`x`, `z`) to +X and +Z) is
+    /// cut out. Off the grid is never a hole.
+    pub fn is_hole(&self, x: usize, z: usize) -> bool {
+        x < self.size_x && z < self.size_z && self.holes.get(z * self.size_x + x) == Some(&true)
+    }
+
+    /// Whether the point (`x`, `z`), in samples, is over a hole.
+    pub fn hole_at(&self, x: f32, z: f32) -> bool {
+        if self.holes.is_empty() || !(x >= 0.0 && z >= 0.0) {
+            return false;
+        }
+        let (cx, cz) = (x.floor() as usize, z.floor() as usize);
+        // A point on the far edge belongs to the last cell.
+        let cx = cx.min(self.size_x.saturating_sub(2));
+        let cz = cz.min(self.size_z.saturating_sub(2));
+        self.is_hole(cx, cz)
+    }
+
+    /// Whether chunk (`cx`, `cz`) has a hole in it.
+    pub fn chunk_has_holes(&self, cx: usize, cz: usize) -> bool {
+        if self.holes.is_empty() {
+            return false;
+        }
+        let rect = self.chunk_rect(cx, cz);
+        (rect.z0..rect.z1).any(|z| {
+            let row = z * self.size_x;
+            self.holes[row + rect.x0..row + rect.x1]
+                .iter()
+                .any(|&hole| hole)
+        })
+    }
+
+    /// The hole flags, for changing samples inside `rect` (made if the
+    /// terrain had none). The chunks there count as changed heights.
+    pub fn holes_mut_in(&mut self, rect: SampleRect) -> &mut [bool] {
+        self.touch(rect, true, false);
+        if self.holes.is_empty() {
+            self.holes = vec![false; self.size_x * self.size_z];
+        }
+        &mut self.holes
+    }
+
+    /// Sets every hole flag at once, as loaded from a file. `holes` must
+    /// have one flag a sample, or be empty for none; anything else is
+    /// ignored and `false` returned.
+    pub fn load_holes(&mut self, holes: Vec<bool>) -> bool {
+        if !holes.is_empty() && holes.len() != self.size_x * self.size_z {
+            return false;
+        }
+        let all = self.bounds();
+        self.touch(all, true, false);
+        self.holes = if holes.iter().any(|&hole| hole) {
+            holes
+        } else {
+            Vec::new()
+        };
+        true
+    }
+
     /// Puts heights between 0 and 1 again after they were changed in `rect`.
     pub fn clamp_heights_in(&mut self, rect: SampleRect) {
         let rect = self.clip(rect);
@@ -626,10 +721,17 @@ impl TerrainData {
         let rect = self.clip(rect);
         let mut heights = Vec::with_capacity(rect.width() * rect.depth());
         let mut paint = Vec::with_capacity(rect.width() * rect.depth());
+        let mut holes = Vec::new();
         for z in rect.z0..rect.z1 {
             let row = z * self.size_x;
             heights.extend_from_slice(&self.heights[row + rect.x0..row + rect.x1]);
             paint.extend_from_slice(&self.paint[row + rect.x0..row + rect.x1]);
+            if !self.holes.is_empty() {
+                holes.extend_from_slice(&self.holes[row + rect.x0..row + rect.x1]);
+            }
+        }
+        if !holes.iter().any(|&hole| hole) {
+            holes.clear();
         }
         let foliage = self
             .foliage
@@ -642,6 +744,7 @@ impl TerrainData {
             heights,
             paint,
             foliage,
+            holes,
         }
     }
 
@@ -654,7 +757,8 @@ impl TerrainData {
         let fits = rect.x1 <= self.size_x
             && rect.z1 <= self.size_z
             && region.heights.len() == count
-            && region.paint.len() == count;
+            && region.paint.len() == count
+            && (region.holes.is_empty() || region.holes.len() == count);
         if !fits {
             return false;
         }
@@ -665,6 +769,19 @@ impl TerrainData {
             let from = row * width;
             self.heights[at..at + width].copy_from_slice(&region.heights[from..from + width]);
             self.paint[at..at + width].copy_from_slice(&region.paint[from..from + width]);
+        }
+        if !region.holes.is_empty() && self.holes.is_empty() {
+            self.holes = vec![false; self.size_x * self.size_z];
+        }
+        if !self.holes.is_empty() {
+            for (row, z) in (rect.z0..rect.z1).enumerate() {
+                let at = z * self.size_x + rect.x0;
+                let cut = &mut self.holes[at..at + width];
+                match region.holes.get(row * width..(row + 1) * width) {
+                    Some(from) => cut.copy_from_slice(from),
+                    None => cut.fill(false),
+                }
+            }
         }
         self.foliage.retain(|instance| !instance.in_rect(rect));
         self.foliage.extend(region.foliage.iter().cloned());
@@ -679,6 +796,7 @@ impl TerrainData {
         self.size_z = other.size_z;
         self.heights.clone_from(&other.heights);
         self.paint.clone_from(&other.paint);
+        self.holes.clone_from(&other.holes);
         self.foliage.clone_from(&other.foliage);
         self.generation.clone_from(&other.generation);
         let chunks = chunk_count(self.size_x) * chunk_count(self.size_z);
@@ -700,6 +818,7 @@ impl TerrainData {
         let scale_z = (self.size_z - 1) as f32 / (size_z - 1) as f32;
         let mut heights = Vec::with_capacity(size_x * size_z);
         let mut paint = Vec::with_capacity(size_x * size_z);
+        let mut holes = Vec::new();
         for z in 0..size_z {
             for x in 0..size_x {
                 let (fx, fz) = (x as f32 * scale_x, z as f32 * scale_z);
@@ -709,9 +828,14 @@ impl TerrainData {
                     (fz.round() as usize).min(self.size_z - 1),
                 );
                 paint.push(self.paint[near]);
+                if !self.holes.is_empty() {
+                    // The cell's middle, in the old grid.
+                    holes.push(self.hole_at(fx + scale_x / 2.0, fz + scale_z / 2.0));
+                }
             }
         }
         let mut data = TerrainData::from_parts(size_x, size_z, heights, paint)?;
+        data.load_holes(holes);
         data.generation.clone_from(&self.generation);
         let to_new_x = (size_x - 1) as f32 / (self.size_x - 1) as f32;
         let to_new_z = (size_z - 1) as f32 / (self.size_z - 1) as f32;
@@ -907,6 +1031,50 @@ mod tests {
         let before = versions(&data);
         data.paint_mut_in(data.bounds());
         assert_eq!(versions(&data), before);
+    }
+
+    #[test]
+    fn holes_are_cells_that_regions_undo_and_resizing_keeps() {
+        let mut data = TerrainData::flat(65, 65, 0.5).unwrap();
+        assert!(!data.has_holes() && data.holes().is_empty());
+        let before = data.read_region(SampleRect::new(30, 30, 40, 40));
+        assert!(before.holes.is_empty());
+        let version = data.chunk_height_version(1, 1);
+        let rect = SampleRect::new(33, 33, 36, 35);
+        let (size_x, _) = data.size();
+        let holes = data.holes_mut_in(rect);
+        for z in 33..35 {
+            for x in 33..36 {
+                holes[z * size_x + x] = true;
+            }
+        }
+        assert!(data.chunk_height_version(1, 1) > version);
+        assert!(data.has_holes());
+        assert!(data.is_hole(33, 33) && data.is_hole(35, 34));
+        assert!(!data.is_hole(36, 34) && !data.is_hole(33, 35));
+        // A point inside cell (33, 33) is over the hole; one in (32, 33) isn't.
+        assert!(data.hole_at(33.5, 33.9));
+        assert!(!data.hole_at(32.9, 33.5));
+        assert!(data.chunk_has_holes(1, 1) && !data.chunk_has_holes(0, 0));
+        // Undo: the region from before has none, so they go.
+        let after = data.read_region(SampleRect::new(30, 30, 40, 40));
+        assert_eq!(after.holes.iter().filter(|&&h| h).count(), 6);
+        assert!(data.write_region(&before));
+        assert!(!data.has_holes());
+        assert!(data.write_region(&after));
+        assert!(data.is_hole(34, 34));
+        // Half the samples a side: the holes land in the same place.
+        let small = data.resampled(33, 33).unwrap();
+        assert!(small.hole_at(16.8, 16.8));
+        assert!(!small.hole_at(10.0, 10.0));
+        // A copy and a replace keep them.
+        assert!(data.clone().is_hole(34, 34));
+        let mut other = TerrainData::flat(65, 65, 0.0).unwrap();
+        other.replace_with(&data);
+        assert!(other.is_hole(34, 34));
+        assert!(!other.load_holes(vec![true; 3]));
+        assert!(other.load_holes(Vec::new()));
+        assert!(!other.has_holes());
     }
 
     #[test]

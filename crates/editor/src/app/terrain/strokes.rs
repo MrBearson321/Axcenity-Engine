@@ -169,6 +169,14 @@ impl EditorApp {
                     "Roughen Terrain".to_owned(),
                 )
             }
+            TerrainTool::Holes if shift => (
+                Operation::Holes { fill: true },
+                "Fill Terrain Holes".to_owned(),
+            ),
+            TerrainTool::Holes => (
+                Operation::Holes { fill: false },
+                "Cut Terrain Holes".to_owned(),
+            ),
             TerrainTool::Paint if shift => (
                 Operation::Erase {
                     locked: studio.locked,
