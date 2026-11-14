@@ -229,6 +229,7 @@ impl EditorApp {
         let scripts = project.scripts.len();
         let show_splash = project.manifest.show_splash;
         let developer_console = project.manifest.developer_console;
+        let ray_traced_by_default = project.manifest.ray_traced_by_default;
         let loading_screen = project.manifest.loading_screen.clone();
         let branding = project.manifest.branding.clone();
         self.profiler.set_budget(project.manifest.memory_budget);
@@ -355,6 +356,7 @@ impl EditorApp {
             level,
             show_splash,
             developer_console,
+            ray_traced_by_default,
             loading_screen,
             branding,
             input_map: project.input_map,
@@ -793,6 +795,10 @@ impl EditorApp {
         self.tabs.paused = None;
         self.pause_pressed = false;
         if let Some(session) = self.play.take() {
+            // The Scripts tab keeps everything recorded up to Stop.
+            if self.profiler.scripts_recording() {
+                self.profiler.record_scripts(session.script_profile());
+            }
             self.viewport.clear_particles();
             self.viewport.clear_ui();
             self.pending_emits.clear();
@@ -1033,6 +1039,14 @@ impl EditorApp {
                 }
             }
             self.profiler.record_game(cost, session.load());
+        }
+        // The Scripts tab: recording follows its Record button.
+        session.set_script_profiling(self.profiler.scripts_recording());
+        if self.profiler.take_clear_scripts() {
+            session.clear_script_profile();
+        }
+        if self.profiler.scripts_due() {
+            self.profiler.record_scripts(session.script_profile());
         }
         let network = session
             .network_stats()

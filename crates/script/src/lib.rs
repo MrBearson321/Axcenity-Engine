@@ -89,6 +89,7 @@ mod network;
 mod ownership;
 mod physical;
 mod players;
+mod profile;
 mod prompt;
 mod query;
 mod random;
@@ -135,8 +136,8 @@ pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, Gam
 pub use chat::ChatLine;
 pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
 pub use debugger::{
-    BreakpointRule, BreakpointRules, Breakpoints, EXPANDED_ENTRIES, Local, Pause, PausedFrame,
-    Resume,
+    BreakpointRule, BreakpointRules, Breakpoints, CoroutineView, EXPANDED_ENTRIES, Local, Pause,
+    PausedFrame, Resume,
 };
 pub use definitions::{
     API_DOCS_PATH, ApiEntry, ApiKind, DEFINITIONS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_example,
@@ -150,6 +151,7 @@ pub use instance::LuaInstance;
 pub use lent::{WorldMut, WorldRef, world as lent_world, world_mut as lent_world_mut};
 pub use levels::Levels;
 pub use network::{LanGame, NetworkRequest};
+pub use profile::{FunctionCost, ScriptProfile, WorkCost, WorkKind};
 pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use replay::{MAX_BUFFER_SECONDS, ReplayRequest};
@@ -1075,6 +1077,8 @@ mod watchdog_tests;
 mod debugger_step_tests;
 #[cfg(test)]
 mod debugger_tests;
+#[cfg(test)]
+mod profile_tests;
 
 #[cfg(test)]
 mod tree_tests;

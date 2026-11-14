@@ -314,6 +314,29 @@ impl EditorApp {
         }
     }
 
+    /// Stores whether built games start with the ray traced look where the
+    /// GPU can ray trace, and says so.
+    pub(super) fn set_ray_traced_by_default(&mut self, on: bool) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        match project::set_ray_traced_by_default(&folder, on) {
+            Ok(()) => {
+                if let Some(project) = &mut self.project {
+                    project.ray_traced_by_default = on;
+                }
+                self.output.info(if on {
+                    "Built games will start with the ray traced look on GPUs that can ray trace (players can still turn it off)."
+                } else {
+                    "Built games will start without ray tracing (players can still turn it on)."
+                });
+            }
+            Err(err) => self.output.error(format!(
+                "Could not update the ray traced look setting: {err}"
+            )),
+        }
+    }
+
     /// Stores whether built games have the F9 Developer Console, and says so.
     pub(super) fn set_developer_console(&mut self, on: bool) {
         let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {

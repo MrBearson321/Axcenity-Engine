@@ -3,8 +3,8 @@ title: Terrain
 type: system
 status: current
 implementation: implemented
-crates: [terrain, core, scene, physics, project]
-source: [crates/terrain/src/lib.rs, crates/terrain/src/brush.rs, crates/terrain/src/generate.rs, crates/terrain/src/erosion.rs, crates/terrain/src/mesh.rs, crates/terrain/src/files.rs, crates/terrain/src/job.rs, crates/core/src/terrain.rs, crates/scene/src/terrain.rs, crates/scene/src/foliage.rs, crates/project/src/terrain_files.rs]
+crates: [terrain, core, scene, physics, project, procedural]
+source: [crates/terrain/src/lib.rs, crates/terrain/src/brush.rs, crates/terrain/src/generate.rs, crates/terrain/src/erosion.rs, crates/terrain/src/mesh.rs, crates/terrain/src/files.rs, crates/terrain/src/job.rs, crates/core/src/terrain.rs, crates/scene/src/terrain.rs, crates/scene/src/foliage.rs, crates/procedural/src/terrain_scatter.rs, crates/project/src/terrain_files.rs]
 docs: [docs/terrain.md, crates/terrain/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -31,13 +31,24 @@ flowchart LR
 
 Since LE4 (the 2026-11-13 lighting audit) a Terrain can flood its hollows: `scene/src/terrain_water.rs` draws the renderer's water over every chunk whose lowest ground is below `WaterLevel`. It is drawn only; physics doesn't see it.
 
+Since PW1 (procedural worlds, 2026-11-14) a Terrain can hold `ScatterRule`s that place foliage by height, slope, material layer, clumping and distance from other rules' spots. `procedural::terrain_scatter` places them per 32-sample chunk on a hash grid (one spot per `Spacing` cell from the seed and the cell's number), so chunks are made independently on every device and only those whose ground or rules changed are made again. The result lives in `TerrainData::generated_chunks` beside painted foliage; it is never saved or sent, and changing it bumps `generated_version` (which scene, physics, nav and preload keys include), not `revision`. Bake turns it into painted foliage.
+
+```mermaid
+flowchart LR
+  SR[ScatterRule children] --> TS[procedural::terrain_scatter<br/>per chunk, hash grid]
+  TD[(TerrainData heights, paint)] --> TS
+  TS --> GEN[(generated per chunk,<br/>not saved)]
+  GEN --> DRAW[scene foliage: only changed chunks rebuilt]
+  GEN --> PHN[physics, nav, preload via all_foliage]
+```
+
 ## Performance
 
-**Measured** (rendering baseline, RX 9070 XT): a 2,048-stud terrain with 20,000 plants was CPU-bound (5,135 draw calls, `ScenePipeline::draw` 12 ms) before culling and foliage cull distances; foliage cull distances by kind (grass 120 studs, flowers 150, bushes 300, trees 800) and shadow reach (35%) followed. **Measured** (owner's biome patches): two scanned oaks are about half the triangles (project memory).
+**Measured** (scatter rules, cloud container, release): a 2,048-stud forest of 348,428 plants in 1,024 chunks places in 122 ms, costs 0.06 ms a frame idle, and a sculpt stroke remakes 16 chunks in 2.4 ms (`bench_forest_on_a_2048_stud_terrain`). **Measured** (rendering baseline, RX 9070 XT): a 2,048-stud terrain with 20,000 plants was CPU-bound (5,135 draw calls, `ScenePipeline::draw` 12 ms) before culling and foliage cull distances; foliage cull distances by kind (grass 120 studs, flowers 150, bushes 300, trees 800) and shadow reach (35%) followed. **Measured** (owner's biome patches): two scanned oaks are about half the triangles (project memory).
 
 ## Testing
 
-42 tests in `terrain`; `bench_terrain_with_foliage` (player, ignored).
+42 tests in `terrain`; `bench_terrain_with_foliage` (player, ignored). Scatter rules: 8 tests in `procedural/src/terrain_scatter_tests.rs`, `bench_forest_on_a_2048_stud_terrain` (ignored), scene foliage and editor `app/terrain/scatter_tests.rs`.
 
 ## Development guidance
 

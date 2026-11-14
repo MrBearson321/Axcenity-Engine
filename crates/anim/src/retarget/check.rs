@@ -221,7 +221,9 @@ pub fn check_rig(
         }
     }
 
-    if let Some(angle) = rest_arm_angle(bones, &map) {
+    // How it rests and its fingers only matter for a humanoid.
+    let humanoid = missing.is_empty();
+    if let Some(angle) = rest_arm_angle(bones, &map).filter(|_| humanoid) {
         let pose = if angle.abs() < 15.0 {
             "a T-pose".to_owned()
         } else {
@@ -234,7 +236,7 @@ pub fn check_rig(
         ));
     }
 
-    for side in [Side::Left, Side::Right] {
+    for side in [Side::Left, Side::Right].into_iter().filter(|_| humanoid) {
         let hand = HumanBone::hand(side);
         let count = map.finger_count(side);
         let which = match side {

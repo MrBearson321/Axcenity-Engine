@@ -1,0 +1,64 @@
+# Facial animation (Axcenity Humanoid facial specification)
+
+Paul's 2026-11-14 brief "Axcenity Humanoid — Facial Animation Specification": expressive faces without developers building their own system. Blend shapes first, facial bones where they fit better, expressions, layered facial animation, procedural blinking and eye tracking, offline lip sync, import mapping (ARKit optional), a Facial workspace in Character Studio, facial LOD and profiling, and compact multiplayer replication. The default stylized humanoid is built in its own thread ("Create the default stylized humanoid"); this document is the contract its head follows.
+
+## Where it starts (audit, 2026-11-14)
+
+| Area | What exists | Gap |
+| --- | --- | --- |
+| Morph targets (blend shapes) | Nothing. `assets::Primitive` has corners, joints and weights only; glTF `targets` and FBX blend deformers are dropped at import | Import, cooked format, LODs, posing, GPU deformation |
+| Facial bones | Skeletons, takes and GPU skinning (`model/rig.rs`, `render/renderer/skinning.rs`); `IKControl` LookAt turns one bone | No jaw or eye convention, no eye limits, no per-eye aim |
+| Facial animation clips | `*.anim.json` property tracks animate Instance properties; bone keys animate skeletons | Nothing to animate: no Instance holds facial controls |
+| Expressions, layers, procedural | Animator layers with masks for the body | No face layers, no blink, no gaze |
+| Lip sync | `DialogueService` lines with sound; audio playback in `audio` | No visemes, no phoneme or viseme tracks, no analysis |
+| Editor | Animation tab (clips, curves, dope sheet), Sequencer, Model Studio | No Character Studio; no facial workspace |
+| Replication | `net` replicates Instance properties | Facial state would go as every property, every change |
+
+## Decisions (taken without asking, all reversible)
+
+- **D1 Morph targets are deformed on the GPU, in the same vertex shader pass that skins.** A mesh's blend shapes go up once as sparse per-corner deltas (only corners a shape moves); each frame an item's shape weights go into one shared buffer beside the joints, as joints already do. Morph first, then skin, the order glTF and FBX define. CPU morphing stays for tests and tools (`Posed::primitive`), as CPU skinning does. Rejected: rewriting a CPU-morphed copy each frame (`MeshSource::version`): a 15k-corner head is 360 KB of upload per talking character per frame, and the copy can't be shared.
+- **D2 One `FaceControls` Instance per face, with one number property per standard control.** It sits under the MeshPart (or the character Model, pointing at its MeshPart). Its properties are the base facial pose, so `*.anim.json` property tracks, the Sequencer, TweenService and scripts all animate faces with no new clip type ("facial animation clips" are ordinary clips whose tracks name a FaceControls). Roblox has a class of the same name; ours uses Axcenity's control names (Paul's spec section 3), not Roblox's.
+- **D3 A face profile maps standard controls to a model's blend shapes and bones.** `assets/faces/*.face.json`, found by fit like rig definitions (the profile naming the most of the model's blend shapes wins): `axcenity.face.json` (the shapes are named as the controls, the default humanoid), `arkit.face.json` (ARKit's 52 names, optional), `vrm.face.json` (VRM 1.0 expressions), `oculus-visemes.face.json` (Ready Player Me style `viseme_*`). A control can drive several shapes with weights, a bone turn, or both. A model needs only the controls it has: missing ones are reported, never required.
+- **D4 Eyes and jaw are bones when the model has them.** Eye bones and the jaw are found by name (`LeftEye`/`RightEye`/`Jaw`, Unity's and VRM's, also `Eye_L`, `eye.L`, `mixamorig:LeftEye` and the like) or named by the profile. Eye_Look_* turn the eye bones within configurable limits (default 30° sideways, 25° up, 20° down) instead of needing gaze shapes; Jaw_Open turns the jaw bone (default 25°) and also drives a `Jaw_Open` corrective shape when there is one. A shapes-only face looks with Eye_Look_* shapes, a bones-only face has no shapes; hybrid is the default humanoid.
+- **D5 Evaluation order is fixed per frame, layers are configurable.** Body pose (state machine, tracks, IK, ragdoll) → face layers blended per control → controls to shape weights and bone turns → facial bone turns applied on top of the body pose → GPU morph then skin. Layers, lowest first by default: Base (the FaceControls properties) → Expression → Dialogue (lip sync) → Procedural (blink, gaze, idle) → Overrides (gameplay). Each layer has a weight, a blend mode (override or additive) and a channel mask; `LayerOrder` reorders them.
+- **D6 Expressions are assets, not code.** `*.expression.json`: control → value, plus default intensity and transition time. The 15 presets in Paul's list ship in `assets/faces/expressions/`. `FaceControls:SetExpression(name, intensity, duration)` blends from the current face; several expressions can blend with weights and priority; left/right asymmetry is a per-call option.
+- **D7 Lip sync is visemes over controls, offline.** 12 visemes (Silence, A/I, E, O, U, F/V, L, M/B/P, W/Q, TH, T/D/N, K/G), each a set of control values in a `*.visemes.json` map (per language or character; the default map is in `assets/faces/visemes/`). A `*.lipsync.json` asset is timed viseme events. It is made by hand, from phoneme timings a dialogue system supplies, or generated from audio on the machine (energy and spectral bands to visemes; no online service, no new heavy dependency). Runtime blends neighbours with smoothing, anticipation and release, and lets the jaw carry part of the opening.
+- **D8 Faces are presentation, not gameplay state.** Replication sends the expression id, intensity, gaze target and lip-sync clip and time (or a compact viseme stream for live input) at a configurable rate, never every control every frame. The server never validates against a face.
+- **D9 Character Studio starts as an editor tab with a Face workspace.** It opens a character (a model with a face profile) and has the facial rig editor, expression editor, facial timeline and lip-sync editor. The default-humanoid thread adds body and customization workspaces to the same tab.
+
+## Standard controls (the Axcenity Humanoid Facial Profile)
+
+The control names are the spec's, used as-is for blend shape names on Axcenity characters and as FaceControls property names. Values are 0 to 1.
+
+| Group | Controls |
+| --- | --- |
+| Eyes | Blink_Left, Blink_Right, Eye_Closed_Left, Eye_Closed_Right, Eye_Squint_Left, Eye_Squint_Right, Eye_Wide_Left, Eye_Wide_Right, Eye_Look_Up, Eye_Look_Down, Eye_Look_Left, Eye_Look_Right |
+| Eyebrows | Brow_Raise_Left, Brow_Raise_Right, Brow_Lower_Left, Brow_Lower_Right, Brow_Inward_Left, Brow_Inward_Right |
+| Mouth and lips | Mouth_Smile_Left, Mouth_Smile_Right, Mouth_Frown_Left, Mouth_Frown_Right, Mouth_Open, Mouth_Wide, Mouth_Narrow, Mouth_Pucker, Mouth_Left, Mouth_Right, Upper_Lip_Raise, Lower_Lip_Lower, Upper_Lip_Raise_Left, Upper_Lip_Raise_Right, Lower_Lip_Lower_Left, Lower_Lip_Lower_Right, Lip_Corner_Pull_Left, Lip_Corner_Pull_Right |
+| Cheeks and nose | Cheek_Raise_Left, Cheek_Raise_Right, Cheek_Puff, Nose_Sneer_Left, Nose_Sneer_Right |
+| Jaw and tongue | Jaw_Open, Jaw_Forward, Jaw_Left, Jaw_Right, Tongue_Out, Tongue_Up, Tongue_Down |
+
+Eye_Look_* are per face; per-eye gaze (independent eyes) comes from the procedural gaze layer, which aims each eye bone at the target itself.
+
+### What the default head carries
+
+Agreed with the default-humanoid thread: shape keys on the head mesh named as the controls above (at minimum the Default Humanoid spec section 5 list: blinks, squint, wide, brow raise and lower, smile, frown, Mouth_Open, Jaw_Open, Mouth_Pucker, Mouth_Left and Mouth_Right, Cheek_Raise); bones named like the rest of its skeleton (Unity/VRM role names): `Jaw` (child of `Head`, at the hinge), `LeftEye` and `RightEye` (children of `Head`, at each eyeball's centre, resting straight ahead), optional `Tongue1`/`Tongue2` under `Jaw`; eyeballs as their own meshes weighted wholly to their eye bone, teeth and mouth interior to `Jaw`; the full control list as shape keys (tongue optional), relative to Basis; exported as `.glb` with shape keys. No gaze shapes are needed.
+
+## Stages (one PR each, in merge order)
+
+| ID | Stage | Content |
+| --- | --- | --- |
+| F0 | This plan | This document, ADR-0028, wiki pages |
+| F1 | Morph targets in assets | glTF `targets` (names from `extras.targetNames`, default weights) and FBX blend shapes imported as sparse per-corner deltas (`Model::morph_targets`, `Primitive::morphs`); fitted with the model; kept by simplified LODs (remapped); in cooked models; `Posed` carries shape weights and `Posed::primitive` morphs on the CPU before skinning; Import dialog lists blend shapes |
+| F2 | Morph targets on the GPU | `MeshSource::morphs`, `Skin` weights, the shared weights buffer, morphing in the scene, shadow, prepass and motion vertex paths, bounds grown by the largest delta; ray traced passes see the unmorphed face (limitation) |
+| F3 | Face profiles and FaceControls | The standard control list (`anim::face`), `*.face.json` profiles found by fit (axcenity, arkit, vrm, oculus visemes), `check_face` validation (missing controls, duplicates, bad shape or bone references, weight ranges, missing eyes or jaw), the `FaceControls` class, controls → shape weights and jaw/eye turns after the body pose, Lua and docs |
+| F4 | Expressions, layers, procedural face | `*.expression.json` and the 15 presets, layer stack with order, weights, blend modes and channel masks, `SetExpression`/`ClearExpression`/`SetOverride`, automatic blinking (interval range, double blinks, duration, per eye, off switch), eye tracking (camera, Instance, position, animation-defined; smoothing and limits), idle micro-movements, procedural never over authored dialogue unless asked |
+| F5 | Lip sync | Visemes, `*.visemes.json` maps, `*.lipsync.json` assets, runtime blending (smoothing, anticipation, release, jaw share, per-viseme override), `PlayLipSync` synced to a Sound, DialogueService lines with lip sync, offline generation from audio and from phoneme timings |
+| F6 | Character Studio: Face workspace | Facial rig editor (controls, sliders, ranges, mapping external shapes, validation), expression editor (create, preview, blend, save), facial timeline (keys and curves of FaceControls tracks, expression events, playback, import and export), lip-sync editor (audio waveform, viseme events, timing fixes, generate, save) |
+| F7 | Scale, profiling, replication | Facial LOD by distance (full, reduced rate and detail, static expression, off) and off-screen skipping, per-character procedural switch, no allocations per frame, a "Face" profiler span with evaluation time and active controls, replication of expression, intensity, gaze and lip-sync state at a set rate with a per-feature choice |
+
+The default humanoid's facial clips and its use of all of the above land with that thread's model; F3–F5 test on a generated test head until then.
+
+## Acceptance (Paul's section 14, by stage)
+
+1 default rig works (default-humanoid model + F3); 2 face independent of body (F3/D5); 3 shapes and bones together (F1–F3); 4 smooth expression blending (F4); 5 blinking, can be switched off (F4); 6 eye targets and limits (F4); 7 lip sync by hand and from phoneme/viseme data (F5); 8 imported rigs mapped to the standard (F3); 9 edited and previewed in Character Studio (F6); 10 profiled and scaled with LOD (F7); 11 nothing online (D7); 12 compact replication (F7).

@@ -4,12 +4,13 @@
 
 use std::sync::Arc;
 
-use axcenity_assets::{BoneTransform, Pose, Rig, Take};
+use axcenity_assets::{BoneTransform, Pose, Rig, RigDefinitions, Take};
 use glam::{Quat, Vec3};
 
 use crate::clip::Clip;
 use crate::files::{ClipFile, Interp, PropertyKeyframe, PropertyName, PropertyTrack};
 use crate::property_clip::{lerp_property, sample_track};
+use crate::retarget::RetargetProfile;
 
 /// How far a dropped key may be from what the keys around it make: in the
 /// bone's units for translation and scale, and radians for rotation.
@@ -103,17 +104,31 @@ pub fn convert_to_keys(
     takes: Arc<Vec<Take>>,
     rig: &Rig,
 ) -> Result<ClipFile, String> {
+    convert_to_keys_with(file, takes, rig, &RigDefinitions::default(), None)
+}
+
+/// [`convert_to_keys`] for a clip whose take is retargeted (AP3): bound
+/// as [`Clip::bind_with`] binds it, with the project's rig definitions
+/// and the link's retarget profile, so the keys are the retargeted motion
+/// on `rig`'s own bones.
+pub fn convert_to_keys_with(
+    file: &ClipFile,
+    takes: Arc<Vec<Take>>,
+    rig: &Rig,
+    rigs: &RigDefinitions,
+    profile: Option<&RetargetProfile>,
+) -> Result<ClipFile, String> {
     let Some(link) = &file.link else {
         return Err("it isn't linked to a take".to_owned());
     };
     // Not looping, so the last phase is the last frame, not the first.
     let mut once = file.clone();
     once.looping = false;
-    let clip = Clip::bind(once, Some(takes), Some(rig))?;
+    let clip = Clip::bind_with(once, Some(takes), Some(rig), rigs, profile)?;
     let take = clip
         .take()
         .ok_or_else(|| format!("its take `{}` can't be read", link.take))?;
-    let moved = take_bones(take, rig);
+    let moved = clip.take_bones();
     let frame_rate = f64::from(take.frame_rate.max(1.0));
     let frames = ((link.end - link.start).abs() * frame_rate)
         .round()

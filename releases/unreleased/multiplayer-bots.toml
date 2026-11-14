@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Load-test a game server with headless bots"
+details = "axcenity-bots <game> --join <address> --count <n> joins that many headless players over real UDP, walking and jumping about, and reports their join times, round trips, bandwidth and how often the server moved them back. axcenity-server --stats prints the server's frame times and players' connections while it serves, and --max-players takes more players than the game's MaxPlayers. scripts/net-scale.py runs both on one or two machines and writes a report (multiplayer readiness MP1)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

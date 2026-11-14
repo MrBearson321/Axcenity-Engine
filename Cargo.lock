@@ -1211,6 +1211,7 @@ version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "axcenity-assets",
+ "axcenity-character",
  "axcenity-core",
  "axcenity-net",
  "axcenity-project",
@@ -1220,7 +1221,9 @@ dependencies = [
  "axcenity-sim",
  "axcenity-workspace-hack",
  "env_logger",
+ "log",
  "profiling",
+ "serde_json",
 ]
 
 [[package]]

@@ -606,7 +606,12 @@ impl DockViewer<'_> {
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
             Pane::UiDesigner => self.app.ui_designer_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
-            Pane::Profiler => self.app.profiler.show(ui),
+            Pane::Profiler => {
+                self.app.profiler.show(ui);
+                if let Some((path, line)) = self.app.profiler.take_open() {
+                    self.app.open_script(&path, Some(line));
+                }
+            }
             Pane::Mixer => self.app.mixer_pane(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::LodInspector => self.app.lod_inspector_pane(ui),
@@ -915,6 +920,9 @@ struct OpenProject {
     /// Whether built games have the F9 Developer Console (File > Build
     /// Game, Phase 71).
     developer_console: bool,
+    /// Whether built games start with the ray traced look on GPUs that can
+    /// ray trace (File > Build Game, runtime lighting parity RL2).
+    ray_traced_by_default: bool,
     /// How built games' loading screen goes (File > Build Game).
     loading_screen: axcenity_project::LoadingScreen,
     /// The game's icon and banner (Settings > This project > Branding).

@@ -35,7 +35,7 @@ Phase 55–62: a Blender-like mesh editor inside the engine. Its view draws thro
 
 ## Animation tab and sequencer
 
-One Animation tab follows the selected Animator; **Animate** (`EditorApp::animate`) makes an Animator, a clip and an Animation as one undo step. Record turns viewport edits into keys. The Sequencer previews in the Scene view through `SequenceRun::apply`, the same code the Sequence Instance runs.
+One Animation tab follows the selected Animator; **Animate** (`EditorApp::animate`) makes an Animator, a clip and an Animation as one undo step. A linked clip's settings end with **Retargeting** (AP3, `animation/retarget_panel.rs`): how the take plays on the preview model, the rig checks, both skeletons' bone maps (saved as reusable rig definitions) and the clip's retarget profile; the preview and Convert to keys bind as Animators do (`ClipDoc::bind_on`). A keyed clip's settings end with **Cleanup** (AP4, `property_editor/cleanup.rs`): Mirror, Smooth, Reduce keys, Fix loop seam and Re-time. Record turns viewport edits into keys. The Sequencer previews in the Scene view through `SequenceRun::apply`, the same code the Sequence Instance runs.
 
 ## UI Designer
 

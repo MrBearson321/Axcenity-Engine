@@ -1,4 +1,5 @@
-//! `axcenity-server <game> [--port <port>] [--password <text>] [--bench <frames> [--bench-clients <n>]]`: a
+//! `axcenity-server <game> [--port <port>] [--password <text>] [--max-players <n>] [--stats <s>]
+//! [--bench <frames> [--bench-clients <n>]]`: a
 //! dedicated server (Phase 63). It loads a project folder or a `.axgame`,
 //! runs the game's Scripts (never its LocalScripts: it has no player of
 //! its own) and physics at 60 frames a second with no window, audio or
@@ -16,6 +17,12 @@
 //! instead and joins `n` loopback players that read everything sent to
 //! them, so the bench measures replication to `n` players (roadmap M7);
 //! measuring starts once they all have their snapshot.
+//!
+//! `--max-players <n>` takes up to n players whatever the game's
+//! `Players.MaxPlayers` says (scale tests, multiplayer readiness MP1).
+//! `--stats <seconds>` prints a line that often while serving: frame times,
+//! players, and their round trips, loss and bandwidth; `--stats-file
+//! <path>` also writes each as a JSON line.
 
 use std::ffi::OsString;
 use std::fs;
@@ -31,7 +38,9 @@ use axcenity_net::{Client, GameInfo, Join, Network, SessionEvent};
 use axcenity_script::{OutputKind, ScriptRuntime};
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
+mod stats;
+
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
 
 /// Each frame is this long.
@@ -48,6 +57,12 @@ struct Arguments {
     /// `--bench-clients <n>`: loopback players to replicate to while
     /// measuring.
     bench_clients: usize,
+    /// `--max-players <n>`: instead of the game's `Players.MaxPlayers`.
+    max_players: Option<u32>,
+    /// `--stats <seconds>`: how often to print the server's numbers.
+    stats: Option<f64>,
+    /// `--stats-file <path>`: where to write them as JSON lines too.
+    stats_file: Option<PathBuf>,
 }
 
 impl Arguments {
@@ -94,11 +109,42 @@ impl Arguments {
                     };
                     parsed.bench_clients = clients;
                 }
+                "--max-players" => {
+                    let max = arguments
+                        .next()
+                        .and_then(|max| max.to_str()?.parse::<u32>().ok())
+                        .filter(|&max| max > 0);
+                    let Some(max) = max else {
+                        bail!(
+                            "--max-players takes how many players at most, such as 32\n\n{USAGE}"
+                        );
+                    };
+                    parsed.max_players = Some(max);
+                }
+                "--stats" => {
+                    let seconds = arguments
+                        .next()
+                        .and_then(|seconds| seconds.to_str()?.parse::<f64>().ok())
+                        .filter(|&seconds| seconds > 0.0);
+                    let Some(seconds) = seconds else {
+                        bail!("--stats takes how often to print, in seconds, such as 5\n\n{USAGE}");
+                    };
+                    parsed.stats = Some(seconds);
+                }
+                "--stats-file" => {
+                    let Some(path) = arguments.next() else {
+                        bail!("--stats-file takes a path\n\n{USAGE}");
+                    };
+                    parsed.stats_file = Some(PathBuf::from(path));
+                }
                 "--help" | "-h" => bail!("{USAGE}"),
                 _ if text.starts_with("--") => bail!("unknown option `{text}`\n\n{USAGE}"),
                 _ if parsed.game.is_none() => parsed.game = Some(PathBuf::from(argument)),
                 _ => bail!("only one game can be served at a time\n\n{USAGE}"),
             }
+        }
+        if parsed.stats_file.is_some() && parsed.stats.is_none() {
+            bail!("--stats-file only goes with --stats\n\n{USAGE}");
         }
         if parsed.bench_clients > 0 && parsed.bench.is_none() {
             bail!("--bench-clients only goes with --bench\n\n{USAGE}");
@@ -186,6 +232,15 @@ fn main() -> Result<()> {
         print_output(&mut scripts);
     }
 
+    if let Some(max) = arguments.max_players {
+        let players = world.players();
+        let _ = world.set_property(
+            players,
+            "MaxPlayers",
+            axcenity_core::Value::Number(f64::from(max)),
+        );
+    }
+
     let game_info = GameInfo {
         name: project.manifest.name.clone(),
         version: project.manifest.version.clone(),
@@ -222,6 +277,13 @@ fn main() -> Result<()> {
     let mut bench = arguments
         .bench
         .map(|frames| BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames));
+    let mut stats = match arguments.stats {
+        Some(seconds) => Some(stats::ServerStats::new(
+            seconds,
+            arguments.stats_file.as_deref(),
+        )?),
+        None => None,
+    };
     let mut last = Instant::now();
     loop {
         let started = Instant::now();
@@ -254,6 +316,9 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             continue;
+        }
+        if let Some(stats) = &mut stats {
+            stats.frame(started.elapsed(), &server.network);
         }
         if let Some(rest) = FRAME.checked_sub(started.elapsed()) {
             std::thread::sleep(rest);
@@ -475,6 +540,9 @@ mod tests {
                 password: Some("moat".to_owned()),
                 bench: None,
                 bench_clients: 0,
+                max_players: None,
+                stats: None,
+                stats_file: None,
             }
         );
     }
@@ -501,5 +569,15 @@ mod tests {
         assert_eq!(parsed.bench_clients, 8);
         let err = parse(&["castle", "--bench-clients", "8"]).unwrap_err();
         assert!(err.to_string().contains("only goes with --bench"), "{err}");
+    }
+
+    #[test]
+    fn max_players_and_stats_take_numbers() {
+        let parsed = parse(&["castle", "--max-players", "32", "--stats", "5"]).unwrap();
+        assert_eq!((parsed.max_players, parsed.stats), (Some(32), Some(5.0)));
+        let err = parse(&["castle", "--max-players", "0"]).unwrap_err();
+        assert!(err.to_string().contains("--max-players takes"), "{err}");
+        let err = parse(&["castle", "--stats-file", "s.jsonl"]).unwrap_err();
+        assert!(err.to_string().contains("only goes with --stats"), "{err}");
     }
 }

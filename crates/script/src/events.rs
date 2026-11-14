@@ -299,8 +299,36 @@ fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoL
         if once && let Some(mut connections) = lua.app_data_mut::<Connections>() {
             connections.disconnect(key, id);
         }
-        crate::handler_threads::run(lua, callback, args.clone(), script);
+        crate::handler_threads::run(lua, callback, args.clone(), script, || {
+            event_label(lua, key)
+        });
     }
+}
+
+/// `Door.Touched`, for the script profiler.
+fn event_label(lua: &Lua, (owner, event): EventKey) -> String {
+    let owner = match owner {
+        Owner::Instance(id) => crate::lent::world(lua)
+            .ok()
+            .and_then(|world| world.get(id).map(|instance| instance.name().to_owned()))
+            .unwrap_or_else(|| "Instance".to_owned()),
+        Owner::UserInputService => "UserInputService".to_owned(),
+        Owner::RunService => "RunService".to_owned(),
+        Owner::Tween(_) => "Tween".to_owned(),
+        Owner::CollectionService => "CollectionService".to_owned(),
+        Owner::LevelService => "LevelService".to_owned(),
+        Owner::NetworkService => "NetworkService".to_owned(),
+        Owner::Service(name) => name.to_owned(),
+    };
+    let event = match event {
+        Event::Named(name) => name.to_owned(),
+        Event::PropertyChanged(property) => format!("{property} changed"),
+        Event::Marker(_) => "MarkerReached".to_owned(),
+        Event::AttributeChanged(_) => "AttributeChanged".to_owned(),
+        Event::TagAdded(_) => "InstanceAdded".to_owned(),
+        Event::TagRemoved(_) => "InstanceRemoved".to_owned(),
+    };
+    format!("{owner}.{event}")
 }
 
 /// An event, as scripts see it: `part.Touched`.

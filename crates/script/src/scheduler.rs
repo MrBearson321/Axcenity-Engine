@@ -342,6 +342,7 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
     // breakpoint that doesn't pause (see below) doesn't restart the clock, so
     // a logpoint can't keep an endless loop from being stopped.
     watchdog::enter(lua, thread);
+    let timing = crate::profile::enter(lua, thread);
     loop {
         debugger::enter(lua, thread);
         // `()` because whatever the thread returns or yields isn't needed here.
@@ -368,5 +369,6 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
         }
         args = MultiValue::new();
     }
+    crate::profile::leave(lua, thread, timing);
     watchdog::leave(lua);
 }
