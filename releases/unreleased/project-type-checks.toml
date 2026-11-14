@@ -1,0 +1,12 @@
+category = "improvement"
+subsystem = "scripting"
+title = "Type checking follows require into your ModuleScripts"
+details = "Script tabs are now checked against the whole project: require(game.ReplicatedStorage.Utils) (or through GetService) brings in the module's functions and types, so calling one that doesn't exist or passing the wrong type is underlined in the script that requires it. Editing a module, even before saving it, checks the scripts open beside it again."
+features = ["scripting.scripts"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
