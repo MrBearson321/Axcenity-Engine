@@ -1,85 +1,12 @@
 //! Multiplayer readiness MP1: the real `axcenity-server` with `--stats`,
 //! and `axcenity-bots` joining it over UDP as separate processes.
 
-use std::io::{BufRead, BufReader};
+mod common;
+
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
 
-/// Kills a process when the test ends, passing or not.
-struct Running(Child);
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn example(name: &str) -> String {
-    format!("{}/../../examples/{name}", env!("CARGO_MANIFEST_DIR"))
-}
-
-fn scratch(name: &str) -> PathBuf {
-    let folder =
-        std::env::temp_dir().join(format!("axcenity-bots-test-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).unwrap();
-    folder
-}
-
-/// Starts the server on a free port; returns it, its port, and its lines.
-fn server(game: &str, arguments: &[&str]) -> (Running, u16, mpsc::Receiver<String>) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_axcenity-server"));
-    command
-        .arg(game)
-        .args(["--port", "0"])
-        .args(arguments)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = Running(command.spawn().expect("the server starts"));
-    let (lines, heard) = mpsc::channel();
-    for stream in [
-        Box::new(child.0.stderr.take().unwrap()) as Box<dyn std::io::Read + Send>,
-        Box::new(child.0.stdout.take().unwrap()),
-    ] {
-        let lines = lines.clone();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                let _ = lines.send(line);
-            }
-        });
-    }
-    let start = Instant::now();
-    let mut said = Vec::new();
-    let port = loop {
-        assert!(
-            start.elapsed() < Duration::from_secs(30),
-            "the server never said its port: {said:?}"
-        );
-        if let Ok(line) = heard.recv_timeout(Duration::from_millis(50)) {
-            if let Some(port) = line
-                .split("on UDP port ")
-                .nth(1)
-                .and_then(|rest| rest.split(',').next())
-                .and_then(|port| port.parse().ok())
-            {
-                break port;
-            }
-            said.push(line);
-        }
-    };
-    (child, port, heard)
-}
-
-fn json_lines(path: &std::path::Path) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect()
-}
+use common::{Running, example, json_lines, scratch, server};
 
 #[test]
 fn twelve_bots_in_two_processes_join_over_udp_walk_about_and_leave() {
