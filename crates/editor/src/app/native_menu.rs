@@ -366,6 +366,7 @@ impl EditorApp {
 
         let mut debug = Items::default();
         debug.command("Graphics Benchmark…", Command::GraphicsBenchmark, ready);
+        debug.command("Animator Inspector…", Command::AnimatorInspector, ready);
         // Only in debug builds (`cargo run`), never in a release.
         if cfg!(debug_assertions) {
             debug

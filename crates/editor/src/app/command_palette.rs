@@ -33,10 +33,11 @@ pub(super) enum Overlay {
     Streaming,
     LightProbes,
     Culling,
+    Skeletons,
 }
 
 impl Overlay {
-    pub(super) const ALL: [Overlay; 12] = [
+    pub(super) const ALL: [Overlay; 13] = [
         Overlay::Colliders,
         Overlay::Raycasts,
         Overlay::Bounds,
@@ -49,6 +50,7 @@ impl Overlay {
         Overlay::Streaming,
         Overlay::LightProbes,
         Overlay::Culling,
+        Overlay::Skeletons,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -65,6 +67,7 @@ impl Overlay {
             Overlay::Streaming => "Streaming",
             Overlay::LightProbes => "Light Probes",
             Overlay::Culling => "Culling",
+            Overlay::Skeletons => "Skeletons",
         }
     }
 
@@ -82,6 +85,7 @@ impl Overlay {
             Overlay::Streaming => &mut overlays.streaming,
             Overlay::LightProbes => &mut overlays.light_probes,
             Overlay::Culling => &mut overlays.culling,
+            Overlay::Skeletons => &mut overlays.skeletons,
         }
     }
 }
@@ -205,6 +209,8 @@ pub(super) enum Command {
     CheckForUpdates,
     /// Debug > Graphics Benchmark…
     GraphicsBenchmark,
+    /// Debug > Animator Inspector… (AP6)
+    AnimatorInspector,
     PanicDuringPlay,
     /// The ribbon's Pause on errors switch (roadmap G6).
     PauseOnErrors,
@@ -905,6 +911,14 @@ impl EditorApp {
             None,
             Ok(()),
         );
+        add(
+            Command::AnimatorInspector,
+            "Animator Inspector…",
+            "Debug",
+            &["Animation", "State machine", "Debug animation", "Bones"],
+            None,
+            Ok(()),
+        );
         if cfg!(debug_assertions) {
             add(
                 Command::PanicDuringPlay,
@@ -1292,6 +1306,7 @@ impl EditorApp {
             Command::About => self.about_open = true,
             Command::CheckForUpdates => self.open_updates(),
             Command::GraphicsBenchmark => self.open_graphics_benchmark(),
+            Command::AnimatorInspector => self.open_animator_inspector(),
             Command::PanicDuringPlay => {
                 if let Some(session) = &mut self.play {
                     session.panic_next_frame();

@@ -108,10 +108,10 @@ pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
     LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MODEL_EXTENSIONS,
     MapSlot, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, MorphTarget, Pick, Pose,
-    Posed, PosedPrimitive, Primitive, PrimitiveMorph, PrimitiveReport, Rig, Take, TextureRole,
-    Track, apply_morphs, cached_meshes, cooked_models, embedded_files, is_collision_piece,
-    list_objects, load_model, load_models, load_takes, lod_level, tangents, texture_pack_name,
-    texture_roles,
+    Posed, PosedBone, PosedPrimitive, Primitive, PrimitiveMorph, PrimitiveReport, Rig, Take,
+    TextureRole, Track, apply_morphs, cached_meshes, cooked_models, embedded_files,
+    is_collision_piece, list_objects, load_model, load_models, load_takes, lod_level, tangents,
+    texture_pack_name, texture_roles,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{

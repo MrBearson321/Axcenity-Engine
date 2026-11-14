@@ -28,7 +28,8 @@ pub use maps::{MapSlot, TextureRole, texture_pack_name, texture_roles};
 pub use morph::{MorphTarget, PrimitiveMorph, apply as apply_morphs};
 pub use objects::{ModelObject, Pick};
 pub use rig::{
-    Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedPrimitive, Rig, Take, Track,
+    Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedBone, PosedPrimitive, Rig, Take,
+    Track,
 };
 
 #[cfg(test)]

@@ -531,6 +531,13 @@ impl EditorApp {
         found(ui, &row, "Show light probes");
         let row = ui
             .checkbox(
+                &mut self.overlays.skeletons,
+                theme::with_icon(icons::BONE, "Show skeletons"),
+            )
+            .on_hover_text("Rigged MeshParts' bones, posed during Play and at rest while editing.");
+        found(ui, &row, "Show skeletons");
+        let row = ui
+            .checkbox(
                 &mut self.overlays.culling,
                 theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
             )
