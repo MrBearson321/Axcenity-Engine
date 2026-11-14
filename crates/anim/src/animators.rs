@@ -38,6 +38,7 @@ use axcenity_core::{
 };
 use glam::{EulerRot, Quat, Vec3};
 
+use crate::body_shape::BodyShape;
 use crate::clip::{Clip, RootMotion};
 use crate::controller::{Compiled, Machine, Playing};
 use crate::face::{FaceRig, choose_face_profile};
@@ -51,6 +52,7 @@ use crate::ik_control;
 use crate::property_clip::{Applied, apply_evaluated, blend_evaluated};
 use crate::ragdoll;
 use crate::retarget::RetargetProfile;
+use crate::sockets;
 use crate::threads::{ThreadTimes, Threads};
 
 mod inspect;
@@ -132,7 +134,7 @@ pub struct Animators {
     poses: Poses,
     /// This update's skeletal poses, by MeshPart, with the skeleton each is
     /// of: what the skinned MeshParts inside one follow ([`Self::follow`]).
-    local: HashMap<InstanceId, (Arc<Rig>, axcenity_assets::Pose)>,
+    local: HashMap<InstanceId, (Arc<Rig>, axcenity_assets::Pose, Vec<glam::Vec3>)>,
     errors: Vec<String>,
     /// Errors already given, so each is reported once.
     reported: HashSet<String>,
@@ -168,6 +170,8 @@ struct PoseJob {
     bone_layers: Vec<Layer>,
     /// Its face, over the body's pose.
     face: Option<FaceFrame>,
+    /// Its body sliders, if any is set.
+    shape: Option<BodyShape>,
 }
 
 /// A face's layers this frame, and the profile matched to its model.
@@ -184,10 +188,11 @@ impl FaceFrame {
         model: &Model,
         skeleton: &Rig,
         mut pose: axcenity_assets::Pose,
+        shape: &[glam::Vec3],
     ) -> Option<Posed> {
         let controls = self.layers.compose(&self.rig, Some(skeleton), Some(&pose));
         self.rig.turn(&mut pose, &controls);
-        let mut posed = model.pose(&pose)?;
+        let mut posed = model.pose_shaped(&pose, shape)?;
         self.set_shapes(model, &controls, &mut posed);
         Some(posed)
     }
@@ -505,25 +510,30 @@ impl Animators {
             let machine = running
                 .get(&job.owner)
                 .and_then(|running| running.machine.as_ref());
-            let pose = pose_of(
+            let mut pose = pose_of(
                 machine,
                 &job.rig,
                 &job.parameters,
                 &job.layer_weights,
                 &job.bone_layers,
             );
-            let posed = match &job.face {
-                Some(face) => face.pose(&job.model, &job.rig, pose.clone()),
-                None => job.model.pose(&pose),
+            let shape = match &job.shape {
+                Some(shape) => shape.apply(&job.rig, &mut pose),
+                None => Vec::new(),
             };
-            (pose, posed)
+            let posed = match &job.face {
+                Some(face) => face.pose(&job.model, &job.rig, pose.clone(), &shape),
+                None => job.model.pose_shaped(&pose, &shape),
+            };
+            (pose, shape, posed)
         });
         self.thread_times = times;
-        for (job, (local, pose)) in jobs.iter().zip(made) {
+        for (job, (local, shape, pose)) in jobs.iter().zip(made) {
             match pose {
                 Some(pose) => {
                     self.poses.insert(job.owner, Arc::new(pose));
-                    self.local.insert(job.owner, (Arc::clone(&job.rig), local));
+                    self.local
+                        .insert(job.owner, (Arc::clone(&job.rig), local, shape));
                 }
                 None => {
                     posed.remove(&job.owner);
@@ -531,6 +541,7 @@ impl Animators {
             }
         }
         self.follow(world, assets, &mut posed);
+        sockets::place_sockets(world, &self.local);
         // A MeshPart nothing poses any more goes back to its still model.
         self.poses.retain(|part, _| posed.contains(part));
         events
@@ -547,7 +558,7 @@ impl Animators {
     fn follow(&mut self, world: &mut World, assets: &Assets, posed: &mut HashSet<InstanceId>) {
         let mut leaders: Vec<InstanceId> = self.local.keys().copied().collect();
         while let Some(leader) = leaders.pop() {
-            let Some((rig, pose)) = self.local.get(&leader).cloned() else {
+            let Some((rig, pose, shape)) = self.local.get(&leader).cloned() else {
                 continue;
             };
             let children = world
@@ -574,12 +585,25 @@ impl Animators {
                             .unwrap_or(bone.rest)
                     })
                     .collect();
-                let Some(made) = model.pose(&follows) else {
+                // The leader's body sliders, bone by bone.
+                let follows_shape: Vec<glam::Vec3> = if shape.is_empty() {
+                    Vec::new()
+                } else {
+                    own.bones
+                        .iter()
+                        .map(|bone| {
+                            rig.bone(&bone.name)
+                                .and_then(|index| shape.get(index).copied())
+                                .unwrap_or(glam::Vec3::ONE)
+                        })
+                        .collect()
+                };
+                let Some(made) = model.pose_shaped(&follows, &follows_shape) else {
                     continue;
                 };
                 self.poses.insert(child, Arc::new(made));
                 posed.insert(child);
-                self.local.insert(child, (own, follows));
+                self.local.insert(child, (own, follows, follows_shape));
                 leaders.push(child);
             }
         }
@@ -880,6 +904,7 @@ impl Animators {
                         layer_weights,
                         bone_layers,
                         face,
+                        shape: BodyShape::read(world, owner),
                     });
                     posed = true;
                 } else {
@@ -890,6 +915,12 @@ impl Animators {
                         &layer_weights,
                         &bone_layers,
                     );
+                    // Body sliders first, so IK and the feet work on the
+                    // body as it's shaped.
+                    let shape = match BodyShape::read(world, owner) {
+                        Some(shape) => shape.apply(rig, &mut pose),
+                        None => Vec::new(),
+                    };
                     if let Some(ragdoll) = parts.ragdoll {
                         pose = run_ragdoll(
                             world,
@@ -944,12 +975,12 @@ impl Animators {
                         }
                     }
                     let made = match &face {
-                        Some(face) => face.pose(model, rig, pose.clone()),
-                        None => model.pose(&pose),
+                        Some(face) => face.pose(model, rig, pose.clone(), &shape),
+                        None => model.pose_shaped(&pose, &shape),
                     };
                     if let Some(made) = made {
                         self.poses.insert(owner, Arc::new(made));
-                        self.local.insert(owner, (Arc::clone(rig), pose));
+                        self.local.insert(owner, (Arc::clone(rig), pose, shape));
                         posed = true;
                     }
                 }

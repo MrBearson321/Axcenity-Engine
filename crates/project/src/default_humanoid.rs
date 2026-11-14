@@ -42,6 +42,19 @@ pub static DEFAULT_HUMANOID_PARTS: &[u8] =
 /// The parts file, in a project ([`add_humanoid_parts`]).
 pub const DEFAULT_HUMANOID_PARTS_PATH: &str = "assets/models/Humanoid/HumanoidParts.glb";
 
+/// The default character's sockets (Attachments in its `Body` that follow
+/// a bone, `anim`'s sockets) and their bones: an accessory with an
+/// Attachment of the same name inside the `Body` hangs from it.
+pub const HUMANOID_SOCKETS: [(&str, &str); 7] = [
+    ("HeadSocket", "Head"),
+    ("BackSocket", "UpperChest"),
+    ("HipsSocket", "Hips"),
+    ("LeftHandSocket", "LeftHand"),
+    ("RightHandSocket", "RightHand"),
+    ("LeftFootSocket", "LeftFoot"),
+    ("RightFootSocket", "RightFoot"),
+];
+
 /// The parts in [`DEFAULT_HUMANOID_PARTS`], by object name: a base body
 /// (under clothes), the head with its face shapes, eyes, hands, clothes
 /// and the hair styles (no hair is Bald).
@@ -443,6 +456,15 @@ pub fn default_character(world: &mut World, position: Vector3) -> InstanceId {
             Value::String(DEFAULT_HUMANOID_STATE_MACHINE_PATH.to_owned()),
         )],
     );
+    let sockets: Vec<(InstanceId, &str)> = HUMANOID_SOCKETS
+        .iter()
+        .map(|(socket, bone)| {
+            (
+                make(ClassName::Attachment, socket, Some(body), Vec::new()),
+                *bone,
+            )
+        })
+        .collect();
     make(
         ClassName::WeldConstraint,
         "BodyWeld",
@@ -466,6 +488,15 @@ pub fn default_character(world: &mut World, position: Vector3) -> InstanceId {
         (ClassName::Inventory, "Inventory", Vec::new()),
     ] {
         make(class, name, Some(model), properties);
+    }
+    for (socket, bone) in sockets {
+        world
+            .set_attribute(
+                socket,
+                axcenity_anim::SOCKET_BONE,
+                Some(Value::String(bone.to_owned())),
+            )
+            .expect("an Attachment takes attributes");
     }
     model
 }

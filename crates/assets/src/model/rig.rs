@@ -482,6 +482,31 @@ impl Model {
     }
 
     /// Posed with `rig`'s bones placed at `world` ([`Rig::world`]).
+    /// Like [`pose`](Self::pose), with each bone's own vertices scaled by
+    /// `shape` (one scale per bone, in the bone's frame; missing ones are
+    /// 1). A bone's shape isn't passed to its children: lengthen a limb by
+    /// scaling its bone's Y and moving its child's translation to match
+    /// (body sliders, default humanoid HD4).
+    pub fn pose_shaped(&self, pose: &[BoneTransform], shape: &[Vec3]) -> Option<Posed> {
+        let rig = self.rig.as_ref()?;
+        if shape.iter().all(|scale| *scale == Vec3::ONE) {
+            return self.pose(pose);
+        }
+        let world = rig.world(pose);
+        let shaped: Vec<Mat4> = world
+            .iter()
+            .enumerate()
+            .map(|(index, matrix)| match shape.get(index) {
+                Some(scale) if *scale != Vec3::ONE => *matrix * Mat4::from_scale(*scale),
+                _ => *matrix,
+            })
+            .collect();
+        Some(self.posed(
+            rig.joints_from_world(&shaped),
+            rig.skeleton_from_world(&world),
+        ))
+    }
+
     fn posed_with(&self, rig: &Rig, world: &[Mat4]) -> Posed {
         self.posed(rig.joints_from_world(world), rig.skeleton_from_world(world))
     }
