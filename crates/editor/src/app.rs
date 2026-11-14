@@ -1580,6 +1580,7 @@ impl EditorApp {
             .input(|input| f64::from(input.stable_dt))
             .min(MAX_FRAME_SECONDS);
         self.plugins_frame(seconds);
+        self.plugin_shortcuts(ctx);
         if self.bake_probes_asked {
             self.bake_probes_asked = false;
             self.start_probe_bake();
@@ -2085,6 +2086,8 @@ mod open_tests;
 mod palette_tests;
 #[cfg(test)]
 mod play_tests;
+#[cfg(test)]
+mod plugin_api3_tests;
 #[cfg(test)]
 mod plugin_tests;
 #[cfg(test)]
