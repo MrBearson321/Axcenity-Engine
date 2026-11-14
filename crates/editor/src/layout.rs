@@ -104,6 +104,8 @@ pub enum Pane {
     /// The selected particle effect played alone, with its emitters'
     /// module stacks (`effect_editor.rs`, roadmap R17.3). Starts closed.
     Effect,
+    /// Character Studio: a character's face (facial animation F6).
+    CharacterStudio,
     /// The Toolbox: assets from ambientCG, Poly Haven and Openverse, and
     /// the asset library (`toolbox_panel.rs`). Starts closed; the Assets
     /// panel's Toolbox button opens it beside Assets.
@@ -134,7 +136,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 29] = [
+    pub const CLOSABLE: [Pane; 30] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -159,6 +161,7 @@ impl Pane {
         Pane::ModelStudio,
         Pane::ObjectViewer,
         Pane::Effect,
+        Pane::CharacterStudio,
         Pane::Toolbox,
         Pane::Inventory,
         Pane::VersionExplorer,
@@ -194,6 +197,7 @@ impl Pane {
             Pane::ModelStudio => "Model Studio",
             Pane::ObjectViewer => "Object Viewer",
             Pane::Effect => "Effect",
+            Pane::CharacterStudio => "Character Studio",
             Pane::Toolbox => "Toolbox",
             Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
@@ -232,6 +236,7 @@ impl Pane {
             Pane::ModelStudio => icons::POLYGON,
             Pane::ObjectViewer => icons::CUBE,
             Pane::Effect => icons::SPARKLE,
+            Pane::CharacterStudio => icons::USER_FOCUS,
             Pane::Toolbox => icons::TOOLBOX,
             Pane::Inventory => icons::TRAY_ARROW_DOWN,
             Pane::VersionExplorer => icons::GIT_BRANCH,
@@ -359,6 +364,7 @@ impl Layout {
             | Pane::ModelStudio
             | Pane::ObjectViewer
             | Pane::Effect
+            | Pane::CharacterStudio
             | Pane::TeamBoard => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain
@@ -789,6 +795,7 @@ mod tests {
                     | Pane::ModelStudio
                     | Pane::ObjectViewer
                     | Pane::Effect
+                    | Pane::CharacterStudio
                     | Pane::Toolbox
                     | Pane::Inventory
                     | Pane::VersionExplorer

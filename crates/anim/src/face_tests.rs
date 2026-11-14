@@ -13,7 +13,11 @@ use axcenity_core::{ClassName, InstanceId, Value, World};
 use glam::{Mat4, Quat, Vec3};
 
 use crate::retarget::Severity;
-use crate::{Animators, FaceProblem, FaceRig, check_face, choose_face_profile};
+use crate::{
+    Animators, CompiledVisemes, FaceProblem, FaceRig, built_in_face_profile, check_face,
+    choose_face_profile,
+};
+use axcenity_assets::VisemeMap;
 
 fn bone(name: &str, parent: Option<usize>, at: Vec3, rotation: Quat) -> Bone {
     Bone {
@@ -668,4 +672,34 @@ fn a_lip_sync_keeps_time_with_its_sound_and_fades_out_when_it_stops() {
     assert!((open - 0.1).abs() < 1e-5, "{open}");
     assert!(world.face(face).unwrap().lip_sync.is_none());
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_preview_poses_the_face_and_frames_the_head() {
+    let model = head(Quat::IDENTITY);
+    let profile = built_in_face_profile("arkit").unwrap();
+    let (rig, _) = FaceRig::bind(&model, "arkit", &profile);
+    let posed = crate::pose_face(&model, &rig, &controls(&[("Jaw_Open", 0.5)]));
+    // jawOpen at half; eyeBlinkLeft driven (so 0); Freckles keeps its own.
+    assert_eq!(posed.morph_weights(), &[0.0, 0.5, 0.3]);
+    let at = crate::face_point(&model, &rig).unwrap();
+    assert!((at - Vec3::new(0.0, 1.6, 0.0)).length() < 1e-5, "{at}");
+    let moving = face_control("Jaw_Open").unwrap();
+    assert!(rig.moves(moving));
+    assert!(!rig.moves(face_control("Cheek_Puff").unwrap()));
+    assert!(!rig.moves(FACE_CONTROLS.len()));
+    let mut lip = VisemeMap::default();
+    lip.visemes
+        .insert("AI".into(), [("Jaw_Open".into(), 0.8)].into());
+    let (compiled, problems) = CompiledVisemes::new(&lip);
+    assert!(problems.is_empty());
+    let mut values = controls(&[("Jaw_Open", 0.2), ("Brow_Lower_Left", 0.4)]);
+    let mut weights = [0.0; 12];
+    weights[1] = 1.0;
+    compiled.apply(&weights, &mut values);
+    assert!(
+        (values[moving] - 0.8).abs() < 1e-6,
+        "the mouth covers the jaw"
+    );
+    assert_eq!(values[face_control("Brow_Lower_Left").unwrap()], 0.4);
 }

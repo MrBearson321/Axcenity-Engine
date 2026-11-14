@@ -80,55 +80,76 @@ impl EditorApp {
     /// `lipsync <file>`: makes and saves the lip sync, one undo step.
     pub(super) fn lip_sync_command(&mut self, source: &str) {
         let source = source.trim().trim_matches(['"', '\'']).replace('\\', "/");
+        if let Some((path, lip)) = self.make_lip_sync_file(&source) {
+            self.output.info(format!(
+                "lipsync: made `{path}` ({} visemes over {:.2} s). Play it with \
+                 `face:PlayLipSync(\"{path}\", sound)`.",
+                lip.visemes.len(),
+                lip.duration
+            ));
+        }
+    }
+
+    /// Makes the lip sync for `source` and saves it beside it, one undo
+    /// step (the Console's `lipsync` and Character Studio's Make from).
+    /// Returns its path and itself.
+    pub(super) fn make_lip_sync_file(&mut self, source: &str) -> Option<(String, LipSync)> {
         let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
             self.output.warning("lipsync: open a project first.");
-            return;
+            return None;
         };
-        let (lip, unknown) = match make_lip_sync(&folder, &source) {
+        let (lip, unknown) = match make_lip_sync(&folder, source) {
             Ok(made) => made,
             Err(why) => {
                 self.output.warning(format!("lipsync: {why}."));
-                return;
+                return None;
             }
         };
-        let path = lip_sync_path(&source);
-        let before = std::fs::read_to_string(folder.join(&path)).ok();
-        let after = lip.to_json();
-        if let Err(err) = axcenity_assets::write_lip_sync(&folder, &path, &lip) {
-            self.output
-                .warning(format!("lipsync: `{path}` can't be written: {err}."));
-            return;
+        let path = lip_sync_path(source);
+        if !self.save_face_file(&path, lip.to_json(), |folder| {
+            axcenity_assets::write_lip_sync(folder, &path, &lip)
+        }) {
+            return None;
         }
-        self.assets.forget(&path);
-        self.history.record_asset(
-            &mut self.world,
-            format!("Make lip sync {path}"),
-            vec![history::TextChange {
-                path: path.clone(),
-                before,
-                after: Some(after),
-            }],
-            Vec::new(),
-        );
-        self.asset_browser.refresh();
-        self.output.info(format!(
-            "lipsync: made `{path}` ({} visemes over {:.2} s). Play it with \
-             `face:PlayLipSync(\"{path}\", sound)`.",
-            lip.visemes.len(),
-            lip.duration
-        ));
         if !unknown.is_empty() {
             self.output.warning(format!(
                 "lipsync: these phonemes weren't known and are Silence: {}.",
                 unknown.join(", ")
             ));
         }
+        Some((path, lip))
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+
+    /// A 16-bit mono WAV: 0.2 s quiet, 0.3 s of a 140 Hz hum, 0.2 s quiet.
+    pub(in crate::app) fn hum_wav() -> Vec<u8> {
+        let rate = 16_000u32;
+        let mut samples = vec![0i16; 3200];
+        samples.extend((0..4800).map(|i| {
+            (8000.0 * (i as f32 * 2.0 * std::f32::consts::PI * 140.0 / rate as f32).sin()) as i16
+        }));
+        samples.extend(vec![0i16; 3200]);
+        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((36 + data.len() as u32).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(rate.to_le_bytes());
+        wav.extend((rate * 2).to_le_bytes());
+        wav.extend(2u16.to_le_bytes());
+        wav.extend(16u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend((data.len() as u32).to_le_bytes());
+        wav.extend(data);
+        wav
+    }
 
     #[test]
     fn timings_read_and_paths_sit_beside_their_source() {
@@ -154,28 +175,7 @@ mod tests {
             std::env::temp_dir().join(format!("axcenity-lipsync-cmd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(folder.join("voice")).unwrap();
-        // 16-bit mono WAV: 0.2 s quiet, 0.3 s of a 140 Hz hum, 0.2 s quiet.
-        let rate = 16_000u32;
-        let mut samples = vec![0i16; 3200];
-        samples.extend((0..4800).map(|i| {
-            (8000.0 * (i as f32 * 2.0 * std::f32::consts::PI * 140.0 / rate as f32).sin()) as i16
-        }));
-        samples.extend(vec![0i16; 3200]);
-        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let mut wav = Vec::new();
-        wav.extend(b"RIFF");
-        wav.extend((36 + data.len() as u32).to_le_bytes());
-        wav.extend(b"WAVEfmt ");
-        wav.extend(16u32.to_le_bytes());
-        wav.extend(1u16.to_le_bytes());
-        wav.extend(1u16.to_le_bytes());
-        wav.extend(rate.to_le_bytes());
-        wav.extend((rate * 2).to_le_bytes());
-        wav.extend(2u16.to_le_bytes());
-        wav.extend(16u16.to_le_bytes());
-        wav.extend(b"data");
-        wav.extend((data.len() as u32).to_le_bytes());
-        wav.extend(data);
+        let wav = hum_wav();
         std::fs::write(folder.join("voice/hum.wav"), wav).unwrap();
         let (lip, unknown) = make_lip_sync(&folder, "voice/hum.wav").unwrap();
         assert!(unknown.is_empty());
