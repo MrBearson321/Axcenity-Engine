@@ -5,7 +5,9 @@
 //! Benchmarks (roadmap I1, `docs/development/benchmarks.md`):
 //! `--make-s10k <folder>` writes the S10k measurement scene there,
 //! `--make-crowd <folder>` the crowd scene (unified Phase 93),
-//! `--make-streaming <folder>` the 4 × 4 km streaming world (Phase 80), and
+//! `--make-streaming <folder>` the 4 × 4 km streaming world (Phase 80),
+//! `--make-showcase <folder> --from <Overgrown Carriage> [--view <view>]`
+//! the showcase scene made from the owner's project, and
 //! `--bench <frames>` runs a project's start level headless, as a test
 //! does, and prints each frame step's times instead of running tests.
 
@@ -19,6 +21,7 @@ const USAGE: &str = "usage: axcenity-test <project-folder> [--junit <results.xml
                      \x20      axcenity-test --make-s10k <folder>\n\
                      \x20      axcenity-test --make-crowd <folder>\n\
                      \x20      axcenity-test --make-streaming <folder>\n\
+                     \x20      axcenity-test --make-showcase <folder> --from <project> [--view interior|exterior|pond|tour]\n\
                      example: cargo run -p axcenity-testing -- examples/hello-character";
 
 fn main() -> ExitCode {
@@ -84,6 +87,33 @@ fn main() -> ExitCode {
             println!(
                 "{} written to `{}`",
                 axcenity_testing::streaming_world::summary(),
+                folder.display()
+            );
+            return ExitCode::SUCCESS;
+        } else if arg == "--make-showcase" {
+            let Some(folder) = args.next() else {
+                return usage("--make-showcase needs a folder to write the scene in");
+            };
+            let (mut from, mut view) = (None, String::from("interior"));
+            while let Some(option) = args.next() {
+                let value = args.next();
+                match (option.to_str(), value) {
+                    (Some("--from"), Some(value)) => from = Some(PathBuf::from(value)),
+                    (Some("--view"), Some(value)) => view = value.to_string_lossy().into_owned(),
+                    _ => return usage("--make-showcase takes --from <project> and --view <view>"),
+                }
+            }
+            let Some(from) = from else {
+                return usage("--make-showcase needs --from <the Overgrown Carriage project>");
+            };
+            let folder = PathBuf::from(folder);
+            if let Err(err) = axcenity_testing::showcase::write(&folder, &from, &view) {
+                eprintln!("error: could not write `{}`: {err}", folder.display());
+                return ExitCode::from(2);
+            }
+            println!(
+                "{} written to `{}`",
+                axcenity_testing::showcase::summary(&view),
                 folder.display()
             );
             return ExitCode::SUCCESS;

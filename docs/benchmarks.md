@@ -25,6 +25,20 @@ cargo run --release -p axcenity-player  -- target/streaming --bench 600
 cargo run --release -p axcenity-server  -- target/streaming --bench 600 --bench-clients 1
 ```
 
+## The showcase (feature benchmark)
+
+The showcase measures the newer rendering features on real assets: the owner's **Overgrown Carriage** project (an overgrown train carriage with its seats, racks, ferns, ivy and leaf carpet, in a forest of the Abandoned Farmhouse's oaks, ash, saplings and bushes; a FogEffect volume of dust inside, dust motes and moths as particles, a light probe volume and wind), with what that project doesn't use yet added: six shadow-casting PointLights under the ceiling lamps (LE1's ray traced lamp shadows), a 128-stud Terrain with a pond and `Water` on (LE4, and LE5's ray traced reflections at reflection quality High or Ultra) ringed by 24 copies of the forest's own trees, and Clouds and a SunRaysEffect in Lighting. Everything added is in the Workspace's `Benchmark` Model and in Lighting; the carriage is untouched. Its assets are the owner's and aren't in this repository, so it's made on the machine that has the project:
+
+```text
+cargo run --release -p axcenity-testing -- --make-showcase target/showcase --from "<projects>/Overgrown Carriage" --view interior
+```
+
+The source is only read: its files are copied (without `.axcenity`, skipping files already copied at the same size) and `scripts/view.client.lua` in the copy is replaced by a camera script that holds one view every frame: **interior** (the project's own reference view down the carriage), **exterior** (three-quarters on, with the forest behind), **pond** (across the water at the far bank's trees) or **tour** (interior, exterior, an overview high over the forest, the pond and back in 12 s, so a 60-frame warm-up and 660 measured frames are one lap and the ray traced scene, streaming and TAA's history see a moving camera). Changing the view rewrites only the world, the camera script and the pond's terrain.
+
+**One scene through every feature.** The player's `--graphics <file.json>` holds a run to the graphics settings in that file (as `graphics.json` holds them; a setting left out keeps the preset's), including whether the GPU is opened with hardware ray tracing, without touching the machine's own `graphics.json` (`--quality` with it replaces the file's preset). `benchmarks/features/` has one file per step: the GPU opened for ray tracing with no effect on (what opening it costs), ray traced shadows, ambient occlusion and GI each at High on top of Ultra, all three together with Ultra reflections, volumetric fog and sun rays, and that again at 67% render scale with TAA upscaling. The regression check's `showcase-*` runs (below) draw the interior at every preset and then each of those files, the exterior, pond and tour at Ultra and with everything on, all at 2560 × 1440, plus `showcase-test` (the scene's simulation alone, headless). Read a feature's cost as its run's GPU frame minus `showcase-interior-ultra`'s, and the per-pass GPU times in the JSON say which pass it went to.
+
+Not covered: the editor's Path Traced view is a reference mode in the editor's viewport, not something a game draws, so it isn't timed here (it accumulates up to 2,048 paths a pixel and then stops tracing; [rendering/ray-tracing.md](rendering/ray-tracing.md)).
+
 ## Running it
 
 Build in release. Each host runs a 60-frame warm-up, then measures the frames asked for at a fixed 1/60 s of game time per frame, so every host does the same work per frame. It prints a table (mean, median, 95th percentile and worst time of each frame step) and one JSON line for tools.
@@ -45,13 +59,15 @@ AXCENITY_BENCH_PROJECT=target/s10k AXCENITY_BENCH_FRAMES=600 \
 
 **The player's own conditions.** `--bench` turns vertical sync off (`Renderer::set_vsync`) so frames are the engine's, not the display's, and times the GPU. `--size 2560x1440` makes the window that many physical pixels (it can be larger than the screen) and `--quality Ultra` draws with that preset alone for the run, leaving `graphics.json` as it is and ignoring a LocalScript's `UserGameSettings` changes. `Render` is the CPU's drawing work and `Present wait` the time the frame was blocked getting its picture from the window and handing it back (`Renderer::present_wait`).
 
+**Fixed graphics settings.** `--graphics <file.json>` draws with the settings in that file for the run (as `graphics.json` holds them, a setting left out keeping the preset's), and opens the GPU with hardware ray tracing if the file's `ray_tracing` is on; `--quality` with it replaces its preset. Like `--quality`, it leaves `graphics.json` as it is and ignores a LocalScript's `UserGameSettings` changes. The files the showcase uses are in `benchmarks/features/`.
+
 **Where uneven frames come from.** `AXCENITY_BENCH_TIMELINE=<file.csv>` makes the player write every measured frame's steps there, the GPU's passes to `<file>.gpu.csv`, and each frame's camera, items drawn, triangles, draw calls and shadow casters to `<file>.counts.csv`. A frame-time spread with no matching change in counts is the machine; a step in the counts is the scene (Temperate Dry Patch's script moves the camera after 8 seconds, which first read as uneven frames).
 
 `--bench` works on any project, not only S10k. After the table, each host also prints its **first frame** and its **worst warm-up frame** (where first-sight loads land), and the player adds **launch to first frame** and **launch to assets loaded** (from `main` starting to the end of the first frame drawn with the Workspace's assets in). The JSON line has these under `"startup"`. `core::bench` holds the shared pieces: `Laps` times a frame's steps one after another (the player's Developer Console Stats tab uses it too), `StageSamples` keeps every frame, and `BenchRun` adds the warm-up and the report.
 
 ### Regression check
 
-`axcenity-bench-check` (`testing/src/bench_check.rs`) runs the scenes listed in `benchmarks/baselines.json` (S10k on every host, and copies of the owner's projects in the test runner and the player) and compares each with the numbers recorded for this machine. Run it before merging a change that could cost frame time, and after an optimization to record the new numbers:
+`axcenity-bench-check` (`testing/src/bench_check.rs`) runs the scenes listed in `benchmarks/baselines.json` (S10k on every host and with 8 joined players, the crowd scene and the streaming world, copies of the owner's projects in the test runner and the player, and the showcase through its feature matrix) and compares each with the numbers recorded for this machine. Run it before merging a change that could cost frame time, and after an optimization to record the new numbers:
 
 ```text
 cargo build --release -p axcenity-player -p axcenity-server -p axcenity-testing -p axcenity-editor
@@ -61,9 +77,10 @@ taskset -c 0-15 target/release/axcenity-bench-check --machine <name>            
 
 - **Pin it.** Every scene it runs inherits the pinning. Unpinned, other work on the machine moves a frame by 30–50% and the check means nothing (`start /affinity FFFF` is the 9950X3D's V-cache CCD).
 - **What it measures.** One uncounted warm-up round, then `--rounds` (3) counted ones; the median of the runs' frame medians, and for the player also its first frame and launch to assets in. A measure slower than its baseline by more than `tolerance` (10% for frames, 30% for startup times) prints `SLOWER` and the exit code is 1. A slower result is a reason to measure properly, alternating before and after builds, not proof on its own. Rerunning the recorded build straight after recording it, every measure came back within 6% (frames within 5%).
+- **Scenes.** `s10k`, `crowd` and `streaming` are written by `axcenity-test` into `target/<name>` the first time. `showcase:<view>` is made from `Overgrown Carriage` in the projects folder into `target/bench-projects/Showcase` before each run (only its camera changes between views; skipped when the project isn't there) and cooked like a project.
 - **Projects.** A `project:<name>` scene is copied once from `AXCENITY_PROJECTS` (or `--projects`; default `Documents/Axcenity Projects`) into `target/bench-projects`, without its `.axcenity` folder, then cooked with `axcenity-editor --cook` before each run. The owner's project is never written. `--fresh` copies it again; a project that isn't on the machine is skipped.
 - **Recording.** `--update` writes this run's numbers for `--machine` into `benchmarks/baselines.json` with the commit. Commit that file with the change that moved them, and say why in the commit. A run's `known` note (Abandoned Farmhouse's steady frame) is kept; edit it, and the machine's `about`, by hand when they go stale.
-- **Per-run options and what else is noted.** A run's `args` are passed to the player (`dry-patch-ultra-1440p` draws Temperate Dry Patch at `--size 2560x1440 --quality Ultra`, the owner's desktop settings, for 400 frames: the project's script keeps its demo camera for 8 seconds, then hands it to the walker). A host that times the GPU also has its GPU frame median checked against `gpu_ms` with the frame's tolerance, and its 1% low frame rate and bound printed and recorded (`low_1pct_fps`, `bound`) but not judged: a 1% low is too few frames to fail a check on.
+- **Per-run options and what else is noted.** A run's `args` are passed to its host's binary (the server's `--bench-clients 8`, the player's `--size`, `--quality` and `--graphics`), so to the player (`dry-patch-ultra-1440p` draws Temperate Dry Patch at `--size 2560x1440 --quality Ultra`, the owner's desktop settings, for 400 frames: the project's script keeps its demo camera for 8 seconds, then hands it to the walker). A host that times the GPU also has its GPU frame median checked against `gpu_ms` with the frame's tolerance, and its 1% low frame rate and bound printed and recorded (`low_1pct_fps`, `bound`) but not judged: a 1% low is too few frames to fail a check on.
 - `--only <text>` runs the scenes whose names contain it. Raw reports of the before/after comparison below are in `benchmarks/results/2026-11-10-desktop-9950x3d.jsonl`, one JSON line per run.
 
 ### Controlled scenarios
@@ -83,6 +100,10 @@ Each kind of load has a scene that isolates it, measured the same way every time
 | Large terrain | General Store Roadside (960 × 1,260 studs, check), `bench_terrain_with_foliage` (2,048 studs) | player `--bench`, render bench |
 | Particle-heavy | `bench_particles` (up to 100,000 GPU particles) | render bench |
 | Animation-heavy | `bench_20_walking_characters`, S10k's 20 animated characters | render bench, `--bench` |
+| Crowd (multithreaded frame) | `crowd-test`, `crowd-player` (check): 200 animated characters, 2,000 bodies | every host's `--bench` |
+| Streaming | `streaming-player`, `streaming-server-1-player` (check): the 4 × 4 km world | player, server `--bench-clients 1` |
+| Replication | `s10k-server-8-players` (check) | server `--bench-clients 8` |
+| Real assets, every newer rendering feature | the showcase (check, `showcase-*`): fog volume, particles, probes, wind, shadow-casting lamps, terrain water, clouds, sun rays; presets, then each ray traced effect | player `--bench --graphics benchmarks/features/<file>` |
 
 Render benches: `cargo test -p axcenity-player --release -- --ignored bench_ --nocapture --test-threads 1` ([rendering/performance.md](rendering/performance.md)). Results over time: `benchmarks/baselines.json` (the recorded numbers and commit per machine) and `benchmarks/results/*.jsonl` (raw reports).
 

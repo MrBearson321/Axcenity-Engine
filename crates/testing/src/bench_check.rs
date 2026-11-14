@@ -77,7 +77,7 @@ fn run() -> Result<ExitCode, String> {
     let mut slower = 0;
     let mut failed = 0;
     println!(
-        "{:<20} {:<16} {:>10} {:>10} {:>8}  status",
+        "{:<34} {:<16} {:>10} {:>10} {:>8}  status",
         "run", "measure", "baseline", "now", "change"
     );
     for run in &runs {
@@ -93,13 +93,13 @@ fn run() -> Result<ExitCode, String> {
             Ok(Some(measured)) => measured,
             Ok(None) => {
                 println!(
-                    "{name:<20} skipped: its project isn't in {}",
+                    "{name:<34} skipped: its project isn't in {}",
                     options.projects.display()
                 );
                 continue;
             }
             Err(message) => {
-                println!("{name:<20} FAILED: {message}");
+                println!("{name:<34} FAILED: {message}");
                 failed += 1;
                 continue;
             }
@@ -130,7 +130,7 @@ fn run() -> Result<ExitCode, String> {
             entry.insert(key.into(), json!((now * 1000.0).round() / 1000.0));
             let Some(base) = recorded[name][key].as_f64() else {
                 println!(
-                    "{name:<20} {label:<16} {:>10} {now:>10.3} {:>8}  new",
+                    "{name:<34} {label:<16} {:>10} {now:>10.3} {:>8}  new",
                     "-", "-"
                 );
                 continue;
@@ -145,7 +145,7 @@ fn run() -> Result<ExitCode, String> {
                 "ok"
             };
             println!(
-                "{name:<20} {label:<16} {base:>10.3} {now:>10.3} {:>+7.1}%  {status}",
+                "{name:<34} {label:<16} {base:>10.3} {now:>10.3} {:>+7.1}%  {status}",
                 change * 100.0
             );
         }
@@ -158,15 +158,15 @@ fn run() -> Result<ExitCode, String> {
             let base = recorded[name]["low_1pct_fps"]
                 .as_f64()
                 .map_or("-".to_owned(), |base| format!("{base:.1}"));
-            println!("{name:<20} {:<16} {base:>10} {low:>10.1}", "1% low fps");
+            println!("{name:<34} {:<16} {base:>10} {low:>10.1}", "1% low fps");
             entry.insert("low_1pct_fps".into(), json!((low * 10.0).round() / 10.0));
         }
         if let Some(bound) = measured.bound.as_ref().filter(|_| drawn) {
-            println!("{name:<20} {bound}");
+            println!("{name:<34} {bound}");
             entry.insert("bound".into(), json!(bound));
         }
         if let Some(note) = recorded[name]["known"].as_str() {
-            println!("{name:<20} known: {note}");
+            println!("{name:<34} known: {note}");
             entry.insert("known".into(), json!(note));
         }
         results.insert(name.into(), Value::Object(entry));
@@ -262,7 +262,8 @@ fn measure(run: &Value, options: &Options) -> Result<Option<Measured>, String> {
     let name = run["name"].as_str().unwrap_or_default();
     let host = run["host"].as_str().unwrap_or_default();
     let frames = run["frames"].as_u64().unwrap_or(300).to_string();
-    // A player run's own options, such as `--size 2560x1440 --quality Ultra`.
+    // A run's own options for its host's binary, such as the player's
+    // `--size 2560x1440 --quality Ultra` or the server's `--bench-clients 8`.
     let extra: Vec<String> = run["args"]
         .as_array()
         .map(|args| {
@@ -280,15 +281,15 @@ fn measure(run: &Value, options: &Options) -> Result<Option<Measured>, String> {
     let mut measured = Measured::default();
     for round in 0..=options.rounds {
         let mut command = match host {
-            "test" => binary("axcenity-test", &[&scene_arg, "--bench", &frames])?,
-            "server" => binary(
-                "axcenity-server",
-                &[&scene_arg, "--port", "0", "--bench", &frames],
-            )?,
-            "player" => {
-                let mut args = vec![scene_arg.as_str(), "--bench", frames.as_str()];
+            "test" | "server" | "player" => {
+                let (name, mut args) = match host {
+                    "test" => ("axcenity-test", vec![scene_arg.as_str()]),
+                    "server" => ("axcenity-server", vec![scene_arg.as_str(), "--port", "0"]),
+                    _ => ("axcenity-player", vec![scene_arg.as_str()]),
+                };
+                args.extend(["--bench", frames.as_str()]);
                 args.extend(extra.iter().map(String::as_str));
-                binary("axcenity-player", &args)?
+                binary(name, &args)?
             }
             "editor-play" => {
                 let mut command = Command::new("cargo");
@@ -351,21 +352,46 @@ fn measure(run: &Value, options: &Options) -> Result<Option<Measured>, String> {
 /// `s10k` is the scene `axcenity-test --make-s10k` writes (made if
 /// missing); `project:<name>` is a cooked copy of that project.
 fn scene_folder(scene: &str, options: &Options) -> Result<Option<PathBuf>, String> {
-    if scene == "s10k" {
-        let folder = PathBuf::from("target/s10k");
+    // Scenes `axcenity-test` writes, made once if missing.
+    for (name, flag) in [
+        ("s10k", "--make-s10k"),
+        ("crowd", "--make-crowd"),
+        ("streaming", "--make-streaming"),
+    ] {
+        if scene != name {
+            continue;
+        }
+        let folder = PathBuf::from("target").join(name);
         if !folder.join("world.json").exists() {
-            let status = binary("axcenity-test", &["--make-s10k", "target/s10k"])?
+            let status = binary("axcenity-test", &[flag, &folder.to_string_lossy()])?
                 .status()
                 .map_err(|err| err.to_string())?;
             if !status.success() {
-                return Err("couldn't write the S10k scene".into());
+                return Err(format!("couldn't write the {name} scene"));
             }
         }
         return Ok(Some(folder));
     }
+    // The showcase is made from the owner's Overgrown Carriage, holding
+    // the run's camera view; only the camera changes between views.
+    if let Some(view) = scene.strip_prefix("showcase:") {
+        let source = options
+            .projects
+            .join(axcenity_testing::showcase::SOURCE_PROJECT);
+        if !source.join("world.json").exists() {
+            return Ok(None);
+        }
+        let copy = PathBuf::from("target/bench-projects").join(axcenity_testing::showcase::NAME);
+        if options.fresh {
+            let _ = std::fs::remove_dir_all(&copy);
+        }
+        axcenity_testing::showcase::write(&copy, &source, view)
+            .map_err(|err| format!("making the showcase: {err}"))?;
+        return cook(&copy, axcenity_testing::showcase::NAME).map(Some);
+    }
     let Some(project) = scene.strip_prefix("project:") else {
         return Err(format!(
-            "unknown scene `{scene}`: use s10k or project:<name>"
+            "unknown scene `{scene}`: use s10k, crowd, streaming, showcase:<view> or project:<name>"
         ));
     };
     let source = options.projects.join(project);
@@ -377,17 +403,22 @@ fn scene_folder(scene: &str, options: &Options) -> Result<Option<PathBuf>, Strin
         let _ = std::fs::remove_dir_all(&copy);
         copy_project(&source, &copy).map_err(|err| format!("copying {project}: {err}"))?;
     }
-    // Cooks what isn't current yet, as opening the project in the editor does.
+    cook(&copy, project).map(Some)
+}
+
+/// Cooks what isn't current yet in `copy`, as opening the project in the
+/// editor does.
+fn cook(copy: &Path, name: &str) -> Result<PathBuf, String> {
     let output = binary("axcenity-editor", &["--cook", &copy.to_string_lossy()])?
         .output()
         .map_err(|err| err.to_string())?;
     if !output.status.success() {
         return Err(format!(
-            "cooking {project} failed:\n{}",
+            "cooking {name} failed:\n{}",
             String::from_utf8_lossy(&output.stdout)
         ));
     }
-    Ok(Some(copy))
+    Ok(copy.to_path_buf())
 }
 
 /// Copies a project folder, leaving out this computer's `.axcenity` cache.

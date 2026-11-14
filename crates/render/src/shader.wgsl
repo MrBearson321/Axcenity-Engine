@@ -164,6 +164,10 @@ struct InstanceIn {
 // bare, and a Part's Decal, drawn a hair toward the camera.
 const ROLE_CHARACTER: f32 = 1.0;
 const ROLE_DECAL: f32 = 2.0;
+// The prepass normal's w on a cut-out's pixel (1 on others, 0.5 on a
+// character's). Must match `PREPASS_CUT_OUT` in ray_shadows.wgsl and
+// ray_ao.wgsl.
+const PREPASS_CUT_OUT: f32 = 0.875;
 // How far toward the camera a Decal's depth is moved, in clip-space depth
 // (0 to 1): many times the depth's rounding, so it always wins over the
 // face it lies on, yet far less than anything placed in front of it.
@@ -735,6 +739,10 @@ fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0)
     // A character's pixels are marked for projected decals (decal.wgsl).
     if in.role == ROLE_CHARACTER {
         normal.w = 0.5;
+    } else if in.surface.z > 0.0 {
+        // A cut-out's pixel, for ray traced shadows and AO
+        // (ray_shadows.wgsl's `cut_out_near`); decals treat it as solid.
+        normal.w = PREPASS_CUT_OUT;
     }
     return normal;
 }

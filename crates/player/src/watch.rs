@@ -10,13 +10,13 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use axcenity_anim::Animators;
 use axcenity_assets::{Assets, Reload};
 use axcenity_audio::GameAudio;
 use axcenity_project::{Watched, Watcher};
 
-use axcenity_render::Quality;
+use axcenity_render::{GraphicsSettings, Quality};
 
 use crate::USAGE;
 
@@ -49,6 +49,11 @@ pub struct Arguments {
     /// `--quality <Low|Medium|High|Ultra>`: that preset with no overrides,
     /// for this run only (`graphics.json` is left as it is).
     pub quality: Option<Quality>,
+    /// `--graphics <file.json>`: graphics settings read from that file (as
+    /// `graphics.json` holds them; leaving a setting out keeps the preset's)
+    /// for this run only, including whether the GPU is opened with
+    /// hardware ray tracing. `--quality` with it replaces the file's preset.
+    pub graphics: Option<PathBuf>,
     /// `--replay <file>`: watch a `.replay` of the game instead of
     /// playing it (Phase 81).
     pub replay: Option<PathBuf>,
@@ -136,6 +141,13 @@ impl Arguments {
                     );
                 };
                 parsed.quality = Some(quality);
+            } else if argument == "--graphics" {
+                let Some(file) = arguments.next() else {
+                    bail!(
+                        "--graphics takes a graphics settings file, such as rt-all.json\n\n{USAGE}"
+                    );
+                };
+                parsed.graphics = Some(PathBuf::from(file));
             } else if argument == "--replay" {
                 let Some(file) = arguments.next() else {
                     bail!("--replay takes the .replay file to watch\n\n{USAGE}");
@@ -158,6 +170,31 @@ impl Arguments {
             bail!("a replay is watched on its own, without --host or --join\n\n{USAGE}");
         }
         Ok(parsed)
+    }
+
+    /// The graphics settings this run is held to, whatever `graphics.json`
+    /// or a LocalScript says: `--graphics`' file (with `--quality`'s preset,
+    /// if given), or `--quality`'s preset alone. `None` when neither was
+    /// given.
+    pub fn fixed_graphics(&self) -> Result<Option<GraphicsSettings>> {
+        let mut settings = match &self.graphics {
+            Some(file) => {
+                let text = std::fs::read_to_string(file).with_context(|| {
+                    format!("could not read the graphics settings in {}", file.display())
+                })?;
+                serde_json::from_str::<GraphicsSettings>(&text).with_context(|| {
+                    format!("{} doesn't read as graphics settings", file.display())
+                })?
+            }
+            None => match self.quality {
+                Some(quality) => return Ok(Some(GraphicsSettings::preset(quality))),
+                None => return Ok(None),
+            },
+        };
+        if let Some(quality) = self.quality {
+            settings.quality = quality;
+        }
+        Ok(Some(settings))
     }
 
     /// The project folder to watch: the game's, if `--watch` was given and
@@ -279,6 +316,75 @@ mod tests {
             let err = parse(bad).unwrap_err();
             assert!(err.to_string().contains("--bench takes"), "{err}");
         }
+    }
+
+    #[test]
+    fn a_graphics_file_holds_the_run_to_its_settings() {
+        use axcenity_render::RayTracedShadows;
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-graphics-arg-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("rt.json");
+        std::fs::write(
+            &file,
+            r#"{ "quality": "Ultra", "ray_tracing": true, "ray_traced_shadows": "High" }"#,
+        )
+        .unwrap();
+        let file_arg = file.to_string_lossy().into_owned();
+
+        let fixed = parse(&["--graphics", &file_arg, "games/showcase"])
+            .unwrap()
+            .fixed_graphics()
+            .unwrap()
+            .unwrap();
+        assert_eq!(fixed.quality, Quality::Ultra);
+        assert!(fixed.ray_tracing());
+        assert_eq!(fixed.ray_traced_shadows, Some(RayTracedShadows::High));
+        // Settings the file leaves out keep the preset's.
+        assert_eq!(fixed.ray_traced_ambient_occlusion, None);
+
+        // `--quality` replaces the file's preset and keeps the rest.
+        let fixed = parse(&["--graphics", &file_arg, "--quality", "Low"])
+            .unwrap()
+            .fixed_graphics()
+            .unwrap()
+            .unwrap();
+        assert_eq!(fixed.quality, Quality::Low);
+        assert!(fixed.ray_tracing());
+
+        // `--quality` alone is the preset; neither is no fixed settings.
+        let preset = parse(&["--quality", "Medium"])
+            .unwrap()
+            .fixed_graphics()
+            .unwrap();
+        assert_eq!(preset, Some(GraphicsSettings::preset(Quality::Medium)));
+        assert_eq!(
+            parse(&["games/showcase"])
+                .unwrap()
+                .fixed_graphics()
+                .unwrap(),
+            None
+        );
+
+        // A missing or unreadable file is an error that names it.
+        assert!(parse(&["--graphics"]).is_err());
+        let missing = parse(&["--graphics", "no-such-settings.json"])
+            .unwrap()
+            .fixed_graphics();
+        assert!(
+            missing
+                .unwrap_err()
+                .to_string()
+                .contains("no-such-settings.json")
+        );
+        std::fs::write(&file, "not json").unwrap();
+        assert!(
+            parse(&["--graphics", &file_arg])
+                .unwrap()
+                .fixed_graphics()
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]
