@@ -92,6 +92,14 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 ```
 
+#### PlayerFlagged
+
+```luau
+Players.PlayerFlagged: Signal
+```
+
+Scripts only: fires with the Player and why (a string) when the server catches what their device sent breaking a rule, such as sending far more than a game client does or tables nested too deep. At most once a second for each reason. The server kicks a player flagged too often in a minute on its own (`axcenity-server --kick-flags`); a script may kick sooner or note it.
+
 ### Functions
 
 #### GetPlayers
