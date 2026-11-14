@@ -318,3 +318,9 @@ The choices of `Enum.RayTracedGlobalIllumination`.
 
 Items: `Off`, `Low`, `Medium`, `High`
 
+## Enum.RayTracedReflections
+
+The choices of `Enum.RayTracedReflections`.
+
+Items: `Off`, `Low`, `Medium`, `High`
+

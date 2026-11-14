@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Faces blink, look at things and show expressions"
+details = "FaceControls:SetExpression blends in one of 15 built-in expressions (Happy, Sad, Angry, Surprised, Sleepy …) or a *.expression.json of the project's own, with an intensity, transition time, weight, priority and one-sided asymmetry; ClearExpression blends it out. Faces blink by themselves (random intervals, double blinks, per eye, or off), follow the camera, a part, a character or a point with their eyes within limits, and make small idle movements. Layers (Base, Expression, Dialogue, Procedural, Override) can be reordered, weighted, made additive and masked to parts of the face, and SetOverride holds a control over everything."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = [384]
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

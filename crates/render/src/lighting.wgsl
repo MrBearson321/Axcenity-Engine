@@ -89,6 +89,11 @@ struct Frame {
     // the lamps' half of `ray_shadow_mask` starts, or 0 while lamps aren't
     // traced (`ray_traced_lamp`).
     ray_shadows: vec4<f32>,
+    // Ray traced reflections (RL4, `traced_reflected`): x the roughness
+    // from which they aren't traced (0 while off), y how many scene pixels
+    // a traced one stands for each way, z the traced width in pixels, w
+    // unused.
+    ray_reflections: vec4<f32>,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in
@@ -198,6 +203,10 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // lamps: 4 bits each (0 in shadow, 15 lit), in the order its tile lists
 // the lamps that cast shadows, at most `TRACED_LAMPS`.
 @group(0) @binding(17) var<storage, read> ray_shadow_mask: array<u32>;
+// Ray traced reflections (ray_reflections.wgsl), two u32s a traced pixel:
+// rg, then b and how much it counts, as half floats. One blank entry while
+// they're off.
+@group(0) @binding(18) var<storage, read> ray_reflections: array<vec2<u32>>;
 
 // The most lamps a pixel has ray traced shadows for. Must match
 // `TRACED_LAMPS` in ray_shadows.wgsl.
@@ -824,6 +833,49 @@ fn reflected(position: vec3<f32>, dir: vec3<f32>, roughness: f32, environment: f
     return color + left * environment * sky_specular(dir, roughness);
 }
 
+// The low 16 bits of `bits` as a half float, positive and finite (as
+// ray_reflections.wgsl writes them). By hand: `unpack2x16float` needs a
+// capability the scene shader doesn't ask every GPU for.
+fn half_float(bits: u32) -> f32 {
+    let exponent = (bits >> 10u) & 0x1fu;
+    let mantissa = bits & 0x3ffu;
+    if exponent == 0u {
+        return f32(mantissa) * exp2(-24.0);
+    }
+    return bitcast<f32>(((exponent + 112u) << 23u) | (mantissa << 13u));
+}
+
+// What a surface at `world_position` sees reflected along `dir`: the ray
+// traced reflection at its `pixel` (RL4) where one was traced for a `solid`
+// surface smoother than the cutoff, fading into the reflection probes and
+// the sky (`reflected`) toward the cutoff and where it counts less.
+fn traced_reflected(
+    world_position: vec3<f32>,
+    dir: vec3<f32>,
+    roughness: f32,
+    environment: f32,
+    pixel: vec2<f32>,
+    solid: bool,
+) -> vec3<f32> {
+    let probes = reflected(world_position, dir, roughness, environment);
+    let cutoff = frame.ray_reflections.x;
+    if !solid || roughness >= cutoff {
+        return probes;
+    }
+    let scale = max(u32(frame.ray_reflections.y), 1u);
+    let at = vec2<u32>(max(pixel, vec2<f32>(0.0))) / scale;
+    let index = at.y * u32(frame.ray_reflections.z) + at.x;
+    if index >= arrayLength(&ray_reflections) {
+        return probes;
+    }
+    let packed = ray_reflections[index];
+    let rg = vec2<f32>(half_float(packed.x), half_float(packed.x >> 16u));
+    let b_weight = vec2<f32>(half_float(packed.y), half_float(packed.y >> 16u));
+    let fade = 1.0 - roughness / cutoff;
+    let weight = clamp(b_weight.y, 0.0, 1.0) * fade * fade;
+    return mix(probes, vec3<f32>(rg, b_weight.x), weight);
+}
+
 // Average specular reflection of light arriving from every direction
 // (Karis' analytic approximation). Multiplies the environment's color to
 // give what a surface reflects of it.
@@ -1116,6 +1168,7 @@ fn shade_surface(
     let ambient = occlusion * (
         frame.ambient.rgb * (diffuse_color + reflectance)
         + surrounding_diffuse(world_position, n, environment) * diffuse_color
-        + reflected(world_position, reflection, roughness, environment) * reflectance);
+        + traced_reflected(world_position, reflection, roughness, environment, pixel, solid)
+            * reflectance);
     return sun + lit + ambient;
 }

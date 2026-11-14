@@ -657,7 +657,7 @@ impl Humanoids {
                 self.states.0.borrow().get(&humanoid),
             );
             events.extend(self.enter(world, humanoid, state));
-            self.animate(world, assets, humanoid, holder, pieces, dt);
+            self.animate(world, assets, controllers, humanoid, holder, pieces, dt);
         }
         events
     }
@@ -787,10 +787,12 @@ impl Humanoids {
     /// Plays the Animator state that matches the Humanoid's: Idle, Walk or
     /// Run on the ground (by how fast it moved since last frame), Jump and
     /// Fall in the air, if its state machine has a state by that name.
+    #[allow(clippy::too_many_arguments)]
     fn animate(
         &mut self,
         world: &mut World,
         assets: &Assets,
+        controllers: &Controllers,
         humanoid: InstanceId,
         holder: InstanceId,
         pieces: Pieces,
@@ -806,13 +808,41 @@ impl Humanoids {
             _ => 0.0,
         };
         let state = self.states.0.borrow().get(&humanoid).copied();
+        let path = pieces
+            .animator
+            .and_then(|animator| world.get(animator))
+            .and_then(|instance| instance.property("StateMachine"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        // Read only when needed: crouched, or the state to play changed.
+        let machine = std::cell::OnceCell::new();
+        let machine = || {
+            machine.get_or_init(|| {
+                (!path.is_empty())
+                    .then(|| read_state_machine(assets, &path).ok())
+                    .flatten()
+            })
+        };
+        let has = |name: &str| {
+            machine()
+                .as_ref()
+                .is_some_and(|file| file.state(name).is_some())
+        };
         let wanted = match state {
             Some(State::Running | State::Landed) => {
                 let controller = pieces.controller.unwrap_or(humanoid);
                 let walk = number(world, controller, "WalkSpeed") as f32;
                 let run = number(world, controller, "RunSpeed") as f32;
+                let crouched = controllers.crouched(controller);
                 if speed < 0.5 {
-                    Some("Idle")
+                    Some(if crouched && has("Crouch") {
+                        "Crouch"
+                    } else {
+                        "Idle"
+                    })
+                } else if crouched && has("CrouchWalk") {
+                    Some("CrouchWalk")
                 } else if run > walk && speed > (walk + run) * 0.5 {
                     Some("Run")
                 } else {
@@ -830,15 +860,8 @@ impl Humanoids {
         let (Some(name), Some(animator)) = (wanted, pieces.animator) else {
             return;
         };
-        let path = world
-            .get(animator)
-            .and_then(|instance| instance.property("StateMachine"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        if path.is_empty()
-            || read_state_machine(assets, &path).is_ok_and(|file| file.state(name).is_none())
-        {
+        // A state machine that doesn't read still gets the request, as before.
+        if path.is_empty() || (machine().is_some() && !has(name)) {
             return;
         }
         if let Some(live) = world.animator_mut(animator) {

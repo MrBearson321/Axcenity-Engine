@@ -71,6 +71,7 @@ impl EditorApp {
             Action::KeepPlayChanges(_) => {}
             Action::SetLocked(id, on) => self.set_locked(id, on),
             Action::ReportBug(id) => self.report_bug_about(id),
+            Action::Plugin { plugin, action } => self.plugin_explorer_action(plugin, action),
         }
     }
     /// Turns `Locked` on or off for `id`, and for the rest of the selection
@@ -264,8 +265,12 @@ impl EditorApp {
         if what == Insertable::Character {
             let parent = tree::insert_parent(&self.world, near, what);
             let position = self.insert_position();
-            let state_machine = self.character_state_machine();
-            let character = tree::character(&mut self.world, position, &state_machine);
+            let character = if self.add_default_humanoid() {
+                axcenity_project::default_character(&mut self.world, position)
+            } else {
+                let state_machine = self.character_state_machine();
+                tree::character(&mut self.world, position, &state_machine)
+            };
             let name = tree::unique_name(&self.world, parent, "Character");
             self.world.set_name(character, &name).expect("just made");
             let index = self.world.get(parent).map_or(0, |p| p.children().len());
@@ -413,6 +418,18 @@ impl EditorApp {
             if !in_mesh_part {
                 self.output.warning(
                     "An IKControl turns the bones of the skinned MeshPart it's inside: select an imported character first.",
+                );
+            }
+        }
+        if what == Insertable::FaceControls {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let in_mesh_part = self
+                .world
+                .get(parent)
+                .is_some_and(|instance| instance.class() == ClassName::MeshPart);
+            if !in_mesh_part {
+                self.output.warning(
+                    "FaceControls move the face of the MeshPart they're inside (its blend shapes, eyes and jaw): select an imported character first.",
                 );
             }
         }
@@ -581,6 +598,39 @@ impl EditorApp {
         }
     }
 
+    /// Writes the default humanoid's files (model, animations, clips, state
+    /// machine and `Character` prefab; `axcenity_project::add_default_humanoid`)
+    /// into the project for Insert > Character, keeping any already there.
+    /// False when there's no project folder to write to or writing failed
+    /// (with an error): Insert > Character then makes the block character.
+    fn add_default_humanoid(&mut self) -> bool {
+        let Some(project) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return false;
+        };
+        let new = !project
+            .join(axcenity_project::DEFAULT_HUMANOID_MODEL_PATH)
+            .is_file();
+        match axcenity_project::add_default_humanoid(&project) {
+            Ok(_) => {
+                if new {
+                    self.output.info(format!(
+                        "Added the default humanoid to the project: its model `{}`, its \
+                         animations and the state machine `{}`.",
+                        axcenity_project::DEFAULT_HUMANOID_MODEL_PATH,
+                        axcenity_project::DEFAULT_HUMANOID_STATE_MACHINE_PATH
+                    ));
+                }
+                true
+            }
+            Err(err) => {
+                self.output.error(format!(
+                    "Could not write the default humanoid's files: {err}"
+                ));
+                false
+            }
+        }
+    }
+
     /// The state machine Insert > Character's Animator plays:
     /// `assets/animations/Character/Character.statemachine.json`, made the
     /// first time with an empty clip for each of [`tree::CHARACTER_STATES`].
@@ -588,8 +638,8 @@ impl EditorApp {
     fn character_state_machine(&mut self) -> String {
         let Some(project) = self.project.as_ref().map(|project| project.folder.clone()) else {
             self.output.warning(
-                "The Character's Animator has no state machine: save the project first, \
-                 then insert another to get its Idle, Walk, Run, Jump, Fall and Sit clips.",
+                "This is the block character, with no state machine: save the project \
+                 first, then insert another to get the default humanoid and its animations.",
             );
             return String::new();
         };

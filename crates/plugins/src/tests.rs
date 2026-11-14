@@ -621,7 +621,7 @@ fn importers_asset_actions_and_asset_imported_reach_the_plugin() {
          local open = plugin:AddAssetAction({ Label = 'Count bytes', Extensions = { 'glb' } })\n\
          open.Activated:Connect(function(path) print('action', path) end)\n\
          plugin.AssetImported:Connect(function(path) print('imported', path) end)\n\
-         assert(plugin.ApiVersion == 2)\n\
+         assert(plugin.ApiVersion >= 2)\n\
          print(pcall(plugin.AddImporter, plugin, { Name = 'x', Extensions = {} }))\n\
          print(pcall(plugin.AddImporter, plugin, { Name = 'x', Extensions = { 'a/b' } }))\n\
          print(pcall(plugin.AddAssetAction, plugin, { }))\n",
@@ -726,6 +726,13 @@ fn the_definitions_name_the_whole_plugin_api() {
         "Imported: PluginSignal",
         "AssetImported: PluginSignal",
         "ApiVersion: number",
+        "function CreateAction(",
+        "function AddExplorerAction(",
+        "function OpenScript(",
+        "function Notify(",
+        "Triggered: PluginSignal",
+        "ModelImported: PluginSignal",
+        "Unloading: PluginSignal",
     ];
     for name in names {
         assert!(
@@ -739,6 +746,7 @@ fn the_definitions_name_the_whole_plugin_api() {
         include_str!("draw.rs"),
         include_str!("rows.rs"),
         include_str!("assets.rs"),
+        include_str!("actions.rs"),
     ]
     .concat();
     for line in api.lines() {
@@ -754,4 +762,117 @@ fn the_definitions_name_the_whole_plugin_api() {
             }
         }
     }
+}
+
+/// API 3: commands, Explorer items, ModelImported, Unloading, OpenScript
+/// and Notify.
+#[test]
+fn api_3_commands_explorer_items_imports_unloading_scripts_and_notices() {
+    let folder = temp_folder("api3");
+    let found = project_with_plugin(
+        &folder,
+        "tidy",
+        MANIFEST,
+        r#"
+        assert(plugin.ApiVersion == 3)
+        local align = plugin:CreateAction({ Id = "align", Text = "Align parts", Shortcut = "Ctrl+Shift+L", Tooltip = "Line them up" })
+        align.Triggered:Connect(function()
+            print("aligned")
+            plugin:Notify("Aligned 2 parts")
+        end)
+        -- The same Id again is the same command, changed.
+        plugin:CreateAction({ Id = "align", Text = "Align selected", Shortcut = "Ctrl+Shift+L" })
+        local tag = plugin:AddExplorerAction({ Label = "Tag as prop", Class = "BasePart" })
+        tag.Activated:Connect(function(instances)
+            for _, part in instances do
+                part:SetAttribute("Prop", true)
+            end
+        end)
+        plugin.ModelImported:Connect(function(root, path)
+            root.Name = "Imported " .. path
+        end)
+        plugin.Unloading:Connect(function()
+            plugin:SetSetting("saved", true)
+        end)
+        local ok, err = pcall(function() plugin:CreateAction({ Id = "bad", Shortcut = "Shift+A" }) end)
+        print(ok, string.find(err, "needs Ctrl or Alt") ~= nil)
+        ok, err = pcall(function() plugin:AddExplorerAction({ Label = "x", Class = "Nope" }) end)
+        print(ok, string.find(err, "isn't a class") ~= nil)
+        "#,
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<String> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed, ["false\ttrue", "false\ttrue"], "{printed:?}");
+    let (actions, explorer) = plugin.take_actions().expect("it made some");
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].text, "Align selected");
+    assert_eq!(
+        actions[0].shortcut.as_ref().map(Shortcut::text).as_deref(),
+        Some("Ctrl+Shift+L")
+    );
+    assert_eq!(explorer.len(), 1);
+    assert!(explorer[0].offered_for(ClassName::Part));
+    assert!(!explorer[0].offered_for(ClassName::Model));
+    assert!(plugin.take_actions().is_none(), "nothing changed since");
+
+    plugin.trigger_action(&mut world, actions[0].id);
+    let printed: Vec<String> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed, ["aligned"]);
+    assert!(matches!(
+        plugin.take_requests().as_slice(),
+        [Request::Notify(text)] if text == "Aligned 2 parts"
+    ));
+
+    let a = part(&mut world, "A", Vector3::new(0.0, 0.0, 0.0));
+    let b = part(&mut world, "B", Vector3::new(4.0, 0.0, 0.0));
+    plugin.explorer_action(&mut world, explorer[0].id, &[a, b]);
+    for id in [a, b] {
+        assert_eq!(
+            world.get(id).unwrap().attribute("Prop"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    let model = world.create(ClassName::Model).unwrap();
+    plugin.model_imported(&mut world, model, "assets/models/crate.glb");
+    assert_eq!(
+        world.get(model).unwrap().name(),
+        "Imported assets/models/crate.glb"
+    );
+
+    plugin.unloading(&mut world);
+    let settings = plugin.take_settings().expect("Unloading saved one");
+    assert_eq!(settings.get("saved"), Some(&Json::Bool(true)));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn open_script_asks_for_a_script_at_a_line() {
+    let folder = temp_folder("open-script");
+    let found = project_with_plugin(
+        &folder,
+        "lint",
+        MANIFEST,
+        r#"
+        local script = Instance.new("Script")
+        script.Name = "Main"
+        script.Parent = game:GetService("ServerScriptService")
+        plugin:OpenScript(script, 12)
+        local ok, err = pcall(function() plugin:OpenScript(workspace, 1) end)
+        print(ok, string.find(err, "needs a Script") ~= nil)
+        "#,
+    );
+    let mut world = World::new();
+    let plugin = start(&mut world, &found, &folder);
+    let printed: Vec<String> = plugin.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed, ["false\ttrue"], "{printed:?}");
+    let requests = plugin.take_requests();
+    assert!(
+        requests
+            .iter()
+            .any(|request| matches!(request, Request::OpenScript(_, Some(12)))),
+        "an OpenScript request"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
 }

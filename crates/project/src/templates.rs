@@ -131,6 +131,14 @@ impl Template {
         Template::BLANK.contains(&self)
     }
 
+    /// Whether its players are the default humanoid: a project made from
+    /// it gets [`add_default_humanoid`]'s files, and its world's
+    /// `StarterPlayer.StarterCharacter` names the `Character` prefab. The
+    /// first-person and top-down templates place characters of their own.
+    pub fn has_default_character(self) -> bool {
+        !matches!(self, Template::FirstPerson | Template::TopDown)
+    }
+
     pub(super) fn world(self) -> &'static str {
         match self {
             Template::Baseplate => BASEPLATE_WORLD,
@@ -143,11 +151,17 @@ impl Template {
 
 // New worlds use Neutral tone mapping; a world saved without it is Classic.
 // The blank ones start under the default sky (`default_sky.rs`), with the
-// sun where its sun is; `create_project_from` writes its file.
+// sun where its sun is, and with the default humanoid as their players'
+// character (`default_humanoid.rs`); `create_project_from` writes their files.
 
 pub(super) const EMPTY_WORLD: &str = r#"{
   "format_version": 1,
   "workspace": {},
+  "starter_player": {
+    "properties": {
+      "StarterCharacter": "assets/prefabs/Character.prefab.json"
+    }
+  },
   "lighting": {
     "properties": {
       "ToneMapping": "Neutral",
@@ -175,6 +189,11 @@ pub(super) const BASEPLATE_WORLD: &str = r#"{
         }
       }
     ]
+  },
+  "starter_player": {
+    "properties": {
+      "StarterCharacter": "assets/prefabs/Character.prefab.json"
+    }
   },
   "lighting": {
     "properties": {
@@ -217,6 +236,9 @@ pub fn create_project_from(
         .and_then(|()| write_through_temporary(&folder.join(WORLD_FILE), template.world()));
     if template.has_default_sky() {
         written = written.and_then(|()| add_default_sky(&folder).map(|_| ()));
+    }
+    if template.has_default_character() {
+        written = written.and_then(|()| add_default_humanoid(&folder).map(|_| ()));
     }
     for (path, bytes) in template.files() {
         if written.is_err() {

@@ -71,6 +71,7 @@ mod plugin_drawings;
 mod plugin_handles;
 mod probe_overlay;
 mod ray_badge;
+mod skeleton_overlay;
 mod streaming_overlay;
 pub use plugin_handles::HandleMove;
 mod view_cube;
@@ -465,6 +466,9 @@ pub struct OverlayToggles {
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
+    /// Rigged MeshParts' bones: posed during Play and in the Sequencer's
+    /// preview, at rest while editing (AP6).
+    pub skeletons: bool,
 }
 
 impl OverlayToggles {
@@ -481,6 +485,7 @@ impl OverlayToggles {
             || self.streaming
             || self.light_probes
             || self.culling
+            || self.skeletons
     }
 }
 
@@ -1668,6 +1673,10 @@ impl Viewport {
         }
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
+        }
+        if overlays.skeletons {
+            let drawn = skeleton_overlay::skeletons(world, assets, poses, eye);
+            skeleton_overlay::paint(&ui.painter_at(rect), &screen, world, &drawn, selection);
         }
         if !plugin_drawings.is_empty() {
             plugin_drawings::paint(&ui.painter_at(rect), &screen, &plugin_drawings);

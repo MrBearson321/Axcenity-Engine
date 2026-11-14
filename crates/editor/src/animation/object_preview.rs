@@ -398,8 +398,7 @@ impl ObjectPreview {
         let id = self.selected?;
         let instance = self.posed.get(id)?;
         let target = target_path(&self.posed, root, id)?;
-        let values = PropertyName::ALL
-            .into_iter()
+        let values = PropertyName::keyable()
             .filter_map(|property| {
                 Some(EvaluatedProperty {
                     target: target.clone(),
