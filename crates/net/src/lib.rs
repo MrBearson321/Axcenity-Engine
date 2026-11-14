@@ -43,7 +43,7 @@ mod transport;
 mod wire;
 
 pub use discovery::{HostInfo, LanAnswerer, LanSearch, SEARCH_TIME};
-pub use game::{Network, PeerStats, ScriptCode, server_moves_characters};
+pub use game::{Network, PeerStats, ScriptCode};
 pub use handshake::{GameInfo, Message, Peer, Refusal, class_defaults};
 pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
@@ -69,6 +69,10 @@ pub use secure::{
 pub use session::{HANDSHAKE_TIMEOUT, Host, HostSettings, Join, SessionEvent};
 pub use transport::{Channel, Client, Conditions, ConnectionId, LinkStats, Server, ServerEvent};
 pub use wire::{WireArg, WireKind, WireMessage, WireValue};
+
+// MP6a, kept apart from the list above so pull requests that add to it
+// don't conflict with this one.
+pub use game::server_moves_characters;
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
