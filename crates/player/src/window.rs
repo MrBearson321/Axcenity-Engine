@@ -117,7 +117,7 @@ impl ApplicationHandler for App {
                 // A LocalScript may have changed them as it started.
                 let settings = match self.sim.scripts.take_graphics_change() {
                     Some(change) => graphics::changed(folder, change, &capabilities),
-                    None => graphics::start(folder, &capabilities),
+                    None => graphics::start(folder, &capabilities, self.ray_traced_start),
                 };
                 // `--quality`: the preset alone, not saved.
                 let settings = match self.quality {

@@ -912,6 +912,9 @@ struct OpenProject {
     /// Whether built games have the F9 Developer Console (File > Build
     /// Game, Phase 71).
     developer_console: bool,
+    /// Whether built games start with the ray traced look on GPUs that can
+    /// ray trace (File > Build Game, runtime lighting parity RL2).
+    ray_traced_by_default: bool,
     /// How built games' loading screen goes (File > Build Game).
     loading_screen: axcenity_project::LoadingScreen,
     /// The game's icon and banner (Settings > This project > Branding).

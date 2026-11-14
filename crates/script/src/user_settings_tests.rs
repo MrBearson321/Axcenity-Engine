@@ -357,3 +357,34 @@ fn a_script_on_the_server_is_told_to_use_a_local_script() {
         );
     }
 }
+
+#[test]
+fn a_game_turns_hardware_ray_tracing_on_for_its_next_start() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    // A GPU that could ray trace, opened without it this run.
+    let gpu = Capabilities {
+        ray_tracing_offered: true,
+        ..Capabilities::default()
+    };
+    runtime.set_graphics(&GraphicsSettings::preset(Quality::High), &gpu);
+    let printed = run(
+        &mut runtime,
+        &mut world,
+        "scripts/rays.client.lua",
+        "local s = game:GetService('UserGameSettings')
+        print(s.HardwareRayTracing, s.RayTracingSupported, s.RayTracingActive)
+        s.HardwareRayTracing = true
+        print(s.HardwareRayTracing, s.RayTracingActive)
+        print(pcall(function() s.RayTracingActive = true end))
+        print(pcall(function() s.HardwareRayTracing = 'yes' end))",
+    );
+    assert_eq!(printed[0], "false\ttrue\tfalse");
+    assert_eq!(printed[1], "true\tfalse", "active only after a restart");
+    assert!(printed[2].starts_with("false"), "{printed:?}");
+    assert!(printed[3].starts_with("false\t") && printed[3].contains("HardwareRayTracing"));
+    let change = runtime
+        .take_graphics_change()
+        .expect("the host sees the change");
+    assert_eq!(change.ray_tracing, Some(true));
+}
