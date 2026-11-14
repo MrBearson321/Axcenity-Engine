@@ -29,7 +29,9 @@ struct Fog {
     sun_direction: vec4<f32>,
     // x: how many of `dust` are drawn, y: where the ray traced air (LE3,
     // ray_shadows.wgsl's `cs_air`) starts in `ray_shadow_mask`, in u32s
-    // (0 while the air isn't traced).
+    // (0 while the air isn't traced), z: the volumetric fog's turn, which
+    // shifts the points each cell is looked at each frame
+    // (volumetric_fog.wgsl's `cell_shift`; 0: not shifted).
     dust_count: vec4<u32>,
     // Boxes of dust, mist or haze (FogEffects with a Density, or marked
     // Interior), in the order they apply: lowest priority first.

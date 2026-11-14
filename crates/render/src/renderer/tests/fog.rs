@@ -510,3 +510,89 @@ fn an_interior_clears_the_worlds_fog_inside_it_and_keeps_its_own_dust() {
     let dusty = pixel_at(&pixels, screen_of(&list, inside));
     assert!(dusty[0] > 40, "the interior's own dust glows: {dusty:?}");
 }
+
+/// `shafts()` with the wall a grille of thin bars, finer than the fog's
+/// cells where its shadow falls: like leaves over a window.
+fn grille() -> (DrawList, Vec3) {
+    let (mut list, shadowed, _) = shafts();
+    list.items.clear();
+    for i in 0..100 {
+        let mut bar = red_block(
+            Vec3::new(-50.0 + i as f32 * 0.5, 0.0, -40.0),
+            Vec3::new(0.25, 60.0, 1.0),
+        );
+        bar.material.emissive = [0.0; 3];
+        list.items.push(bar);
+    }
+    (list, shadowed)
+}
+
+/// How much the shadowed half of the view changes from pixel to pixel
+/// across, summed: the blocks and stripes a grille's shadow left.
+fn roughness(pixels: &[u8]) -> u32 {
+    let mut sum = 0;
+    for y in 40..88 {
+        for x in 8..60 {
+            let [a, ..] = pixel_at(pixels, (x, y));
+            let [b, ..] = pixel_at(pixels, (x + 1, y));
+            sum += u32::from(a.abs_diff(b));
+        }
+    }
+    sum
+}
+
+/// Each frame looks at the fog's cells through other points and blends
+/// with the frames before, so a still view's shafts through a fine
+/// grille settle smoother than any one frame's, and then hold still.
+#[test]
+fn a_still_view_settles_on_a_smoother_grille_shadow_and_holds_still() {
+    for traced in [false, true] {
+        let device = if traced {
+            ray_test_device()
+        } else {
+            test_device()
+        };
+        let Some((device, queue)) = device else {
+            eprintln!("skipped: no graphics adapter (ray queries: {traced}) on this machine");
+            continue;
+        };
+        let (list, shadowed) = grille();
+        let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+        renderer.set_graphics(&GraphicsSettings {
+            ray_traced_shadows: Some(if traced {
+                crate::RayTracedShadows::Low
+            } else {
+                crate::RayTracedShadows::Off
+            }),
+            ..ultra(true)
+        });
+        renderer.render(&list).unwrap();
+        let first = renderer.read_pixels();
+        for _ in 0..40 {
+            renderer.render(&list).unwrap();
+        }
+        let settled = renderer.read_pixels();
+        renderer.render(&list).unwrap();
+        let next = renderer.read_pixels();
+        let (rough_first, rough_settled) = (roughness(&first), roughness(&settled));
+        let flicker = settled
+            .iter()
+            .zip(&next)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        let [glow_first, ..] = pixel_at(&first, screen_of(&list, shadowed));
+        let [glow, ..] = pixel_at(&settled, screen_of(&list, shadowed));
+        eprintln!(
+            "traced {traced}: roughness {rough_first} -> {rough_settled}, flicker {flicker}, glow {glow_first} -> {glow}"
+        );
+        assert!(
+            rough_settled < rough_first,
+            "smoother once settled (traced: {traced}): {rough_settled} vs {rough_first}"
+        );
+        assert!(
+            flicker <= 6,
+            "a still view holds still (traced: {traced}): {flicker}"
+        );
+    }
+}

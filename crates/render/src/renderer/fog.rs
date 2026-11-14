@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 use super::lighting::linear_color;
 use super::*;
@@ -22,6 +22,52 @@ pub(super) const VOLUMETRIC_REACH: f32 = 200.0;
 /// Further than anything is seen: distance fog that never starts.
 const NEVER: f32 = 1.0e9;
 const GRID_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// How much of last frame's light each cell keeps: about the last 10
+/// frames are averaged, each looked at through different points of the
+/// cell (`cell_shift` in volumetric_fog.wgsl).
+pub(super) const HISTORY_KEEP: f32 = 0.9;
+/// A camera moving further than this in a frame (in studs), or turning
+/// more than [`CUT_TURN`], has cut to another view: the grid starts again
+/// rather than blend in light from where it was.
+const CUT_DISTANCE: f32 = 25.0;
+/// The cosine of the widest turn in a frame that isn't a cut (about 40°).
+const CUT_TURN: f32 = 0.75;
+/// Turns run 1 to this, then start again (turn 0 shifts nothing).
+const TURNS: u32 = 1024;
+
+/// Last frame's camera, for the grid's history. Must match `FogHistory` in
+/// volumetric_fog.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub(super) struct FogHistoryRaw {
+    view_proj: [[f32; 4]; 4],
+    /// xyz: last frame's camera, w: how much of last frame's light each
+    /// cell keeps (0: none).
+    camera: [f32; 4],
+}
+
+/// What the grid's history needs of a frame's camera: world to clip
+/// space (`Frame::view_proj`) and where it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct FogCamera {
+    pub(super) view_proj: Mat4,
+    pub(super) position: Vec3,
+}
+
+impl FogCamera {
+    /// Which way it looks.
+    fn forward(&self) -> Vec3 {
+        // The clip-space w row is the view's depth axis.
+        let row = self.view_proj.row(3);
+        row.truncate().normalize_or(Vec3::NEG_Z)
+    }
+
+    /// Whether going from `self` to `next` is a cut to another view.
+    fn cuts_to(&self, next: &FogCamera) -> bool {
+        self.position.distance(next.position) > CUT_DISTANCE
+            || self.forward().dot(next.forward()) < CUT_TURN
+    }
+}
 
 /// The fog as the shaders read it. Must match `Fog` in fog.wgsl.
 #[repr(C)]
@@ -175,9 +221,18 @@ pub(super) struct VolumetricFog {
     /// Remade with the frame's (`ScenePipeline::bind_frame`).
     pub(super) frame_group: Option<wgpu::BindGroup>,
     scatter_pipeline: wgpu::ComputePipeline,
-    scatter_group: wgpu::BindGroup,
+    /// The scatter grids take turns: each frame one is written while the
+    /// other, last frame's, is its history. By which is written.
+    scatter_groups: [wgpu::BindGroup; 2],
     gather_pipeline: wgpu::ComputePipeline,
-    gather_group: wgpu::BindGroup,
+    gather_groups: [wgpu::BindGroup; 2],
+    /// Which scatter grid this frame writes.
+    current: usize,
+    history_buffer: wgpu::Buffer,
+    /// Last frame's camera, if the grid has a history.
+    last: Option<FogCamera>,
+    /// Frames drawn, for the turn.
+    frames: u32,
     composite_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
     gathered_view: wgpu::TextureView,
@@ -223,7 +278,10 @@ impl VolumetricFog {
                 view_formats: &[],
             })
         };
-        let scatter_view = grid("volumetric fog scatter").create_view(&Default::default());
+        let scatter_views = [
+            grid("volumetric fog scatter").create_view(&Default::default()),
+            grid("volumetric fog scatter").create_view(&Default::default()),
+        ];
         let gathered_view = grid("volumetric fog gathered").create_view(&Default::default());
         let entry = |binding, visibility, ty| wgpu::BindGroupLayoutEntry {
             binding,
@@ -259,7 +317,27 @@ impl VolumetricFog {
                 entries,
             })
         };
-        let scatter_layout = layout("volumetric fog scatter", &[storage(0)]);
+        let scatter_layout = layout(
+            "volumetric fog scatter",
+            &[
+                storage(0),
+                sampled(6, wgpu::ShaderStages::COMPUTE, true),
+                entry(
+                    7,
+                    wgpu::ShaderStages::COMPUTE,
+                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                ),
+                entry(
+                    8,
+                    wgpu::ShaderStages::COMPUTE,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                ),
+            ],
+        );
         let gather_layout = layout(
             "volumetric fog gather",
             &[sampled(1, wgpu::ShaderStages::COMPUTE, false), storage(2)],
@@ -288,15 +366,45 @@ impl VolumetricFog {
             binding,
             resource: wgpu::BindingResource::TextureView(view),
         };
-        let scatter_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("volumetric fog scatter"),
-            layout: &scatter_layout,
-            entries: &[view_entry(0, &scatter_view)],
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("volumetric fog"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
-        let gather_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("volumetric fog gather"),
-            layout: &gather_layout,
-            entries: &[view_entry(1, &scatter_view), view_entry(2, &gathered_view)],
+        let history_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("volumetric fog history"),
+            size: std::mem::size_of::<FogHistoryRaw>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let scatter_groups = [0, 1].map(|written| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("volumetric fog scatter"),
+                layout: &scatter_layout,
+                entries: &[
+                    view_entry(0, &scatter_views[written]),
+                    view_entry(6, &scatter_views[1 - written]),
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: history_buffer.as_entire_binding(),
+                    },
+                ],
+            })
+        });
+        let gather_groups = [0, 1].map(|written| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("volumetric fog gather"),
+                layout: &gather_layout,
+                entries: &[
+                    view_entry(1, &scatter_views[written]),
+                    view_entry(2, &gathered_view),
+                ],
+            })
         });
         let shader = shader_module(device, "volumetric fog", gpu::VOLUMETRIC_FOG_SHADER);
         let compute = |label, group: &wgpu::BindGroupLayout, entry_point| {
@@ -356,25 +464,23 @@ impl VolumetricFog {
             multiview_mask: None,
             cache: None,
         });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("volumetric fog"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
         let [width, height, depth] = GRID;
         Self {
             frame_layout: compute_frame_layout,
             frame_group: None,
             scatter_pipeline,
-            scatter_group,
+            scatter_groups,
             gather_pipeline,
-            gather_group,
+            gather_groups,
+            current: 0,
+            history_buffer,
+            last: None,
+            frames: 0,
             composite_pipeline,
             composite_layout,
             gathered_view,
             sampler,
-            bytes: 2 * target_bytes((width, height, depth), GRID_FORMAT, 1),
+            bytes: 3 * target_bytes((width, height, depth), GRID_FORMAT, 1),
             _alive: alive.clone(),
         }
     }
@@ -382,6 +488,26 @@ impl VolumetricFog {
     /// Bytes of its grids.
     pub(super) fn bytes(&self) -> u64 {
         self.bytes
+    }
+
+    /// Starts a frame seen by `camera`: picks the scatter grid to write,
+    /// and tells the history where last frame's camera was. Returns the
+    /// frame's turn for `Fog.dust_count.z` (0, shifting nothing, on the
+    /// grid's first frame or after a cut, when there's no history to
+    /// average the shifted points with).
+    pub(super) fn begin_frame(&mut self, queue: &wgpu::Queue, camera: FogCamera) -> u32 {
+        let (raw, turn) = history_raw(self.last.as_ref(), &camera, self.frames);
+        queue.write_buffer(&self.history_buffer, 0, bytemuck::bytes_of(&raw));
+        self.current = 1 - self.current;
+        self.last = Some(camera);
+        self.frames = self.frames.wrapping_add(1);
+        turn
+    }
+
+    /// Starts the grid again from the next frame, keeping nothing of
+    /// what it had (new graphics settings light it differently).
+    pub(super) fn forget_history(&mut self) {
+        self.last = None;
     }
 
     /// Works out the grid's light for this frame: each cell's, then each
@@ -396,11 +522,11 @@ impl VolumetricFog {
         });
         pass.set_bind_group(0, frame_group, &[]);
         pass.set_pipeline(&self.scatter_pipeline);
-        pass.set_bind_group(1, &self.scatter_group, &[]);
+        pass.set_bind_group(1, &self.scatter_groups[self.current], &[]);
         let [width, height, depth] = GRID;
         pass.dispatch_workgroups(width.div_ceil(4), height.div_ceil(4), depth.div_ceil(4));
         pass.set_pipeline(&self.gather_pipeline);
-        pass.set_bind_group(1, &self.gather_group, &[]);
+        pass.set_bind_group(1, &self.gather_groups[self.current], &[]);
         pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
     }
 
@@ -452,9 +578,64 @@ impl VolumetricFog {
     }
 }
 
+/// The history's uniform and the turn for a frame seen by `camera`, after
+/// `last` (`frames` drawn before it).
+fn history_raw(last: Option<&FogCamera>, camera: &FogCamera, frames: u32) -> (FogHistoryRaw, u32) {
+    match last.filter(|last| !last.cuts_to(camera)) {
+        Some(last) => (
+            FogHistoryRaw {
+                view_proj: last.view_proj.to_cols_array_2d(),
+                camera: last.position.extend(HISTORY_KEEP).to_array(),
+            },
+            frames % TURNS + 1,
+        ),
+        None => (FogHistoryRaw::default(), 0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn camera(position: Vec3, toward: Vec3) -> FogCamera {
+        use glam::camera::rh;
+        let view = rh::view::look_at_mat4(position, toward, Vec3::Y);
+        let proj = rh::proj::directx::perspective(70f32.to_radians(), 16.0 / 9.0, 0.1, 1000.0);
+        FogCamera {
+            view_proj: proj * view,
+            position,
+        }
+    }
+
+    #[test]
+    fn the_first_frame_has_no_history_and_shifts_nothing() {
+        let first = camera(Vec3::ZERO, Vec3::NEG_Z);
+        let (raw, turn) = history_raw(None, &first, 0);
+        assert_eq!((raw, turn), (FogHistoryRaw::default(), 0));
+    }
+
+    #[test]
+    fn later_frames_keep_last_frames_camera_and_turn() {
+        let last = camera(Vec3::ZERO, Vec3::NEG_Z);
+        let now = camera(Vec3::new(0.5, 0.0, -0.5), Vec3::new(0.6, 0.0, -10.0));
+        let (raw, turn) = history_raw(Some(&last), &now, 7);
+        assert_eq!(raw.camera, [0.0, 0.0, 0.0, HISTORY_KEEP]);
+        assert_eq!(raw.view_proj, last.view_proj.to_cols_array_2d());
+        assert_eq!(turn, 8);
+        // Turns never come back to 0, which shifts nothing.
+        assert_eq!(history_raw(Some(&last), &now, TURNS - 1).1, TURNS);
+        assert_eq!(history_raw(Some(&last), &now, TURNS).1, 1);
+    }
+
+    #[test]
+    fn a_cut_to_another_view_starts_the_grid_again() {
+        let last = camera(Vec3::ZERO, Vec3::NEG_Z);
+        let far = camera(Vec3::new(100.0, 0.0, 0.0), Vec3::new(100.0, 0.0, -10.0));
+        assert_eq!(history_raw(Some(&last), &far, 3).1, 0);
+        let turned = camera(Vec3::ZERO, Vec3::X);
+        assert_eq!(history_raw(Some(&last), &turned, 3).1, 0);
+        assert!(!last.cuts_to(&camera(Vec3::ZERO, Vec3::new(1.0, 0.0, -10.0))));
+    }
 
     #[test]
     fn no_fog_is_drawn_by_default() {

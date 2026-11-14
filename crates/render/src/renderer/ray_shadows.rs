@@ -39,7 +39,8 @@ pub(super) struct RayShadowUniform {
     /// many there are across.
     lamps: [u32; 4],
     /// How wide a lamp's bulb is in studs (0: hard shadows), rays per lamp
-    /// for soft shadows.
+    /// for soft shadows, and the volumetric fog's turn (`Fog.dust_count.z`),
+    /// which shifts the points its air is traced from.
     lamp: [f32; 4],
 }
 
@@ -499,7 +500,7 @@ pub(super) fn ray_shadow_uniform(
     plan: &RayShadowPlan,
     (inv_view_proj, view): (Mat4, Mat4),
     (size, lamps): ((u32, u32), (u32, u32)),
-    turn: f32,
+    (turn, air_turn): (f32, u32),
 ) -> RayShadowUniform {
     let sun = list.sun.direction.normalize_or(Vec3::Y);
     let tan_half = (list.camera.fov_y_degrees.to_radians() * 0.5).tan();
@@ -528,7 +529,7 @@ pub(super) fn ray_shadow_uniform(
         lamp: [
             plan.sun_size / MAX_SUN_SIZE * MAX_LAMP_SIZE,
             plan.rays as f32,
-            0.0,
+            air_turn as f32,
             0.0,
         ],
     }
