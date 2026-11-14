@@ -34,6 +34,12 @@ UDim2.new(xScale: number?, xOffset: number?, yScale: number?, yOffset: number?):
 
 A UI value from scale and pixel offset on each axis. Left-out components are 0.
 
+```lua
+local button = script.Parent
+-- Scale and offset: full width less 20 pixels, 40 pixels tall.
+button.Size = UDim2.new(1, -20, 0, 40)
+```
+
 #### fromScale
 
 ```luau

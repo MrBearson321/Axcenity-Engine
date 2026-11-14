@@ -65,6 +65,13 @@ task.defer(callback: (...any) -> (), ...: any): thread
 
 Runs `callback` (or resumes a thread) with the given arguments at the next frame step, after this code has finished or paused.
 
+```lua
+task.defer(function()
+	print("Runs after this script finishes its first run")
+end)
+print("Runs first")
+```
+
 #### cancel
 
 ```luau
@@ -72,6 +79,16 @@ task.cancel(thread: thread): ()
 ```
 
 Stops `thread` (from `task.spawn`, `task.delay` or `task.defer`) for good: it doesn't start or resume again. It can't stop the code running now.
+
+```lua
+local countdown = task.delay(10, function()
+	print("Boom")
+end)
+workspace.DefuseButton.Touched:Once(function()
+	task.cancel(countdown)
+	print("Defused!")
+end)
+```
 
 #### synchronize
 
