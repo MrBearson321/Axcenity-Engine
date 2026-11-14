@@ -904,7 +904,7 @@ impl Network {
                 let mut update = if self.players.is_empty() {
                     Update::default()
                 } else {
-                    self.replicator.frame(world)
+                    self.replicator.frame_at(world, Some(self.clock))
                 };
                 update.time = self.clock;
                 if levels != self.sent_levels {

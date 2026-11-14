@@ -14,6 +14,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 |---|---|---|---|
 | 2026-11-14 | Lighting and atmosphere | RL4: ray traced reflections on glossy surfaces (`renderer/ray_reflections.rs`) | Claude |
 | 2026-11-14 | Lighting and atmosphere | RL3: ray traced GI traced in software on GPUs without ray queries (`renderer/ray_soft.rs`) | Claude |
+| 2026-11-14 | Animation, roadmap | F7b: faces' expressions, overrides, layers and lip sync replicated per face at a set rate | Claude |
 | 2026-11-14 | Animation, roadmap | F7a: facial LOD by distance and view, ProceduralEnabled, the Profiler's Faces section | Claude |
 | 2026-11-14 | Animation, roadmap | F6: the Character Studio tab edits faces (profile, controls, shape mapping, expressions, lip-sync timeline) | Claude |
 | 2026-11-14 | ADR-0028, ADR index, roadmap, Animation | Facial animation plan F0–F7 (`docs/research/facial-animation.md`) | Claude |

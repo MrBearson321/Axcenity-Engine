@@ -5,3 +5,4 @@
 - Keep `Message::Hello` and `Refused` readable by later versions (they stay JSON, `handshake::Greeting`), so a newer engine can still say why it refuses. Raise `PROTOCOL_VERSION` when a message or a class default changes (creates carry only non-default properties).
 - Never block: sockets are non-blocking and every wait is counted in frame time (the token port and token fetches run on threads of their own). Keys and certificates never go in a project.
 - Nothing in ServerScriptService or ServerStorage (`World::is_server_only`) goes to a player: not in replication, not as a message's Instance. A player's message is theirs whatever it says (the connection decides its Player).
+- Faces' live state (expressions, overrides, layers, lip sync) is replicated by `face_sync.rs` (F7b), beside `replicate.rs`.

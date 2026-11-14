@@ -17,7 +17,9 @@
 //!
 //! Animators' parameters and layer weights (Phase 78) aren't Instance
 //! properties; each frame's update carries those that changed too, so a
-//! device animates what the server's scripts asked for.
+//! device animates what the server's scripts asked for. FaceControls' live
+//! state (expressions, overrides, layers, lip sync) goes the same way, by
+//! each face's choice and rate (`face_sync`, facial animation F7b).
 //!
 //! With streaming on (Phase 80), `streaming` passes each player only their
 //! share of an update, and what comes and goes as they move.
@@ -31,6 +33,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
 use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::face_sync::{self, SentFaces, WireFace};
 
 use axcenity_core::{
     ClassName, Instance, InstanceId, LayerWeight, MOTION_PROPERTIES, Parameter, Value, World,
@@ -98,6 +102,9 @@ pub struct Update {
     /// Animators' parameters and layer weights that changed (all of them in
     /// a snapshot), applied after the Instances.
     pub animators: Vec<WireAnimator>,
+    /// FaceControls' live state that changed (F7b; all of it in a
+    /// snapshot), applied after the Animators.
+    pub faces: Vec<WireFace>,
     /// Streaming (Phase 80): units the player no longer has (each a loose
     /// part or a Model), whose contents this update takes off their device.
     pub streamed_out: Vec<u64>,
@@ -214,6 +221,7 @@ impl Update {
         self.ops.is_empty()
             && self.levels.is_none()
             && self.animators.is_empty()
+            && self.faces.is_empty()
             && self.streamed_out.is_empty()
             && self.streamed_in.is_empty()
     }
@@ -462,6 +470,8 @@ pub struct Replicator {
     services: Vec<InstanceId>,
     inside: Vec<InstanceId>,
     animator_ids: Vec<InstanceId>,
+    face_ids: Vec<InstanceId>,
+    faces: SentFaces,
     structure: Option<u64>,
 }
 
@@ -520,16 +530,27 @@ impl Replicator {
             .map(|(id, now)| now.changes(world, id, None))
             .filter(|wire| !wire.parameters.is_empty() || !wire.layers.is_empty())
             .collect();
+        let faces: Vec<InstanceId> = face_sync::face_ids(world, &inside)
+            .into_iter()
+            .filter(|&id| keep(id))
+            .collect();
         Update {
             ops,
             animators,
+            faces: face_sync::snapshot(world, &faces),
             ..Update::default()
         }
     }
 
     /// What changed since the last call, for the players who have the
-    /// world as it was then.
+    /// world as it was then, with every face change in it.
     pub fn frame(&mut self, world: &World) -> Update {
+        self.frame_at(world, None)
+    }
+
+    /// [`frame`](Self::frame) at the server's clock `clock` in seconds:
+    /// a face's changes wait for its ReplicationRate.
+    pub fn frame_at(&mut self, world: &World, clock: Option<f64>) -> Update {
         profiling::scope!("Replicator::frame");
         let structure = Some(world.structure_version());
         let tree_changed = self.structure != structure;
@@ -545,6 +566,7 @@ impl Replicator {
                         .is_some_and(|i| i.class() == ClassName::Animator)
                 })
                 .collect();
+            self.face_ids = face_sync::face_ids(world, &inside);
             self.services = services;
             self.inside = inside;
         }
@@ -610,6 +632,7 @@ impl Replicator {
         Update {
             ops,
             animators: wire_animators,
+            faces: self.faces.frame(world, &self.face_ids, clock),
             ..Update::default()
         }
     }
@@ -762,6 +785,9 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
                 .or_insert_with(|| LayerWeight::new(*target))
                 .set(*target, *fade);
         }
+    }
+    for wire in &update.faces {
+        face_sync::apply(world, wire);
     }
     applied
 }

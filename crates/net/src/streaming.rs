@@ -342,6 +342,12 @@ fn forward(
             .filter(|wire| stream.has(partition, InstanceId::from_bits(wire.id)))
             .cloned()
             .collect(),
+        faces: update
+            .faces
+            .iter()
+            .filter(|wire| stream.has(partition, InstanceId::from_bits(wire.id)))
+            .cloned()
+            .collect(),
         ..Update::default()
     }
 }

@@ -3408,6 +3408,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Studs from the camera where the face starts costing less: beyond it the face updates 15 times a second without idle motion, beyond twice it only its expressions 4 times a second, and beyond four times it (or out of view) it rests. 0 keeps it whole at any distance.",
     ),
     (
+        ClassName::FaceControls,
+        "ReplicateExpressions",
+        "In multiplayer, whether expressions set on the server (`SetExpression`, `ClearExpression`) show on players' devices. Off, each device's own LocalScripts set them.",
+    ),
+    (
+        ClassName::FaceControls,
+        "ReplicateOverrides",
+        "In multiplayer, whether overrides and layer settings set on the server (`SetOverride`, `ClearOverrides`, `SetLayer`) go to players' devices.",
+    ),
+    (
+        ClassName::FaceControls,
+        "ReplicateLipSync",
+        "In multiplayer, whether a lip sync played on the server (`PlayLipSync`, `StopLipSync`) plays on players' devices, kept in time with the server's.",
+    ),
+    (
+        ClassName::FaceControls,
+        "ReplicationRate",
+        "In multiplayer, the most times a second the face's changes go to players' devices (they blend between them themselves). 0 sends every change at once.",
+    ),
+    (
         ClassName::IKControl,
         "Type",
         "How it turns the bones: `\"Position\"` puts EndEffector at the Target, `\"Rotation\"` turns it as the Target is turned from the MeshPart, `\"Transform\"` does both, and `\"LookAt\"` faces it at the Target.",
