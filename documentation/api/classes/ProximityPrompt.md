@@ -46,6 +46,15 @@ ProximityPrompt.HoldDuration: number
 
 Seconds the action is held before Triggered fires; the prompt's ring fills meanwhile. 0 triggers on the press.
 
+```lua
+local prompt = workspace.Chest.ProximityPrompt
+prompt.ActionText = "Open"
+prompt.HoldDuration = 1.5 -- hold the key for a second and a half
+prompt.Triggered:Connect(function(player)
+	print(player.Name, "opened the chest")
+end)
+```
+
 #### MaxActivationDistance
 
 ```luau

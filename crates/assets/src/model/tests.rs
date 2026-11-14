@@ -631,3 +631,40 @@ fn a_gltf_files_blend_shapes_are_read_and_shared_by_name() {
     assert!((lowered.positions[0][1] - (lash.positions[0][1] + down)).abs() < 1e-6);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_blend_shape_accessor_without_data_reads_as_no_moves() {
+    // Blender writes a shape that doesn't move a primitive as an accessor
+    // with no buffer view and no sparse values: all zeros, by the spec.
+    let folder =
+        std::env::temp_dir().join(format!("axcenity-gltf-empty-shape-{}", std::process::id()));
+    let gltf = blinking_face(&folder).replace(
+        r#"{ "bufferView": 6, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0, -1, 0], "max": [0, -1, 0] }"#,
+        r#"{ "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0, 0, 0], "max": [0, 0, 0] }"#,
+    );
+    assert!(
+        !gltf.contains(r#""bufferView": 6"#),
+        "the lash's moves are gone"
+    );
+    let model = load_model(gltf.as_bytes(), &folder, ModelFormat::Gltf).unwrap();
+    let names: Vec<&str> = model
+        .morph_targets
+        .iter()
+        .map(|target| target.name.as_str())
+        .collect();
+    assert_eq!(names, ["Blink_Left", "Smile"]);
+    assert_eq!(model.primitives.len(), 2);
+    let lash = model
+        .primitives
+        .iter()
+        .find(|primitive| primitive.positions.len() == 3)
+        .unwrap();
+    assert!(lash.morphs.is_empty(), "the lash doesn't move");
+    // Every other check still holds.
+    let broken = gltf.replace(r#""bufferView": 7,"#, r#""bufferView": 99,"#);
+    assert_ne!(broken, gltf);
+    assert!(load_model(broken.as_bytes(), &folder, ModelFormat::Gltf).is_err());
+    let _ = std::fs::remove_dir_all(&folder);
+}

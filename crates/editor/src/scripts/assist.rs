@@ -47,7 +47,6 @@ pub struct Keys {
 }
 
 impl Assist {
-    #[cfg(test)]
     pub fn is_open(&self) -> bool {
         self.popup.is_some()
     }

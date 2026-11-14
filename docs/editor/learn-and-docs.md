@@ -15,7 +15,7 @@ The start screen's **Learn** and **Documentation** pages (and the same pages in 
 - `start/docs/library.rs`: the pure parser. `Library::load` reads `SUMMARY.md` and the pages into `Page`s of `Block`s (headings with GitHub-style anchors, paragraphs, lists, code, `>` notes, pipe tables, rules) and `Span`s (text, bold, code, links); `resolve` turns a link into a page and anchor, a sample (`.../examples/<name>`), an API entry (`api/...`), a URL or Missing; `search` scores titles over headings over text. Anything it can't show (nested lists, HTML, images, GitBook `{% %}` blocks, unclosed `**` or backticks) is a page problem.
 - `start/docs/markdown.rs`: draws a page with theme tokens. Code spans that name an API entry (`api_name`: `Part.Touched`, `Instance:FindFirstChild()`, `task.wait()`, `workspace:Raycast()` through `global_class`) are links to it; code blocks have Lua colours and Copy. `pages_mentioning` lists the pages whose code names an entry (the API Reference's "Read more").
 - `start/docs.rs`: the Documentation page (search, a contents column wider than `TWO_COLUMNS`, a Contents fold narrower, Back/Next). `start/learn.rs`: Learn's chapter cards (`chapters`) above the tutorials; a chapter page adds "Try it in a sample" and Back/Next chapter. Clicks become `DocAction`s that `StartScreen::follow_doc` routes: a Learn chapter opens in Learn, any other page in Documentation, an API name in the API Reference.
-- `start/reference.rs`: an entry's page shows `axcenity_script::api_example` under Example and the "Read more" pages.
+- `start/reference.rs`: an entry's page shows `axcenity_script::api_example` under Example (with **Insert into <file>** while a Lua tab is active; `docs/editor/scripts.md`) and the "Read more" pages. The same examples show in code tabs' hover docs.
 
 ## API reference generation
 
@@ -24,6 +24,7 @@ The start screen's **Learn** and **Documentation** pages (and the same pages in 
 ## Tests
 
 - Editor `start::docs::tests`: every page reads without problems and has a description and known icon; every link, anchor and sample resolves; every sample opens; every `Owner.Member` in backticks with a known owner exists in the API (renaming an API member fails here); every Lua block compiles (`axcenity_script::syntax_error`) and every block names a known language; the learning path covers the brief's topics; every page draws wide and narrow (with `AXCENITY_SNAPSHOTS`, `docs-<path>.png`); search draws.
+- Editor `script_completion::lint::tests::every_api_example_passes_the_editors_own_checks`: no example (115, scripting priority 2) has an error or warning from the editor's own API checks, except naming objects an empty world lacks.
 - Script `definitions::tests`: `every_example_names_a_real_entry_and_compiles`, `api_pages_are_up_to_date`, `the_api_summary_replaces_only_its_own_section`.
 
 ## Writing pages

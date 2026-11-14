@@ -32,3 +32,11 @@ BindableEvent:Fire(...: any): ()
 
 Fires `Event` with the arguments, for scripts on this side.
 
+```lua
+local roundEnded = game.ServerStorage.RoundEnded
+roundEnded.Event:Connect(function(winner)
+	print(winner, "won the round")
+end)
+roundEnded:Fire("Red team")
+```
+
