@@ -463,7 +463,21 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 137] = [
+    /// Every class, in the order of `LIST`. It's built from `LIST` so that
+    /// no count needs keeping up to date: every pull request that added a
+    /// class used to change that one number, so any two of them conflicted.
+    pub const ALL: [ClassName; ClassName::LIST.len()] = {
+        let mut all = [ClassName::DataModel; ClassName::LIST.len()];
+        let mut i = 0;
+        while i < all.len() {
+            all[i] = ClassName::LIST[i];
+            i += 1;
+        }
+        all
+    };
+
+    /// Every class; `ALL` is this list as an array.
+    const LIST: &[ClassName] = &[
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
