@@ -41,7 +41,7 @@ fn switch(app: &mut EditorApp, path: &str) {
     app.switch_script_view(path, view);
 }
 
-fn example_model() -> std::path::PathBuf {
+pub(super) fn example_model() -> std::path::PathBuf {
     super::super::tests::example("hello-mesh").join("assets/models/pyramid.gltf")
 }
 
@@ -302,7 +302,7 @@ fn undoing_an_animated_fbx_import_removes_only_its_files_and_redo_brings_them_ba
 /// A glTF file in `folder` holding three copies of the example pyramid
 /// (4 wide): `Pyramid` at the origin, `Street/Big` 10 along X inside
 /// an empty `Street` node, and `Small` 10 along -Z.
-fn write_props(folder: &Path) -> std::path::PathBuf {
+pub(super) fn write_props(folder: &Path) -> std::path::PathBuf {
     let text = fs::read_to_string(example_model()).unwrap();
     let mut gltf: serde_json::Value = serde_json::from_str(&text).unwrap();
     gltf["scenes"][0]["nodes"] = serde_json::json!([0, 1, 3]);
@@ -584,7 +584,7 @@ fn import_without_small(app: &mut EditorApp, file: &Path, placement: Placement) 
     app.import_chosen(&dialog);
 }
 
-fn position(app: &EditorApp, id: InstanceId) -> Vector3 {
+pub(super) fn position(app: &EditorApp, id: InstanceId) -> Vector3 {
     match app.world.get(id).unwrap().property("Position") {
         Some(Value::Vector3(position)) => *position,
         other => panic!("{other:?}"),

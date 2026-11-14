@@ -144,6 +144,7 @@ fn graphics_settings_survive_a_restart() {
         ray_traced_shadows: Some(RayTracedShadows::Medium),
         ray_traced_ambient_occlusion: Some(axcenity_render::RayTracedAmbientOcclusion::Low),
         ray_traced_global_illumination: Some(axcenity_render::RayTracedGlobalIllumination::High),
+        ray_traced_reflections: Some(axcenity_render::RayTracedReflections::Medium),
         ray_tracing: Some(true),
     };
     let mut storage = MemoryStorage::default();
@@ -414,4 +415,10 @@ fn the_in_use_line_lists_each_ray_traced_effect() {
     let line = ray_tracing_in_use(&effective);
     assert!(line.contains("shadows Low"), "{line}");
     assert!(line.contains("ambient occlusion High (8 rays"), "{line}");
+    effective.ray_traced_reflections = axcenity_render::RayTracedReflections::Low;
+    let line = ray_tracing_in_use(&effective);
+    assert!(
+        line.contains("reflections Low (smoother than 0.15 roughness, half size)"),
+        "{line}"
+    );
 }

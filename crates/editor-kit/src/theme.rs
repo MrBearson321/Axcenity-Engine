@@ -1347,6 +1347,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::VehicleSeat => icons::STEERING_WHEEL,
         ClassName::VehicleWheel => icons::TIRE,
         ClassName::Ragdoll | ClassName::IKControl => icons::PERSON_SIMPLE,
+        ClassName::FaceControls => icons::SMILEY,
         ClassName::Fracture => icons::HAMMER,
         ClassName::UnionOperation => icons::UNITE,
         ClassName::NegateOperation => icons::SUBTRACT,

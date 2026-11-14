@@ -34,6 +34,8 @@ mod asset_id;
 mod color_grading;
 mod cooked;
 mod data_table;
+mod face_expression;
+mod face_profile;
 mod fonts;
 mod import;
 mod import_presets;
@@ -42,6 +44,7 @@ mod loading;
 mod material;
 mod memory;
 mod model;
+mod model_presets;
 mod orphaned;
 mod probe;
 mod references;
@@ -78,6 +81,14 @@ pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
     Row, data_table_name, data_table_path, is_data_table, read_data_table, write_data_table,
 };
+pub use face_expression::{
+    EXPRESSION_EXTENSION, EXPRESSIONS_FOLDER, FaceExpression, FaceExpressions, expression_name,
+    is_face_expression, read_face_expressions, write_face_expression,
+};
+pub use face_profile::{
+    FACE_EXTENSION, FACES_FOLDER, FaceLimits, FaceProfile, FaceProfiles, ShapeWeight,
+    is_face_profile, read_face_profiles, write_face_profile,
+};
 pub use fonts::{FontFile, is_font_file};
 pub use import::{
     AUDIO_EXTENSIONS, ImportError, MESH_EDIT_FOLDER_SUFFIX, MESH_EDIT_SUFFIX, MODELS_FOLDER,
@@ -108,10 +119,15 @@ pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
     LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MODEL_EXTENSIONS,
     MapSlot, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, MorphTarget, Pick, Pose,
-    Posed, PosedPrimitive, Primitive, PrimitiveMorph, PrimitiveReport, Rig, Take, TextureRole,
-    Track, apply_morphs, cached_meshes, cooked_models, embedded_files, is_collision_piece,
-    list_objects, load_model, load_models, load_takes, lod_level, tangents, texture_pack_name,
-    texture_roles,
+    Posed, PosedBone, PosedPrimitive, Primitive, PrimitiveMorph, PrimitiveReport, Rig, Take,
+    TextureRole, Track, apply_morphs, cached_meshes, cooked_models, embedded_files,
+    is_collision_piece, list_objects, load_model, load_models, load_takes, lod_level, tangents,
+    texture_pack_name, texture_roles,
+};
+pub use model_presets::{
+    BringIn, DEFAULT_MODEL_PRESET, ImportCollision, LAST_MODEL_PRESET_FILE, ModelSettings, UpAxis,
+    built_in_model_presets, last_model_preset, presets_file_with_model_preset,
+    remember_model_preset,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{
@@ -223,6 +239,11 @@ struct Shared {
     /// The project's rig definitions, read the first time they're asked
     /// for (see [`Assets::rig_definitions`]).
     rigs: Option<Arc<RigDefinitions>>,
+    /// The project's face profiles, read the first time they're asked for
+    /// (see [`Assets::face_profiles`]).
+    faces: Option<Arc<FaceProfiles>>,
+    /// The project's expressions (see [`Assets::face_expressions`]).
+    expressions: Option<Arc<FaceExpressions>>,
     /// Each model and texture file's stamp when it was read, so
     /// [`Assets::reload`] skips one that hasn't changed since (such as a
     /// model the editor just imported).
@@ -824,6 +845,12 @@ impl Assets {
         if is_rig_definition(file) {
             shared.rigs = None;
         }
+        if is_face_profile(file) {
+            shared.faces = None;
+        }
+        if is_face_expression(file) {
+            shared.expressions = None;
+        }
         forget_materials_using(&mut shared, file);
         loading::reread_loads(&mut shared, |key| {
             key.file() == file || key.kind == Kind::Material
@@ -899,6 +926,55 @@ impl Assets {
         }
         shared.errors.extend(read.problems.iter().cloned());
         shared.rigs = Some(read.clone());
+        read
+    }
+
+    /// The project's face profiles (`assets/faces/**/*.face.json`), read
+    /// the first time they're asked for and again after
+    /// [`forget`](Self::forget) or [`reload`](Self::reload) is told about
+    /// one. Files that can't be read are reported once through
+    /// [`take_errors`](Self::take_errors). Empty with no project.
+    pub fn face_profiles(&self) -> Arc<FaceProfiles> {
+        let folder = {
+            let shared = self.lock();
+            if let Some(faces) = &shared.faces {
+                return faces.clone();
+            }
+            shared.folder.clone()
+        };
+        // Read with the lock released, as rig definitions are.
+        let read = Arc::new(
+            folder.map_or_else(FaceProfiles::default, |folder| read_face_profiles(&folder)),
+        );
+        let mut shared = self.lock();
+        if let Some(faces) = &shared.faces {
+            return faces.clone();
+        }
+        shared.errors.extend(read.problems.iter().cloned());
+        shared.faces = Some(read.clone());
+        read
+    }
+
+    /// The project's expressions (`assets/faces/expressions/**/*.expression.json`),
+    /// read the first time they're asked for and again after one changes,
+    /// as [`face_profiles`](Self::face_profiles) are.
+    pub fn face_expressions(&self) -> Arc<FaceExpressions> {
+        let folder = {
+            let shared = self.lock();
+            if let Some(expressions) = &shared.expressions {
+                return expressions.clone();
+            }
+            shared.folder.clone()
+        };
+        let read = Arc::new(folder.map_or_else(FaceExpressions::default, |folder| {
+            read_face_expressions(&folder)
+        }));
+        let mut shared = self.lock();
+        if let Some(expressions) = &shared.expressions {
+            return expressions.clone();
+        }
+        shared.errors.extend(read.problems.iter().cloned());
+        shared.expressions = Some(read.clone());
         read
     }
 

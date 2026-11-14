@@ -116,7 +116,32 @@ impl Rig {
     /// Each joint's transform from a bound vertex to where `pose` puts it,
     /// in the fitted space the model's triangles are in.
     pub fn joint_matrices(&self, pose: &[BoneTransform]) -> Vec<Mat4> {
-        let world = self.world(pose);
+        self.joints_from_world(&self.world(pose))
+    }
+
+    /// Each bone's origin where `pose` puts it, in the model's fitted space,
+    /// with its parent: a skeleton to draw ([`Posed::bones`] for a posed
+    /// model).
+    pub fn skeleton(&self, pose: &[BoneTransform]) -> Vec<PosedBone> {
+        self.skeleton_from_world(&self.world(pose))
+    }
+
+    fn skeleton_from_world(&self, world: &[Mat4]) -> Vec<PosedBone> {
+        self.bones
+            .iter()
+            .zip(world)
+            .map(|(bone, matrix)| PosedBone {
+                position: self
+                    .fit
+                    .transform_point3(matrix.transform_point3(Vec3::ZERO)),
+                parent: bone.parent,
+            })
+            .collect()
+    }
+
+    /// [`joint_matrices`](Self::joint_matrices) from bones already placed by
+    /// [`world`](Self::world).
+    fn joints_from_world(&self, world: &[Mat4]) -> Vec<Mat4> {
         let unfit = self.fit.inverse();
         self.joints
             .iter()
@@ -277,11 +302,22 @@ pub struct Posed {
     /// ([`Model::morph_targets`]) its corners lean, applied before the
     /// joints move them.
     morph_weights: Vec<f32>,
+    /// Each bone's posed origin in the fitted space, and its parent: what a
+    /// skeleton overlay draws.
+    bones: Vec<PosedBone>,
     /// How many primitives the model has.
     primitive_count: usize,
     /// Each primitive's corners at each level, the full one first
     /// (`level * primitives + index`), posed when first asked for.
     posed: Vec<OnceLock<PosedPrimitive>>,
+}
+
+/// Where a [`Posed`] model's bone is: its origin in the model's fitted
+/// space (the model's placement turns it into the world) and its parent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PosedBone {
+    pub position: Vec3,
+    pub parent: Option<usize>,
 }
 
 /// One primitive's moved corners.
@@ -306,6 +342,12 @@ impl Posed {
     /// what the renderer skins them with on the GPU.
     pub fn joints(&self) -> &[Mat4] {
         &self.joints
+    }
+
+    /// Each bone of the rig where this pose puts it, parents first (empty
+    /// for a model without a rig).
+    pub fn bones(&self) -> &[PosedBone] {
+        &self.bones
     }
 
     /// The matching turn for normals: each of [`joints`](Self::joints)'
@@ -426,22 +468,25 @@ impl Model {
     /// asked for (see [`Posed::primitive`]).
     pub fn pose(&self, pose: &[BoneTransform]) -> Option<Posed> {
         let rig = self.rig.as_ref()?;
-        Some(self.posed(rig.joint_matrices(pose)))
+        Some(self.posed_with(rig, &rig.world(pose)))
     }
 
     /// The model at rest (its rig's rest pose, if it has one), to lean
     /// toward its blend shapes with [`Posed::set_morph_weights`]: how a
     /// model with blend shapes and no skeleton is posed.
     pub fn rest_posed(&self) -> Posed {
-        let joints = self
-            .rig
-            .as_ref()
-            .map(|rig| rig.joint_matrices(&rig.rest_pose()))
-            .unwrap_or_default();
-        self.posed(joints)
+        match &self.rig {
+            Some(rig) => self.posed_with(rig, &rig.world(&rig.rest_pose())),
+            None => self.posed(Vec::new(), Vec::new()),
+        }
     }
 
-    fn posed(&self, joints: Vec<Mat4>) -> Posed {
+    /// Posed with `rig`'s bones placed at `world` ([`Rig::world`]).
+    fn posed_with(&self, rig: &Rig, world: &[Mat4]) -> Posed {
+        self.posed(rig.joints_from_world(world), rig.skeleton_from_world(world))
+    }
+
+    fn posed(&self, joints: Vec<Mat4>, bones: Vec<PosedBone>) -> Posed {
         // Normals are turned by the inverse transpose, so they stay
         // perpendicular to stretched surfaces.
         let normal_matrices = joints
@@ -465,6 +510,7 @@ impl Model {
                 .iter()
                 .map(|target| target.default_weight)
                 .collect(),
+            bones,
             primitive_count,
             posed: (0..levels * primitive_count)
                 .map(|_| OnceLock::new())

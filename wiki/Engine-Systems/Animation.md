@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [anim, assets, render]
-source: [crates/assets/src/model/morph.rs, crates/anim/src/lib.rs, crates/anim/src/retarget.rs, crates/anim/src/retarget/roles.rs, crates/anim/src/retarget/check.rs, crates/anim/src/retarget/profile.rs, crates/assets/src/rig_definition.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
+source: [crates/assets/src/model/morph.rs, crates/anim/src/face.rs, crates/anim/src/face_play.rs, crates/anim/src/face_world.rs, crates/core/src/face.rs, crates/assets/src/face_profile.rs, crates/assets/src/face_expression.rs, crates/script/src/face.rs, crates/anim/src/lib.rs, crates/anim/src/retarget.rs, crates/anim/src/retarget/roles.rs, crates/anim/src/retarget/check.rs, crates/anim/src/retarget/profile.rs, crates/assets/src/rig_definition.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
 docs: [docs/rendering/animation.md, docs/scripting/api-animation.md, docs/project/animation-files.md, docs/project/sequences.md, crates/anim/CLAUDE.md]
 verified: 2026-11-14
 verified_commit: f6d5427f
@@ -36,6 +36,7 @@ flowchart LR
 - Live state (`AnimatorState`, `AnimationTrackState`, `PropertyAnimationState`) is in the World, not saved properties.
 - Property tracks animate Parts, Model pivots and UI elements; reduced motion (a game UI setting) holds GUI animations.
 - A take for another humanoid skeleton (Mixamo on an Unreal mannequin, Blender, Biped …) is **retargeted** (G16, `retarget.rs`): bones are matched to 52 humanoid roles (22 body, 30 finger; AP1) by a fitting **rig definition** (`assets/rigs/*.rig.json`, reusable bone maps found by fit, `Assets::rig_definitions`) or by name, the body's facing and up are measured in both rest poses, and each mapped bone's world turn from its rest is carried over; the hips' travel is scaled by leg length. Name binding still wins whenever any humanoid bone binds by name. `check_rig`/`check_pair` report missing or misplaced roles, swapped sides, rest pose (T/A) and finger coverage before binding. A clip's link can name a **retarget profile** (`*.retarget.json`, AP2): match rest poses (T-pose takes on A-pose models, on by default), hips Scaled/Unscaled/InPlace, plant feet and match hands with two-bone IK, finger strength, per-role weight and offset.
+- Debugging (AP6): `Model::pose` also keeps each bone's posed origin (`Posed::bones`), which the viewport's **Skeletons** overlay draws (rest skeletons from `Rig::skeleton` while editing); `Animators::inspect` is a read-only snapshot of one runner (state, fade, layers, tracks over it, parameters, the last 8 things it fired, root motion) for the editor's Debug > Animator Inspector.
 - `Posed::primitive` skins on the CPU only on request (tests, tools, the Model Studio's pose test), per LOD level.
 
 ## Dependencies
@@ -48,14 +49,15 @@ flowchart LR
 
 ## Testing
 
-`crates/anim/src/tests.rs` (canonical example files round-trip), `layer_tests.rs`, `retarget_tests.rs`; player `skinning_tests.rs`, `ragdoll_tests.rs`, `cutscene_tests.rs`; editor animation tests (the Animation tab).
+`crates/anim/src/tests.rs` (canonical example files round-trip), `layer_tests.rs`, `retarget_tests.rs`, `animators/inspect_tests.rs`; player `skinning_tests.rs`, `ragdoll_tests.rs`, `cutscene_tests.rs`; editor animation tests (the Animation tab).
 
 ## Limitations
 
 - Format 1 clip files still read (converted).
+- No motion matching: proposal only (`docs/research/motion-matching.md`, MM1–MM6; inertialization and a controller trajectory first, the database when there's a licensed dataset).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
-- Blend shapes (morph targets) are imported (F1: `Model::morph_targets`, sparse `Primitive::morphs`, applied by `Posed::primitive` on the CPU) and drawn morphed on the GPU (F2, before skinning, in every raster pass), but hardware ray tracing sees the unmorphed mesh, and there is no facial animation yet (nothing sets weights but code). Plan: `docs/research/facial-animation.md` (F1–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
+- Blend shapes (morph targets) are imported (F1) and drawn morphed on the GPU (F2, before skinning, in every raster pass), but hardware ray tracing sees the unmorphed mesh. Faces are driven by a `FaceControls` (F3: 48 standard controls through a face profile, eye and jaw bones turned after IK) and F4's layers (expressions with priorities and asymmetry, overrides, masks, automatic blinks, gaze at the camera, a target or a point, idle darts), and clips and Sequences key face controls (F4b), but there's no lip sync yet and what scripts set on a face isn't replicated (F7). Plan: `docs/research/facial-animation.md` (F4–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
 - Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Bone maps and profiles are edited in the Animation tab's Retargeting section (AP3). Keyed clips have Cleanup tools (AP4, `anim/src/cleanup.rs`): mirror (by the humanoid map and side words, baked a frame apart), smooth, reduce keys, fix the loop seam, re-time a range; they work on keys only, so a linked clip is converted first. The Sequencer's transport adds play backwards, loop, an In/Out play range and edit-point stepping (AP5, `transport::PlayMode`; preview only, never saved). Plan: `docs/research/animation-production.md` (AP6-AP7).
 
 ## Development guidance

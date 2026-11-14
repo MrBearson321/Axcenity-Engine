@@ -22,7 +22,7 @@ Paul's 2026-11-14 list, Priority 4: Axcenity has animation authoring, skeletal m
 | AP4 | Cleanup and editing | Mirror (left ↔ right through the humanoid map), smooth, reduce keys on keyed clips, fix the loop seam, re-time a range |
 | AP5 | Sequencer transport | Loop, play range (in and out marks), previous/next edit point (section ends, cuts, events), reverse play |
 | AP6 | Debugging and visualization | Skeleton overlay in the viewport (edit and Play), a live Animator inspector (current state and blend, layers and weights, playing tracks, recent events, root motion) |
-| AP7 | Motion matching | Proposal only, after retargeting is finished |
+| AP7 | Motion matching | Proposal only, after retargeting is finished: [motion-matching.md](motion-matching.md) (decisions D1–D6, stages MM1–MM6) |
 
 Decisions taken without asking (all reversible):
 

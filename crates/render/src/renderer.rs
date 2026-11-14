@@ -78,6 +78,7 @@ mod probes;
 mod ray_ao;
 mod ray_cut_outs;
 mod ray_gi;
+mod ray_reflections;
 mod ray_shadows;
 mod ray_soft;
 mod ray_sway;

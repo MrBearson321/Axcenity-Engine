@@ -467,11 +467,10 @@ impl RetargetPanel {
                 map.file.rsplit('/').next().unwrap_or("")
             ),
         };
-        egui::Window::new(title)
-            .id(egui::Id::new("retarget bone map"))
-            .open(&mut open)
-            .default_size([360.0, 480.0])
-            .show(ctx, |ui| {
+        crate::widgets::tool_window(icons::BONE, &title)
+            .id("retarget bone map")
+            .size(egui::vec2(360.0, 480.0))
+            .show(ctx, &mut open, |ui| {
                 ui.weak(format!(
                     "Saved as `{}`, it applies to every skeleton that has these bones.",
                     map.path
