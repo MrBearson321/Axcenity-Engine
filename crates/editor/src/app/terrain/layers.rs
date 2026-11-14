@@ -116,7 +116,8 @@ impl EditorApp {
         }
     }
 
-    /// Swaps a layer with the one before (`up`) or after it.
+    /// Swaps a layer with the one before (`up`) or after it (or a scatter
+    /// rule with the rule before or after it).
     pub(super) fn move_terrain_layer(&mut self, layer: InstanceId, up: bool) {
         let Some(place) = history::place_of(&self.world, layer) else {
             return;
@@ -124,9 +125,8 @@ impl EditorApp {
         let Some(siblings) = self.world.get(place.parent).map(|p| p.children().to_vec()) else {
             return;
         };
-        let is_layer = |id: &InstanceId| {
-            self.world.get(*id).map(|i| i.class()) == Some(ClassName::TerrainLayer)
-        };
+        let class = self.world.get(layer).map(|i| i.class());
+        let is_layer = |id: &InstanceId| self.world.get(*id).map(|i| i.class()) == class;
         // Taking the layer out first moves later siblings back one, so
         // going down, the next layer's index is where it ends up after it.
         let index = if up {

@@ -286,12 +286,12 @@ pub(crate) fn lerp_property(property: PropertyName, a: &[f32], b: &[f32], t: f32
     out
 }
 
-fn quat_from_orientation(orientation: Vector3) -> Quat {
+pub(crate) fn quat_from_orientation(orientation: Vector3) -> Quat {
     let [x, y, z] = [orientation.x, orientation.y, orientation.z].map(f32::to_radians);
     Quat::from_euler(EulerRot::YXZ, y, x, z)
 }
 
-fn orientation_from_quat(rotation: Quat) -> Vector3 {
+pub(crate) fn orientation_from_quat(rotation: Quat) -> Vector3 {
     let (y, x, z) = rotation.to_euler(EulerRot::YXZ);
     let tidy = |radians: f32| (radians.to_degrees() * 1000.0).round() / 1000.0 + 0.0;
     Vector3::new(tidy(x), tidy(y), tidy(z))

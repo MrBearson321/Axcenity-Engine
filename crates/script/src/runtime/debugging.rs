@@ -50,6 +50,29 @@ impl ScriptRuntime {
         self.server.pause_requested() || self.client.pause_requested()
     }
 
+    /// Starts or stops the script profiler on both sides (scripting P2
+    /// PR 4, `profile.rs`): each resume's time by the work it runs (a
+    /// script's body, an event handler, a task) and sampled time by script
+    /// function. It costs a little time while on, so only the editor's
+    /// Profiler turns it on. What it recorded stays until
+    /// [`Self::clear_profile`].
+    pub fn set_profiling(&mut self, on: bool) {
+        self.server.set_profiling(on);
+        self.client.set_profiling(on);
+    }
+
+    pub fn clear_profile(&mut self) {
+        self.server.clear_profile();
+        self.client.clear_profile();
+    }
+
+    /// What the profiler recorded on both sides, the costliest first.
+    pub fn script_profile(&self) -> ScriptProfile {
+        let mut profile = self.server.profile();
+        profile.merge(self.client.profile());
+        profile
+    }
+
     /// Where a script is paused at a breakpoint, if one is. While paused,
     /// the host should stop running frames: nothing in the game should move.
     /// Anything it fires anyway (a Console command, an event) waits, and

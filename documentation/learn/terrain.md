@@ -39,6 +39,10 @@ A terrain is painted with **layers** (TerrainLayer objects inside it), each with
 
 The **Foliage** tool scatters the selected item from the Assets panel (a built-in plant or prop, or one of your models) as you paint, with a density. Click a prop or model in Assets to choose it, and hold **Shift** to erase it. Foliage can be solid, so parts rest on it, or only visual. Painted plants sway in the Workspace's **GlobalWind** and are drawn only near the camera (grass to about 120 studs, trees to 800), so a large painted forest stays fast.
 
+## Scatter rules
+
+Instead of painting by hand, a **scatter rule** (a ScatterRule object inside the terrain) covers the whole terrain for you. In the Terrain Studio, open **Scatter Rules** and pick **Add rule**: the **Forest set** adds trees, undergrowth and grass tufts at once, or add one preset. Select a rule to set how far apart things stand, how many, the heights and slopes they grow on, the material layer they need, how much they gather into patches, and how far they keep from what rules above them placed. With a rule selected, click plants, props or models in the Assets panel to add or remove them. The layout follows the ground as you sculpt and paint, and the same seed gives the same layout every time. It isn't saved: it's made again when the world opens. **Bake** turns what the rules placed into painted foliage, so you can brush and erase it by hand.
+
 ## Roads and parts into terrain
 
 - A **SplineMesh** lays a road or fence along a spline, and **Flatten Terrain Along** levels the ground under it. See the **hello-roads** sample.

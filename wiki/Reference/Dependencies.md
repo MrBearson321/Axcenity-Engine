@@ -25,6 +25,7 @@ Third-party crates pinned in the root `Cargo.toml` `[workspace.dependencies]` (v
 | Scripting | `mlua` 0.12 (`luau`, `luau-jit`), `luau0-src` **=0.22.0** | script | MIT | Pin moves with mlua; guarded by `luau_pin_tests.rs` |
 | Audio | `kira` 0.12, `mint` 0.5 | audio | MIT/Apache | cpal underneath (ALSA on Linux) |
 | Models | `gltf` 1.4 (`KHR_texture_transform`, `extras`), `ufbx` 0.11, `meshopt` 0.7 | assets | MIT/Apache; ufbx MIT/Unlicense | ufbx and meshoptimizer are C/C++ built with `cc` |
+| USD import | `openusd` 0.8, `openusd-schemas` 0.8 (`geom`, `shade`) | convert (editor only) | MIT | Pure Rust; ADR-0027. Never linked by the player or server (`scripts/check-platform.*`) |
 | Images | `image` 0.25 (bmp, exr, hdr, jpeg, png, tga), `png` 0.18 | assets, terrain, player icon, editor thumbnails | MIT/Apache | |
 | Texture cooking | `intel_tex_2` 0.5 | cook (editor only) | MIT/Apache | Prebuilt ISPC kernels; never linked by player/server/testing |
 | Cooked texture decoding | `texture2ddecoder` 0.1.2 | assets (player too) | MIT/Apache | Pure Rust, no unsafe; decodes BC7/BC5 top levels for CPU readers in cooked-only games (G12); pulls in `paste` (already in the tree) |

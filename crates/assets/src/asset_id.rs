@@ -133,6 +133,10 @@ struct ImportFile {
     /// its folder's, or Default (`import_presets.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preset: Option<String>,
+    /// The file this one was converted from on import (a USD file made
+    /// into a `.glb`, ADR-0027), by its name, if it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    converted_from: Option<String>,
 }
 
 /// The project path of the sidecar of the file at `relative`.
@@ -169,30 +173,70 @@ pub fn encode_import_file(id: AssetId) -> Vec<u8> {
 /// A sidecar's bytes for `id`, with the import preset picked for its file
 /// (R12), if any.
 pub fn encode_import_file_with(id: AssetId, preset: Option<&str>) -> Vec<u8> {
-    let file = ImportFile {
+    encode(&ImportFile {
         format_version: FORMAT_VERSION,
         uid: id,
         preset: preset.map(str::to_owned),
-    };
-    let mut text = serde_json::to_string_pretty(&file).expect("plain data");
+        converted_from: None,
+    })
+}
+
+fn encode(file: &ImportFile) -> Vec<u8> {
+    let mut text = serde_json::to_string_pretty(file).expect("plain data");
     text.push('\n');
     text.into_bytes()
+}
+
+fn read_import_file(project: &Path, relative: &str) -> Option<ImportFile> {
+    let bytes = fs::read(project.join(import_path(relative))).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// The sidecar bytes that give the project file `relative` the preset
+/// `preset` (`None`: no pick of its own), keeping its asset ID (a new one if
+/// it has none yet) and the rest of its sidecar.
+pub(crate) fn encode_with_preset(project: &Path, relative: &str, preset: Option<&str>) -> Vec<u8> {
+    let mut file = read_import_file(project, relative).unwrap_or(ImportFile {
+        format_version: FORMAT_VERSION,
+        uid: AssetId::new(),
+        preset: None,
+        converted_from: None,
+    });
+    file.format_version = FORMAT_VERSION;
+    file.preset = preset.map(str::to_owned);
+    encode(&file)
+}
+
+/// The name of the file the project file `relative` was converted from on
+/// import (ADR-0027), if its sidecar says.
+pub fn read_converted_from(project: &Path, relative: &str) -> Option<String> {
+    read_import_file(project, relative)?.converted_from
+}
+
+/// Notes in the sidecar of the project file `relative` (writing one, with a
+/// new ID, if it has none) that it was converted on import from the file
+/// named `source`, such as `Kitchen.usdz`.
+pub fn note_converted_from(project: &Path, relative: &str, source: &str) -> io::Result<()> {
+    let mut file = read_import_file(project, relative).unwrap_or(ImportFile {
+        format_version: FORMAT_VERSION,
+        uid: AssetId::new(),
+        preset: None,
+        converted_from: None,
+    });
+    file.converted_from = Some(source.to_owned());
+    write_whole(&project.join(import_path(relative)), &encode(&file))
 }
 
 /// The import preset picked for the project file `relative` in its sidecar
 /// (R12), if there's a sidecar that can be read and it names one.
 pub fn read_preset(project: &Path, relative: &str) -> Option<String> {
-    let bytes = fs::read(project.join(import_path(relative))).ok()?;
-    let file: ImportFile = serde_json::from_slice(&bytes).ok()?;
-    file.preset
+    read_import_file(project, relative)?.preset
 }
 
 /// The ID of the project file `relative`, if it has a sidecar that can be
 /// read.
 pub fn read_asset_id(project: &Path, relative: &str) -> Option<AssetId> {
-    let bytes = fs::read(project.join(import_path(relative))).ok()?;
-    let file: ImportFile = serde_json::from_slice(&bytes).ok()?;
-    Some(file.uid)
+    Some(read_import_file(project, relative)?.uid)
 }
 
 /// The ID of the project file `relative`, giving it one first (writing its
@@ -405,6 +449,31 @@ mod tests {
         ] {
             assert!(bad.parse::<AssetId>().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_converted_file_keeps_its_source_through_a_preset_change() {
+        let project = project("converted");
+        let glb = "assets/models/kitchen.glb";
+        fs::write(project.join(glb), b"glb").unwrap();
+        assert_eq!(read_converted_from(&project, glb), None);
+        note_converted_from(&project, glb, "Kitchen.usdz").unwrap();
+        let id = read_asset_id(&project, glb).expect("a sidecar with an ID");
+        assert_eq!(
+            read_converted_from(&project, glb).as_deref(),
+            Some("Kitchen.usdz")
+        );
+        // Picking a preset keeps the ID and the note.
+        let bytes =
+            crate::import_presets::sidecar_with_preset(&project, glb, Some("Small")).unwrap();
+        fs::write(project.join(import_path(glb)), bytes).unwrap();
+        assert_eq!(read_asset_id(&project, glb), Some(id));
+        assert_eq!(read_preset(&project, glb).as_deref(), Some("Small"));
+        assert_eq!(
+            read_converted_from(&project, glb).as_deref(),
+            Some("Kitchen.usdz")
+        );
+        let _ = fs::remove_dir_all(&project);
     }
 
     #[test]

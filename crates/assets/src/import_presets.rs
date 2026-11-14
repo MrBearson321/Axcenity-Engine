@@ -25,7 +25,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{encode_import_file_with, read_asset_id, read_preset, takes_asset_id};
+use crate::{read_preset, takes_asset_id};
 
 /// The project file that holds its own presets and folders' presets.
 pub const PRESETS_FILE: &str = "import-presets.json";
@@ -232,13 +232,15 @@ pub fn sidecar_with_preset(
     if !takes_asset_id(relative) {
         return None;
     }
-    let id = read_asset_id(project, relative).unwrap_or_default();
-    Some(encode_import_file_with(id, preset))
+    Some(crate::asset_id::encode_with_preset(
+        project, relative, preset,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::read_asset_id;
 
     fn folder(name: &str) -> std::path::PathBuf {
         let folder =

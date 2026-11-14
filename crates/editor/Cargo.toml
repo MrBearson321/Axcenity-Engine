@@ -14,6 +14,7 @@ axcenity-audio.workspace = true
 axcenity-blocks.workspace = true
 axcenity-character.workspace = true
 axcenity-collab.workspace = true
+axcenity-convert.workspace = true
 axcenity-core.workspace = true
 axcenity-editor-benchmark.workspace = true
 axcenity-editor-kit.workspace = true

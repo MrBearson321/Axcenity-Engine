@@ -676,7 +676,11 @@ impl AnimationStudio {
                 self.clip.retarget.show(ui, doc, assets, project, output);
                 rename
             }
-            Some(Clip::Property(doc)) => doc.inspector(ui, self.clip.objects.root_name()),
+            Some(Clip::Property(doc)) => {
+                let rename = doc.inspector(ui, self.clip.objects.root_name());
+                doc.cleanup_section(ui, &assets.rig_definitions());
+                rename
+            }
             None => false,
         }
     }
