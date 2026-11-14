@@ -11,8 +11,15 @@
 //! a second. Every `--report` seconds a line sums them up (round trips,
 //! bandwidth, corrections, bots' own frame times); at the end comes the
 //! summary, also as JSON lines in `--report-file`.
+//!
+//! Operational tests (MP2): `--churn <s>` has each bot leave after about
+//! that long and a new one (a new install) join in its place, for leak
+//! checks; `--flood silent|junk|spam|deep` opens misbehaving connections
+//! instead of bots (`flood.rs`). A bot that loses its connection tries to
+//! rejoin for a minute, as a player's device does.
 
 mod bot;
+mod flood;
 mod stats;
 
 use std::ffi::OsString;
@@ -25,12 +32,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
+use axcenity_net::GameInfo;
 use bot::{Bot, BotSettings};
+use flood::{Flood, FloodConnection};
 use stats::{BotSample, Summary};
 
 const USAGE: &str = "usage: axcenity-bots <project-folder> --join <address:port> [--count <n>] [--seconds <s>] \
                      [--threads <n>] [--stagger <ms>] [--password <text>] [--no-scripts] [--idle] [--roam <studs>] \
-                     [--report <s>] [--report-file <path>] [--user-id <first>]\n\
+                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood silent|junk|spam|deep]\n\
                      example: cargo run -p axcenity-server --bin axcenity-bots -- examples/hello-character --join 127.0.0.1:47800 --count 16";
 
 /// Each frame is this long.
@@ -53,6 +62,9 @@ struct Arguments {
     report: f64,
     report_file: Option<PathBuf>,
     first_user_id: Option<u64>,
+    /// Each bot leaves after about this long and a new one takes its place.
+    churn: Option<f64>,
+    flood: Option<Flood>,
 }
 
 impl Default for Arguments {
@@ -71,6 +83,8 @@ impl Default for Arguments {
             report: 5.0,
             report_file: None,
             first_user_id: None,
+            churn: None,
+            flood: None,
         }
     }
 }
@@ -137,6 +151,16 @@ impl Arguments {
                         "a number",
                     )?)
                 }
+                "--churn" => {
+                    let seconds: f64 = number(&value("--churn", "seconds")?, "--churn", "seconds")?;
+                    if seconds < 1.0 {
+                        bail!("--churn takes at least 1 second\n\n{USAGE}");
+                    }
+                    parsed.churn = Some(seconds);
+                }
+                "--flood" => {
+                    parsed.flood = Some(Flood::parse(&value("--flood", "a kind")?)?);
+                }
                 "--help" | "-h" => bail!("{USAGE}"),
                 _ if text.starts_with("--") => bail!("unknown option `{text}`\n\n{USAGE}"),
                 _ => rest.push(text),
@@ -159,7 +183,10 @@ enum Report {
 }
 
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(axcenity_net::LOG_FILTER),
+    )
+    .init();
     let arguments = Arguments::parse(std::env::args_os().skip(1))?;
     let Some(game) = arguments.game.clone() else {
         bail!("no game to join\n\n{USAGE}");
@@ -182,6 +209,31 @@ fn main() -> Result<()> {
         roam: arguments.roam,
         first_user_id,
     };
+    // A flood's connections only need the game's name and version.
+    let flood = match arguments.flood {
+        Some(kind) => {
+            let project = axcenity_project::load(&settings.game).map_err(|err| {
+                anyhow::anyhow!(
+                    "could not open the project in `{}`: {err}",
+                    settings.game.display()
+                )
+            })?;
+            Some((
+                kind,
+                GameInfo {
+                    name: project.manifest.name.clone(),
+                    version: project.manifest.version.clone(),
+                },
+            ))
+        }
+        None => None,
+    };
+    let plan = Plan {
+        stagger: arguments.stagger,
+        report: Duration::from_secs_f64(arguments.report),
+        churn: arguments.churn.map(Duration::from_secs_f64),
+        flood,
+    };
     let stop = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = mpsc::channel();
     let threads = arguments.threads.min(arguments.count);
@@ -190,20 +242,23 @@ fn main() -> Result<()> {
         .map(|thread| {
             let mine: Vec<usize> = (thread..arguments.count).step_by(threads).collect();
             let settings = settings.clone();
+            let plan = plan.clone();
             let stop = stop.clone();
             let sender = sender.clone();
-            let stagger = arguments.stagger;
-            let report = Duration::from_secs_f64(arguments.report);
             std::thread::Builder::new()
                 .name(format!("bots-{thread}"))
                 // Luau and the editor's tests want a deep stack in debug.
                 .stack_size(16 * 1024 * 1024)
-                .spawn(move || run_thread(mine, &settings, stagger, report, &stop, &sender))
+                .spawn(move || run_thread(mine, &settings, &plan, &stop, &sender))
         })
         .collect::<std::io::Result<_>>()?;
     drop(sender);
+    let what = match arguments.flood {
+        Some(kind) => format!("{kind:?} flood connections").to_lowercase(),
+        None => "bots".to_owned(),
+    };
     eprintln!(
-        "Starting {} bots on {threads} threads, joining {}...",
+        "Starting {} {what} on {threads} threads, joining {}...",
         arguments.count, settings.address
     );
 
@@ -268,6 +323,20 @@ fn main() -> Result<()> {
         json["summary"] = serde_json::Value::Bool(true);
         writeln!(file, "{json}")?;
     }
+    match arguments.flood {
+        // The server must have dropped every one of them.
+        Some(Flood::Silent | Flood::Junk) => {
+            let kept = latest.iter().filter(|s| s.ended.is_none()).count();
+            if kept > 0 {
+                bail!(
+                    "the server kept {kept} of {} flood connections",
+                    summary.bots
+                );
+            }
+            return Ok(());
+        }
+        Some(Flood::Spam | Flood::Deep) | None => {}
+    }
     if summary.joined < summary.bots {
         bail!(
             "{} of {} bots never joined",
@@ -278,18 +347,107 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// How each thread runs its share.
+#[derive(Clone)]
+struct Plan {
+    /// Between one bot's start and the next's.
+    stagger: Duration,
+    /// How often each bot's sample goes out.
+    report: Duration,
+    churn: Option<Duration>,
+    /// Misbehaving connections instead of bots, for this game.
+    flood: Option<(Flood, GameInfo)>,
+}
+
+/// A bot, or a misbehaving connection.
+enum Device {
+    Bot(Box<Bot>),
+    Flood(Box<FloodConnection>),
+}
+
+impl Device {
+    fn start(index: usize, generation: u64, settings: &BotSettings, plan: &Plan) -> Result<Device> {
+        Ok(match &plan.flood {
+            Some((kind, game)) => Device::Flood(Box::new(FloodConnection::start(
+                index,
+                *kind,
+                &settings.address,
+                game,
+                settings.password.clone(),
+                settings.first_user_id + index as u64,
+            )?)),
+            None => Device::Bot(Box::new(Bot::start(index, generation, settings)?)),
+        })
+    }
+
+    fn frame(&mut self, seconds: f64) {
+        match self {
+            Device::Bot(bot) => bot.frame(seconds),
+            Device::Flood(flood) => flood.frame(seconds),
+        }
+    }
+
+    fn sample(&mut self) -> BotSample {
+        match self {
+            Device::Bot(bot) => bot.sample(),
+            Device::Flood(flood) => flood.sample(),
+        }
+    }
+
+    fn is_over(&self) -> bool {
+        match self {
+            Device::Bot(bot) => bot.is_over(),
+            Device::Flood(flood) => flood.is_over(),
+        }
+    }
+
+    fn leave(&mut self) {
+        match self {
+            Device::Bot(bot) => bot.leave(),
+            Device::Flood(flood) => flood.leave(),
+        }
+    }
+}
+
+/// One of a thread's places for a bot: churned bots come and go in it.
+struct Slot {
+    index: usize,
+    device: Device,
+    /// How many bots this place had before this one.
+    generation: u64,
+    since: Instant,
+}
+
+impl Slot {
+    /// A churned bot stays between 0.75 and 1.25 times `churn`, so they
+    /// don't all leave at once.
+    fn stays(&self, churn: Duration) -> Duration {
+        let spread = (self.index as f64 * 0.618_034 + self.generation as f64 * 0.414_214).fract();
+        churn.mul_f64(0.75 + 0.5 * spread)
+    }
+
+    fn sample(&mut self) -> BotSample {
+        BotSample {
+            churned: self.generation,
+            ..self.device.sample()
+        }
+    }
+}
+
 /// One thread's bots: started one by one, `stagger` apart, then stepped
 /// each frame until `stop`; a sample of each goes out every `report`.
+/// With `churn`, each leaves after its time and a new one starts.
 fn run_thread(
     indices: Vec<usize>,
     settings: &BotSettings,
-    stagger: Duration,
-    report: Duration,
+    plan: &Plan,
     stop: &AtomicBool,
     sender: &mpsc::Sender<Report>,
 ) {
     let started = Instant::now();
-    let mut bots: Vec<Bot> = Vec::new();
+    let mut slots: Vec<Slot> = Vec::new();
+    // Bots that just left, stepped one more frame so their goodbye goes.
+    let mut leaving: Vec<Device> = Vec::new();
     let mut waiting = indices.into_iter().peekable();
     let mut last_report = Instant::now();
     let mut last = Instant::now();
@@ -297,12 +455,17 @@ fn run_thread(
         let frame_started = Instant::now();
         // Bot n starts n staggers after the run did, whichever thread has it.
         while let Some(&index) = waiting.peek() {
-            if started.elapsed() < stagger * index as u32 {
+            if started.elapsed() < plan.stagger * index as u32 {
                 break;
             }
             waiting.next();
-            match Bot::start(index, settings) {
-                Ok(bot) => bots.push(bot),
+            match Device::start(index, 0, settings, plan) {
+                Ok(device) => slots.push(Slot {
+                    index,
+                    device,
+                    generation: 0,
+                    since: Instant::now(),
+                }),
                 Err(err) => {
                     let _ = sender.send(Report::Failed(index, format!("{err:#}")));
                 }
@@ -310,29 +473,55 @@ fn run_thread(
         }
         let seconds = frame_started.duration_since(last).as_secs_f64().min(0.1);
         last = frame_started;
-        for bot in &mut bots {
-            bot.frame(seconds);
+        for device in &mut leaving {
+            device.frame(seconds);
         }
-        if last_report.elapsed() >= report {
-            last_report = Instant::now();
-            for bot in &mut bots {
-                let _ = sender.send(Report::Sample(bot.sample()));
+        leaving.clear();
+        for slot in &mut slots {
+            slot.device.frame(seconds);
+        }
+        if let Some(churn) = plan.churn {
+            for slot in &mut slots {
+                if slot.since.elapsed() < slot.stays(churn) || slot.device.is_over() {
+                    continue;
+                }
+                match Device::start(slot.index, slot.generation + 1, settings, plan) {
+                    Ok(device) => {
+                        let mut old = std::mem::replace(&mut slot.device, device);
+                        old.leave();
+                        leaving.push(old);
+                        slot.generation += 1;
+                        slot.since = Instant::now();
+                    }
+                    Err(err) => {
+                        let _ = sender.send(Report::Failed(slot.index, format!("{err:#}")));
+                    }
+                }
             }
         }
-        if waiting.peek().is_none() && !bots.is_empty() && bots.iter().all(Bot::is_over) {
+        if last_report.elapsed() >= plan.report {
+            last_report = Instant::now();
+            for slot in &mut slots {
+                let _ = sender.send(Report::Sample(slot.sample()));
+            }
+        }
+        if waiting.peek().is_none()
+            && !slots.is_empty()
+            && slots.iter().all(|slot| slot.device.is_over())
+        {
             break;
         }
         if let Some(rest) = FRAME.checked_sub(frame_started.elapsed()) {
             std::thread::sleep(rest);
         }
     }
-    for bot in &mut bots {
-        let _ = sender.send(Report::Sample(bot.sample()));
-        bot.leave();
+    for slot in &mut slots {
+        let _ = sender.send(Report::Sample(slot.sample()));
+        slot.device.leave();
     }
     // Let the leaving packets go out.
-    for bot in &mut bots {
-        bot.frame(FRAME.as_secs_f64());
+    for slot in &mut slots {
+        slot.device.frame(FRAME.as_secs_f64());
     }
 }
 
@@ -362,6 +551,20 @@ mod tests {
         assert_eq!(parsed.count, 32);
         assert_eq!(parsed.seconds, 120.0);
         assert!(!parsed.scripts);
+    }
+
+    #[test]
+    fn churn_and_flood_take_what_they_say() {
+        let parsed = parse(&["castle", "--churn", "20", "--flood", "silent"]).unwrap();
+        assert_eq!(parsed.churn, Some(20.0));
+        assert_eq!(parsed.flood, Some(Flood::Silent));
+        let err = parse(&["castle", "--flood", "loud"]).unwrap_err();
+        assert!(
+            err.to_string().contains("silent, junk, spam or deep"),
+            "{err}"
+        );
+        let err = parse(&["castle", "--churn", "0.5"]).unwrap_err();
+        assert!(err.to_string().contains("at least 1 second"), "{err}");
     }
 
     #[test]

@@ -66,3 +66,9 @@ TweenInfo.new(time: number?, easingStyle: EnumEasingStyle?, easingDirection: Enu
 
 How a tween plays. Left out: 1 second, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`, no repeats, no reversing and no delay. The style and direction can also be item names, such as `"Sine"`.
 
+```lua
+local TweenService = game:GetService("TweenService")
+local info = TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, -1, true)
+TweenService:Create(workspace.Platform, info, { Position = Vector3.new(0, 20, 0) }):Play()
+```
+

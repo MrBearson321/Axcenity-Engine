@@ -113,6 +113,19 @@ pub(super) const RAY_GI_SHADER: &str = concat!(
     include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../ray_cut_outs.wgsl"),
+    include_str!("../ray_gi_hardware.wgsl"),
+    include_str!("../ray_gi.wgsl")
+);
+/// Ray traced GI's pass traced in software (RL3, renderer/ray_soft.rs) on
+/// a GPU without ray queries: the same, with its rays walking
+/// `ray_soft.wgsl`'s BVHs.
+pub(super) const RAY_GI_SOFTWARE_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../ray_soft.wgsl"),
+    include_str!("../ray_gi_software.wgsl"),
     include_str!("../ray_gi.wgsl")
 );
 /// The Path Traced view's pass (`path_tracer.wgsl`, renderer/path_tracer.rs):

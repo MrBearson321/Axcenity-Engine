@@ -40,6 +40,14 @@ RunService.RenderStepped: Signal
 
 Fires once every frame just before it's drawn, after the functions bound with `BindToRenderStep`. The handler gets the frame's length in seconds. LocalScripts only. LocalScripts only.
 
+```lua
+-- In a LocalScript: runs before each frame is drawn.
+local RunService = game:GetService("RunService")
+RunService.RenderStepped:Connect(function(deltaTime)
+	workspace.Compass.Orientation += Vector3.new(0, 90 * deltaTime, 0)
+end)
+```
+
 ### Functions
 
 #### BindToRenderStep
@@ -65,6 +73,15 @@ RunService:IsServer(): boolean
 ```
 
 Whether this is a Script, on the server.
+
+```lua
+local RunService = game:GetService("RunService")
+if RunService:IsServer() then
+	print("Running on the server")
+else
+	print("Running on a player's device")
+end
+```
 
 #### IsClient
 

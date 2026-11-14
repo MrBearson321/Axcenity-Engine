@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "networking"
+title = "A remote message of deeply nested tables no longer crashes a server"
+details = "A modified client could send a RemoteEvent message whose argument was tables nested 200,000 deep (600 KB), and the server, or any device that read it, overflowed its stack and stopped. Reading now stops at 32 tables deep and drops the message, and a script that sends tables nested deeper than that gets an error (multiplayer readiness MP3)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -60,6 +60,15 @@ Player.CharacterAdded: Signal
 
 Fires with the character Model once it's in the Workspace: when the player first gets one, after each respawn and after `LoadCharacter`.
 
+```lua
+local Players = game:GetService("Players")
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		print(player.Name, "spawned as", character.Name)
+	end)
+end)
+```
+
 #### CharacterRemoving
 
 ```luau

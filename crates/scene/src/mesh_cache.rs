@@ -41,6 +41,15 @@ impl MeshCache {
             .retain(|_, cached| cached.checked == frame);
         let frame = self.skins.frame;
         self.skins.by_part.retain(|_, cached| cached.used == frame);
+        self.forget_rest_skins();
+    }
+
+    /// Forgets the rest skins of models no longer kept.
+    fn forget_rest_skins(&mut self) {
+        let models = &self.models.by_id;
+        self.skins
+            .rest
+            .retain(|key, _| models.values().any(|cached| cached.model.key() == *key));
     }
 
     /// Call once after drawing a frame when draw items are kept between
@@ -60,6 +69,7 @@ impl MeshCache {
                     .is_some_and(|address| in_use.contains(&address))
             });
         }
+        self.forget_rest_skins();
     }
 }
 
@@ -150,6 +160,9 @@ impl Models {
 #[derive(Default)]
 pub(crate) struct Skins {
     by_part: HashMap<InstanceId, CachedSkin>,
+    /// Each model's skin of its blend shapes' default weights, by model
+    /// key, `None` when they're all 0.
+    rest: HashMap<u64, Option<Arc<Skin>>>,
     frame: u64,
 }
 
@@ -176,15 +189,40 @@ impl Skins {
             cached.version = Some(posed.version);
             // Still held (by last frame's draw list, say): a new one.
             match Arc::get_mut(&mut cached.skin) {
-                Some(skin) => skin.set_pose(posed.joints(), posed.normal_matrices()),
+                Some(skin) => {
+                    skin.set_pose(posed.joints(), posed.normal_matrices());
+                    skin.set_morph_weights(posed.morph_weights());
+                }
                 None => {
                     let mut skin = Skin::default();
                     skin.set_pose(posed.joints(), posed.normal_matrices());
+                    skin.set_morph_weights(posed.morph_weights());
                     cached.skin = Arc::new(skin);
                 }
             }
         }
         cached.skin.clone()
+    }
+
+    /// The skin of `model` at rest when its file leans it toward some of
+    /// its blend shapes (default weights): no joints, only those weights.
+    /// `None` for a model whose shapes all rest at 0.
+    pub(crate) fn rest(&mut self, model: &Model) -> Option<Arc<Skin>> {
+        self.rest
+            .entry(model.key())
+            .or_insert_with(|| {
+                let weights: Vec<f32> = model
+                    .morph_targets
+                    .iter()
+                    .map(|target| target.default_weight)
+                    .collect();
+                weights.iter().any(|weight| *weight != 0.0).then(|| {
+                    let mut skin = Skin::default();
+                    skin.set_morph_weights(&weights);
+                    Arc::new(skin)
+                })
+            })
+            .clone()
     }
 }
 
