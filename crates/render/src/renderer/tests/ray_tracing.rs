@@ -505,6 +505,18 @@ mod sun_shadows {
             without[0] > beside[0] + 40,
             "up close a card shades its foot: {beside:?} vs {without:?}"
         );
+        // On a cut-out's own pixel (a blade beside a blade), a card that
+        // near isn't counted at any distance: a blade's own card and the
+        // ones crossing it at its foot would speckle it.
+        let mut blade = list.clone();
+        blade.items[0].material.alpha_cutoff = 0.5;
+        blade.items[0].material.base_color_texture =
+            Some(std::sync::Arc::new(AlphaTexture::new(4, 255)));
+        let (beside, without) = shade(&mut renderer, &blade);
+        assert!(
+            beside[0].abs_diff(without[0]) <= 4,
+            "a cut-out isn't shaded by a card on it: {beside:?} vs {without:?}"
+        );
         // From 70 studs (through a narrow lens, so the middle stays beside
         // it), a card that near the surface is let off: depth is coarse
         // there, and a card past the bent budget is traced at rest.

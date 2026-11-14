@@ -178,6 +178,12 @@ pub(in crate::app) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Viewport,
+            "Show the ray tracing badge",
+            &["Ray tracing badge", "RTX", "Hide ray tracing"],
+            "The badge that says which ray traced effects are drawing.",
+        ),
+        setting(
+            Viewport,
             "Show the movement guide",
             &[
                 "Movement guide",

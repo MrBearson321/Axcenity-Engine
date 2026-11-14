@@ -329,6 +329,7 @@ impl EditorApp {
         for (label, command, on) in [
             ("Grid", Command::Grid, self.grid),
             ("View Cube", Command::ViewCube, self.view_cube),
+            ("Ray Tracing Badge", Command::RayBadge, self.ray_badge),
             ("Light Cones", Command::LightCones, self.light_cones),
             ("Movement Guide", Command::MovementGuide, self.move_guide),
             (
