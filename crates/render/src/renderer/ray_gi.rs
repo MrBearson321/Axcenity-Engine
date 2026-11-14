@@ -11,9 +11,14 @@
 //! reads, so nothing comes back to the CPU. Hits are lit by the probes as
 //! last updated, so light bounces again with each update.
 //!
-//! Exists only while the setting is on and the GPU can ray trace. The
-//! camera then brings probes of its own (`light_probes.rs`), so it needs
-//! no light probe volume; any drawn are traced too.
+//! On a GPU without ray queries (or with Hardware ray tracing off) the
+//! same pass traces its rays in software instead (RL3, `ray_soft.rs`): the
+//! scene as BVHs in a storage buffer, walked by `ray_soft.wgsl`.
+//!
+//! Exists only while the setting is on and the GPU can run compute shaders
+//! (`EffectiveGraphics::ray_traced_global_illumination`). The camera then
+//! brings probes of its own (`light_probes.rs`), so it needs no light
+//! probe volume; any drawn are traced too.
 
 use std::num::NonZeroU64;
 
@@ -71,8 +76,22 @@ impl Cycle {
     }
 }
 
+/// The scene a batch's rays are traced through: the hardware's TLAS (with
+/// its items' colors and cut-outs' holes), or the software scene's buffer
+/// (with its items' colors).
+pub(super) enum GiScene<'a> {
+    Hardware(
+        &'a wgpu::Tlas,
+        &'a wgpu::Buffer,
+        &'a super::ray_cut_outs::CutOuts,
+    ),
+    Software(&'a wgpu::Buffer, &'a wgpu::Buffer),
+}
+
 /// The pass's pipeline and buffers.
 pub(super) struct RayGlobalIllumination {
+    /// Whether its rays are traced in software (RL3).
+    pub(super) software: bool,
     /// The frame's bindings as a compute pass sees them, and their bind
     /// group (made again with the frame's).
     pub(super) frame_layout: wgpu::BindGroupLayout,
@@ -101,8 +120,13 @@ pub(super) const FRAME_BINDINGS: [u32; 6] = [0, 3, 10, 11, 12, 16];
 
 impl RayGlobalIllumination {
     /// `frame_entries` are the frame's bindings; those the pass reads
-    /// ([`FRAME_BINDINGS`]) are made visible to it here.
-    pub(super) fn new(device: &wgpu::Device, frame_entries: &[wgpu::BindGroupLayoutEntry]) -> Self {
+    /// ([`FRAME_BINDINGS`]) are made visible to it here. With `software`,
+    /// its rays are traced in software (`ray_soft.rs`).
+    pub(super) fn new(
+        device: &wgpu::Device,
+        frame_entries: &[wgpu::BindGroupLayoutEntry],
+        software: bool,
+    ) -> Self {
         let compute_entries: Vec<_> = frame_entries
             .iter()
             .filter(|entry| FRAME_BINDINGS.contains(&entry.binding))
@@ -126,35 +150,48 @@ impl RayGlobalIllumination {
             has_dynamic_offset: false,
             min_binding_size: None,
         };
-        let cut_outs = super::ray_cut_outs::layout_entries(5, wgpu::ShaderStages::COMPUTE);
+        // The scene: the TLAS, or the software scene's buffer.
+        let scene = if software {
+            entry(0, storage(true))
+        } else {
+            entry(
+                0,
+                wgpu::BindingType::AccelerationStructure {
+                    vertex_return: false,
+                },
+            )
+        };
+        let mut entries = vec![
+            scene,
+            entry(
+                1,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(size_of::<RayGiUniform>() as u64),
+                },
+            ),
+            entry(2, storage(true)),
+            entry(3, storage(true)),
+            entry(4, storage(false)),
+        ];
+        if !software {
+            // Cut-outs' holes (LE7).
+            entries.extend(super::ray_cut_outs::layout_entries(
+                5,
+                wgpu::ShaderStages::COMPUTE,
+            ));
+        }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ray traced GI"),
-            entries: &[
-                entry(
-                    0,
-                    wgpu::BindingType::AccelerationStructure {
-                        vertex_return: false,
-                    },
-                ),
-                entry(
-                    1,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(size_of::<RayGiUniform>() as u64),
-                    },
-                ),
-                entry(2, storage(true)),
-                entry(3, storage(true)),
-                entry(4, storage(false)),
-                // Cut-outs' holes (LE7).
-                cut_outs[0],
-                cut_outs[1],
-                cut_outs[2],
-                cut_outs[3],
-            ],
+            entries: &entries,
         });
-        let shader = super::gpu::shader_module(device, "ray traced GI", super::gpu::RAY_GI_SHADER);
+        let code = if software {
+            super::gpu::RAY_GI_SOFTWARE_SHADER
+        } else {
+            super::gpu::RAY_GI_SHADER
+        };
+        let shader = super::gpu::shader_module(device, "ray traced GI", code);
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("ray traced GI"),
             layout: Some(
@@ -178,6 +215,7 @@ impl RayGlobalIllumination {
             })
         };
         Self {
+            software,
             frame_layout,
             frame_group: None,
             layout,
@@ -256,52 +294,60 @@ impl RayGlobalIllumination {
         })
     }
 
-    /// Records tracing `batch` through `tlas` (whose items' colors are in
-    /// `surfaces`) and copying the result over its places in `probes`'
-    /// buffer, into `encoder`. Does nothing until the frame's bindings are
-    /// made (`frame_group`).
+    /// Records tracing `batch` through `scene` and copying the result over
+    /// its places in `probes`' buffer, into `encoder`. Does nothing until
+    /// the frame's bindings are made (`frame_group`), or with a scene of the
+    /// other kind than the pass was made for.
     pub(super) fn trace(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (tlas, surfaces, cut_outs): (&wgpu::Tlas, &wgpu::Buffer, &super::ray_cut_outs::CutOuts),
+        scene: GiScene,
         batch: &Batch,
         probes: &LightProbes,
-    ) {
+    ) -> bool {
         let Some(frame_group) = &self.frame_group else {
-            return;
+            return false;
+        };
+        let (scene, surfaces, cut_outs) = match scene {
+            GiScene::Hardware(tlas, surfaces, cut_outs) if !self.software => {
+                (tlas.as_binding(), surfaces, Some(cut_outs))
+            }
+            GiScene::Software(scene, surfaces) if self.software => {
+                (scene.as_entire_binding(), surfaces, None)
+            }
+            _ => return false,
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&batch.uniform));
-        let [a, b, c, d] = cut_outs.entries(5);
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: scene,
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: self.uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: self.batch.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: surfaces.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: self.traced.as_entire_binding(),
+            },
+        ];
+        if let Some(cut_outs) = cut_outs {
+            entries.extend(cut_outs.entries(5));
+        }
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ray traced GI"),
             layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: tlas.as_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.batch.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: surfaces.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: self.traced.as_entire_binding(),
-                },
-                a,
-                b,
-                c,
-                d,
-            ],
+            entries: &entries,
         });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -329,6 +375,7 @@ impl RayGlobalIllumination {
             from += u64::from(count);
         }
         self.probes_traced += u64::from(batch.uniform.counts[0]);
+        true
     }
 
     /// Bytes of its buffers.
@@ -337,10 +384,10 @@ impl RayGlobalIllumination {
     }
 }
 
-/// Whether `graphics` asks for ray traced GI (and the GPU can trace rays).
+/// Whether `graphics` asks for ray traced GI (which it keeps only where
+/// the GPU can trace rays, in hardware or in software).
 pub(super) fn wanted(graphics: &EffectiveGraphics) -> bool {
-    graphics.ray_queries
-        && graphics.ray_traced_global_illumination != RayTracedGlobalIllumination::Off
+    graphics.ray_traced_global_illumination != RayTracedGlobalIllumination::Off
 }
 
 /// Whether ray traced GI is drawn with `graphics` for `probes` light probes.

@@ -16,6 +16,13 @@ HttpService:JSONEncode(value: any): string
 
 `value` as JSON text. A table with keys 1, 2, 3 (or none) becomes an array; one with text keys an object. Numbers, strings, booleans and nil can go in; anything else, or a table inside itself, is an error.
 
+```lua
+local HttpService = game:GetService("HttpService")
+local text = HttpService:JSONEncode({ level = 3, coins = { 1, 2, 3 } })
+local back = HttpService:JSONDecode(text)
+print(text, back.level)
+```
+
 #### JSONDecode
 
 ```luau

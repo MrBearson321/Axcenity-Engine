@@ -16,6 +16,13 @@ DataService:GetTable(name: string): DataTable
 
 The table named `name`: `"weapons"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.
 
+```lua
+local DataService = game:GetService("DataService")
+local enemies = DataService:GetTable("Enemies")
+local goblin = enemies:Get("Goblin")
+print(goblin)
+```
+
 #### CreateAbility
 
 ```luau
