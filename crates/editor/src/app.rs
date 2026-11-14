@@ -169,7 +169,7 @@ use eframe::egui_wgpu::RenderState;
 use egui_dock::DockState;
 
 /// The hover text of Import…, in the File menu and the ribbon.
-const IMPORT_HOVER: &str = "Import models (.gltf, .glb, .fbx or .obj), images, sounds and prefabs. A \
+const IMPORT_HOVER: &str = "Import models (.gltf, .glb, .fbx, .obj, or USD, converted to .glb), images, sounds and prefabs. A \
     model opens the Import dialog and is inserted at the camera's focus point; images and \
     sounds are copied into the project's assets and reported in the Console. You can also \
     drop files onto the editor.";
@@ -391,6 +391,9 @@ pub struct EditorApp {
     importing: Option<ImportDialog>,
     /// Model files imported together, waiting for the dialog to be free.
     import_queue: VecDeque<PathBuf>,
+    /// Converted `.glb` copies waiting for (or in) the Import dialog, and
+    /// the file each was converted from (`app/files/convert.rs`).
+    converted: HashMap<PathBuf, PathBuf>,
     /// The theme, accent, density and motion, picked in Settings. Saved between runs.
     appearance: Appearance,
     /// The Settings window.
@@ -1053,6 +1056,7 @@ impl EditorApp {
             constraint_tool: None,
             importing: None,
             import_queue: VecDeque::new(),
+            converted: HashMap::new(),
             game_keys: GameKeys::default(),
             warnings: WarningCache::default(),
             appearance: Appearance::default(),
