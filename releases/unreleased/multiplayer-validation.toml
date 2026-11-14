@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Servers hold each player to what a game client sends, and kick cheaters"
+details = "Each player's device has a budget for bytes, remote calls, chat, console commands, streaming requests and motion packets; what goes over it, can't be read or only the server sends is dropped, and the player is flagged. Scripts hear Players.PlayerFlagged(player, reason), and a player flagged 5 times in a minute is kicked with the reason (axcenity-server --kick-flags changes it, 0 never). A device spamming junk as fast as it can is kicked in about 3 seconds (multiplayer readiness MP3)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"
