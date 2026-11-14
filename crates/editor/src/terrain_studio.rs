@@ -19,6 +19,7 @@
 
 mod presets;
 
+pub(crate) mod biomes;
 mod layers;
 pub(crate) mod scatter;
 mod tool_settings;
@@ -48,6 +49,7 @@ use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
 pub use axcenity_editor_tools::terrain_tool::TerrainTool;
+pub use biomes::{BiomePreset, biome_of};
 pub use presets::{LayerPreset, layers_for};
 pub use scatter::{RulePreset, scatter_rules};
 
@@ -151,6 +153,9 @@ pub enum TerrainAction {
     /// Add ScatterRules from these presets to the end, as one undo step
     /// with this label.
     AddScatterRules(Vec<RulePreset>, String),
+    /// Add a Biome from this preset (with its ground layer and rules), as
+    /// one undo step.
+    AddBiome(BiomePreset),
     /// Turn what the scatter rules placed into painted foliage and switch
     /// the rules off, as one undo step.
     BakeScatter,
@@ -353,9 +358,17 @@ pub fn terrain_of(world: &World, id: InstanceId) -> Option<InstanceId> {
     let instance = world.get(id)?;
     match instance.class() {
         ClassName::Terrain => Some(id),
-        ClassName::TerrainLayer | ClassName::ScatterRule => instance
-            .parent()
-            .filter(|&parent| world.get(parent).map(|p| p.class()) == Some(ClassName::Terrain)),
+        ClassName::TerrainLayer | ClassName::ScatterRule | ClassName::Biome => {
+            let parent = instance.parent()?;
+            match world.get(parent)?.class() {
+                ClassName::Terrain => Some(parent),
+                // A rule inside a Biome.
+                ClassName::Biome if instance.class() == ClassName::ScatterRule => {
+                    terrain_of(world, parent)
+                }
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -436,6 +449,7 @@ impl TerrainStudio {
                     let Some(tool) = self.tool else {
                         hint(ui, "Pick a tool to start shaping the terrain.");
                         self.layers_section(ui, cx, terrain, false, &mut actions);
+                        self.biomes_section(ui, cx, terrain, &mut actions);
                         self.scatter_section(ui, cx, terrain, &mut actions);
                         self.water_section(ui, cx.world, terrain, &mut actions);
                         self.view_section(ui);
@@ -462,6 +476,7 @@ impl TerrainStudio {
                     }
                     let painting = matches!(tool, TerrainTool::Paint | TerrainTool::Auto);
                     self.layers_section(ui, cx, terrain, painting, &mut actions);
+                    self.biomes_section(ui, cx, terrain, &mut actions);
                     self.scatter_section(ui, cx, terrain, &mut actions);
                     self.water_section(ui, cx.world, terrain, &mut actions);
                     self.view_section(ui);

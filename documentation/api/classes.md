@@ -145,3 +145,4 @@ Instance classes: everything that can be in the tree.
 | [DataLayerService](classes/DataLayerService.md) | The service that holds the project's DataLayers (roadmap R16). |
 | [DataLayer](classes/DataLayer.md) | A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. |
 | [ScatterRule](classes/ScatterRule.md) | Inside a Terrain: places plants, props or models (Models) over the ground by itself, where its height, slope, layer and water settings allow, about Spacing studs apart at Density, gathered into clumps by Clumping and keeping AvoidRadius from what the rules before it placed. |
+| [Biome](classes/Biome.md) | Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). |

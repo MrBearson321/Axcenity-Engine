@@ -34,6 +34,7 @@ use crate::terrain_studio::{
 };
 use crate::viewport::{TerrainBrush, TerrainPointer};
 
+mod biomes;
 mod disk;
 mod jobs;
 mod layers;
@@ -286,6 +287,11 @@ impl EditorApp {
                     self.add_scatter_rules(terrain, &presets, label);
                 }
             }
+            TerrainAction::AddBiome(preset) => {
+                if let Some(terrain) = target {
+                    self.add_biome(terrain, &preset);
+                }
+            }
             TerrainAction::BakeScatter => {
                 if let Some(terrain) = target {
                     self.bake_scatter(terrain);
@@ -389,6 +395,8 @@ impl EditorApp {
     }
 }
 
+#[cfg(test)]
+mod biome_tests;
 #[cfg(test)]
 mod scatter_tests;
 #[cfg(test)]
