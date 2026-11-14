@@ -11,38 +11,63 @@ use crate::terrain_studio::RulePreset;
 
 impl EditorApp {
     /// Adds ScatterRules from `presets` to the end of `terrain`'s children,
-    /// as one undo step.
+    /// or of the selected Biome's (PW2), as one undo step.
     pub(super) fn add_scatter_rules(
         &mut self,
         terrain: InstanceId,
         presets: &[RulePreset],
         label: String,
     ) {
-        let Some(instance) = self.world.get(terrain) else {
-            return;
-        };
-        let height = instance
+        let parent = self
+            .selected
+            .and_then(|id| crate::terrain_studio::biome_of(&self.world, id))
+            .filter(|&biome| self.world.get(biome).and_then(|b| b.parent()) == Some(terrain))
+            .unwrap_or(terrain);
+        let mut moves = Vec::new();
+        let last = self.make_scatter_rules(terrain, parent, presets, &mut moves);
+        if !moves.is_empty() {
+            self.history.record_tree(&mut self.world, label, moves);
+            // Selected, so models clicked in Assets go into it.
+            self.select_from_viewport(last);
+            self.generate_frame();
+        }
+    }
+
+    /// Makes ScatterRules from `presets` at the end of `parent` (`terrain`
+    /// or one of its Biomes), adding their moves to `moves`, and returns the
+    /// last. Inside a Biome they leave out their tree line: the biome
+    /// says where they go.
+    pub(super) fn make_scatter_rules(
+        &mut self,
+        terrain: InstanceId,
+        parent: InstanceId,
+        presets: &[RulePreset],
+        moves: &mut Vec<Move>,
+    ) -> Option<InstanceId> {
+        let height = self
+            .world
+            .get(terrain)?
             .property("Size")
             .and_then(Value::as_vector3)
             .map_or(128.0, |size| size.y);
-        let mut moves = Vec::new();
+        let in_biome = parent != terrain;
         let mut last = None;
         for preset in presets {
             let Ok(rule) = self.world.create(ClassName::ScatterRule) else {
                 continue;
             };
             for (property, value) in preset.properties(height) {
+                if in_biome && property == "MaxHeight" {
+                    continue;
+                }
                 self.world
                     .set_property(rule, property, value)
                     .expect("presets set ScatterRule properties");
             }
-            let name = tree::unique_name(&self.world, terrain, preset.name);
+            let name = tree::unique_name(&self.world, parent, preset.name);
             self.world.set_name(rule, name).expect("just made");
-            let index = self.world.get(terrain).map_or(0, |t| t.children().len());
-            let place = Place {
-                parent: terrain,
-                index,
-            };
+            let index = self.world.get(parent).map_or(0, |t| t.children().len());
+            let place = Place { parent, index };
             if history::put(&mut self.world, rule, Some(place)).is_ok() {
                 moves.push(Move {
                     id: rule,
@@ -52,12 +77,7 @@ impl EditorApp {
                 last = Some(rule);
             }
         }
-        if !moves.is_empty() {
-            self.history.record_tree(&mut self.world, label, moves);
-            // Selected, so models clicked in Assets go into it.
-            self.select_from_viewport(last);
-            self.generate_frame();
-        }
+        last
     }
 
     /// The ScatterRule selected while editing, and what its `Models`

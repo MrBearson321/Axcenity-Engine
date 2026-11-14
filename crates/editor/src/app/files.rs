@@ -40,6 +40,7 @@ mod attach_script;
 mod convert;
 mod export;
 mod import;
+mod model_presets;
 mod packages;
 mod pickers;
 mod script_files;
@@ -622,6 +623,8 @@ impl EditorApp {
 
 #[cfg(test)]
 mod convert_tests;
+#[cfg(test)]
+mod model_preset_tests;
 #[cfg(test)]
 mod package_tests;
 #[cfg(test)]

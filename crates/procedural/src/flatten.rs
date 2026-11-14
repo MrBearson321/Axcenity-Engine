@@ -1,8 +1,8 @@
 //! Flatten Terrain Along: a strip of terrain under a spline brought to the
 //! curve's height, for a road to lie on.
 
+use axcenity_core::TerrainData;
 use axcenity_core::spline::SplineCurve;
-use axcenity_core::{SampleRect, TerrainData};
 use axcenity_terrain::Placement;
 use glam::{Vec2, Vec3};
 
@@ -24,28 +24,10 @@ pub fn flatten_along(
         .map(v3)
         .collect();
     let reach = (width / 2.0).max(0.0);
-    let (min, max) = line
-        .iter()
-        .fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(min, max), p| {
-            let p = Vec2::new(p.x, p.z);
-            (min.min(p), max.max(p))
-        });
-    let (size_x, size_z) = data.size();
-    let low = placement
-        .to_grid(data, min.x - reach, min.y - reach)
-        .floor();
-    let high = placement.to_grid(data, max.x + reach, max.y + reach).ceil();
-    let clamp_x = |v: f32| (v.max(0.0) as usize).min(size_x);
-    let clamp_z = |v: f32| (v.max(0.0) as usize).min(size_z);
-    let rect = SampleRect::new(
-        clamp_x(low.x),
-        clamp_z(low.y),
-        clamp_x(high.x + 1.0),
-        clamp_z(high.y + 1.0),
-    );
-    if rect.is_empty() || line.is_empty() {
+    let (size_x, _) = data.size();
+    let Some(rect) = crate::paths::rect_around(data, placement, &line, reach) else {
         return 0;
-    }
+    };
     // Worked out first, so the heights aren't borrowed while reading.
     let mut set = Vec::new();
     for z in rect.z0..rect.z1 {
@@ -68,7 +50,7 @@ pub fn flatten_along(
 
 /// How far `at` is from the line seen from above, and the line's height at
 /// its nearest point.
-fn nearest(line: &[Vec3], at: Vec2) -> Option<(f32, f32)> {
+pub(crate) fn nearest(line: &[Vec3], at: Vec2) -> Option<(f32, f32)> {
     if line.len() == 1 {
         let p = line[0];
         return Some((Vec2::new(p.x, p.z).distance(at), p.y));

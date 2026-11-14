@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "gameplay"
+title = "New projects and Insert ▸ Character use the stylized default humanoid"
+details = "Empty, Baseplate, Third Person, Vehicle and Arena projects start with the default humanoid as the player's character, animated walking, running, jumping, falling and crouching, and Insert ▸ Character makes it in a saved project. A character with a HumanoidRootPart (or a PrimaryPart) is now measured by that part alone, so its mesh doesn't widen it."
+features = ["gameplay.humanoid"]
+fixes = []
+introduces_issues = []
+prs = [380]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -131,7 +131,7 @@ impl EditorApp {
 
 /// A new SplinePoint at `position`, named for its place in `spline`, with
 /// no parent yet.
-fn new_point(world: &mut World, spline: InstanceId, position: Vector3) -> InstanceId {
+pub(super) fn new_point(world: &mut World, spline: InstanceId, position: Vector3) -> InstanceId {
     let id = world
         .create(ClassName::SplinePoint)
         .expect("a SplinePoint can be made");

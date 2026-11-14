@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Terrain paths: roads that keep plants off, flatten and paint the ground, and route over hills"
+details = "Insert > Terrain Path puts a TerrainPath in a Spline. Scatter rules keep off its strip as soon as it's there and wherever its points move. Apply to Terrain flattens the ground under it to the curve and paints a layer, blending in over Falloff, as one undo step. Route lays the Spline's points over the terrain from its first point to its last, never climbing more than Max Grade, so a road winds round or up a hill; also one undo step."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

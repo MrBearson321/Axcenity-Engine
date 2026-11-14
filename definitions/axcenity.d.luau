@@ -615,6 +615,8 @@ declare extern type UserGameSettings with
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
 	--- Ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, the rays are traced in software instead: slower (Low suits it), with leaves' holes guessed. Only a GPU without compute shaders keeps the bakes (or real-time GI, as set).
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
+	--- Hardware ray traced reflections on glossy surfaces: Off, Low (surfaces smoother than 0.15 roughness, traced at half size), Medium (smoother than 0.3) or High (smoother than 0.5). Off at every preset. On, a smooth part mirrors what's around it, even off the screen, fading into the reflection probes as it gets rougher; see-through parts, water and terrain keep the probes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only the reflection probes are used.
+	RayTracedReflections: EnumRayTracedReflections
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1394,6 +1396,18 @@ declare extern type EnumRayTracedGlobalIlluminationItems with
 	High: EnumRayTracedGlobalIllumination
 end
 
+--- One choice of `Enum.RayTracedReflections`.
+declare extern type EnumRayTracedReflections extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedReflections`.
+declare extern type EnumRayTracedReflectionsItems with
+	Off: EnumRayTracedReflections
+	Low: EnumRayTracedReflections
+	Medium: EnumRayTracedReflections
+	High: EnumRayTracedReflections
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1447,6 +1461,7 @@ declare extern type EnumLibrary with
 	ParticleFlipbookMode: EnumParticleFlipbookModeItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
+	RayTracedReflections: EnumRayTracedReflectionsItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -4865,6 +4880,149 @@ declare extern type IKControl extends Instance with
 	[string]: any
 end
 
+--- The face of the MeshPart it's in: one number property per standard facial control, 0 to 1 (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Jaw_Open …). After the Animator and before drawing, its face profile turns them into the model's blend shape weights and turns its eye and jaw bones. Scripts and TweenService animate a face by setting these properties.
+declare extern type FaceControls extends Instance with
+	--- If false, the face rests: the model's own blend shape values, and the eyes and jaw as the body's pose has them.
+	Enabled: boolean
+	--- The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`"axcenity"`, `"arkit"` or `"vroid"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.
+	Profile: string
+	--- The face layers' order, lowest first, as names separated by commas (`"Base, Expression, Dialogue, Procedural, Override"`): Base is these properties, Expression is `SetExpression`'s, Dialogue is lip sync, Procedural is blinking, gaze and idle motion, and Override is `SetOverride`'s. Layers left out keep their place after the named ones.
+	LayerOrder: string
+	--- Whether the eyes blink by themselves, now and then.
+	BlinkEnabled: boolean
+	--- Which eyes blink by themselves: `"Both"`, `"Left"` or `"Right"`.
+	BlinkEyes: string
+	--- The fewest seconds between blinks; each wait is a random time from this to BlinkIntervalMax.
+	BlinkIntervalMin: number
+	--- The most seconds between blinks.
+	BlinkIntervalMax: number
+	--- Seconds a blink takes, closing and opening.
+	BlinkDuration: number
+	--- How often a blink is followed straight away by another, from 0 (never) to 1 (always).
+	DoubleBlinkChance: number
+	--- What the eyes look at: `"Animation"` (only what the controls say), `"Camera"`, `"Target"` (GazeTarget) or `"Position"` (GazePosition). The eyes turn within the face profile's limits and look ahead again when the target is too far round.
+	GazeMode: string
+	--- With GazeMode `"Target"`: the part, Attachment or character (a Model, looked at in its Head) to look at.
+	GazeTarget: Instance?
+	--- With GazeMode `"Position"`: the point in the world to look at.
+	GazePosition: Vector3
+	--- About how many seconds the eyes take to catch up with a moving target; 0 follows at once.
+	GazeSmoothing: number
+	--- How much the gaze counts over the eye controls, from 0 to 1.
+	GazeWeight: number
+	--- Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.
+	IdleMotion: number
+	--- Closes the left eye in a blink, 0 to 1.
+	Blink_Left: number
+	--- Closes the right eye in a blink, 0 to 1.
+	Blink_Right: number
+	--- Holds the left eye closed, 0 to 1, as in sleep or a wink, apart from blinking.
+	Eye_Closed_Left: number
+	--- Holds the right eye closed, 0 to 1, as in sleep or a wink, apart from blinking.
+	Eye_Closed_Right: number
+	--- Narrows the left eye, 0 to 1.
+	Eye_Squint_Left: number
+	--- Narrows the right eye, 0 to 1.
+	Eye_Squint_Right: number
+	--- Opens the left eye wide, 0 to 1.
+	Eye_Wide_Left: number
+	--- Opens the right eye wide, 0 to 1.
+	Eye_Wide_Right: number
+	--- Turns both eyes up, 0 to 1 (1 is the face profile's up limit, 25° by default). Turns the eye bones when the model has them, otherwise its look shapes.
+	Eye_Look_Up: number
+	--- Turns both eyes down, 0 to 1 (1 is the face profile's down limit, 20° by default).
+	Eye_Look_Down: number
+	--- Turns both eyes to the character's left, 0 to 1 (1 is the face profile's sideways limit, 30° by default).
+	Eye_Look_Left: number
+	--- Turns both eyes to the character's right, 0 to 1 (1 is the face profile's sideways limit, 30° by default).
+	Eye_Look_Right: number
+	--- Raises the left eyebrow, 0 to 1.
+	Brow_Raise_Left: number
+	--- Raises the right eyebrow, 0 to 1.
+	Brow_Raise_Right: number
+	--- Lowers the left eyebrow, 0 to 1.
+	Brow_Lower_Left: number
+	--- Lowers the right eyebrow, 0 to 1.
+	Brow_Lower_Right: number
+	--- Draws the left eyebrow's inner end in and up, 0 to 1, as in worry.
+	Brow_Inward_Left: number
+	--- Draws the right eyebrow's inner end in and up, 0 to 1, as in worry.
+	Brow_Inward_Right: number
+	--- Pulls the left corner of the mouth up into a smile, 0 to 1.
+	Mouth_Smile_Left: number
+	--- Pulls the right corner of the mouth up into a smile, 0 to 1.
+	Mouth_Smile_Right: number
+	--- Pulls the left corner of the mouth down, 0 to 1.
+	Mouth_Frown_Left: number
+	--- Pulls the right corner of the mouth down, 0 to 1.
+	Mouth_Frown_Right: number
+	--- Parts the lips, 0 to 1, without the jaw (Jaw_Open drops the jaw).
+	Mouth_Open: number
+	--- Stretches the mouth wide, 0 to 1.
+	Mouth_Wide: number
+	--- Narrows the mouth into a round opening, 0 to 1, as for "oo".
+	Mouth_Narrow: number
+	--- Pushes the lips forward together, 0 to 1, as for a kiss.
+	Mouth_Pucker: number
+	--- Moves the whole mouth to the character's left, 0 to 1.
+	Mouth_Left: number
+	--- Moves the whole mouth to the character's right, 0 to 1.
+	Mouth_Right: number
+	--- Raises the upper lip, 0 to 1.
+	Upper_Lip_Raise: number
+	--- Lowers the lower lip, 0 to 1.
+	Lower_Lip_Lower: number
+	--- Raises the left side of the upper lip, 0 to 1.
+	Upper_Lip_Raise_Left: number
+	--- Raises the right side of the upper lip, 0 to 1.
+	Upper_Lip_Raise_Right: number
+	--- Lowers the left side of the lower lip, 0 to 1.
+	Lower_Lip_Lower_Left: number
+	--- Lowers the right side of the lower lip, 0 to 1.
+	Lower_Lip_Lower_Right: number
+	--- Pulls the left corner of the lips back, 0 to 1.
+	Lip_Corner_Pull_Left: number
+	--- Pulls the right corner of the lips back, 0 to 1.
+	Lip_Corner_Pull_Right: number
+	--- Raises the left cheek, 0 to 1, as in a broad smile.
+	Cheek_Raise_Left: number
+	--- Raises the right cheek, 0 to 1, as in a broad smile.
+	Cheek_Raise_Right: number
+	--- Puffs both cheeks out, 0 to 1.
+	Cheek_Puff: number
+	--- Wrinkles the left side of the nose up, 0 to 1.
+	Nose_Sneer_Left: number
+	--- Wrinkles the right side of the nose up, 0 to 1.
+	Nose_Sneer_Right: number
+	--- Drops the jaw, 0 to 1 (1 is the face profile's jaw limit, 25° by default). Turns the jaw bone when the model has one, and drives a Jaw_Open shape too when it has one.
+	Jaw_Open: number
+	--- Pushes the jaw forward, 0 to 1.
+	Jaw_Forward: number
+	--- Moves the jaw to the character's left, 0 to 1. Turns the jaw bone when the model has one.
+	Jaw_Left: number
+	--- Moves the jaw to the character's right, 0 to 1. Turns the jaw bone when the model has one.
+	Jaw_Right: number
+	--- Sticks the tongue out, 0 to 1.
+	Tongue_Out: number
+	--- Curls the tongue's tip up, 0 to 1.
+	Tongue_Up: number
+	--- Curls the tongue's tip down, 0 to 1.
+	Tongue_Down: number
+	[string]: any
+	--- Shows the expression `name` (a built-in one such as `"Happy"`, `"Sad"` or `"Sleepy"`, or a `*.expression.json` file's name or path) at `intensity` (0 to 1, 1 if left out), blending in over `duration` seconds (the expression's own time if left out). `options` may set `Weight` (0 to 1, how much it counts over the expressions under it), `Priority` (higher goes over lower; equal ones go in the order they were set) and `Asymmetry` (-1 shows only the left side, 1 only the right). Setting a shown expression again changes it.
+	function SetExpression(self, name: string, intensity: number?, duration: number?, options: { Weight: number?, Priority: number?, Asymmetry: number? }?): ()
+	--- Fades the expression `name` out over `duration` seconds (its own time if left out), or every expression if `name` is nil.
+	function ClearExpression(self, name: string?, duration: number?): ()
+	--- The expressions being shown, in the order they were set: each a table of `Name`, `Intensity`, `Weight`, `Priority` and `Asymmetry`.
+	function GetExpressions(self): { { Name: string, Intensity: number, Weight: number, Priority: number, Asymmetry: number } }
+	--- Holds the control `control` (such as `"Jaw_Open"`) at `value` (0 to 1) over everything else on the Override layer, such as a character's mouth while eating; nil lets it go.
+	function SetOverride(self, control: string, value: number?): ()
+	--- Lets go of every control SetOverride holds.
+	function ClearOverrides(self): ()
+	--- Sets how the face layer `layer` (`"Base"`, `"Expression"`, `"Dialogue"`, `"Procedural"` or `"Override"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `"Override"` (replaces, the default) or `"Additive"` (adds), and `mask`, the controls it may move: a group (`"Eyes"`, `"Eyebrows"`, `"Mouth"`, `"CheeksAndNose"`, `"JawAndTongue"`), a control, or a list of them; nil for all.
+	function SetLayer(self, layer: string, weight: number?, blend: string?, mask: (string | { string })?): ()
+end
+
 --- Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime.
 declare extern type Fracture extends Instance with
 	--- How many pieces Generate (in its Properties) cuts the part into.
@@ -5716,6 +5874,62 @@ declare extern type ScatterRule extends Instance with
 	[string]: any
 end
 
+--- Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). It covers ground where its height, slope and moisture settings hold, with soft edges (later biomes cover earlier ones), and wherever its GroundLayer is painted. Its GroundLayer is laid under the other layers' own rules there, and the ScatterRules inside it place only where it covers, thinning out at its edges. ScatterRules outside every Biome place anywhere.
+declare extern type Biome extends Instance with
+	--- If false, the biome covers nothing and the rules inside it place nothing. True by default.
+	Enabled: boolean
+	--- The name of the TerrainLayer that covers the biome's ground. Painting that layer in the Terrain Studio paints the biome too. Empty for none.
+	GroundLayer: string
+	--- If true (the default), the biome covers ground by itself wherever its height, slope and moisture settings hold; if false, only where its GroundLayer is painted.
+	AutoEnabled: boolean
+	--- Studs above the terrain's bottom where the biome starts. 0 by default.
+	MinHeight: number
+	--- Studs above the terrain's bottom where the biome ends. 10000 by default.
+	MaxHeight: number
+	--- Studs over which each height edge fades. 8 by default.
+	HeightFade: number
+	--- Degrees from flat where the biome starts. 0 by default.
+	MinSlope: number
+	--- Degrees from flat where the biome ends. 90 by default.
+	MaxSlope: number
+	--- Degrees over which each slope edge fades. 5 by default.
+	SlopeFade: number
+	--- 0 (dry) to 1 (wet): the driest ground the biome covers. Moisture is noise over the terrain, the same for every biome with the same MoistureScale. 0 by default.
+	MinMoisture: number
+	--- 0 to 1: the wettest ground the biome covers. 1 by default.
+	MaxMoisture: number
+	--- How much of the moisture range each moisture edge fades over. 0.1 by default.
+	MoistureFade: number
+	--- Studs across one dry or wet patch. 400 by default.
+	MoistureScale: number
+	--- 0 to 1: breaks the biome's edges up with noise. 0.3 by default.
+	EdgeNoise: number
+	--- Studs across the edge noise's patches. 48 by default.
+	NoiseScale: number
+	[string]: any
+end
+
+--- Inside a Spline: a road or path on the terrain (procedural worlds PW4), Width studs across along the Spline's curve. ScatterRules keep off it (ClearScatter) wherever it goes, on every device, without changing the terrain. In the editor, Apply to Terrain flattens the ground under it to the curve and paints its Layer, blending in over Falloff (one undo step), and Route lays the Spline's points over the terrain from its first point to its last, no stretch climbing more than MaxGrade degrees, so a road winds round or up a hill (one undo step). Put a SplineMesh in the same Spline for the road's surface.
+declare extern type TerrainPath extends Instance with
+	--- If false, scatter rules don't keep off it and the editor's Apply and Route do nothing. True by default.
+	Enabled: boolean
+	--- Studs across the road or path. Apply flattens and paints this strip fully. 8 by default.
+	Width: number
+	--- Studs past each edge over which Apply's flattening and paint blend into the ground around. 4 by default.
+	Falloff: number
+	--- If true (the default), Apply levels the strip to the height of its Spline's curve.
+	Flatten: boolean
+	--- The name of the TerrainLayer Apply paints the strip with. Empty (the default) paints nothing.
+	Layer: string
+	--- If true (the default), the terrain's ScatterRules place nothing within Width / 2 + ClearMargin studs of the curve, seen from above. They keep off it as soon as it's there and wherever its points move, on every device.
+	ClearScatter: boolean
+	--- Studs past each edge that scatter rules keep clear, so trees don't stand on the verge. 1 by default.
+	ClearMargin: number
+	--- The steepest the editor's Route lets the road climb, in degrees. 8 by default.
+	MaxGrade: number
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -5736,7 +5950,132 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "SunRaysEffect") -> SunRaysEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: "DataLayer") -> DataLayer) & ((className: "ScatterRule") -> ScatterRule) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part)
+		& ((className: "MeshPart") -> MeshPart)
+		& ((className: "UnionOperation") -> UnionOperation)
+		& ((className: "NegateOperation") -> NegateOperation)
+		& ((className: "Seat") -> Seat)
+		& ((className: "VehicleSeat") -> VehicleSeat)
+		& ((className: "DamageZone") -> DamageZone)
+		& ((className: "ReverbZone") -> ReverbZone)
+		& ((className: "SpawnLocation") -> SpawnLocation)
+		& ((className: "Script") -> Script)
+		& ((className: "LocalScript") -> LocalScript)
+		& ((className: "ModuleScript") -> ModuleScript)
+		& ((className: "RemoteEvent") -> RemoteEvent)
+		& ((className: "RemoteFunction") -> RemoteFunction)
+		& ((className: "BindableEvent") -> BindableEvent)
+		& ((className: "BindableFunction") -> BindableFunction)
+		& ((className: "Model") -> Model)
+		& ((className: "Folder") -> Folder)
+		& ((className: "SurfaceAppearance") -> SurfaceAppearance)
+		& ((className: "ScreenGui") -> ScreenGui)
+		& ((className: "Frame") -> Frame)
+		& ((className: "TextLabel") -> TextLabel)
+		& ((className: "TextButton") -> TextButton)
+		& ((className: "ImageLabel") -> ImageLabel)
+		& ((className: "TextBox") -> TextBox)
+		& ((className: "PageLayout") -> PageLayout)
+		& ((className: "Table") -> Table)
+		& ((className: "ScrollingFrame") -> ScrollingFrame)
+		& ((className: "Slider") -> Slider)
+		& ((className: "Toggle") -> Toggle)
+		& ((className: "Dropdown") -> Dropdown)
+		& ((className: "ProgressBar") -> ProgressBar)
+		& ((className: "BillboardGui") -> BillboardGui)
+		& ((className: "Sound") -> Sound)
+		& ((className: "SoundGroup") -> SoundGroup)
+		& ((className: "ReverbSoundEffect") -> ReverbSoundEffect)
+		& ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect)
+		& ((className: "CompressorSoundEffect") -> CompressorSoundEffect)
+		& ((className: "EchoSoundEffect") -> EchoSoundEffect)
+		& ((className: "DistortionSoundEffect") -> DistortionSoundEffect)
+		& ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect)
+		& ((className: "LowPassSoundEffect") -> LowPassSoundEffect)
+		& ((className: "HighPassSoundEffect") -> HighPassSoundEffect)
+		& ((className: "PointLight") -> PointLight)
+		& ((className: "SpotLight") -> SpotLight)
+		& ((className: "RectLight") -> RectLight)
+		& ((className: "ReflectionProbe") -> ReflectionProbe)
+		& ((className: "LightProbeVolume") -> LightProbeVolume)
+		& ((className: "Atmosphere") -> Atmosphere)
+		& ((className: "Clouds") -> Clouds)
+		& ((className: "Weather") -> Weather)
+		& ((className: "OutlineEffect") -> OutlineEffect)
+		& ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect)
+		& ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect)
+		& ((className: "VignetteEffect") -> VignetteEffect)
+		& ((className: "FilmGrainEffect") -> FilmGrainEffect)
+		& ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect)
+		& ((className: "SharpenEffect") -> SharpenEffect)
+		& ((className: "SunRaysEffect") -> SunRaysEffect)
+		& ((className: "MotionBlurEffect") -> MotionBlurEffect)
+		& ((className: "GraphicsVolume") -> GraphicsVolume)
+		& ((className: "ExposureEffect") -> ExposureEffect)
+		& ((className: "FogEffect") -> FogEffect)
+		& ((className: "BloomEffect") -> BloomEffect)
+		& ((className: "ParticleEmitter") -> ParticleEmitter)
+		& ((className: "Animator") -> Animator)
+		& ((className: "Animation") -> Animation)
+		& ((className: "AnimationTrack") -> AnimationTrack)
+		& ((className: "Sequence") -> Sequence)
+		& ((className: "Spline") -> Spline)
+		& ((className: "SplinePoint") -> SplinePoint)
+		& ((className: "SplineFollower") -> SplineFollower)
+		& ((className: "SplineMesh") -> SplineMesh)
+		& ((className: "SplineScatter") -> SplineScatter)
+		& ((className: "Decal") -> Decal)
+		& ((className: "ProjectedDecal") -> ProjectedDecal)
+		& ((className: "Terrain") -> Terrain)
+		& ((className: "TerrainLayer") -> TerrainLayer)
+		& ((className: "ThirdPersonController") -> ThirdPersonController)
+		& ((className: "FirstPersonController") -> FirstPersonController)
+		& ((className: "NavigationAgent") -> NavigationAgent)
+		& ((className: "Checkpoint") -> Checkpoint)
+		& ((className: "Camera") -> Camera)
+		& ((className: "Attachment") -> Attachment)
+		& ((className: "VehicleWheel") -> VehicleWheel)
+		& ((className: "Ragdoll") -> Ragdoll)
+		& ((className: "IKControl") -> IKControl)
+		& ((className: "FaceControls") -> FaceControls)
+		& ((className: "Fracture") -> Fracture)
+		& ((className: "Health") -> Health)
+		& ((className: "ProximityPrompt") -> ProximityPrompt)
+		& ((className: "ClickDetector") -> ClickDetector)
+		& ((className: "Tool") -> Tool)
+		& ((className: "Inventory") -> Inventory)
+		& ((className: "Humanoid") -> Humanoid)
+		& ((className: "Ability") -> Ability)
+		& ((className: "Effect") -> Effect)
+		& ((className: "ForceField") -> ForceField)
+		& ((className: "Team") -> Team)
+		& ((className: "WeldConstraint") -> WeldConstraint)
+		& ((className: "HingeConstraint") -> HingeConstraint)
+		& ((className: "BallSocketConstraint") -> BallSocketConstraint)
+		& ((className: "PrismaticConstraint") -> PrismaticConstraint)
+		& ((className: "CylindricalConstraint") -> CylindricalConstraint)
+		& ((className: "SpringConstraint") -> SpringConstraint)
+		& ((className: "RopeConstraint") -> RopeConstraint)
+		& ((className: "RodConstraint") -> RodConstraint)
+		& ((className: "LinearVelocity") -> LinearVelocity)
+		& ((className: "AngularVelocity") -> AngularVelocity)
+		& ((className: "VectorForce") -> VectorForce)
+		& ((className: "Torque") -> Torque)
+		& ((className: "AlignPosition") -> AlignPosition)
+		& ((className: "AlignOrientation") -> AlignOrientation)
+		& ((className: "IntValue") -> IntValue)
+		& ((className: "NumberValue") -> NumberValue)
+		& ((className: "StringValue") -> StringValue)
+		& ((className: "BoolValue") -> BoolValue)
+		& ((className: "Vector3Value") -> Vector3Value)
+		& ((className: "Color3Value") -> Color3Value)
+		& ((className: "CFrameValue") -> CFrameValue)
+		& ((className: "ObjectValue") -> ObjectValue)
+		& ((className: "DataLayer") -> DataLayer)
+		& ((className: "ScatterRule") -> ScatterRule)
+		& ((className: "Biome") -> Biome)
+		& ((className: "TerrainPath") -> TerrainPath)
+		& ((className: string) -> Instance)
 end
 
 --- Creates Instances.

@@ -1561,6 +1561,9 @@ mod gpu_particles_tests;
 mod skinning_tests;
 
 #[cfg(test)]
+mod default_humanoid_tests;
+
+#[cfg(test)]
 mod shader_tests;
 
 #[cfg(test)]

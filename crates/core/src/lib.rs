@@ -19,6 +19,7 @@ pub mod csg;
 pub mod data_layers;
 pub mod dialogue;
 mod enums;
+pub mod face;
 mod index;
 pub mod input;
 mod journal;

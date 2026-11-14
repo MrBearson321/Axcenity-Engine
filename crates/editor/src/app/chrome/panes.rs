@@ -15,6 +15,11 @@ impl EditorApp {
                     .push(member.color);
             }
         }
+        self.explorer.plugin_items = if editing {
+            self.plugins.explorer_actions()
+        } else {
+            Vec::new()
+        };
         // The game's world during Play, otherwise the one being edited.
         let world = shown(&self.world, &self.play);
         let explorer = self.explorer.show(ui, world, &self.selection, editing);

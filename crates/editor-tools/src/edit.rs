@@ -75,6 +75,12 @@ pub enum Edit {
     /// Flattens the Terrain under the selected Spline (or the one the
     /// selection is in), road-wide (Phase 74).
     FlattenTerrainAlong,
+    /// Flattens and paints the terrain under the selected TerrainPath
+    /// (procedural worlds PW4).
+    ApplyTerrainPath,
+    /// Lays the selected TerrainPath's Spline over the terrain within its
+    /// MaxGrade (PW4).
+    RouteTerrainPath,
     /// Opens the selected MeshPart's model in the Model Studio.
     OpenInModelStudio,
     /// Opens the selected MeshPart's `.glb` in Blender (R15.4).

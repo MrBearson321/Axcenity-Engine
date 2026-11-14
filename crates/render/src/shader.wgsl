@@ -240,7 +240,10 @@ struct VertexOut {
     @builtin(position) @invariant clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) base_color: vec4<f32>,
+    // Flat: the item's own, the same at every corner. Interpolated, the
+    // opacity of a solid item could come out a hair under 1 in places,
+    // which then weren't treated as solid.
+    @location(2) @interpolate(flat) base_color: vec4<f32>,
     @location(3) emissive: vec3<f32>,
     @location(4) surface: vec3<f32>,
     @location(5) uv: vec2<f32>,
@@ -797,6 +800,10 @@ fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0)
         discard;
     }
     var normal = prepass_normal(normalize(in.normal) * facing);
+    // A plain solid pixel keeps its roughness, 1 plus it, for ray traced
+    // reflections (ray_reflections.wgsl); anything reading the flags below
+    // sees it as solid (1 or more).
+    normal.w = 1.0 + clamp(shaded.roughness, 0.0, 0.999);
     // A character's pixels are marked for projected decals (decal.wgsl).
     if in.role == ROLE_CHARACTER {
         normal.w = 0.5;
