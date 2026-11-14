@@ -70,7 +70,7 @@ In particular (status checked on main `5143a5a`):
 | G10 | Plugin API | **Implemented**: viewport drawing #265, drag handles #267, Properties rows #270, importers, Assets panel items and `plugin.ApiVersion` #274, on Phase 54's toolbars, dock widgets, selection, settings, files and mouse |
 | G11 | Editor modularization | **Implemented** for every planned move (#162, #164, #166, #189, #193, #194); further moves as they pay off |
 | G12 | Cooked-only games | **Implemented** (#243): Build Game leaves texture sources out; reading the pack in place not planned |
-| G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines |
+| G13 | Multiplayer scaling tests | **Planned**: needs Paul's machines; bots and the harness are MP1 of [multiplayer-readiness.md](multiplayer-readiness.md) |
 | G14 | Run without a player | **Implemented** (#245): Run, F8 |
 | G15 | Physics debug views | **Implemented** (#253): Contacts and Bodies overlays (centers of mass, sleeping) beside collider wireframes, rays and Size boxes |
 | G16 | Humanoid retargeting | **Implemented** (stage 1, #244: roles by bone name and rest-pose correction; hand-edited maps and profiles later) |
@@ -608,6 +608,8 @@ Develop a unified authoring experience around existing CPU and GPU particle syst
 
 **Priority:** Medium-High
 **Status:** Partial (R16). Streaming (`StreamingEnabled`, streaming radii as rings in Play, `RequestStreamAroundAsync`), levels, terrain sculpt, paint and erosion, painted foliage and water exist. Streaming diagnostics in the editor are built: the Streaming overlay (R16) shows each unit by where it stands from the camera, what's always there, both radii, what a player standing there has and units too big to stream well, while editing too. The plan is [world-regions-r16.md](world-regions-r16.md). Data layers in the editor (R16.2, #328: `DataLayer` objects named as tags, hidden and locked per person), Stream While Editing (R16.3, #331) and regions unloaded in the editor (R16.3b, #333) are built, and so are data layers in games (R16.4, #336: `DataLayerService:SetLayerActive` parks a layer's members out of the game and puts them back, starting states, `LayerChanged` on every device, save slots and blocks). R16's plan is done; left are its PC hand checks.
+
+Procedural worldbuilding (Paul's Priority 3, 14 Nov 2026) has its own plan, [procedural-worlds.md](procedural-worlds.md): scatter rules, biomes, world presets, roads and paths, terrain and objects, and procedural buildings (PW1–PW6), with mesh terrain (cliffs, caves, overhangs) proposed as PW7–PW8.
 
 Improve large-world authoring and environmental systems.
 
