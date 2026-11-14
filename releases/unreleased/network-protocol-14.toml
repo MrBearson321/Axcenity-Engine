@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "networking"
+title = "Network protocol 14: players on this version can't join games on older ones"
+details = "The join request and the server's welcome carry a rejoin key (multiplayer readiness MP2), so a player on an older version is told to update when they join."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

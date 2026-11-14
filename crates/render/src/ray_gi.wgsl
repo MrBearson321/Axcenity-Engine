@@ -20,9 +20,11 @@
 // kept. One a bake found inside a solid (w 1, R18.2) stays marked.
 //
 // Compiled after `sky.wgsl`, `fog.wgsl`, `clouds.wgsl` and `lighting.wgsl`
-// (for the frame's bindings, its sky and its probes) and
-// `ray_cut_outs.wgsl`, with
-// `enable wgpu_ray_query;` put first (renderer/gpu.rs).
+// (for the frame's bindings, its sky and its probes) and what traces its
+// rays (`gi_trace`): the hardware's ray queries (`ray_cut_outs.wgsl` and
+// `ray_gi_hardware.wgsl`, with `enable wgpu_ray_query;` put first) or, on
+// a GPU without them, software (`ray_soft.wgsl` and
+// `ray_gi_software.wgsl`, RL3; renderer/gpu.rs).
 
 // Threads a probe's rays are shared between, one workgroup a probe.
 const GI_THREADS: u32 = 64u;
@@ -50,7 +52,17 @@ struct RayGi {
     settings: vec4<f32>,
 }
 
-@group(1) @binding(0) var ray_scene: acceleration_structure;
+// What a ray found (`gi_trace`): whether it hit, how far along it, the
+// TLAS slot it hit and whether that's the front of a triangle.
+struct GiHit {
+    found: bool,
+    t: f32,
+    slot: u32,
+    front_face: bool,
+}
+
+// Binding 0 is the scene rays are traced through, and 5 to 8 cut-outs'
+// holes with hardware rays (`gi_trace`'s file).
 @group(1) @binding(1) var<uniform> gi: RayGi;
 // xyz: where each probe of the batch stands, w: its place in
 // `light_probes` (the bits of a u32).
@@ -62,11 +74,6 @@ struct RayGi {
 // Four a probe of the batch: what's copied over its place in
 // `light_probes` once this pass is done.
 @group(1) @binding(4) var<storage, read_write> gi_traced: array<vec4<f32>>;
-// Cut-outs' holes (LE7, ray_cut_outs.wgsl): light passes through them.
-@group(1) @binding(5) var<storage, read> cut_outs: array<CutOut>;
-@group(1) @binding(6) var<storage, read> cut_out_uvs: array<vec2<f32>>;
-@group(1) @binding(7) var cut_out_alpha: texture_2d_array<f32>;
-@group(1) @binding(8) var cut_out_sampler: sampler;
 
 // Each thread's sums of its rays: the four coefficients, then (x) how many
 // found the back of a solid thing.
@@ -90,9 +97,7 @@ fn gi_direction(i: u32, count: u32, turn: f32) -> vec3<f32> {
 // Whether anything casts a shadow between `origin` and `distance` along
 // `direction`.
 fn gi_blocked(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> bool {
-    let hit = trace_through_holes(RayDesc(
-        RAY_FLAG_TERMINATE_ON_FIRST_HIT, GI_MASK_CASTERS, 0.0, distance, origin, direction));
-    return hit.kind != RAY_QUERY_INTERSECTION_NONE;
+    return gi_trace(origin, direction, distance, GI_MASK_CASTERS, true).found;
 }
 
 // The light leaving a surface at `position` facing `n` of `color` (linear)
@@ -137,15 +142,14 @@ fn gi_hit_light(position: vec3<f32>, n: vec3<f32>, color: vec3<f32>) -> vec3<f32
 // What a probe at `origin` sees looking along `direction` (rgb), and (w)
 // 1 if that's the back of a solid thing.
 fn gi_ray_light(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
-    let hit = trace_through_holes(RayDesc(
-        0u, GI_MASK_SURFACES, 0.0, gi.settings.y, origin, direction));
-    if hit.kind == RAY_QUERY_INTERSECTION_NONE {
+    let hit = gi_trace(origin, direction, gi.settings.y, GI_MASK_SURFACES, false);
+    if !hit.found {
         // The sky as drawn, without the sun's disc (the sun lights what
         // rays hit). Not times the environment intensity: a probe's light
         // stands in for the sky's on surfaces, as a bake's does.
         return vec4<f32>(sky_specular(direction, 0.2), 0.0);
     }
-    let surface = 2u * hit.instance_custom_data;
+    let surface = 2u * hit.slot;
     let color = gi_surfaces[surface];
     if !hit.front_face && color.w < 0.5 {
         // Inside something solid: no light.

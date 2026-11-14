@@ -173,7 +173,10 @@ fn main() -> Result<()> {
         println!("{text}");
         return Ok(());
     }
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(axcenity_net::LOG_FILTER),
+    )
+    .init();
     let arguments = Arguments::parse(std::env::args_os().skip(1))?;
     let Some(game) = arguments.game else {
         bail!("no game to serve\n\n{USAGE}");
@@ -318,7 +321,7 @@ fn main() -> Result<()> {
             continue;
         }
         if let Some(stats) = &mut stats {
-            stats.frame(started.elapsed(), &server.network);
+            stats.frame(started.elapsed(), &server.network, &server.sim);
         }
         if let Some(rest) = FRAME.checked_sub(started.elapsed()) {
             std::thread::sleep(rest);
