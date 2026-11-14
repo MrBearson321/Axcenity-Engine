@@ -279,7 +279,10 @@ impl FoliageSource {
 
 /// One painted plant, prop, or model. `x` and `z` are sample coordinates, so
 /// the instance stays on the surface when the heights change. `collide` is
-/// whether physics treats it as solid.
+/// whether physics treats it as solid. `lean` (0 upright, 1 square to the
+/// ground) tilts it with the slope and `sink` (studs) lowers it into the
+/// ground; scatter rules set them (procedural worlds PW5), painted foliage
+/// stands upright on the surface.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FoliageInstance {
     pub source: FoliageSource,
@@ -288,9 +291,31 @@ pub struct FoliageInstance {
     pub yaw: f32,
     pub scale: f32,
     pub collide: bool,
+    pub lean: f32,
+    pub sink: f32,
 }
 
 impl FoliageInstance {
+    /// The way it stands (one unit long, pointing up): straight up, leaned
+    /// `lean` of the way to the ground's normal under it. `cell` is studs
+    /// between samples along X and Z and `height` the terrain's height
+    /// range in studs.
+    pub fn up(&self, data: &TerrainData, cell: (f32, f32), height: f32) -> Vector3 {
+        let lean = self.lean.clamp(0.0, 1.0);
+        if lean <= 0.0 {
+            return Vector3::new(0.0, 1.0, 0.0);
+        }
+        let h = |x: f32, z: f32| data.height_at(x, z) * height;
+        let dx = (h(self.x + 1.0, self.z) - h(self.x - 1.0, self.z)) / (2.0 * cell.0.max(1e-6));
+        let dz = (h(self.x, self.z + 1.0) - h(self.x, self.z - 1.0)) / (2.0 * cell.1.max(1e-6));
+        let normal = Vector3::new(-dx, 1.0, -dz);
+        let length = (normal.x * normal.x + 1.0 + normal.z * normal.z).sqrt();
+        let (nx, ny, nz) = (normal.x / length, 1.0 / length, normal.z / length);
+        let (x, y, z) = (nx * lean, 1.0 - lean + ny * lean, nz * lean);
+        let length = (x * x + y * y + z * z).sqrt().max(1e-6);
+        Vector3::new(x / length, y / length, z / length)
+    }
+
     /// True when this instance's sample sits inside `rect` (end excluded).
     pub fn in_rect(&self, rect: SampleRect) -> bool {
         self.x >= rect.x0 as f32
@@ -700,6 +725,8 @@ impl TerrainData {
                 yaw: instance.yaw,
                 scale: instance.scale,
                 collide: instance.collide,
+                lean: 0.0,
+                sink: 0.0,
             })
             .collect();
         Ok(data)
@@ -930,6 +957,8 @@ mod tests {
             yaw: 0.5,
             scale: 1.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         }
     }
 

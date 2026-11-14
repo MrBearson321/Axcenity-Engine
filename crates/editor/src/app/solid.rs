@@ -1,6 +1,8 @@
 //! The ribbon's Solid Modeling group (Phase 50): Union, Negate, Intersect
 //! and Separate, each one undo step that keeps the whole world
-//! (`History::record_world`), and To Terrain (`to_terrain.rs`).
+//! (`History::record_world`), To Terrain (`to_terrain.rs`), and Conform to
+//! Terrain and Blend into Terrain (`terrain_objects.rs`, procedural worlds
+//! PW5).
 //!
 //! Union and Intersect combine the selected parts with `mesh_edit` and save
 //! the result as `assets/models/<name>.union.glb` (the file stays when the
@@ -25,15 +27,19 @@ pub enum SolidAction {
     Intersect,
     Separate,
     ToTerrain,
+    ConformToTerrain,
+    BlendIntoTerrain,
 }
 
 impl SolidAction {
-    pub const ALL: [SolidAction; 5] = [
+    pub const ALL: [SolidAction; 7] = [
         SolidAction::Union,
         SolidAction::Negate,
         SolidAction::Intersect,
         SolidAction::Separate,
         SolidAction::ToTerrain,
+        SolidAction::ConformToTerrain,
+        SolidAction::BlendIntoTerrain,
     ];
 
     pub fn label(self) -> &'static str {
@@ -43,6 +49,8 @@ impl SolidAction {
             SolidAction::Intersect => "Intersect",
             SolidAction::Separate => "Separate",
             SolidAction::ToTerrain => "To Terrain",
+            SolidAction::ConformToTerrain => "Conform to Terrain",
+            SolidAction::BlendIntoTerrain => "Blend into Terrain",
         }
     }
 
@@ -53,6 +61,8 @@ impl SolidAction {
             SolidAction::Intersect => icons::INTERSECT_SQUARE,
             SolidAction::Separate => icons::ARROWS_SPLIT,
             SolidAction::ToTerrain => icons::MOUNTAINS,
+            SolidAction::ConformToTerrain => icons::ARROW_LINE_DOWN,
+            SolidAction::BlendIntoTerrain => icons::BULLDOZER,
         }
     }
 
@@ -77,6 +87,15 @@ impl SolidAction {
                 "Turn the selected parts into ground: the Terrain under each rises to its top \
                  and is painted with the layer most like it, and the part is removed."
             }
+            SolidAction::ConformToTerrain => {
+                "Move each selected part or model straight up or down so its bottom sits on \
+                 the Terrain under its middle. One undo step."
+            }
+            SolidAction::BlendIntoTerrain => {
+                "Level the Terrain under each selected part or model to its bottom and paint \
+                 it with the Terrain Studio's Paint layer, fading into the ground 6 studs \
+                 around, so it neither floats nor sinks. One undo step."
+            }
         }
     }
 
@@ -86,7 +105,9 @@ impl SolidAction {
             SolidAction::Union | SolidAction::Intersect => "Select two or more parts.",
             SolidAction::Negate => "Select a Part or a negated part.",
             SolidAction::Separate => "Select a UnionOperation.",
-            SolidAction::ToTerrain => "Select parts over a Terrain.",
+            SolidAction::ToTerrain
+            | SolidAction::ConformToTerrain
+            | SolidAction::BlendIntoTerrain => "Select parts over a Terrain.",
         }
     }
 
@@ -104,7 +125,9 @@ impl SolidAction {
             SolidAction::Separate => parts
                 .iter()
                 .any(|&id| class(id) == Some(ClassName::UnionOperation)),
-            SolidAction::ToTerrain => {
+            SolidAction::ToTerrain
+            | SolidAction::ConformToTerrain
+            | SolidAction::BlendIntoTerrain => {
                 !parts.is_empty()
                     && world.descendants(world.workspace()).into_iter().any(|id| {
                         world
@@ -141,6 +164,8 @@ impl EditorApp {
             SolidAction::Negate => self.negate_selected(),
             SolidAction::Separate => self.separate_selected(),
             SolidAction::ToTerrain => self.convert_to_terrain(),
+            SolidAction::ConformToTerrain => self.conform_to_terrain(),
+            SolidAction::BlendIntoTerrain => self.blend_into_terrain(),
         }
     }
 

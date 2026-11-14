@@ -33,6 +33,7 @@ use axcenity_terrain::materials::{LayerRule, MaterialRules, biome_weights, sampl
 use axcenity_terrain::noise::{Noise, smoothstep};
 use glam::Vec2;
 
+use crate::obstacles::{Obstacle, Obstacles};
 use crate::paths::{KeepOff, keep_offs};
 use crate::rng::Rng;
 
@@ -42,6 +43,8 @@ pub const MAX_RULES: usize = 16;
 pub const MIN_SPACING: f32 = 1.0;
 /// The farthest a rule keeps from earlier rules' spots, in studs.
 pub const MAX_AVOID_RADIUS: f32 = 32.0;
+/// The deepest a rule sinks what it places, in studs.
+pub const MAX_SINK: f32 = 50.0;
 /// What one chunk can hold, at most, over all its rules.
 pub const MAX_PER_CHUNK: usize = 4096;
 /// How far a candidate moves from its cell's middle, as a share of the
@@ -72,6 +75,12 @@ pub struct Rule {
     pub collide: bool,
     /// The Biome (by its place among the terrain's biomes) it's inside, if any.
     pub biome: Option<usize>,
+    /// 0 to 1: how far what it places leans with the slope (PW5).
+    pub lean: f32,
+    /// Studs what it places sinks into the ground at scale 1.
+    pub sink: f32,
+    /// With `AvoidParts`, the studs it keeps from anchored parts.
+    pub part_margin: Option<f32>,
 }
 
 impl Rule {
@@ -150,6 +159,10 @@ impl Rule {
             scale: pair("ScaleRange", Vec2::new(0.85, 1.15)),
             collide: instance.property("CanCollide") == Some(&Value::Bool(true)),
             biome: None,
+            lean: number("AlignToSlope", 0.0).clamp(0.0, 1.0),
+            sink: number("SinkDepth", 0.0).clamp(0.0, MAX_SINK),
+            part_margin: (instance.property("AvoidParts") == Some(&Value::Bool(true)))
+                .then(|| number("PartMargin", 1.0).clamp(0.0, MAX_AVOID_RADIUS)),
         })
     }
 }
@@ -227,14 +240,15 @@ pub fn rules_of(world: &World, terrain: InstanceId) -> Vec<Rule> {
 }
 
 /// What the rules stand on: the terrain, where it is, its material rules
-/// (for `Layer`), its water level (world Y), if it has water, and the
-/// strips they keep off.
+/// (for `Layer`), its water level (world Y), if it has water, the strips
+/// they keep off and the parts rules with `AvoidParts` keep off.
 pub struct Ground<'a> {
     pub data: &'a TerrainData,
     pub placement: Placement,
     pub materials: &'a MaterialRules,
     pub water: Option<f32>,
     pub keep_off: &'a [KeepOff],
+    pub obstacles: &'a [Obstacle],
 }
 
 impl Ground<'_> {
@@ -252,6 +266,25 @@ impl Ground<'_> {
             .filter(|strip| strip.overlaps(min + corner, max + corner))
             .collect()
     }
+
+    /// The parts within `margin` of the box from `min` to `max` (studs
+    /// from the terrain's corner).
+    fn parts_in(&self, min: Vec2, max: Vec2, margin: f32) -> Vec<&Obstacle> {
+        let corner = self.corner();
+        self.obstacles
+            .iter()
+            .filter(|part| part.overlaps(min + corner, max + corner, margin))
+            .collect()
+    }
+}
+
+/// The most studs any of `rules` keeps from parts, or `None` when none
+/// avoids them.
+fn part_reach(rules: &[Rule]) -> Option<f32> {
+    rules
+        .iter()
+        .filter_map(|rule| rule.part_margin)
+        .reduce(f32::max)
 }
 
 /// Studs past a chunk's edge that rules have to be worked out to, so the
@@ -286,6 +319,9 @@ pub fn chunk(rules: &[Rule], ground: &Ground, cx: usize, cz: usize) -> Vec<Folia
     let mut out = Vec::new();
     let all = Vec2::splat(margin(rules));
     let strips = ground.strips_in(own_min - all, own_max + all);
+    let parts = part_reach(rules).map_or_else(Vec::new, |reach| {
+        ground.parts_in(own_min - all, own_max + all, reach)
+    });
     for (index, rule) in rules.iter().enumerate() {
         let grow = Vec2::splat(margin(&rules[index..]));
         let spots = Spots::of(
@@ -293,7 +329,7 @@ pub fn chunk(rules: &[Rule], ground: &Ground, cx: usize, cz: usize) -> Vec<Folia
             ground,
             (own_min - grow, own_max + grow),
             &placed,
-            &strips,
+            (&strips, &parts),
         );
         for spot in &spots.spots {
             let at = spot.at;
@@ -308,6 +344,8 @@ pub fn chunk(rules: &[Rule], ground: &Ground, cx: usize, cz: usize) -> Vec<Folia
                     yaw: spot.yaw,
                     scale: spot.scale,
                     collide: rule.collide,
+                    lean: rule.lean,
+                    sink: rule.sink * spot.scale,
                 });
             }
         }
@@ -341,15 +379,17 @@ struct Spots {
 impl Spots {
     /// The spots `rule` uses with candidates between `min` and `max`
     /// (studs from the terrain's corner), keeping `AvoidRadius` from the
-    /// spots in `earlier` and out of `strips`.
+    /// spots in `earlier`, out of `strips` and, with `AvoidParts`, away
+    /// from `parts`.
     fn of(
         rule: &Rule,
         ground: &Ground,
         (min, max): (Vec2, Vec2),
         earlier: &[Spots],
-        strips: &[&KeepOff],
+        (strips, parts): (&[&KeepOff], &[&Obstacle]),
     ) -> Spots {
         let corner = ground.corner();
+        let cell_size = ground.placement.cell_size(ground.data);
         let s = rule.spacing;
         let first = ((min.x / s).floor() as i64, (min.y / s).floor() as i64);
         let last = ((max.x / s).floor() as i64, (max.y / s).floor() as i64);
@@ -378,6 +418,17 @@ impl Spots {
                 }
                 if strips.iter().any(|strip| strip.covers(at + corner)) {
                     continue;
+                }
+                if let Some(margin) = rule.part_margin
+                    && !parts.is_empty()
+                {
+                    let grid = at / cell_size;
+                    let y = ground
+                        .placement
+                        .world_y(ground.data.height_at(grid.x, grid.y));
+                    if parts.iter().any(|part| part.blocks(at + corner, y, margin)) {
+                        continue;
+                    }
                 }
                 let chance = base * suitability(rule, ground, at, &clumps);
                 if roll >= chance {
@@ -543,6 +594,7 @@ pub struct TerrainScatter {
     /// checked against, so an unchanged terrain costs one pass over its
     /// chunk versions.
     seen: HashMap<InstanceId, u64>,
+    obstacles: Obstacles,
 }
 
 impl TerrainScatter {
@@ -588,6 +640,12 @@ impl TerrainScatter {
             return 0;
         }
         let strips: &[KeepOff] = strips.get_or_insert_with(|| keep_offs(world));
+        let part_reach = part_reach(&rules);
+        let obstacles: &[Obstacle] = if part_reach.is_some() {
+            self.obstacles.update(world)
+        } else {
+            &[]
+        };
         let materials = MaterialRules::of(world, terrain);
         let water = world
             .get(terrain)
@@ -607,7 +665,9 @@ impl TerrainScatter {
         };
         let strips_key = strips
             .iter()
-            .fold(signature, |key, strip| mix_in(key, strip.hash));
+            .map(|strip| strip.hash)
+            .chain(obstacles.iter().map(|part| part.hash))
+            .fold(signature, mix_in);
         let mut fingerprint = mix_in(strips_key, data.generated_version());
         for cz in 0..chunks_z {
             for cx in 0..chunks_x {
@@ -622,19 +682,48 @@ impl TerrainScatter {
         let cell = placement.cell_size(data);
         let chunk_studs = CHUNK_STUDS_CELLS * cell.x.min(cell.y);
         let ring = (margin(&rules) / chunk_studs.max(f32::EPSILON)).ceil() as usize;
+        // Each chunk's key starts with the strips and parts that reach its
+        // rules: each one's box, grown by how far the rules look, mixed
+        // into the chunks it covers (in a set order).
         let corner = placement.to_world_xz(data, Vec2::ZERO);
-        let reach = Vec2::splat(margin(&rules) + cell.max_element());
+        let reach = margin(&rules) + cell.max_element();
+        let mut keys = vec![signature; chunks_x * chunks_z];
+        let chunk_at = |p: Vec2| {
+            let grid = (p - corner) / cell / CHUNK_STUDS_CELLS;
+            (
+                (grid.x.floor().max(0.0) as usize).min(chunks_x - 1),
+                (grid.y.floor().max(0.0) as usize).min(chunks_z - 1),
+            )
+        };
+        let boxes = strips
+            .iter()
+            .map(|strip| (strip.min, strip.max, strip.hash, reach))
+            .chain(obstacles.iter().map(|part| {
+                let grow = reach + part_reach.unwrap_or(0.0);
+                (part.min, part.max, part.hash, grow)
+            }));
+        for (min, max, hash, grow) in boxes {
+            let (low, high) = (
+                chunk_at(min - Vec2::splat(grow)),
+                chunk_at(max + Vec2::splat(grow)),
+            );
+            if max.x + grow < corner.x
+                || max.y + grow < corner.y
+                || min.x - grow > corner.x + placement.size.x
+                || min.y - grow > corner.y + placement.size.z
+            {
+                continue;
+            }
+            for z in low.1..=high.1 {
+                for x in low.0..=high.0 {
+                    keys[z * chunks_x + x] = mix_in(keys[z * chunks_x + x], hash);
+                }
+            }
+        }
         let mut dirty = Vec::new();
         for cz in 0..chunks_z {
             for cx in 0..chunks_x {
-                let mut key = signature;
-                // The strips that reach this chunk's rules.
-                let rect = data.chunk_rect(cx, cz);
-                let low = corner + Vec2::new(rect.x0 as f32, rect.z0 as f32) * cell - reach;
-                let high = corner + Vec2::new(rect.x1 as f32, rect.z1 as f32) * cell + reach;
-                for strip in strips.iter().filter(|strip| strip.overlaps(low, high)) {
-                    key = mix_in(key, strip.hash);
-                }
+                let mut key = keys[cz * chunks_x + cx];
                 for z in cz.saturating_sub(ring)..=(cz + ring).min(chunks_z - 1) {
                     for x in cx.saturating_sub(ring)..=(cx + ring).min(chunks_x - 1) {
                         key = mix_in(key, data.chunk_height_version(x, z));
@@ -655,6 +744,7 @@ impl TerrainScatter {
                 materials: &materials,
                 water,
                 keep_off: strips,
+                obstacles,
             };
             let results = make_chunks(&rules, &ground, &dirty);
             if let Some(data) = world.terrain_mut(terrain) {

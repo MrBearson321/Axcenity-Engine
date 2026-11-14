@@ -807,6 +807,8 @@ fn apply_foliage(
                     yaw: rng.next_f32() * std::f32::consts::TAU,
                     scale: 0.85 + rng.next_f32() * 0.3,
                     collide,
+                    lean: 0.0,
+                    sink: 0.0,
                 });
             }
             if added.len() >= MAX_FOLIAGE_PER_STAMP {

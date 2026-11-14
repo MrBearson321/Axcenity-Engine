@@ -174,3 +174,35 @@ ScatterRule.CanCollide: boolean
 
 If true, parts and characters bump into what it places, as into painted foliage marked solid. False by default.
 
+#### AlignToSlope
+
+```luau
+ScatterRule.AlignToSlope: number
+```
+
+0 to 1: how far what it places leans with the ground's slope. 0 (the default) stands straight up, as trees grow; 1 stands square to the ground, as rocks and grass on a hillside do.
+
+#### SinkDepth
+
+```luau
+ScatterRule.SinkDepth: number
+```
+
+Studs what it places sinks into the ground (at scale 1; a bigger one sinks more), so a trunk or rock on a slope doesn't show its base. 0 by default.
+
+#### AvoidParts
+
+```luau
+ScatterRule.AvoidParts: boolean
+```
+
+If true (the default), it places nothing under or into anchored, colliding parts standing on or near the ground (lower than 12 studs above it), such as a house's walls and floor or a placed rock. Moving such a part remakes only the ground near it.
+
+#### PartMargin
+
+```luau
+ScatterRule.PartMargin: number
+```
+
+Studs past those parts' sides it keeps clear, with AvoidParts. 1 by default.
+

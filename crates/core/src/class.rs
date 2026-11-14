@@ -2563,6 +2563,15 @@ impl ClassName {
                 ("ScaleRange", Value::Vector2(Vector2::new(0.85, 1.15))),
                 // Whether parts and characters bump into what it places.
                 ("CanCollide", Value::Bool(false)),
+                // 0 to 1: how far what it places leans with the slope (0
+                // stands straight up, 1 square to the ground), and studs
+                // it sinks into the ground at scale 1.
+                ("AlignToSlope", Value::Number(0.0)),
+                ("SinkDepth", Value::Number(0.0)),
+                // Whether it keeps off anchored, colliding parts standing
+                // on or near the ground, and how many studs past them.
+                ("AvoidParts", Value::Bool(true)),
+                ("PartMargin", Value::Number(1.0)),
             ],
             ClassName::Biome => vec![
                 ("Enabled", Value::Bool(true)),

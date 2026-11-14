@@ -24,6 +24,10 @@ pub struct RulePreset {
     pub scale: (f32, f32),
     pub collide: bool,
     pub seed: f64,
+    /// 0 to 1: how far what it places leans with the slope.
+    pub lean: f64,
+    /// Studs it sinks into the ground.
+    pub sink: f64,
 }
 
 impl RulePreset {
@@ -44,6 +48,8 @@ impl RulePreset {
             ),
             ("CanCollide", Value::Bool(self.collide)),
             ("Seed", Value::Number(self.seed)),
+            ("AlignToSlope", Value::Number(self.lean)),
+            ("SinkDepth", Value::Number(self.sink)),
         ];
         if let Some(below) = self.below {
             properties.push((
@@ -68,6 +74,8 @@ pub const FOREST_TREES: RulePreset = RulePreset {
     scale: (0.8, 1.3),
     collide: true,
     seed: 11.0,
+    lean: 0.0,
+    sink: 0.4,
 };
 pub const UNDERGROWTH: RulePreset = RulePreset {
     name: "Undergrowth",
@@ -82,6 +90,8 @@ pub const UNDERGROWTH: RulePreset = RulePreset {
     scale: (0.7, 1.2),
     collide: false,
     seed: 23.0,
+    lean: 0.3,
+    sink: 0.1,
 };
 pub const MEADOW_FLOWERS: RulePreset = RulePreset {
     name: "Meadow Flowers",
@@ -96,6 +106,8 @@ pub const MEADOW_FLOWERS: RulePreset = RulePreset {
     scale: (0.8, 1.2),
     collide: false,
     seed: 37.0,
+    lean: 0.5,
+    sink: 0.0,
 };
 pub const GRASS_TUFTS: RulePreset = RulePreset {
     name: "Grass Tufts",
@@ -110,6 +122,8 @@ pub const GRASS_TUFTS: RulePreset = RulePreset {
     scale: (0.8, 1.3),
     collide: false,
     seed: 41.0,
+    lean: 0.7,
+    sink: 0.0,
 };
 /// No models yet: select it and click models or props in Assets.
 pub const YOUR_MODELS: RulePreset = RulePreset {
@@ -125,6 +139,8 @@ pub const YOUR_MODELS: RulePreset = RulePreset {
     scale: (0.85, 1.15),
     collide: false,
     seed: 1.0,
+    lean: 0.0,
+    sink: 0.0,
 };
 
 /// The single rules the Add menu offers.

@@ -37,7 +37,7 @@ impl EditorApp {
     }
 
     /// The terrains in the Workspace, with where they are.
-    fn terrains(&self) -> Vec<(InstanceId, Placement)> {
+    pub(super) fn terrains(&self) -> Vec<(InstanceId, Placement)> {
         self.world
             .descendants(self.world.workspace())
             .into_iter()

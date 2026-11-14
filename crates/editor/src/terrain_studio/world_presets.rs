@@ -41,6 +41,8 @@ const DESERT_SCRUB: RulePreset = RulePreset {
     scale: (0.5, 0.9),
     collide: false,
     seed: 53.0,
+    lean: 0.3,
+    sink: 0.1,
 };
 const TUNDRA_TUFTS: RulePreset = RulePreset {
     name: "Tundra Tufts",

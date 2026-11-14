@@ -627,15 +627,18 @@ fn built_groups<'a>(
                 cull_distance > 0.0 && cull_distance <= SHORT_REACH,
             ))
             .or_default();
-        let ground = Vec3::new(xz.x, y, xz.y);
-        let turn = Quat::from_rotation_y(instance.yaw);
+        let ground = Vec3::new(xz.x, y - instance.sink, xz.y);
+        let cell = placement.cell_size(data);
+        let up = instance.up(data, (cell.x, cell.y), placement.size.y);
+        let turn = Quat::from_rotation_arc(Vec3::Y, Vec3::new(up.x, up.y, up.z))
+            * Quat::from_rotation_y(instance.yaw);
         match (&instance.source, model) {
             (FoliageSource::Model(_), Some((model_size, pieces))) => {
                 let size = model_size * scale;
                 let model_transform = Mat4::from_scale_rotation_translation(
                     size.max(Vec3::splat(0.01)),
                     turn,
-                    ground + Vec3::new(0.0, size.y.abs() * 0.5, 0.0),
+                    ground + turn * Vec3::new(0.0, size.y.abs() * 0.5, 0.0),
                 );
                 push_model(pieces, model_transform, id, cull_distance, items);
             }
@@ -714,6 +717,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         });
         data.foliage_mut().push(FoliageInstance {
             source: FoliageSource::Prop(FoliageProp::Crate),
@@ -722,6 +727,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: true,
+            lean: 0.0,
+            sink: 0.0,
         });
         world.set_terrain(terrain, std::sync::Arc::new(data));
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
@@ -761,6 +768,8 @@ mod tests {
             yaw: 0.0,
             scale,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         };
         data.foliage_mut().extend([
             plant(FoliageSource::Plant(FoliagePlant::Tree), 2.0, 2.0),
@@ -818,6 +827,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         };
         data.foliage_mut().extend([
             plant(FoliageSource::Plant(FoliagePlant::Grass), 4.0),
@@ -899,6 +910,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         };
         let data = world.terrain_mut(terrain).unwrap();
         let revision = data.revision();
@@ -922,6 +935,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         };
         let data = world.terrain_mut(terrain).unwrap();
         data.set_generated(0, 0, 1, vec![crate_at(4.0, 4.0)]);
@@ -986,6 +1001,8 @@ mod tests {
             yaw: 0.0,
             scale: 1.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         });
         world.set_terrain(terrain, std::sync::Arc::new(data));
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
@@ -1036,6 +1053,8 @@ mod tests {
             yaw: 0.0,
             scale: 2.0,
             collide: false,
+            lean: 0.0,
+            sink: 0.0,
         });
         world.set_terrain(terrain, std::sync::Arc::new(data));
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();

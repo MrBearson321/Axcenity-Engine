@@ -16,6 +16,10 @@
 
 mod bend;
 mod flatten;
+mod footprint;
+#[cfg(test)]
+mod objects_tests;
+pub mod obstacles;
 pub mod paths;
 #[cfg(test)]
 mod paths_tests;
@@ -41,6 +45,7 @@ use glam::{EulerRot, Quat, Vec2, Vec3};
 
 pub use bend::{MAX_PIECES, Piece, bend, frame, piece_count};
 pub use flatten::flatten_along;
+pub use footprint::blend_footprint;
 pub use paths::{KeepOff, PathSettings, apply_path, keep_offs};
 pub use route::route;
 pub use scatter::{MAX_MODELS, Placed, Settings, layout};
