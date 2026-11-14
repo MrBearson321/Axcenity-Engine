@@ -223,10 +223,16 @@ fn a_blend_shape_moves_its_mesh_into_view_by_its_weight() {
     assert_eq!(renderer.stats().items_culled, 1, "off to the side at rest");
     // Weight 0 on its target keeps it there (its box reaches as far as
     // its shapes can move it, so it isn't culled, but nothing shows).
-    let still = middle(&mut renderer, &list_of(vec![morphed_square(Some(&[1.0, 0.0]))]));
+    let still = middle(
+        &mut renderer,
+        &list_of(vec![morphed_square(Some(&[1.0, 0.0]))]),
+    );
     assert_eq!(still, sky);
     // Weight 1 brings it into the middle, and its box goes with it.
-    let drawn = middle(&mut renderer, &list_of(vec![morphed_square(Some(&[0.0, 1.0]))]));
+    let drawn = middle(
+        &mut renderer,
+        &list_of(vec![morphed_square(Some(&[0.0, 1.0]))]),
+    );
     let stats = renderer.stats();
     assert_eq!((stats.items_drawn, stats.items_culled), (1, 0));
     assert!(

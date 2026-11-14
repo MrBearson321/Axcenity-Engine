@@ -364,10 +364,7 @@ impl Skinning {
             ),
             None => (self.no_ranges.clone(), self.no_moves.clone()),
         };
-        let size = buffer.size()
-            + morphs
-                .as_ref()
-                .map_or(0, |_| ranges.size() + moves.size());
+        let size = buffer.size() + morphs.as_ref().map_or(0, |_| ranges.size() + moves.size());
         Some(GpuSkin {
             bind_group: skin_group(device, &self.layout, [&buffer, &ranges, &moves]),
             buffer,
