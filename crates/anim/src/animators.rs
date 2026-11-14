@@ -130,12 +130,12 @@ pub struct Animators {
     /// How foot placement finds the ground. Without one, feet stay where
     /// the animation has them.
     ground: Option<GroundProbe>,
+    /// Seconds of updates so far, to time what the inspector lists.
+    clock: f64,
     /// Where poses are worked out (unified Phase 93).
     threads: Threads,
     /// How long each thread spent posing in the last update.
     thread_times: ThreadTimes,
-    /// Seconds of updates so far, to time what the inspector lists.
-    clock: f64,
 }
 
 /// A pose to work out off the calling thread: everything it needs from
