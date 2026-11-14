@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5a (the relay with join codes, hole punching, the NAT lab) is built ([§6](#mp5a-relay-join-codes-and-hole-punching-cloud-container-2026-11-14)); MP5b (port mapping on the host) is next. MP6–MP7 not started.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -89,6 +89,22 @@ Operational tests start the real `axcenity-server` and real bot processes over U
 Choices made while building it: a player falls back to unsecured only when nothing answers on the token port and it has no fingerprint for the server, so a secured server can't silently be swapped for an unsecured one; the per-address limit (30 tokens a minute) doesn't apply to this computer's own addresses, so bots and the scale run can join 32 players from one machine. Breaking: an engine from before MP4 can't join a secured server.
 
 Left: the PC–Mac join over Tailscale (a firewall must let TCP through as well as UDP on the game port); a join link in the player's UI and a "copy join link" for hosts (today the log prints it); NAT traversal is MP5.
+
+### MP5a: relay, join codes and hole punching (cloud container, 2026-11-14)
+
+[networking.md](../architecture/networking.md#reaching-a-host). `axcenity-relay` is in the repository (`crates/relay`); a host started with `--relay` gets a join code, and players join by code or the host's link, through a hole both ends punch or through the relay. The token exchange is TLS from player to host through a spliced TCP connection, so the relay sees neither the game nor the password.
+
+**The NAT lab** (`scripts/nat-lab.sh`): two home networks behind masquerading Linux routers that let in only replies, the relay on a bridge between them, in network namespaces on the container.
+
+| Run | Result |
+|---|---|
+| `cone`: both routers keep a port per inside address, 16 bots | 16 of 16 in, all **punched** (direct); join p50 0.12 s; round trip p50 24 ms; no loss, no corrections |
+| `symmetric`: the players' router picks a new port per destination, 16 bots | 16 of 16 in, all **relayed**; join p50 2.16 s (the 2 s punch try first); round trip p50 30 ms; no loss, no corrections |
+| Real server and bots on one machine (`tests/relay.rs`) | 3 relayed with `--no-punch`, 3 punched |
+
+Found while building it: **a router that accepts unasked packets addressed to itself breaks hole punching on Linux.** The first punch to arrive left a connection-tracking entry that made the router map the other side's outgoing packets to a new port, so neither side's punches matched (all relayed, even with friendly routers). Home routers drop such packets, and with the lab's routers doing the same every bot punched through. A router that accepts them still works, through the relay.
+
+Left: port mapping on the host (MP5b); a real cross-network join on Paul's machines (a relay on a public address, host and player on different networks); a "copy join code" in the player's UI; a relay address in the project settings so a game can carry its own.
 
 ## 4. What stays Paul's call
 

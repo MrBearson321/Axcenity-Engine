@@ -35,7 +35,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 
 ## Networking
 
-- **Game connections trust a typed address on first use** (MP4; a join link pins the fingerprint); no NAT traversal or relay yet (MP5).
+- **Game connections trust a typed address on first use** (MP4; a join link pins the fingerprint); a bare join code trusts the relay; no port mapping on the host yet (MP5b).
 - No relay, matchmaking, encryption or NAT traversal, and no input-driven prediction and rollback (lag compensation and replays exist, Phase 81). Multiplayer has been measured with 8 loopback players; a 16–32 client run (G13) is planned. All of it is planned in `docs/research/multiplayer-readiness.md` (MP1–MP7).
 - Editor Play can't host or join a real network game.
 

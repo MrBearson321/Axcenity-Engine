@@ -1002,6 +1002,7 @@ dependencies = [
  "axcenity-core",
  "axcenity-gameplay",
  "axcenity-physics",
+ "axcenity-relay",
  "axcenity-script",
  "axcenity-workspace-hack",
  "log",
@@ -1010,6 +1011,7 @@ dependencies = [
  "rcgen",
  "renet",
  "renet_netcode",
+ "renetcode",
  "ring",
  "rustc-hash 2.1.3",
  "rustls",
@@ -1105,6 +1107,17 @@ dependencies = [
  "thiserror 2.0.21",
  "zip 2.6.1",
  "zstd",
+]
+
+[[package]]
+name = "axcenity-relay"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "axcenity-workspace-hack",
+ "ring",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1218,6 +1231,7 @@ dependencies = [
  "axcenity-core",
  "axcenity-net",
  "axcenity-project",
+ "axcenity-relay",
  "axcenity-release",
  "axcenity-save",
  "axcenity-script",

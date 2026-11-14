@@ -12,6 +12,8 @@
 //!   and a [`Join`].
 //! - `secure`: MP4's connect tokens: a server's certificate and token
 //!   port, and fetching a token over TLS checked against a fingerprint.
+//! - `relayed` and `host_socket`: MP5's join codes through an
+//!   `axcenity-relay`, hole punching, and relayed players on the host.
 //! - `discovery`: LAN games found by broadcast.
 //! - `wire`: values and remote messages as plain data, Instances as
 //!   network IDs; `replicate`: the snapshot and each frame's changes.
@@ -22,10 +24,12 @@
 mod discovery;
 mod game;
 mod handshake;
+mod host_socket;
 pub mod limits;
 mod motion;
 mod movement;
 mod ownership;
+mod relayed;
 mod replay;
 mod replicate;
 mod secure;
@@ -43,6 +47,7 @@ pub use motion::{
 pub use ownership::{
     ASSEMBLY_SPEED, CharacterCheck, Owned, OwnedSender, Sender, TELEPORT_DISTANCE,
 };
+pub use relayed::{PUNCH_TIME, RelayEvent, Route};
 pub use replay::{
     BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
     ReplayFrame, Replays, WirePose, eyes_of,

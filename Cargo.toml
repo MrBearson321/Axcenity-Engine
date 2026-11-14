@@ -30,6 +30,7 @@ axcenity-mcp = { path = "crates/mcp" }
 axcenity-mesh-edit = { path = "crates/mesh_edit" }
 axcenity-nav = { path = "crates/nav" }
 axcenity-net = { path = "crates/net" }
+axcenity-relay = { path = "crates/relay" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-plugins = { path = "crates/plugins" }
 axcenity-procedural = { path = "crates/procedural" }
@@ -165,9 +166,11 @@ meshopt = "0.7"
 # and unreliable channels (`renet`) over UDP, with netcode's connection
 # handshake, timeouts and disconnect reasons (`renet_netcode`, over
 # `renetcode`, which brings `chacha20poly1305`, MIT OR Apache-2.0). Pure
-# Rust, on every OS. Upgrade the two together.
+# Rust, on every OS. Upgrade the three together. `net` drives `renetcode`
+# directly on the host, so relayed players (MP5) share its socket.
 renet = "2"
 renet_netcode = "2"
+renetcode = "2"
 # The multiplayer wire (roadmap M7), MIT OR Apache-2.0: reliable messages,
 # snapshots and RemoteEvent payloads as compact binary serde instead of
 # JSON. Only `use-std`, which brings `cobs` (MIT OR Apache-2.0); not its
