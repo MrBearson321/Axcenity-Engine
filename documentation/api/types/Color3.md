@@ -86,6 +86,16 @@ Color3.fromHSV(hue: number, saturation: number, value: number): Color3
 
 A color from hue, saturation and value, each from 0 to 1. Hue goes round the color wheel from red (0) through green (1/3) and blue (2/3) back to red (1).
 
+```lua
+-- Cycle a part through the rainbow.
+local hue = 0
+while true do
+	hue = (hue + 0.01) % 1
+	workspace.Disco.Color = Color3.fromHSV(hue, 1, 1)
+	task.wait()
+end
+```
+
 #### fromHex
 
 ```luau

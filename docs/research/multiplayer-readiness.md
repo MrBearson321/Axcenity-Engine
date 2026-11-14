@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) is built; MP3b (wall and flight checks, owned-assembly speed) is next. MP4–MP7 not started.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -119,4 +119,32 @@ MP6b, MP6c and anything hosted wait for Paul.
 3. A character that walked off the edge of a map fell further each update than the 30-stud teleport limit, and was moved back every frame from then on. Falling no longer counts toward the limit.
 
 Before these, 32 walking bots were moved back about 87,500 times in a minute.
+
+### MP2: crashes, churn and floods (cloud container, 2026-11-14)
+
+Debug builds, the server and bots as separate processes over UDP on one 4-vCPU container (`crates/server/tests/operations.rs`, [networking.md](../architecture/networking.md#reconnecting)):
+
+| Test | Result |
+|---|---|
+| Server `kill -9`, started again on the same port 2 s later | 3 of 3 bots rejoined (netcode's 15 s timeout, then 1–2 s of retries); each one's saved data came back (visit 1, then visit 2); 0 corrections |
+| 4 bots churning every ~3 s for 16 s (about 20 joins and leaves) | The server's Instances back to where they started (21), Lua memory within 1.5× |
+| 6 silent connections on a 2-player server (all 6 connection slots) | All dropped after 10 s; then 2 players joined |
+| 3 junk join requests | Refused and dropped |
+| 2 connections sending junk at renet's full rate (~3.5 MB/s each) | Server at 59 frames a second; 2 players joined in under 1 s and stayed in, but lost about 20% of their packets |
+
+The plan said the server replaces a stale connection "with the same UserId". A UserId is whatever the device says, so anyone could knock another player out with it; the server instead gives each player a random rejoin key in `Welcome`, and only a Hello with that key replaces the old connection.
+
+**Left for later phases:** a spamming connection is only dropped once MP3's per-connection budgets exist (the test notes the loss rather than failing on it); silent connections can hold every spare slot for 10 s until MP4's connect tokens keep strangers out.
+
+### MP3a: budgets, flags and kicks (cloud container, 2026-11-14)
+
+[networking.md](../architecture/networking.md#validation). Found while building it: **a remote message of tables nested 200,000 deep (600 KB, under the reliable channel's 5 MiB) crashed any server or client that read it**, since postcard decodes nested tables recursively. Decoding now stops at 32 deep (`MAX_TABLE_DEPTH`), the sender raises an error past it, and a million deep (3 MB) is over the bytes budget anyway.
+
+| Test | Result |
+|---|---|
+| Client firing a RemoteEvent 600 times a second | Held to the budget (600 at once, then 240 a second); flagged once a second; kicked at the 5th flag |
+| `--flood deep` (one 600 KB message of nested tables a second) | Flagged unreadable or over budget; kicked in 5.5 s; server unharmed |
+| `--flood spam` (2 connections at ~3.5 MB/s each) beside 2 walking players | Both kicked in under 3 s; players stayed in (at most a correction or so from the packets lost meanwhile); server above 50 frames a second |
+
+Left: the junk a spammer sends before it's kicked still fills the server's socket for a moment; a larger socket receive buffer (needs `socket2`) would soften that.
 
