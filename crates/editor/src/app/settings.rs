@@ -429,6 +429,13 @@ impl EditorApp {
         found(ui, &row, "Show the view cube");
         let row = ui
             .checkbox(
+                &mut self.ray_badge,
+                theme::with_icon(icons::SUN, "Show the ray tracing badge"),
+            )
+            .on_hover_text(RAY_BADGE_HINT);
+        found(ui, &row, "Show the ray tracing badge");
+        let row = ui
+            .checkbox(
                 &mut self.move_guide,
                 theme::with_icon(icons::ARROWS_OUT_CARDINAL, "Show the movement guide"),
             )

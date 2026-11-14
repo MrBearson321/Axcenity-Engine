@@ -1141,6 +1141,7 @@ impl EditorApp {
                             console: std::mem::take(&mut console),
                             light_cones: self.light_cones,
                             view_cube: self.view_cube,
+                            ray_badge: self.ray_badge,
                             grid: self.grid,
                             move_guide: self.move_guide,
                             grid_strength: self.grid_strength,

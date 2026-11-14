@@ -526,6 +526,13 @@ impl EditorApp {
         );
         overlay_menu_item(
             ui,
+            &mut self.ray_badge,
+            icons::SUN,
+            "Ray Tracing Badge",
+            RAY_BADGE_HINT,
+        );
+        overlay_menu_item(
+            ui,
             &mut self.move_guide,
             icons::ARROWS_OUT_CARDINAL,
             "Movement Guide",
