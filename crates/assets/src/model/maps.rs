@@ -225,27 +225,115 @@ pub(crate) fn name_key(name: &str) -> String {
 /// digit, and where a lowercase letter is followed by a capital
 /// (`BaseColor` is "base", "color").
 fn words(stem: &str) -> Vec<String> {
-    let mut words = Vec::new();
+    word_spans(stem).into_iter().map(|span| span.word).collect()
+}
+
+/// One of [`words`], with where it ends in the name.
+struct WordSpan {
+    /// The byte after its last letter in the name.
+    end: usize,
+    word: String,
+}
+
+/// [`words`], each with where it ends.
+fn word_spans(stem: &str) -> Vec<WordSpan> {
+    let mut spans = Vec::new();
     let mut word = String::new();
+    let mut end = 0;
     let mut last_lower = false;
-    for c in stem.chars() {
+    for (at, c) in stem.char_indices() {
         if !c.is_alphanumeric() {
             if !word.is_empty() {
-                words.push(std::mem::take(&mut word));
+                spans.push(WordSpan {
+                    end,
+                    word: std::mem::take(&mut word),
+                });
             }
             last_lower = false;
             continue;
         }
         if c.is_uppercase() && last_lower && !word.is_empty() {
-            words.push(std::mem::take(&mut word));
+            spans.push(WordSpan {
+                end,
+                word: std::mem::take(&mut word),
+            });
         }
+        end = at + c.len_utf8();
         last_lower = c.is_lowercase() || c.is_ascii_digit();
         word.extend(c.to_lowercase());
     }
     if !word.is_empty() {
-        words.push(word);
+        spans.push(WordSpan { end, word });
     }
-    words
+    spans
+}
+
+/// Image formats, which download names often carry (`Moss002_2K-JPG_Color`).
+const FORMAT_WORDS: &[&str] = &[
+    "jpg", "jpeg", "png", "tga", "bmp", "exr", "hdr", "tif", "tiff", "webp",
+];
+
+/// Takes the sizes and formats (`2k`, `2K` split as "2" "k", `JPG`) off the
+/// end of `spans`, and plain numbers too with `numbers`.
+fn trim_sizes(spans: &mut Vec<WordSpan>, numbers: bool) {
+    let digits = |word: &str| !word.is_empty() && word.chars().all(|c| c.is_ascii_digit());
+    loop {
+        let Some(last) = spans.last() else {
+            return;
+        };
+        let word = last.word.as_str();
+        if word == "k" && spans.len() >= 2 && digits(&spans[spans.len() - 2].word) {
+            spans.truncate(spans.len() - 2);
+        } else if is_size(word) || FORMAT_WORDS.contains(&word) || (numbers && digits(word)) {
+            spans.pop();
+        } else {
+            return;
+        }
+    }
+}
+
+/// The material a texture map's file is one map of, by its name: the name
+/// with the map's word and the sizes and formats around it taken off, so
+/// every map of a download names the same material
+/// (`brown_mud_leaves_01_nor_gl_2k.jpg` and `brown_mud_leaves_01_diff_2k.jpg`
+/// are `brown_mud_leaves_01`, `Moss002_2K-JPG_Color.jpg` is `Moss002`).
+/// `None` unless the name ends with a word saying which map it is.
+pub fn texture_pack_name(file_name: &str) -> Option<String> {
+    let file = file_name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    let mut spans = word_spans(stem);
+    // Sizes, formats and numbers after the map's word say nothing about it
+    // ("_2k", "_01").
+    trim_sizes(&mut spans, true);
+    // The map's word ends the name: up to three words seen whole
+    // ("ambient" + "occlusion", Poly Haven's "nor" + "gl"), or a short
+    // suffix after at least one other word ("T_Bench_N").
+    let mut cut = None;
+    for length in (1..=3.min(spans.len())).rev() {
+        let joined: String = spans[spans.len() - length..]
+            .iter()
+            .map(|span| span.word.as_str())
+            .collect();
+        if WORDS.iter().any(|(word, _)| *word == joined) {
+            cut = Some(spans.len() - length);
+            break;
+        }
+    }
+    if cut.is_none()
+        && spans.len() > 1
+        && let Some(last) = spans.last()
+        && SUFFIXES.iter().any(|(suffix, _)| *suffix == last.word)
+    {
+        cut = Some(spans.len() - 1);
+    }
+    let cut = cut?;
+    // What's before it, without the sizes and formats at its end; a number
+    // stays ("forest_leaves_04").
+    spans.truncate(cut);
+    trim_sizes(&mut spans, false);
+    let end = spans.last()?.end;
+    let name = stem[..end].trim_matches(|c: char| !c.is_alphanumeric());
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// True for a texture size such as "4k" or "2k".

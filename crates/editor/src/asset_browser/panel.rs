@@ -77,6 +77,9 @@ impl AssetBrowser {
         ui.add_space(4.0);
         widgets::divider(ui);
         ui.add_space(4.0);
+        if let Some(done) = self.organize_row(ui, can_edit) {
+            action = Some(done);
+        }
 
         let search = self.search.trim().to_lowercase();
         let entries: Vec<AssetEntry> = self
@@ -469,6 +472,49 @@ impl AssetBrowser {
         }
         responsive::room_for(ui, 140.0);
         self.source_menu(ui);
+    }
+
+    /// When materials' maps lie loose in the project (a download's
+    /// `_diff`, `_nor_gl`… side by side), a row offering to put each
+    /// material's maps in a folder of their own, one tile each.
+    fn organize_row(&mut self, ui: &mut egui::Ui, can_edit: bool) -> Option<BrowserAction> {
+        if self.loose_packs == 0 || self.folder.is_none() {
+            return None;
+        }
+        let palette = theme::palette(ui.ctx());
+        let mut action = None;
+        responsive::toolbar(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let text = match self.loose_packs {
+                1 => "1 material has loose texture maps.".to_owned(),
+                n => format!("{n} materials have loose texture maps."),
+            };
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(theme::with_icon(icons::FOLDER_SIMPLE, &text))
+                        .color(palette.text_secondary),
+                )
+                .wrap(),
+            );
+            if ui
+                .add_enabled(
+                    can_edit,
+                    widgets::button(widgets::Role::Secondary, None, "Organize", &palette)
+                        .min_size(egui::vec2(0.0, 22.0)),
+                )
+                .on_hover_text(
+                    "Put each material's maps in a folder of their own with a texture set, so \
+                     each shows here as one tile. Everything that uses them is pointed at the \
+                     new places, and their asset IDs stay. One undo step.",
+                )
+                .on_disabled_hover_text("Press Stop to organize assets.")
+                .clicked()
+            {
+                action = Some(BrowserAction::OrganizeTexturePacks);
+            }
+        });
+        ui.add_space(4.0);
+        action
     }
 
     pub(super) fn refresh_button(&mut self, ui: &mut egui::Ui) {

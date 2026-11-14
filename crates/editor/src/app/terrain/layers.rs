@@ -171,6 +171,7 @@ impl EditorApp {
         };
         let mut edits = Vec::new();
         let mut unknown = Vec::new();
+        let mut known = Vec::new();
         for file in files {
             let file_name = file
                 .file_name()
@@ -178,24 +179,33 @@ impl EditorApp {
             let roles = axcenity_assets::texture_roles(&file_name);
             if roles.is_empty() {
                 unknown.push(file_name);
-                continue;
+            } else {
+                known.push((file, roles));
             }
-            let path = match axcenity_assets::import_texture(
-                &folder,
-                &file,
-                axcenity_assets::PROJECT_TEXTURES_FOLDER,
-            ) {
-                Ok(path) => path,
-                Err(err) => {
-                    self.output.error(format!(
-                        "Could not use `{}`: {}",
-                        file.display(),
-                        super::super::files::chain(&err)
-                    ));
-                    continue;
-                }
-            };
-            edits.extend(layer_map_edits(&roles, &path));
+        }
+        // A download's maps go in a folder of their own, with a texture set.
+        let picked: Vec<PathBuf> = known.iter().map(|(file, _)| file.clone()).collect();
+        let import = axcenity_assets::import_textures(
+            &folder,
+            &picked,
+            axcenity_assets::PROJECT_TEXTURES_FOLDER,
+            axcenity_assets::PROJECT_TEXTURES_FOLDER,
+        );
+        for ((file, result), (_, roles)) in import.files.iter().zip(&known) {
+            match result {
+                Ok(path) => edits.extend(layer_map_edits(roles, path)),
+                Err(err) => self.output.error(format!(
+                    "Could not use `{}`: {}",
+                    file.display(),
+                    super::super::files::chain(err)
+                )),
+            }
+        }
+        for set in import.sets {
+            if let Err(err) = set {
+                self.output
+                    .error(format!("Could not save a texture set: {err}"));
+            }
         }
         if !unknown.is_empty() {
             self.output.warning(format!(

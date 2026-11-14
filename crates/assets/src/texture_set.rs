@@ -179,6 +179,11 @@ pub fn write_texture_set(path: &Path, set: &TextureSet) -> Result<(), TextureSet
     {
         fs::create_dir_all(folder).map_err(TextureSetError::Write)?;
     }
+    fs::write(path, texture_set_json(set)).map_err(TextureSetError::Write)
+}
+
+/// The text of `set`'s file, as [`write_texture_set`] writes it.
+pub fn texture_set_json(set: &TextureSet) -> String {
     let maps: Vec<serde_json::Value> = set
         .maps
         .iter()
@@ -192,14 +197,15 @@ pub fn write_texture_set(path: &Path, set: &TextureSet) -> Result<(), TextureSet
             })
         })
         .collect();
-    let text = serde_json::to_string_pretty(&json!({
+    let value = json!({
         "source": set.source,
         "assetId": set.asset_id,
         "link": set.link,
         "maps": maps,
-    }))
-    .map_err(TextureSetError::Format)?;
-    fs::write(path, format!("{text}\n")).map_err(TextureSetError::Write)
+    });
+    // A `Value` always prints.
+    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+    format!("{text}\n")
 }
 
 const SLOTS: [(MapSlot, &str); 9] = [

@@ -241,3 +241,159 @@ fn a_rename_onto_a_taken_name_changes_nothing_and_says_why() {
     assert!(app.output.lines().last().unwrap().text.contains("taken"));
     let _ = fs::remove_dir_all(&folder);
 }
+
+/// Loose Poly Haven and ambientCG maps, as the Abandoned Farmhouse's
+/// terrain has them.
+const LOOSE: [&str; 7] = [
+    "assets/textures/terrain/leafy_grass_ao_2k.jpg",
+    "assets/textures/terrain/leafy_grass_diff_2k.jpg",
+    "assets/textures/terrain/leafy_grass_nor_gl_2k.jpg",
+    "assets/textures/terrain/Moss002_2K-JPG_Color.jpg",
+    "assets/textures/terrain/Moss002_2K-JPG_NormalGL.jpg",
+    "assets/textures/terrain/Moss002_2K-JPG_Roughness.jpg",
+    "assets/textures/terrain/logo.png",
+];
+
+#[test]
+fn organize_puts_each_materials_loose_maps_in_a_folder_and_keeps_what_uses_them() {
+    let folder = copy_of_example("hello-touched", "organize-packs");
+    let picture = fs::read(super::tests::example(
+        "hello-data/assets/textures/sword.png",
+    ))
+    .unwrap();
+    for path in LOOSE {
+        let disk = folder.join(path);
+        fs::create_dir_all(disk.parent().unwrap()).unwrap();
+        fs::write(disk, &picture).unwrap();
+    }
+    let id = axcenity_assets::give_asset_id(&folder, LOOSE[1])
+        .unwrap()
+        .unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    let workspace = app.world.workspace();
+    let terrain = add(&mut app, ClassName::Terrain, workspace, "Terrain");
+    let layer = add(&mut app, ClassName::TerrainLayer, terrain, "Grass");
+    set(&mut app, layer, "ColorMap", Value::String(LOOSE[1].into()));
+    set(&mut app, layer, "NormalMap", Value::String(LOOSE[2].into()));
+    let moss = add(&mut app, ClassName::TerrainLayer, terrain, "Moss");
+    set(
+        &mut app,
+        moss,
+        "RoughnessMap",
+        Value::String(LOOSE[5].into()),
+    );
+    let loose = crate::asset_browser::loose_images(&crate::asset_browser::scan(&folder));
+    assert_eq!(axcenity_assets::plan_pack_folders(&folder, &loose).len(), 2);
+
+    app.organize_texture_packs();
+
+    let grass = "assets/textures/terrain/leafy_grass";
+    let moss_folder = "assets/textures/terrain/Moss002";
+    for path in &LOOSE[..6] {
+        assert!(!folder.join(path).exists(), "{path} moved");
+    }
+    assert!(
+        folder.join(LOOSE[6]).is_file(),
+        "a picture that isn't a map stays"
+    );
+    assert_eq!(
+        app.world.get(layer).unwrap().property("ColorMap"),
+        Some(&Value::String(format!("{grass}/leafy_grass_diff_2k.jpg")))
+    );
+    assert_eq!(
+        app.world.get(layer).unwrap().property("NormalMap"),
+        Some(&Value::String(format!("{grass}/leafy_grass_nor_gl_2k.jpg")))
+    );
+    assert_eq!(
+        app.world.get(moss).unwrap().property("RoughnessMap"),
+        Some(&Value::String(format!(
+            "{moss_folder}/Moss002_2K-JPG_Roughness.jpg"
+        )))
+    );
+    // The map keeps its asset ID: its sidecar moved with it.
+    let moved = format!("{grass}/leafy_grass_diff_2k.jpg");
+    assert_eq!(
+        axcenity_assets::give_asset_id(&folder, &moved).unwrap(),
+        Some(id)
+    );
+    // Each material is one texture set tile in the panel.
+    let set = axcenity_assets::read_texture_set(
+        &folder.join(format!("{moss_folder}/Moss002.texture.json")),
+    )
+    .unwrap();
+    assert_eq!(set.maps.len(), 3);
+    let tiles: Vec<String> = crate::asset_browser::scan(&folder)
+        .into_iter()
+        .filter(|entry| entry.path.starts_with("assets/textures/terrain/"))
+        .map(|entry| entry.path)
+        .collect();
+    assert_eq!(
+        tiles,
+        [
+            format!("{grass}/leafy_grass.texture.json"),
+            LOOSE[6].to_owned(),
+            format!("{moss_folder}/Moss002.texture.json"),
+        ]
+    );
+    // Nothing left to organize.
+    let loose = crate::asset_browser::loose_images(&crate::asset_browser::scan(&folder));
+    assert!(axcenity_assets::plan_pack_folders(&folder, &loose).is_empty());
+
+    // One undo puts every map, sidecar and reference back.
+    assert_eq!(app.history.undo_label(), Some("Organize Texture Packs"));
+    app.undo();
+    for path in LOOSE {
+        assert!(folder.join(path).is_file(), "{path} is back");
+    }
+    assert!(
+        folder
+            .join(axcenity_assets::import_path(LOOSE[1]))
+            .is_file()
+    );
+    assert!(!folder.join(grass).exists() && !folder.join(moss_folder).exists());
+    assert_eq!(
+        app.world.get(layer).unwrap().property("ColorMap"),
+        Some(&Value::String(LOOSE[1].into()))
+    );
+    let _ = fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_dropped_download_folder_comes_in_as_one_texture_set_per_material() {
+    let folder = copy_of_example("hello-touched", "import-pack");
+    let downloads = folder.with_extension("downloads");
+    let _ = fs::remove_dir_all(&downloads);
+    let picture = fs::read(super::tests::example(
+        "hello-data/assets/textures/sword.png",
+    ))
+    .unwrap();
+    let pack = downloads.join("Moss002_2K-JPG");
+    fs::create_dir_all(&pack).unwrap();
+    for name in [
+        "Moss002_2K-JPG_Color.jpg",
+        "Moss002_2K-JPG_NormalGL.jpg",
+        "Moss002_2K-JPG_Roughness.jpg",
+    ] {
+        fs::write(pack.join(name), &picture).unwrap();
+    }
+    let mut app = EditorApp::new(Some(&folder));
+    // As if the folder were dropped on the window.
+    app.import_files(vec![pack], axcenity_assets::PROJECT_TEXTURES_FOLDER);
+    let set = axcenity_assets::read_texture_set(
+        &folder.join("assets/textures/Moss002/Moss002.texture.json"),
+    )
+    .unwrap();
+    assert_eq!(set.maps.len(), 3);
+    assert!(
+        folder
+            .join("assets/textures/Moss002/Moss002_2K-JPG_NormalGL.jpg")
+            .is_file()
+    );
+    let tiles = crate::asset_browser::scan(&folder)
+        .into_iter()
+        .filter(|entry| entry.path.contains("Moss002"))
+        .count();
+    assert_eq!(tiles, 1);
+    let _ = fs::remove_dir_all(&folder);
+    let _ = fs::remove_dir_all(&downloads);
+}

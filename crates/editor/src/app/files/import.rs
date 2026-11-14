@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::*;
+use crate::asset_browser::{self, AssetKind};
 use crate::history::BlobChange;
 
 /// Every file under the project's `assets` folder, where imports copy and
@@ -63,6 +64,30 @@ pub(super) fn mesh_part_properties(
         ("MeshId", Value::String(mesh_id)),
         ("Size", Value::Vector3(Vector3::new(x, y, z))),
     ]
+}
+
+/// `files`, with each folder among them replaced by the files inside it
+/// (and its folders'), in name order. Hidden files are left out.
+pub(in crate::app) fn files_in(files: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for file in files {
+        if !file.is_dir() {
+            found.push(file);
+            continue;
+        }
+        let mut inside: Vec<PathBuf> = fs::read_dir(&file)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+                    .map(|entry| entry.path())
+                    .collect()
+            })
+            .unwrap_or_default();
+        inside.sort();
+        found.extend(files_in(inside));
+    }
+    found
 }
 
 /// True if `file` is an asset package (`.axpkg`).
@@ -129,7 +154,9 @@ impl EditorApp {
     /// Imports each of `files` by its kind: a model or an asset package
     /// through the Import dialog (one at a time, in order), and images (into `image_folder`),
     /// sounds and prefabs straight into the project, reported in the
-    /// Console.
+    /// Console. A folder brings in the files inside it. Several maps of one
+    /// material (a Poly Haven or ambientCG download) go in a folder of their
+    /// own in `assets/textures` with a texture set, so they're one tile.
     pub(in crate::app) fn import_files(&mut self, files: Vec<PathBuf>, image_folder: &str) {
         let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
             return;
@@ -137,10 +164,98 @@ impl EditorApp {
         if self.playing() {
             return;
         }
-        for file in files {
+        let files = files_in(files);
+        // Particle flipbooks are loose frames, not a material's maps.
+        let packs = image_folder != crate::asset_browser::PARTICLES_FOLDER;
+        let is_image = |file: &PathBuf| {
+            let name = file.to_string_lossy().replace('\\', "/");
+            matches!(
+                asset_browser::kind_of(&name),
+                Some(AssetKind::Image | AssetKind::Texture | AssetKind::Particle)
+            )
+        };
+        let (images, others): (Vec<PathBuf>, Vec<PathBuf>) =
+            files.into_iter().partition(|file| packs && is_image(file));
+        if !images.is_empty() {
+            self.import_images(&folder, &images, image_folder);
+        }
+        for file in others {
             self.import_file(&folder, &file, image_folder);
         }
         self.asset_browser.refresh();
+    }
+
+    /// Imports the image `files` (into `image_folder`), a material's maps
+    /// into a pack folder of their own, and reports them in the Console.
+    fn import_images(&mut self, folder: &Path, files: &[PathBuf], image_folder: &str) {
+        let import = axcenity_assets::import_textures(
+            folder,
+            files,
+            image_folder,
+            axcenity_assets::PROJECT_TEXTURES_FOLDER,
+        );
+        let mut imported = 0;
+        let mut failed = false;
+        let sets: Vec<String> = import.sets.iter().flatten().cloned().collect();
+        let pack_of = |path: &str| {
+            sets.iter().find(|set| {
+                path.rsplit_once('/').map(|(f, _)| f) == set.rsplit_once('/').map(|(f, _)| f)
+            })
+        };
+        for (file, result) in &import.files {
+            match result {
+                Ok(path) => {
+                    imported += 1;
+                    if pack_of(path).is_none() {
+                        self.output.info(format!("Imported `{path}`."));
+                    }
+                    self.plugins_asset_imported(path);
+                }
+                Err(err) => {
+                    failed = true;
+                    self.output
+                        .error(format!("Could not import `{}`: {err}", file.display()));
+                }
+            }
+        }
+        for set in &import.sets {
+            match set {
+                Ok(set) => {
+                    let maps = import
+                        .files
+                        .iter()
+                        .filter_map(|(_, result)| result.as_ref().ok())
+                        .filter(|path| pack_of(path) == Some(set))
+                        .count();
+                    let folder = set.rsplit_once('/').map_or(set.as_str(), |(f, _)| f);
+                    self.output.info(format!(
+                        "Imported {maps} {} into `{folder}`, one texture set (`{set}`).",
+                        if maps == 1 { "map" } else { "maps" }
+                    ));
+                }
+                Err(err) => {
+                    failed = true;
+                    self.output
+                        .error(format!("Could not save a texture set: {err}"));
+                }
+            }
+        }
+        if failed {
+            self.toasts
+                .error("Could not import every file. Output says why.");
+        } else if imported == 1 && sets.is_empty() {
+            if let Some((_, Ok(path))) = import.files.first() {
+                self.toasts.success(format!("Imported `{path}`"));
+            }
+        } else if !sets.is_empty() {
+            self.toasts.success(format!(
+                "Imported {imported} files, grouped into {} texture {}",
+                sets.len(),
+                if sets.len() == 1 { "set" } else { "sets" }
+            ));
+        } else if imported > 0 {
+            self.toasts.success(format!("Imported {imported} images"));
+        }
     }
 
     /// Files dropped onto the window from the system: imported as with

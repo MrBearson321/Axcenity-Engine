@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [assets, editor]
-source: [crates/assets/src/import.rs, crates/assets/src/model.rs, crates/assets/src/model/fbx.rs, crates/assets/src/model/maps.rs, crates/assets/src/model/lod.rs, crates/assets/src/model/rig.rs, crates/assets/src/model/objects.rs, crates/assets/src/texture_set.rs, crates/editor/src/app/files/import.rs]
+source: [crates/assets/src/import.rs, crates/assets/src/model.rs, crates/assets/src/model/fbx.rs, crates/assets/src/model/maps.rs, crates/assets/src/model/lod.rs, crates/assets/src/model/rig.rs, crates/assets/src/model/objects.rs, crates/assets/src/texture_set.rs, crates/assets/src/texture_pack.rs, crates/editor/src/app/files/import.rs]
 docs: [docs/editor/import.md, docs/rendering/models.md, docs/project/assets.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -19,6 +19,8 @@ tags: [asset-pipeline, import]
 ## What the editor's import does
 
 `EditorApp::import_with_dialog` → per kind (`EditorApp::import_file`): a model through the Import dialog (loaded first, so a bad file copies nothing), images, sounds and prefabs straight in, `.axpkg` packages through a package tab. `assets::import_model` copies a self-contained `.glb`/`.fbx` to `assets/models/<name>.<ext>`, anything with other files into `assets/models/<name>/`; **embedded textures are copied out** to `textures/` beside the model so every map is a file a SurfaceAppearance can name and the cook can cook. One undo step (`History::record_blobs`).
+
+**Texture packs** (`assets/src/texture_pack.rs`): several maps of one material from outside the project (a Poly Haven `name_diff_2k`/`name_nor_gl_2k` download, an ambientCG `Name_2K-JPG_Color` one) are imported into `assets/textures/<pack>/` with a `<pack>.texture.json` texture set, so the Assets panel shows one tile; `import_textures` does this for Import…, dropped files and folders, and Terrain Studio's Import textures. The pack name is the file name without the trailing map word, size and format (`texture_pack_name`, using the same role words as `maps.rs`); a group needs two files filling two different maps. Loose packs already in a project are moved by the Assets panel's **Organize** (`plan_pack_folders` plus `project::plan_rename` per map, merged into one undo step), so references and `ax://` IDs survive.
 
 ## What loading reads
 

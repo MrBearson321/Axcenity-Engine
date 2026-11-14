@@ -165,6 +165,7 @@ pub(super) enum Command {
     OpenStylesheet,
     NewStylesheet,
     CheckAssets,
+    OrganizeTexturePacks,
     SetUpAutocomplete,
     Settings,
     Quit,
@@ -573,6 +574,14 @@ impl EditorApp {
             &[],
             None,
             when(project, "Open a project first."),
+        );
+        add(
+            Command::OrganizeTexturePacks,
+            "Organize Texture Packs",
+            "Assets",
+            &["Group texture maps into folders", "Tidy textures"],
+            None,
+            when(editing, not_editing),
         );
         add(
             Command::SetUpAutocomplete,
@@ -1190,6 +1199,7 @@ impl EditorApp {
             Command::OpenStylesheet => self.open_stylesheet_with_dialog(),
             Command::NewStylesheet => self.new_stylesheet(),
             Command::CheckAssets => self.run_asset_check(),
+            Command::OrganizeTexturePacks => self.organize_texture_packs(),
             Command::SetUpAutocomplete => self.set_up_autocomplete(),
             Command::Settings => self.settings.open = true,
             Command::Quit => self.request_and_go_ahead(ctx, Discard::Quit),

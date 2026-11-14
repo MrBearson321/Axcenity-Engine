@@ -23,7 +23,7 @@ mod test_rig;
 pub use collision::is_piece as is_collision_piece;
 pub use lod::level_of as lod_level;
 pub use lod_report::{LevelReport, LodReport, LodWarning, PrimitiveReport};
-pub use maps::{MapSlot, TextureRole, texture_roles};
+pub use maps::{MapSlot, TextureRole, texture_pack_name, texture_roles};
 pub use objects::{ModelObject, Pick};
 pub use rig::{
     Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedPrimitive, Rig, Take, Track,
