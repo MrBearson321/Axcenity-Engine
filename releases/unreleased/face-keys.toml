@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Key a face's controls in animation clips and sequences"
+details = "Select a FaceControls in the Animation tab or the Sequencer to key its controls (Jaw_Open, Blink_Left, Mouth_Smile_Left …) like any other property. Clip files name them as the track's property."
+features = ["animation.facial"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"
