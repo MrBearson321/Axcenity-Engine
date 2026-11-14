@@ -2,6 +2,7 @@
 //! readiness MP1): how long its frames took, how many players are in, and
 //! their connections' round trips, loss and bandwidth, as renet measures
 //! them. A line that often on stdout, and a JSON line in `--stats-file`.
+//! The Instance count and Lua memory show leaks under churn (MP2).
 
 use std::fs::File;
 use std::io::Write;
@@ -10,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use axcenity_net::Network;
+use axcenity_sim::Sim;
 
 /// The value at `share` (0 to 1) of sorted `values`, nearest rank.
 fn percentile(sorted: &[f64], share: f64) -> f64 {
@@ -48,7 +50,7 @@ impl ServerStats {
     }
 
     /// After each frame, which took `took` to run (not counting the wait).
-    pub fn frame(&mut self, took: Duration, network: &Network) {
+    pub fn frame(&mut self, took: Duration, network: &Network, sim: &Sim) {
         self.frames.push(took.as_secs_f64() * 1000.0);
         if self.since.elapsed() < self.every {
             return;
@@ -60,7 +62,8 @@ impl ServerStats {
         let links: Vec<_> = network.stats().into_iter().map(|peer| peer.link).collect();
         let mut rtts: Vec<f64> = links.iter().map(|link| link.rtt * 1000.0).collect();
         rtts.sort_by(f64::total_cmp);
-        let sum = |f: fn(&axcenity_net::LinkStats) -> f64| links.iter().map(f).sum::<f64>();
+        // `+ 0.0`: an empty sum is -0.0, which would print as "-0.0".
+        let sum = |f: fn(&axcenity_net::LinkStats) -> f64| links.iter().map(f).sum::<f64>() + 0.0;
         let sent = sum(|link| link.bytes_sent_per_second);
         let received = sum(|link| link.bytes_received_per_second);
         let loss = if links.is_empty() {
@@ -70,10 +73,13 @@ impl ServerStats {
         };
         let fps = frames.len() as f64 / interval;
         let t = self.started.elapsed().as_secs_f64();
+        let instances = sim.world.len();
+        let lua_bytes = sim.scripts.used_memory();
+        let flags = network.flag_count();
         println!(
             "[{t:6.1} s] {} players; {fps:.0} frames a second, frame p50 {:.2} ms, p95 {:.2}, \
              max {:.2}; round trip p50 {:.0} ms, max {:.0}; loss {:.1}%; sending {:.1} KB/s \
-             ({:.1} per player), receiving {:.1} KB/s",
+             ({:.1} per player), receiving {:.1} KB/s; {instances} Instances, Lua {:.1} MB; {flags} flags",
             links.len(),
             percentile(&frames, 0.5),
             percentile(&frames, 0.95),
@@ -84,6 +90,7 @@ impl ServerStats {
             sent / 1000.0,
             sent / 1000.0 / links.len().max(1) as f64,
             received / 1000.0,
+            lua_bytes as f64 / 1e6,
         );
         if let Some(file) = &mut self.file {
             let line = serde_json::json!({
@@ -98,6 +105,9 @@ impl ServerStats {
                 "loss_mean": loss,
                 "sent_bytes_per_s": sent,
                 "received_bytes_per_s": received,
+                "instances": instances,
+                "lua_bytes": lua_bytes,
+                "flags": flags,
             });
             let _ = writeln!(file, "{line}");
         }

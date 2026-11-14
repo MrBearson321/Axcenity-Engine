@@ -24,6 +24,15 @@ Tween.Completed: Signal
 
 Fires when it reaches its goals, or is cancelled, with how it ended: `function(playbackState) ... end`.
 
+```lua
+local TweenService = game:GetService("TweenService")
+local tween = TweenService:Create(workspace.Door, TweenInfo.new(1), { Transparency = 1 })
+tween.Completed:Connect(function()
+	workspace.Door.CanCollide = false
+end)
+tween:Play()
+```
+
 #### Instance
 
 ```luau
