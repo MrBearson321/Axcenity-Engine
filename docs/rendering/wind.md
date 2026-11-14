@@ -20,7 +20,7 @@ Plants bend in the wind in the vertex shader (graphics Phase 28). The wind is th
 - A flutter (`Sway::flutter`, in the fraction of `InstanceRaw::sway.w`, whose whole part is the decal role) shivers each corner by that many studs, across and along the wind and a little upward, in quick waves whose phase comes from where the corner rests, so neighbouring leaves don't match. Gusts drive it, and the bottom quarter of the plant fades to none.
 - With no wind (or a NaN one), nothing moves: the frame is exactly the same as with no sway.
 
-The scene and prepass pipelines (`vs_main`) and the shadow pipeline (`vs_shadow`) call the same function, so shadows and ambient occlusion move with the plant. The shadow passes bind the frame uniform for it (binding 0 of their group). Culling grows a swaying item's bounding sphere by `Sway::reach`, the farthest any corner can move, so a plant just out of view that can lean into it is still drawn. Normals aren't bent.
+The scene and prepass pipelines (`vs_main`) and the shadow pipeline (`vs_shadow`) call the same function (`swayed_at`, in sway.wgsl), so shadows and ambient occlusion move with the plant. Ray traced shadows, AO, GI and the fog's traced shafts move with it too: the ray traced scene bends swaying items' meshes with the same function into BLASes of their own each frame, nearest first within a budget ([ray-tracing.md](ray-tracing.md)). The shadow passes bind the frame uniform for it (binding 0 of their group). Culling grows a swaying item's bounding sphere by `Sway::reach`, the farthest any corner can move, so a plant just out of view that can lean into it is still drawn. Normals aren't bent.
 
 Time is `DrawList::time`. The editor keeps drawing frames while the wind blows something that sways (`viewport::shader_time`).
 
@@ -32,7 +32,7 @@ Measured on Temperate Dry Patch at Ultra 2560 × 1440 (`profile_project`'s `no-w
 
 ## Tests
 
-- `render/src/renderer/tests/wind.rs` (GPU): a plant leans toward +X in a wind to +X and toward −X in one to −X, less in a breeze than in a gale, not sideways in a wind toward the camera, and its foot stays put. With no wind, or with no sway, the frame is exactly as still. Its shadow's end moves as many studs as its top does (within 35%; about 1.06 studs each in a 40-stud-a-second wind). A swaying plant just out of view isn't culled where a still one is.
+- `render/src/renderer/tests/wind.rs` (GPU): with ray traced shadows and no shadow maps, the plant's shadow moves with it in a gale, one item is bent, and none without wind (`a_swaying_plants_ray_traced_shadow_moves_with_it`, ray queries only); a plant leans toward +X in a wind to +X and toward −X in one to −X, less in a breeze than in a gale, not sideways in a wind toward the camera, and its foot stays put. With no wind, or with no sway, the frame is exactly as still. Its shadow's end moves as many studs as its top does (within 35%; about 1.06 studs each in a 40-stud-a-second wind). A swaying plant just out of view isn't culled where a still one is.
 - `scene/src/foliage.rs`: a tree's trunk and crown share one sway from its ground to its top, grass gives more than a tree, and crates stay still.
 - `scene/src/material.rs`: a material file's `sway` sways a part from the bottom of its box by its height, one without doesn't, and `GlobalWind` reaches `DrawList::wind`.
 - `assets/src/material.rs`: `sway` round-trips and an instance takes its base's.

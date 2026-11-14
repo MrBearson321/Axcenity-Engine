@@ -41,10 +41,12 @@ const GI_INSIDE: f32 = 0.25;
 // Must match `RayGiUniform` in renderer/ray_gi.rs.
 struct RayGi {
     // x: probes in this batch, y: rays from each, z: a number that changes
-    // each update (turns the rays), w: unused.
+    // each update (turns the rays), w: how many of the batch's first probes
+    // are near ones (traced more often).
     counts: vec4<u32>,
-    // x: how much of what a probe had is kept (0 to 1), y: how far rays
-    // reach in studs, z: how far a hit's shadow rays start off it, w: unused.
+    // x: how much of what a far probe had is kept (0 to 1), y: how far rays
+    // reach in studs, z: how far a hit's shadow rays start off it, w: how
+    // much of what a near probe had is kept.
     settings: vec4<f32>,
 }
 
@@ -201,7 +203,8 @@ fn cs_trace_probes(
         let place = 4u * bitcast<u32>(probe.w);
         let inside = gi_sums[0][4].x > GI_INSIDE * f32(max(rays, 1u));
         // Nothing worth keeping from a probe not usable until now.
-        let keep = select(gi.settings.x, 0.0, light_probes[place].w > 0.5);
+        let kept = select(gi.settings.x, gi.settings.w, group.x < gi.counts.w);
+        let keep = select(kept, 0.0, light_probes[place].w > 0.5);
         let baked_inside = abs(light_probes[place].w - 1.0) < 0.5;
         for (var k = 0u; k < 4u; k++) {
             let band = select(2.0 / 3.0, 1.0, k == 0u);

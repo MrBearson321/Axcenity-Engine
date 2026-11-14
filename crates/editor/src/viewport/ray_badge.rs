@@ -165,12 +165,30 @@ pub(super) fn badge(
     } else {
         String::new()
     };
+    // The world's ShadowDistance caps every shadow, traced or not: say so
+    // when it's what stops them, or a farther ray tracing distance seems
+    // to change nothing.
+    let capped = stats.shadow_reach > 0 && (stats.shadow_reach as f32) < reach;
+    let (cap, cap_detail) = if capped {
+        (
+            format!(" · shadows end at {} studs", stats.shadow_reach),
+            format!(
+                " Shadows (traced or not) end at {} studs: the world's Lighting \
+                 ShadowDistance, which caps them whatever the ray tracing distance. Raise \
+                 ShadowDistance in Lighting's properties to shadow farther.",
+                stats.shadow_reach
+            ),
+        )
+    } else {
+        (String::new(), String::new())
+    };
     Some(Badge {
-        text: format!("Ray tracing: {} · {seen}", effects.join(", ")),
+        text: format!("Ray tracing: {} · {seen}{cap}", effects.join(", ")),
         detail: format!(
             "Drawing with ray tracing up to {reach} studs from the camera ({} meshes, {} \
              triangles); past that the usual shadow maps and screen-space effects take \
-             over.{waiting} Change it in {settings}; the Profiler times each ray traced pass.",
+             over.{cap_detail}{waiting} Change it in {settings}; the Profiler times each ray \
+             traced pass.",
             stats.meshes, stats.triangles
         ),
         warning: false,
@@ -294,6 +312,31 @@ mod tests {
         let shown = badge(&on, true, true, None, false, &RayTracingStats::default()).unwrap();
         assert_eq!(shown.text, "Ray tracing on: no effects");
         assert!(!shown.warning);
+    }
+
+    #[test]
+    fn a_shadow_distance_nearer_than_the_rays_is_named_on_the_badge() {
+        let on = effective(true, RayTracedShadows::High);
+        let reach = on.ray_tracing_distance;
+        let stats = RayTracingStats {
+            instances: 10,
+            shadow_reach: 150,
+            ..RayTracingStats::default()
+        };
+        assert!(reach > 150.0, "{reach}");
+        let shown = badge(&on, true, true, None, false, &stats).unwrap();
+        assert!(
+            shown.text.ends_with(" · shadows end at 150 studs"),
+            "{}",
+            shown.text
+        );
+        assert!(shown.detail.contains("ShadowDistance"), "{}", shown.detail);
+        let reaching = RayTracingStats {
+            shadow_reach: reach as u32,
+            ..stats
+        };
+        let shown = badge(&on, true, true, None, false, &reaching).unwrap();
+        assert!(!shown.text.contains("shadows end"), "{}", shown.text);
     }
 
     #[test]

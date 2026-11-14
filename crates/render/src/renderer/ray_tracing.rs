@@ -18,14 +18,17 @@
 //!   nothing after its first frame.
 //! - Posed (skinned) items are left out: their mesh is posed in the vertex
 //!   shader, so a BLAS of its corners would be the rest pose.
+//! - Swaying plants in a wind get a bent copy of their mesh each frame, a
+//!   BLAS of their own (`ray_sway.rs`), within a budget, nearest first.
 
 use glam::{Mat4, Vec3};
 use rustc_hash::FxHashMap;
 
 use super::ray_cut_outs::{CutOutRaw, CutOuts, has_holes};
+use super::ray_sway::{BENT_TRIANGLES, BentKey, BentMeshes, bending, bent_raw};
 use super::scene::gpu_mesh_in;
 use super::{Draw, GpuMesh, MeshKey, ScenePipeline};
-use crate::draw_list::Material;
+use crate::draw_list::{DrawItem, Material};
 
 /// Solid items that cast shadows.
 pub(super) const MASK_SOLID: u8 = 1 << 0;
@@ -62,6 +65,12 @@ pub struct RayTracingStats {
     /// Paths a pixel the editor's Path Traced view has averaged so far (0
     /// while it isn't shown).
     pub path_traced_paths: u32,
+    /// Swaying items bent by the wind into BLASes of their own this frame.
+    pub bent: u32,
+    /// How far ray traced sun shadows reach this frame, in studs (0 while
+    /// they're off): the ray tracing distance or the world's
+    /// `ShadowDistance`, whichever is nearer.
+    pub shadow_reach: u32,
 }
 
 struct MeshBlas {
@@ -94,12 +103,18 @@ pub(super) struct Surfaces {
 /// ways has one of each.
 type BlasKey = (MeshKey, bool);
 
+/// An item wanted in the ray traced scene: its BLAS, mesh, transform and
+/// instance mask.
+type Wanted<'a> = (BlasKey, &'a GpuMesh, Mat4, u8);
+
 /// One TLAS slot: what's in it, compared frame to frame.
 #[derive(Clone, Copy, PartialEq)]
 struct Slot {
     mesh: BlasKey,
     transform: [f32; 12],
     mask: u8,
+    /// Its bent copy, for a swaying item in the wind.
+    bent: Option<BentKey>,
 }
 
 /// The ray traced scene: BLASes by mesh and the TLAS.
@@ -114,6 +129,8 @@ pub(super) struct RayScene {
     pub(super) surfaces: Option<Surfaces>,
     /// Where each slot's holes are, for rays that pass through them.
     pub(super) cut_outs: CutOuts,
+    /// Swaying items' bent copies, made the first time the wind blows.
+    bent: Option<BentMeshes>,
     pub(super) stats: RayTracingStats,
 }
 
@@ -128,6 +145,7 @@ impl RayScene {
             built: false,
             surfaces: None,
             cut_outs: CutOuts::new(device),
+            bent: None,
             stats: RayTracingStats::default(),
         }
     }
@@ -154,11 +172,13 @@ impl RayScene {
     /// and the TLAS if any slot changed. `reach` is the ray tracing
     /// distance from `camera`; `mesh` finds an uploaded mesh. With
     /// `surfaces`, each slot's [`SurfaceRaw`] is kept up to date too.
+    /// `clock` is the frame's time and wind (`Frame::clock`), which bends
+    /// swaying items.
     pub(super) fn prepare<'a>(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
         encoder: &mut wgpu::CommandEncoder,
-        (frame, camera, reach, surfaces): (u64, Vec3, f32, bool),
+        (frame, camera, reach, surfaces, clock): (u64, Vec3, f32, bool, [f32; 4]),
         draws: &[Draw],
         mesh: impl Fn(MeshKey) -> Option<&'a GpuMesh>,
     ) {
@@ -166,8 +186,10 @@ impl RayScene {
             self.surfaces = None;
         }
         // The items wanted, and the meshes they need.
-        let mut wanted: Vec<(BlasKey, &'a GpuMesh, Mat4, u8)> = Vec::new();
+        let mut wanted: Vec<Wanted<'a>> = Vec::new();
         let mut wanted_items = Vec::new();
+        // Each wanted item's distance, for bending the nearest first.
+        let mut wanted_distances = Vec::new();
         let mut wanted_surfaces: Vec<SurfaceRaw> = Vec::new();
         for draw in draws {
             let item = draw.item;
@@ -194,6 +216,7 @@ impl RayScene {
                 mask_of(&item.material, draw),
             ));
             wanted_items.push(item);
+            wanted_distances.push(center.distance(camera) - radius);
             if surfaces {
                 let table = self.surfaces.get_or_insert_with(|| Surfaces::new(device));
                 wanted_surfaces.push(surface_of(&item.material, &mut table.texture_colors));
@@ -260,14 +283,23 @@ impl RayScene {
                     .is_some_and(|entry| entry.built)
             })
             .collect();
+        let bent = self.bend(
+            (device, queue),
+            &in_slots,
+            (&wanted, &wanted_items, &wanted_distances),
+            clock,
+            frame,
+        );
         let slots: Vec<Slot> = in_slots
             .iter()
-            .map(|&index| {
+            .zip(&bent)
+            .map(|(&index, &bent)| {
                 let (mesh, _, transform, mask) = wanted[index];
                 Slot {
                     mesh,
                     transform: rows_3x4(transform),
                     mask,
+                    bent,
                 }
             })
             .collect();
@@ -298,15 +330,25 @@ impl RayScene {
             self.slots.clear();
             self.built = false;
         }
-        let changed = !self.built || slots != self.slots || !to_build.is_empty();
+        // A bent copy is built afresh each frame, so the TLAS is too.
+        let any_bent = bent.iter().any(Option::is_some);
+        let changed = !self.built || slots != self.slots || !to_build.is_empty() || any_bent;
         if changed {
             for (index, slot) in slots.iter().enumerate() {
                 // A slot whose mesh was built again needs its new BLAS.
                 let rebuilt = to_build.iter().any(|(key, _)| *key == slot.mesh);
-                if self.built && !rebuilt && self.slots.get(index) == Some(slot) {
+                // A bent slot is set again too: its copy may be new.
+                if self.built
+                    && !rebuilt
+                    && slot.bent.is_none()
+                    && self.slots.get(index) == Some(slot)
+                {
                     continue;
                 }
-                let blas = &self.blases[&slot.mesh].blas;
+                let blas = match (&slot.bent, &self.bent) {
+                    (Some(key), Some(bent)) => bent.blas(key),
+                    _ => &self.blases[&slot.mesh].blas,
+                };
                 self.tlas[index] = Some(wgpu::TlasInstance::new(
                     blas,
                     slot.transform,
@@ -319,7 +361,15 @@ impl RayScene {
             }
         }
 
-        // Record the builds: the BLASes, then the TLAS that uses them.
+        // Record the builds: the swaying items' bending, the BLASes, then
+        // the TLAS that uses them.
+        if let Some(bent_meshes) = &self.bent {
+            bent_meshes.record(encoder);
+        }
+        let bent_entries = in_slots.iter().zip(&bent).filter_map(|(&index, key)| {
+            let key = key.as_ref()?;
+            Some(self.bent.as_ref()?.build_entry(key, wanted[index].1))
+        });
         let entries: Vec<wgpu::BlasBuildEntry> = to_build
             .iter()
             .map(|(key, gpu)| {
@@ -340,6 +390,7 @@ impl RayScene {
                     ]),
                 }
             })
+            .chain(bent_entries)
             .collect();
         if changed || !entries.is_empty() {
             let tlas = changed.then_some(&self.tlas);
@@ -352,6 +403,9 @@ impl RayScene {
         // Meshes nothing has wanted for a while are freed.
         self.blases
             .retain(|_, entry| frame.saturating_sub(entry.last_used) < FORGET_AFTER);
+        if let Some(bent) = &mut self.bent {
+            bent.forget_unused(frame);
+        }
         let built = self.blases.values().filter(|entry| entry.built);
         self.stats = RayTracingStats {
             instances: count,
@@ -362,7 +416,63 @@ impl RayScene {
             meshes_waiting: waiting,
             rebuilt: changed,
             path_traced_paths: 0,
+            bent: self.bent.as_ref().map_or(0, BentMeshes::bent_count),
+            shadow_reach: 0,
         };
+    }
+
+    /// Bends this frame's swaying items in the wind of `clock`, nearest
+    /// first within [`BENT_TRIANGLES`]: for each of `in_slots` (indices
+    /// into the wanted items), its bent copy, or `None` to keep its mesh's
+    /// rest pose.
+    fn bend(
+        &mut self,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        in_slots: &[usize],
+        (wanted, items, distances): (&[Wanted<'_>], &[&DrawItem], &[f32]),
+        clock: [f32; 4],
+        frame: u64,
+    ) -> Vec<Option<BentKey>> {
+        let mut bent = vec![None; in_slots.len()];
+        let mut swaying: Vec<(usize, [f32; 4])> = in_slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, &index)| Some((slot, bending(items[index], clock)?)))
+            .collect();
+        if swaying.is_empty() {
+            if let Some(meshes) = &mut self.bent {
+                meshes.begin();
+            }
+            return bent;
+        }
+        swaying.sort_by(|a, b| distances[in_slots[a.0]].total_cmp(&distances[in_slots[b.0]]));
+        let meshes = self.bent.get_or_insert_with(|| BentMeshes::new(device));
+        meshes.begin();
+        let mut budget = BENT_TRIANGLES;
+        let mut copies: FxHashMap<BlasKey, u32> = FxHashMap::default();
+        for (slot, sway) in swaying {
+            let index = in_slots[slot];
+            let (blas_key, gpu, transform, _) = wanted[index];
+            let triangles = u64::from(gpu.index_count / 3);
+            if triangles > budget {
+                continue;
+            }
+            budget -= triangles;
+            let copy = copies.entry(blas_key).or_default();
+            let key = (blas_key.0, blas_key.1, *copy);
+            *copy += 1;
+            let raw = bent_raw(transform, sway, clock, gpu);
+            meshes.bend(
+                (device, queue),
+                key,
+                gpu,
+                size_of_mesh(gpu, blas_key.1),
+                &raw,
+                frame,
+            );
+            bent[slot] = Some(key);
+        }
+        bent
     }
 }
 
@@ -414,7 +524,7 @@ pub(super) fn prepare_scene(
         &FxHashMap<u64, super::Cached<GpuMesh>>,
     ),
     encoder: &mut wgpu::CommandEncoder,
-    (traces, frame, camera, reach, surfaces): (bool, u64, Vec3, f32, bool),
+    (traces, frame, camera, reach, surfaces, clock): (bool, u64, Vec3, f32, bool, [f32; 4]),
     draws: &[Draw],
 ) -> bool {
     let ((device, queue), meshes, custom_meshes) = pipeline;
@@ -426,7 +536,7 @@ pub(super) fn prepare_scene(
     scene.prepare(
         (device, queue),
         encoder,
-        (frame, camera, reach, surfaces),
+        (frame, camera, reach, surfaces, clock),
         draws,
         |key| gpu_mesh_in(meshes, custom_meshes, key),
     );
