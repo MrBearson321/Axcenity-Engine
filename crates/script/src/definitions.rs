@@ -29,7 +29,7 @@ mod tables;
 
 use crate::types::EnumType;
 use docs::*;
-pub use examples::api_example;
+pub use examples::{api_example, api_examples};
 pub use markdown::{
     API_DOCS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_markdown, api_summary, with_api_summary,
 };

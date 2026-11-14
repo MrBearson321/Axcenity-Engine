@@ -104,6 +104,13 @@ Tool.Activated: Signal
 
 Fires when the Primary action (the left mouse button, or RT) is pressed while it's in the player character's hand, such as to swing a sword.
 
+```lua
+local tool = script.Parent
+tool.Activated:Connect(function()
+	print("Swing!")
+end)
+```
+
 #### Deactivated
 
 ```luau

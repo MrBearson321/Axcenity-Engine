@@ -20,6 +20,9 @@
 //!
 //! `--max-players <n>` takes up to n players whatever the game's
 //! `Players.MaxPlayers` says (scale tests, multiplayer readiness MP1).
+//! `--kick-flags <n>` kicks a player whose device is flagged n times in a
+//! minute for sending what a game client doesn't (MP3; 5 unless told, 0
+//! never).
 //! `--stats <seconds>` prints a line that often while serving: frame times,
 //! players, and their round trips, loss and bandwidth; `--stats-file
 //! <path>` also writes each as a JSON line.
@@ -40,7 +43,7 @@ use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 mod stats;
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
 
 /// Each frame is this long.
@@ -59,6 +62,8 @@ struct Arguments {
     bench_clients: usize,
     /// `--max-players <n>`: instead of the game's `Players.MaxPlayers`.
     max_players: Option<u32>,
+    /// `--kick-flags <n>`: instead of `net::KICK_FLAGS`.
+    kick_flags: Option<usize>,
     /// `--stats <seconds>`: how often to print the server's numbers.
     stats: Option<f64>,
     /// `--stats-file <path>`: where to write them as JSON lines too.
@@ -121,6 +126,17 @@ impl Arguments {
                     };
                     parsed.max_players = Some(max);
                 }
+                "--kick-flags" => {
+                    let flags = arguments
+                        .next()
+                        .and_then(|flags| flags.to_str()?.parse::<usize>().ok());
+                    let Some(flags) = flags else {
+                        bail!(
+                            "--kick-flags takes how many flags in a minute kick a player, such as 5 (0 never)\n\n{USAGE}"
+                        );
+                    };
+                    parsed.kick_flags = Some(flags);
+                }
                 "--stats" => {
                     let seconds = arguments
                         .next()
@@ -173,7 +189,10 @@ fn main() -> Result<()> {
         println!("{text}");
         return Ok(());
     }
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(axcenity_net::LOG_FILTER),
+    )
+    .init();
     let arguments = Arguments::parse(std::env::args_os().skip(1))?;
     let Some(game) = arguments.game else {
         bail!("no game to serve\n\n{USAGE}");
@@ -246,6 +265,9 @@ fn main() -> Result<()> {
         version: project.manifest.version.clone(),
     };
     let mut network = Network::new(game_info.clone());
+    if let Some(flags) = arguments.kick_flags {
+        network.set_kick_flags(flags);
+    }
     // `ReplayService:StopRecording` saves beside the server's saves (Phase 81).
     network.set_replay_folder(
         axcenity_save::game_folder(&project.manifest.name).map(|data| data.join("replays")),
@@ -318,7 +340,7 @@ fn main() -> Result<()> {
             continue;
         }
         if let Some(stats) = &mut stats {
-            stats.frame(started.elapsed(), &server.network);
+            stats.frame(started.elapsed(), &server.network, &server.sim);
         }
         if let Some(rest) = FRAME.checked_sub(started.elapsed()) {
             std::thread::sleep(rest);
@@ -541,6 +563,7 @@ mod tests {
                 bench: None,
                 bench_clients: 0,
                 max_players: None,
+                kick_flags: None,
                 stats: None,
                 stats_file: None,
             }
@@ -575,6 +598,10 @@ mod tests {
     fn max_players_and_stats_take_numbers() {
         let parsed = parse(&["castle", "--max-players", "32", "--stats", "5"]).unwrap();
         assert_eq!((parsed.max_players, parsed.stats), (Some(32), Some(5.0)));
+        let parsed = parse(&["castle", "--kick-flags", "0"]).unwrap();
+        assert_eq!(parsed.kick_flags, Some(0));
+        let err = parse(&["castle", "--kick-flags", "often"]).unwrap_err();
+        assert!(err.to_string().contains("--kick-flags takes"), "{err}");
         let err = parse(&["castle", "--max-players", "0"]).unwrap_err();
         assert!(err.to_string().contains("--max-players takes"), "{err}");
         let err = parse(&["castle", "--stats-file", "s.jsonl"]).unwrap_err();
