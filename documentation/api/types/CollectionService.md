@@ -16,6 +16,14 @@ CollectionService:AddTag(instance: Instance, tag: string): ()
 
 Gives `instance` the tag `tag`. Adding a tag it has does nothing.
 
+```lua
+local CollectionService = game:GetService("CollectionService")
+CollectionService:AddTag(workspace.Spikes, "Hazard")
+for _, hazard in CollectionService:GetTagged("Hazard") do
+	hazard.Color = Color3.fromRGB(255, 0, 0)
+end
+```
+
 #### RemoveTag
 
 ```luau
@@ -70,6 +78,13 @@ CollectionService:GetInstanceAddedSignal(tag: string): Signal
 ```
 
 An event that fires with an Instance when it gets the tag `tag` while in the game, or joins the game with it (such as a tagged clone put in the Workspace).
+
+```lua
+local CollectionService = game:GetService("CollectionService")
+CollectionService:GetInstanceAddedSignal("Coin"):Connect(function(coin)
+	coin.Transparency = 0
+end)
+```
 
 #### GetInstanceRemovedSignal
 

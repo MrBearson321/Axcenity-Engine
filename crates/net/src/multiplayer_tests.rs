@@ -258,3 +258,92 @@ end)
     });
     assert!(!offline.send_console_command("give 1"));
 }
+
+/// A modified client (MP3): fires a RemoteEvent ten times a frame, 600 a
+/// second, where the server takes 240.
+const SPAM_CLIENT: &str = r#"
+game:GetService("NetworkService").ConnectionFailed:Connect(function(reason)
+    print("failed", reason)
+end)
+while true do
+    for _ = 1, 10 do
+        game.ReplicatedStorage.Shout:FireServer("spam")
+    end
+    task.wait()
+end
+"#;
+
+const COUNTING_SERVER: &str = r#"
+local heard = 0
+game.ReplicatedStorage.Shout.OnServerEvent:Connect(function()
+    heard += 1
+    workspace:SetAttribute("Heard", heard)
+end)
+game.Players.PlayerFlagged:Connect(function(player, reason)
+    print("flagged", player.Name, reason)
+end)
+"#;
+
+fn saw(device: &Device, text: &str) -> bool {
+    device.output.iter().any(|line| line.contains(text))
+}
+
+/// How many messages the server's script heard.
+fn heard(server: &mut Device) -> f64 {
+    server
+        .scripts
+        .run_command(&mut server.world, "print(workspace:GetAttribute('Heard'))")
+        .unwrap();
+    let output = server.scripts.take_output();
+    let text = &output.last().unwrap().text;
+    text.parse().unwrap_or_else(|_| panic!("{output:?}"))
+}
+
+#[test]
+fn a_player_firing_remote_events_too_fast_is_held_to_the_budget_flagged_and_kicked() {
+    let (mut server, mut players) = game(COUNTING_SERVER, SPAM_CLIENT, &[1.0], None);
+    // Two seconds (and the frames joining took): the burst and that long's
+    // worth get through.
+    frames(&mut server, &mut players, 120);
+    let budget = crate::limits::budget(crate::limits::Kind::Remote);
+    let got = heard(&mut server);
+    assert!(
+        got <= budget.burst + 2.25 * budget.per_second,
+        "{got} got through"
+    );
+    assert!(got >= budget.burst, "{got}");
+    assert!(
+        saw(
+            &server,
+            "flagged Player fired remote events faster than a game client does"
+        ),
+        "{:?}",
+        server.output
+    );
+    // Flagged once a second; the fifth in a minute kicks.
+    frames(&mut server, &mut players, 360);
+    assert!(
+        saw(
+            &players[0],
+            "failed Your device fired remote events faster than a game client does."
+        ),
+        "{:?}",
+        players[0].output
+    );
+    assert!(
+        saw(&server, "Kicked Player: flagged 5 times in a minute"),
+        "{:?}",
+        server.output
+    );
+    assert_eq!(server.network.flag_count(), 5);
+}
+
+#[test]
+fn with_kicking_off_a_flagged_player_stays_and_scripts_decide() {
+    let (mut server, mut players) = game(COUNTING_SERVER, SPAM_CLIENT, &[1.0], None);
+    server.network.set_kick_flags(0);
+    frames(&mut server, &mut players, 480);
+    assert!(server.network.flag_count() >= 5);
+    assert!(!saw(&players[0], "failed"), "{:?}", players[0].output);
+    assert_eq!(server.network.stats().len(), 1);
+}

@@ -397,3 +397,37 @@ fn a_player_whose_engine_has_other_class_defaults_is_refused() {
     let refusal = admit(Some(&hello(class_defaults() ^ 1)), &admission).unwrap_err();
     assert!(refusal.to_player.contains("other defaults"), "{refusal:?}");
 }
+
+/// A remote message's bytes with `depth` tables, each inside the last.
+pub(crate) fn nested_tables(depth: usize) -> Vec<u8> {
+    let shallow = Message::Remote {
+        message: crate::wire::WireMessage {
+            remote: 5,
+            player: 0,
+            kind: crate::wire::WireKind::Event,
+            args: vec![WireArg::Nil],
+        },
+    };
+    let mut bytes = shallow.to_bytes();
+    // The last byte is the Nil argument; tables go in its place. In
+    // postcard a table is its variant (9), its pair count (1), then the
+    // key (the next table in) and the value (nil, 0).
+    assert_eq!(bytes.pop(), Some(0));
+    bytes.extend(std::iter::repeat_n([9, 1], depth).flatten());
+    bytes.push(0);
+    bytes.extend(std::iter::repeat_n(0, depth));
+    bytes
+}
+
+#[test]
+fn a_remote_message_with_tables_nested_too_deep_is_dropped_not_a_crash() {
+    // As deep as a script may nest: arrives.
+    let fine = Message::from_bytes(&nested_tables(crate::wire::MAX_TABLE_DEPTH));
+    assert!(matches!(fine, Some(Message::Remote { .. })), "{fine:?}");
+    // One deeper, or a million deep from a modified client: dropped.
+    assert_eq!(
+        Message::from_bytes(&nested_tables(crate::wire::MAX_TABLE_DEPTH + 1)),
+        None
+    );
+    assert_eq!(Message::from_bytes(&nested_tables(1_000_000)), None);
+}

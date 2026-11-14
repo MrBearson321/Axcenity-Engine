@@ -30,6 +30,10 @@ Workspace.Gravity: number
 
 How hard unanchored parts and the characters are pulled down, in studs a second squared: 196.2 by default. Halve it and things fall slower and characters jump higher.
 
+```lua
+workspace.Gravity = 30 -- low gravity, like the moon
+```
+
 #### MaxSpawnedDecals
 
 ```luau
@@ -77,6 +81,12 @@ Workspace.CurrentCamera: Camera
 ```
 
 The camera the player sees through. LocalScripts only.
+
+```lua
+-- In a LocalScript.
+local camera = workspace.CurrentCamera
+camera.FieldOfView = 90
+```
 
 ### Functions
 
@@ -148,6 +158,13 @@ Workspace:GetPartsInPart(part: Instance, params: OverlapParams?): {Instance}
 ```
 
 The parts whose shapes overlap `part`'s, not counting it, in Explorer order: what's inside a trigger zone. Terrain isn't listed.
+
+```lua
+local zone = workspace.SafeZone
+for _, part in workspace:GetPartsInPart(zone) do
+	print(part.Name, "is in the safe zone")
+end
+```
 
 #### SpawnDecal
 

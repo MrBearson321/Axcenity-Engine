@@ -5284,6 +5284,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires with the Player when someone leaves a hosted game, just before their Player (and character) are destroyed.",
     ),
     (
+        ClassName::Players,
+        "PlayerFlagged",
+        "Scripts only: fires with the Player and why (a string) when the server catches what their device sent breaking a rule, such as sending far more than a game client does or tables nested too deep. At most once a second for each reason. The server kicks a player flagged too often in a minute on its own (`axcenity-server --kick-flags`); a script may kick sooner or note it.",
+    ),
+    (
         ClassName::Player,
         "CharacterAdded",
         "Fires with the character Model once it's in the Workspace: when the player first gets one, after each respawn and after `LoadCharacter`.",
