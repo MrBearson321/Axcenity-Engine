@@ -36,7 +36,7 @@ use super::gpu::{shader_module, target_bytes};
 use super::lighting::instance_raw;
 use super::lod::Draw;
 use super::post::fullscreen_pass;
-use super::skinning::JointRaw;
+use super::skinning::{JointRaw, entry_count};
 use super::{DEPTH_FORMAT, FAR_PLANE, HDR_FORMAT, MeshKey, NEAR_PLANE};
 
 /// How far each pixel moved across the screen since last frame, in texture
@@ -799,7 +799,7 @@ impl History {
             let skin = skin.unwrap_or([0, 0]);
             if skin[1] > 0
                 && let Some(before) = self.joints.get(&item.id)
-                && before.len() == skin[1] as usize
+                && before.len() == entry_count(skin[1])
             {
                 let start = skin[0] as usize;
                 previous_joints[start..start + before.len()].copy_from_slice(before);

@@ -12,12 +12,20 @@ pub struct BotSample {
     pub connected: bool,
     /// Why its connection ended, if it has.
     pub ended: Option<String>,
+    /// Seconds from starting until it ended (`--flood`).
+    pub ended_after: Option<f64>,
+    /// Times this bot left and a new one took its place (`--churn`).
+    pub churned: u64,
     pub rtt_ms: f64,
     pub packet_loss: f64,
     pub sent_per_second: f64,
     pub received_per_second: f64,
     /// Times the server moved its character back.
     pub corrections: u64,
+    /// Times it rejoined after losing its connection (MP2).
+    pub rejoins: u64,
+    /// Lost its connection and trying to rejoin now.
+    pub rejoining: bool,
     pub script_errors: u64,
     /// Its own frames' average time since the last sample, in ms.
     pub frame_ms: f64,
@@ -52,6 +60,13 @@ pub struct Summary {
     pub sent_mean: f64,
     pub received_mean: f64,
     pub corrections: u64,
+    pub rejoins: u64,
+    /// Bots that left and were replaced (`--churn`).
+    pub churned: u64,
+    /// The longest a connection lasted before it ended (`--flood`).
+    pub ended_after_max: f64,
+    /// Bots trying to rejoin now.
+    pub rejoining: usize,
     pub script_errors: u64,
     pub frame_ms_mean: f64,
     pub frame_ms_max: f64,
@@ -91,6 +106,13 @@ impl Summary {
             sent_mean: mean(&of_live(|s| s.sent_per_second)),
             received_mean: mean(&of_live(|s| s.received_per_second)),
             corrections: samples.iter().map(|s| s.corrections).sum(),
+            rejoins: samples.iter().map(|s| s.rejoins).sum(),
+            churned: samples.iter().map(|s| s.churned).sum(),
+            ended_after_max: samples
+                .iter()
+                .filter_map(|s| s.ended_after)
+                .fold(0.0, f64::max),
+            rejoining: samples.iter().filter(|s| s.rejoining).count(),
             script_errors: samples.iter().map(|s| s.script_errors).sum(),
             frame_ms_mean: mean(&frames),
             frame_ms_max: percentile(&frames, 1.0),
@@ -119,6 +141,15 @@ impl Summary {
             self.frame_ms_mean,
             self.frame_ms_max,
         );
+        if self.rejoins > 0 || self.rejoining > 0 {
+            line.push_str(&format!(
+                "; {} rejoins, {} rejoining now",
+                self.rejoins, self.rejoining
+            ));
+        }
+        if self.churned > 0 {
+            line.push_str(&format!("; {} replaced", self.churned));
+        }
         if self.script_errors > 0 {
             line.push_str(&format!("; {} script errors", self.script_errors));
         }
@@ -143,6 +174,10 @@ impl Summary {
             "sent_bytes_per_s": self.sent_mean,
             "received_bytes_per_s": self.received_mean,
             "corrections": self.corrections,
+            "rejoins": self.rejoins,
+            "churned": self.churned,
+            "ended_after_max_s": self.ended_after_max,
+            "rejoining": self.rejoining,
             "script_errors": self.script_errors,
             "bot_frame_ms_mean": self.frame_ms_mean,
             "bot_frame_ms_max": self.frame_ms_max,

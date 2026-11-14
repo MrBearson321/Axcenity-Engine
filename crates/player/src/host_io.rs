@@ -31,7 +31,8 @@ impl HostIo for App {
         if !axcenity_ui::chat_enabled(&self.sim.world) {
             self.chat_typing = None;
         }
-        if self.sim.scripts.is_client_only() && !self.following {
+        if self.sim.scripts.is_client_only() && self.followed != self.network.follows() {
+            self.followed = self.network.follows();
             self.follow_server();
         }
         ops::ControlFlow::Continue(())

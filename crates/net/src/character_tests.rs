@@ -611,6 +611,9 @@ fn a_character_that_walks_off_the_edge_falls_without_being_moved_back() {
     let me = players[0].scripts.local_player().unwrap();
     frames(&mut server, &mut players, 600, &[forward()]);
     let fell = server.character_at(me).unwrap();
-    assert!(fell.y < -1000.0, "it fell a long way on the server too: {fell:?}");
+    assert!(
+        fell.y < -1000.0,
+        "it fell a long way on the server too: {fell:?}"
+    );
     assert_eq!(players[0].network.corrections(), 0, "{:?}", players[0].log);
 }

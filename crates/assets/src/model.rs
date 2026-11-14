@@ -10,6 +10,7 @@
 mod collision;
 pub(crate) mod cooked_model;
 mod fbx;
+mod gltf_takes;
 mod lod;
 mod lod_cache;
 mod lod_report;
@@ -867,10 +868,11 @@ fn file_origin(project: Option<&Path>, folder: &Path, file: Option<&str>) -> Ima
 }
 
 /// Every take (animation timeline) in a model file's `bytes`, baked into
-/// keys per bone. Only FBX files give takes for now; a glTF file has none.
+/// keys per bone: an FBX file's animation stacks, or a glTF file's
+/// animations (their node channels; see `model/gltf_takes.rs`).
 pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
-        ModelFormat::Gltf => Ok(Vec::new()),
+        ModelFormat::Gltf => gltf_takes::load_takes(bytes),
         ModelFormat::Fbx => fbx::load_takes(bytes),
         ModelFormat::Obj => Ok(Vec::new()),
     }))
@@ -1159,17 +1161,35 @@ fn read(
 /// matrix): their nodes and every node above them, parents first, each
 /// resting where its node is.
 fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> Rig {
+    let (bones, index_of) = gltf_bones(document, joints.iter().map(|&(node, _)| node));
+    let joints = joints
+        .iter()
+        .map(|&(node, inverse_bind)| Joint {
+            bone: index_of.get(&node).copied().unwrap_or(0),
+            inverse_bind,
+        })
+        .collect();
+    Rig { bones, joints, fit }
+}
+
+/// The nodes `wanted` and every node above them, parents first, each
+/// resting at its node's transform, and each node's index among them: the
+/// bones of a glTF skin, or of the skeleton a file's animations move.
+fn gltf_bones(
+    document: &gltf::Document,
+    wanted: impl IntoIterator<Item = usize>,
+) -> (Vec<Bone>, HashMap<usize, usize>) {
     let mut parent_of: HashMap<usize, usize> = HashMap::new();
     for node in document.nodes() {
         for child in node.children() {
             parent_of.insert(child.index(), node.index());
         }
     }
-    let mut wanted = HashSet::new();
-    for &(node, _) in joints {
+    let mut keep = HashSet::new();
+    for node in wanted {
         let mut at = Some(node);
         while let Some(current) = at {
-            if !wanted.insert(current) {
+            if !keep.insert(current) {
                 break;
             }
             at = parent_of.get(&current).copied();
@@ -1190,7 +1210,7 @@ fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> R
             continue;
         }
         let mut parent = parent;
-        if wanted.contains(&node) {
+        if keep.contains(&node) {
             let (translation, rotation, scale) = nodes[node].transform().decomposed();
             index_of.insert(node, bones.len());
             bones.push(Bone {
@@ -1208,14 +1228,7 @@ fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> R
             stack.push((child.index(), parent, depth + 1));
         }
     }
-    let joints = joints
-        .iter()
-        .map(|&(node, inverse_bind)| Joint {
-            bone: index_of.get(&node).copied().unwrap_or(0),
-            inverse_bind,
-        })
-        .collect();
-    Rig { bones, joints, fit }
+    (bones, index_of)
 }
 
 /// The objects in a glTF file: the default scene's nodes, or every mesh
