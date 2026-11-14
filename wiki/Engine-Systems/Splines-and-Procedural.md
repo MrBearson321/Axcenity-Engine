@@ -36,4 +36,4 @@ flowchart LR
 
 ## Related documentation
 
-`docs/architecture/splines.md`; `examples/hello-splines`, `examples/hello-roads`; [Terrain](Terrain.md), [Networking](Networking.md)
+`docs/architecture/splines.md`; `examples/hello-splines`, `examples/hello-roads`; [Terrain](Terrain.md), [Networking](Networking.md); the procedural worlds plan (scatter rules, biomes, presets, roads, buildings, mesh terrain proposal): `docs/research/procedural-worlds.md`

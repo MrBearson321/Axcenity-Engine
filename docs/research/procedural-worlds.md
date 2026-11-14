@@ -1,0 +1,68 @@
+# Procedural world creation (PW)
+
+This file is the plan for Paul's Priority 3 of 14 Nov 2026: more advanced procedural worldbuilding on top of the terrain, foliage, spline scattering, streaming, regions and data layers that already exist. It checks what main has, compares it with Unreal's current tools, sets decisions D1–D8 and stages PW1–PW8, and proposes (but does not yet build) a way to get cliffs, caves and overhangs past the heightfield. Each stage is its own PR. Item IDs here are new: **PW1–PW8**. Section 6.5 of [competitive-development-roadmap.md](competitive-development-roadmap.md) (Advanced world creation) is where its status is reported.
+
+## What exists today
+
+| Area | Today | Where |
+|---|---|---|
+| Landscape generation | `fractal` generator (fractal and ridged noise, warp, valleys, dunes, island, crater, terraces, plains), ten presets, erosion (water and gravity), stamps, heightmap import and export | `crates/terrain` (`generate.rs`, `erosion.rs`), [../terrain.md](../terrain.md) |
+| Materials | Up to eight `TerrainLayer`s with automatic rules (height window, slope window, fades, noise) under hand paint; layer sets that suit each landscape preset | `terrain/src/materials.rs`, `editor/src/terrain_studio/presets.rs` |
+| Vegetation | **Painted** foliage: a brush scatters built-in plants, props or project models at a density, visual or solid, saved in `foliage.json`; drawn in 48-stud groups with cull distances and wind | `terrain/src/brush.rs`, `scene/src/foliage.rs` |
+| Spline content | SplineMesh (a model bent along a curve: roads, fences, pipes), SplineScatter (models along a curve or inside a closed one), Flatten Terrain Along, Bake | `crates/procedural`, [../architecture/splines.md](../architecture/splines.md) |
+| Large worlds | Streaming, levels, regions, data layers (R16) | [world-regions-r16.md](world-regions-r16.md) |
+| Water | Terrain water below `WaterLevel` (LE4) | `scene/src/terrain_water.rs` |
+
+What's missing is **rules**: every plant on a terrain today is placed by a brush stroke, so a 2 km map takes hours of painting, and changing the landscape (sculpting, regenerating) leaves the painted plants where they were instead of following "trees on gentle slopes below the snow line". There are no biomes, no reusable world setups beyond the height presets, roads are a SplineMesh plus a one-shot flatten, nothing keeps plants off roads or out from under buildings, and buildings are built by hand.
+
+## What Unreal does now (for comparison)
+
+- **PCG** (production-ready in 5.7): graphs that sample surfaces, filter points by attributes, and spawn meshes; an editor mode with spline drawing, point painting and volume tools; GPU execution; templates and biome samples. 5.8 adds better support for manual edits on top of procedural results. ([Creative Bloq](https://www.creativebloq.com/3d/video-game-design/the-unreal-engine-5-7-procedural-content-generation-update-explained), [Digital Production](https://digitalproduction.com/2025/10/17/unreal-5-7-preview-pcg-grows-up-foliage-gets-fancy/))
+- **Procedural Vegetation Editor** (experimental, 5.7): grows varied Nanite trees inside the editor.
+- **Mesh Terrain** (experimental, 5.8): terrain as a 3D mesh rather than a heightfield, so caves, arches and overhangs are possible, sculpted in any direction, with weight channels feeding materials and PCG. Reviews say it's heavier to stream and collide, layer parity with Landscape isn't there yet, and PCG sampling on 3D surfaces (undersides, ceilings) is young. Landscape is expected to stay alongside it. ([StraySpark](https://www.strayspark.studio/blog/mesh-terrain-ue5-8-caves-overhangs-guide), [Skyroid](https://www.skyroidstudios.com/insights/unreal-engine-5-8-mesh-terrain-environment-production), [Unreal University](https://www.unreal-university.blog/unreal-engine-5-8-every-major-new-feature-explained-mesh-terrain-metahuman-crowds-lumen-upgrades-more/)). These are secondary sources; Epic's own pages weren't read.
+
+The lesson for Axcenity: most of PCG's value in day-to-day worldbuilding comes from a handful of filters (height, slope, material, noise, distance to other things, inside or outside an area) applied in order, and from keeping the result live as the ground changes. Those fit in rules without a graph.
+
+## Decisions
+
+- **D1. Scatter rules are objects inside a Terrain, evaluated in order like TerrainLayers.** A `ScatterRule` holds what to place (`Models`, as a SplineScatter does, plus the built-in plants and props), how many (`Density` per 100 square studs, `Spacing` as the closest two may be), and where (height window, slope window, a material layer it grows on, noise for clumps, whether it may stand under water). Rules later in the list keep `AvoidRadius` studs from what earlier ones placed, so trees go first and undergrowth fills the gaps. Being Instances, rules get undo, the Properties panel, Collaborate, scripts and saving for free.
+- **D2. What rules place is generated, never saved, and made on every device.** Like a SplineScatter's results and a layer's automatic weights, rule results are a function of the terrain, the rules and the seed. They live in `TerrainData` beside the painted foliage (not in `foliage.json`), are drawn and collided exactly like painted foliage, and are made again **per 32-sample chunk** when that chunk's heights or paint, or the rules, change. Each chunk records which inputs it was made from, so sculpting one hill remakes a few chunks, not the map. **Bake** turns them into painted foliage when you want to hand-edit.
+- **D3. Placement is a hash grid, not a sequence.** Each rule cuts the world into cells `Spacing` studs across; a cell's candidate spot, chance and look come from the rule's seed and the cell's coordinates only (SplitMix64, as `procedural/src/rng.rs`). So a chunk's result never depends on its neighbours' results, the layout is the same at any resolution and on every device, and checking "is an earlier rule's plant within `AvoidRadius`?" means evaluating that rule's few nearby cells.
+- **D4. Biomes are areas that own rules and a ground layer.** A `Biome` inside a Terrain holds its own `ScatterRule`s and names the `TerrainLayer` that covers its ground. Where it applies comes from automatic conditions (height, slope, a moisture noise) and hand paint, blended softly at the edges, the same split as material layers (automatic weights never lose paint). Rules outside any Biome apply everywhere.
+- **D5. Presets are files of objects and settings.** A world preset (`.axworld`, JSON) is a landscape generator's settings, its layers, biomes and rules, and water. Built-ins ship with the editor (Temperate Forest, Alpine, Desert, Tropical Island, Tundra, Meadow); Save as Preset writes your own to the project's `presets/` folder or your user folder, as templates do. Single rules have presets too (Forest Trees, Undergrowth, Meadow Flowers, Grass, Boulders).
+- **D6. Roads and paths are splines that tell the terrain and the rules about themselves.** A `TerrainPath` inside a Spline (beside its SplineMesh) has a `Width`, an edge `Falloff`, a layer to paint, whether to flatten, and whether scatter rules keep off it. Rules keep off paths live (it's an input to D2). Painting and flattening change the heightfield, which is the source of truth, so they're an **Apply** step with undo, as Flatten Terrain Along is today. **Route** lays a spline's points across the terrain between its ends within a maximum grade (A* on the heightfield), so a road climbs a hill in switchbacks instead of straight up.
+- **D7. Procedural buildings are a generator, like SplineMesh.** A `BuildingGenerator` makes a building from a footprint (a closed Spline, or its own `Size`), `Floors`, `FloorHeight`, a roof style and module models for walls, windows, doors and corners (built-in parts when none are set), varied by `Seed`. Its children are generated, never saved, and **Bake** keeps them, exactly as SplineMesh's are. It isn't a shape-grammar language: the rules are fixed and the modules are yours.
+- **D8. No graph editor yet.** Rule stacks, biomes, paths and generators cover the workflows Paul listed. `editor-node-graph` exists, so a graph that wires the same filters is possible later, but only once a real project needs a filter that rules can't express (D8 is revisited after PW6). Mesh terrain is a separate decision, below.
+
+## Stages
+
+| Stage | What | Tests | PC check |
+|---|---|---|---|
+| **PW1 Scatter rules** | D1–D3: `ScatterRule` (`core`), the hash-grid evaluator (`procedural/src/terrain_scatter.rs`), per-chunk generation in `Generators::update` on every device, `TerrainData`'s generated foliage drawn, collided and preloaded with the painted, the Terrain Studio's **Scatter** section (add from rule presets, pick models from Assets, reorder, Bake), the API reference | Same seed and terrain give the same layout; height, slope, layer, water and avoid filters hold; sculpting a hill remakes only nearby chunks; nothing generated is saved; Bake makes painted foliage | A 2,048-stud terrain with a forest preset: frame time and the time a sculpt stroke takes |
+| **PW2 Biomes** | D4: `Biome` with automatic conditions, a biome paint brush, its ground layer blended into the material weights, rules inside a Biome scaled by its weight | Biome weights add up and keep paint; a rule in a Biome places nothing outside it; edges are soft | A two-biome island |
+| **PW3 World presets** | D5: `.axworld` files, six built-ins, Apply Preset (one undo step) and Save as Preset, rule presets | A preset round-trips; applying makes the same world from the same seed | Each built-in on a 2 km terrain |
+| **PW4 Roads and paths** | D6: `TerrainPath`, live keep-off for rules, Apply (paint and flatten, one undo step), Route | Rules leave a path's strip empty; Apply paints and flattens within Width and Falloff; Route keeps every stretch under its grade | A road routed over a hill with a SplineMesh |
+| **PW5 Terrain and objects** | Rules keep off anchored parts and models (`AvoidParts`), Conform to Terrain for the selection, Blend into Terrain (flatten and paint under a model's footprint), foliage that tilts with the slope and sinks into it | Nothing generated stands inside a part; a conformed model sits on the ground | A house dropped into a forest |
+| **PW6 Procedural buildings** | D7: `BuildingGenerator`, built-in modules, Bake, an example | A footprint gives the same building from the same seed; floors stack; Bake keeps it | A street of generated houses |
+| **PW7 Mesh terrain, part 1** | Option A below, if chosen: terrain holes and cliff and cave pieces | — | — |
+| **PW8 Mesh terrain, part 2** | Option B below, if chosen after a spike | — | — |
+
+Each stage updates [../terrain.md](../terrain.md) or [../architecture/splines.md](../architecture/splines.md), the wiki's Terrain and Splines and Procedural pages, and the roadmap's section 6.5 row.
+
+## Mesh terrain: cliffs, caves and overhangs (proposal, not built)
+
+A heightfield has one height per spot, so it can't have an overhang, a cave or an arch. Today the only answers are steep slopes (stretched textures, fixed by triplanar layers) and models placed on top. Three ways past that:
+
+| Option | What it is | Cost | Risk |
+|---|---|---|---|
+| **A. Heightfield + holes + pieces** | A hole mask cut into the heightfield (drawn, collided and walked through), and cliff, arch and cave-mouth models placed by hand or by scatter rules on steep slopes (PW1 with slope alignment, PW5). This is what most shipped Unreal and Unity games do. | Small: a mask in `TerrainData`, the mesher and parry heightfield skipping cells, a brush | Low. Seams between rock models and ground need care (triplanar layers already help) |
+| **B. Terrain volumes (voxels)** | A `TerrainVolume` object beside the heightfield: a sparse grid of signed distances in 32³ chunks (about 1 stud apart), surfaces made by surface nets or dual contouring, 3D brushes (add, carve, smooth), the same material layers projected triplanar, a triangle-mesh collider per chunk, chunks streamed like terrain chunks. Roblox's own terrain is voxels; Unreal 5.8's Mesh Terrain is a different representation with the same goal. | Large: a mesher with LOD seams, material blending, collision, a file format, navmesh input, Collaborate sync, Play streaming | Medium–high: memory per chunk, LOD seams, and the editing feel all need a spike before committing |
+| **C. Sculpted mesh terrain** (Unreal 5.8's direction) | The whole landscape as a sectioned mesh you sculpt in 3D, as Model Studio sculpts | Large | High: Unreal's own version is experimental, heavy to stream and collide, and carving a cave into a mesh needs robust booleans |
+
+**Recommendation:** do **A** first (PW7). It gets cave entrances, cliff faces and arches into games soon, reuses PW1's rules and R15's models, and keeps every terrain feature (streaming, LE4 water, layers, navmesh, Collaborate) working. Then spike **B** (a single volume with surface nets, a carve brush, collision and a benchmark on Paul's PC) before deciding on PW8, and use volumes for cliffs and caves *inside* heightfield worlds rather than replacing them. Don't do **C**: it repeats what Unreal itself still calls experimental, and A plus B cover the same shapes.
+
+This is Paul's choice; nothing for PW7 or PW8 is built until he picks.
+
+## Progress
+
+Nothing is built yet. PW1 is next.
