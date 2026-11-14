@@ -167,6 +167,14 @@ impl EditorApp {
                 self.flatten_terrain_along(id);
                 return;
             }
+            Edit::ApplyTerrainPath => {
+                self.apply_terrain_path(id);
+                return;
+            }
+            Edit::RouteTerrainPath => {
+                self.route_terrain_path(id);
+                return;
+            }
             Edit::OpenInModelStudio | Edit::OpenInBlender => {
                 let mesh_id = self
                     .world
@@ -1493,6 +1501,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::GenerateFracture
         | Edit::BakeSpline
         | Edit::FlattenTerrainAlong
+        | Edit::ApplyTerrainPath
+        | Edit::RouteTerrainPath
         | Edit::OpenInModelStudio
         | Edit::OpenInBlender
         | Edit::PreviewSound(_)

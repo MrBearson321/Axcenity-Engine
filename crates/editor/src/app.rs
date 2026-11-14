@@ -95,6 +95,7 @@ mod team_chat;
 mod team_history;
 mod team_panel;
 mod terrain;
+mod terrain_paths;
 mod texture_set;
 mod to_terrain;
 mod toolbox;
@@ -2105,6 +2106,8 @@ mod spline_content_tests;
 mod spline_tests;
 #[cfg(test)]
 mod template_tests;
+#[cfg(test)]
+mod terrain_path_tests;
 #[cfg(test)]
 mod tool_window_tests;
 #[cfg(test)]

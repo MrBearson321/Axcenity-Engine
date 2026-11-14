@@ -203,7 +203,10 @@ impl EditorApp {
             self.insert_spline();
             return;
         }
-        if matches!(what, Insertable::SplineMesh | Insertable::SplineScatter) {
+        if matches!(
+            what,
+            Insertable::SplineMesh | Insertable::SplineScatter | Insertable::TerrainPath
+        ) {
             self.insert_spline_generator(what, near.or(self.selected));
             return;
         }

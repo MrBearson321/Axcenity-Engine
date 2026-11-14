@@ -54,6 +54,7 @@ A **world preset** sets up a whole landscape at once: its shape, materials, biom
 ## Roads and parts into terrain
 
 - A **SplineMesh** lays a road or fence along a spline, and **Flatten Terrain Along** levels the ground under it. See the **hello-roads** sample.
+- A **Terrain Path** (Insert ▸ Terrain Path, into the selected spline) makes the spline a road on the terrain. Scatter rules keep off it straight away, wherever you drag its points. In its Properties, set its **Width**, the **Layer** to paint it with and how far it blends in (**Falloff**), then click **Apply to Terrain** to flatten and paint the ground under it. **Route** lays the spline's points over the terrain from its first point to its last without climbing steeper than **Max Grade**, so the road winds round or up a hill. Both are one undo step each.
 - **Solid Modeling ▸ To Terrain** turns a selected part into ground: the terrain under it is raised to its top and painted.
 
 ## How it's saved

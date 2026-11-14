@@ -1741,6 +1741,11 @@ pub fn insert_hint(what: Insertable) -> String {
              along the curve, or inside a closed one, from a seed. Click models in the Assets \
              panel while it's selected to add them."
         }
+        Insertable::TerrainPath => {
+            "Insert a Terrain Path into the selected Spline (or a new one): a road or path on \
+             the terrain. Scatter rules keep off it; Apply flattens and paints the ground \
+             under it, and Route lays its points over hills within Max Grade."
+        }
         Insertable::Checkpoint => {
             "Insert a Checkpoint on top of the selected part: a place \
              SaveService:RestoreCheckpoint (or the \"go back to checkpoint\" block) puts the \
