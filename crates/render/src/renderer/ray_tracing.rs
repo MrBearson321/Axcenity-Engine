@@ -453,7 +453,13 @@ impl RayScene {
         // swaying ones, each nearest first.
         let posed_mesh = |index: usize| {
             let gpu = wanted[index].1;
-            items[index].skin.as_ref().zip(gpu.skin.as_ref())
+            // Ray tracing poses joints only: a mesh that only morphs is
+            // traced at rest (its blend shapes aren't traced yet).
+            items[index]
+                .skin
+                .as_ref()
+                .zip(gpu.skin.as_ref())
+                .filter(|(skin, gpu_skin)| gpu_skin.jointed && !skin.joints().is_empty())
         };
         let mut posing: Vec<usize> = (0..in_slots.len())
             .filter(|&slot| posed_mesh(in_slots[slot]).is_some())

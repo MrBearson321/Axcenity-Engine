@@ -147,3 +147,106 @@ fn a_skins_box_holds_each_corner_wherever_its_joints_move_it() {
         }
     );
 }
+
+/// A unit square facing +Z, 30 studs to the right of where it's drawn,
+/// with no joints and one blend shape (target 1) moving every corner 30
+/// studs left, back into view.
+struct MorphedSquare;
+
+const MORPHED_CORNERS: [u32; 4] = [0, 1, 2, 3];
+const MORPHED_MOVES: [[f32; 3]; 4] = [[-30.0, 0.0, 0.0]; 4];
+const MORPHED_NORMALS: [[f32; 3]; 4] = [[0.0; 3]; 4];
+
+impl MeshSource for MorphedSquare {
+    fn key(&self) -> u64 {
+        77
+    }
+    fn positions(&self) -> &[[f32; 3]] {
+        &[
+            [29.5, -0.5, 0.0],
+            [30.5, -0.5, 0.0],
+            [30.5, 0.5, 0.0],
+            [29.5, 0.5, 0.0],
+        ]
+    }
+    fn normals(&self) -> &[[f32; 3]] {
+        &[[0.0, 0.0, 1.0]; 4]
+    }
+    fn uvs(&self) -> &[[f32; 2]] {
+        &[]
+    }
+    fn indices(&self) -> &[u32] {
+        &[0, 1, 2, 0, 2, 3]
+    }
+    fn morph_count(&self) -> usize {
+        1
+    }
+    fn morph(&self, index: usize) -> Option<crate::MorphView<'_>> {
+        (index == 0).then_some(crate::MorphView {
+            target: 1,
+            corners: &MORPHED_CORNERS,
+            positions: &MORPHED_MOVES,
+            normals: &MORPHED_NORMALS,
+        })
+    }
+}
+
+fn morphed_square(weights: Option<&[f32]>) -> DrawItem {
+    let mut item = item(
+        Shape::Mesh(Arc::new(MorphedSquare)),
+        Vec3::new(0.0, 0.0, -3.0),
+        1.0,
+    );
+    item.material.emissive = [1.0; 3];
+    let skin = weights.map(|weights| {
+        let mut skin = Skin::default();
+        skin.set_morph_weights(weights);
+        Arc::new(skin)
+    });
+    DrawItem { skin, ..item }
+}
+
+#[test]
+fn a_blend_shape_moves_its_mesh_into_view_by_its_weight() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+    let middle = |renderer: &mut TextureRenderer, list: &DrawList| {
+        renderer.render(list).unwrap();
+        let pixels = renderer.read_pixels();
+        let at = (16 * 32 + 16) * 4;
+        [pixels[at], pixels[at + 1], pixels[at + 2]]
+    };
+    let sky = middle(&mut renderer, &list_of(vec![morphed_square(None)]));
+    assert_eq!(renderer.stats().items_culled, 1, "off to the side at rest");
+    // Weight 0 on its target keeps it there (its box reaches as far as
+    // its shapes can move it, so it isn't culled, but nothing shows).
+    let still = middle(&mut renderer, &list_of(vec![morphed_square(Some(&[1.0, 0.0]))]));
+    assert_eq!(still, sky);
+    // Weight 1 brings it into the middle, and its box goes with it.
+    let drawn = middle(&mut renderer, &list_of(vec![morphed_square(Some(&[0.0, 1.0]))]));
+    let stats = renderer.stats();
+    assert_eq!((stats.items_drawn, stats.items_culled), (1, 0));
+    assert!(
+        drawn.iter().zip(sky).any(|(a, b)| a.abs_diff(b) > 30),
+        "the morphed square isn't drawn: {drawn:?} vs sky {sky:?}"
+    );
+}
+
+#[test]
+fn shape_weights_follow_a_skins_joints_sixteen_to_an_entry() {
+    let mut skin = Skin::new(vec![Mat4::IDENTITY; 3]);
+    let weights: Vec<f32> = (0..20).map(|w| w as f32).collect();
+    skin.set_morph_weights(&weights);
+    let packed = super::super::skinning::packed_counts(&skin);
+    assert_eq!(packed, 3 | (20 << 16));
+    assert_eq!(super::super::skinning::entry_count(packed), 5);
+    let raw: Vec<_> = super::super::skinning::JointRaw::of(&skin).collect();
+    assert_eq!(raw.len(), 5);
+    // Weight 5 is the second entry of the second column of the first
+    // weight entry; weight 17 is the second of the next entry.
+    assert_eq!(raw[3].position[1][1], 5.0);
+    assert_eq!(raw[4].position[0][1], 17.0);
+}

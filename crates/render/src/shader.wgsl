@@ -85,6 +85,64 @@ struct SkinCorner {
 // for a mesh that isn't animated.
 @group(2) @binding(0) var<storage, read> skin_corners: array<SkinCorner>;
 
+// One corner's move by one blend shape at weight 1. Must match `MorphDelta`
+// in renderer/skinning.rs.
+struct MorphDelta {
+    position: vec3<f32>,
+    shape: u32,
+    normal: vec3<f32>,
+}
+
+// Each corner's first move in `morph_deltas` and how many (one empty range
+// for a mesh without blend shapes), and the moves.
+@group(2) @binding(1) var<storage, read> morph_ranges: array<vec2<u32>>;
+@group(2) @binding(2) var<storage, read> morph_deltas: array<MorphDelta>;
+
+// An instance's `skin.y` holds its skin's joints in the low 16 bits and its
+// blend shape weights in the high 16 (renderer/skinning.rs).
+fn skin_joint_count(skin: vec2<u32>) -> u32 {
+    return skin.y & 0xFFFFu;
+}
+
+fn skin_weight_count(skin: vec2<u32>) -> u32 {
+    return skin.y >> 16u;
+}
+
+// Shape weight `shape` of a skin whose weights start at entry `first` of a
+// joints buffer: sixteen to an entry, column by column of its `position`.
+fn weight_in(entry: Joint, shape: u32) -> f32 {
+    let at = shape % 16u;
+    return entry.position[at / 4u][at % 4u];
+}
+
+// Corner `index` leaned toward the item's blend shapes by this frame's
+// weights (after its joints in `frame_joints`), as `Posed::skin` in
+// assets' rig.rs does on the CPU before skinning.
+fn morph_corner(index: u32, skin: vec2<u32>, posed: Posed) -> Posed {
+    let weights = skin_weight_count(skin);
+    if weights == 0u {
+        return posed;
+    }
+    let first = skin.x + skin_joint_count(skin);
+    let range = morph_ranges[index];
+    var moved = posed;
+    var turned = false;
+    for (var i = range.x; i < range.x + range.y; i += 1u) {
+        let delta = morph_deltas[i];
+        if delta.shape >= weights {
+            continue;
+        }
+        let weight = weight_in(frame_joints[first + delta.shape / 16u], delta.shape);
+        moved.position += delta.position * weight;
+        moved.normal += delta.normal * weight;
+        turned = turned || weight != 0.0;
+    }
+    if turned {
+        moved.normal = unit_or_zero(moved.normal);
+    }
+    return moved;
+}
+
 struct Posed {
     position: vec3<f32>,
     normal: vec3<f32>,
@@ -96,12 +154,15 @@ struct Posed {
 // animated): each of its joints moves it, blended by their weights, as
 // `Posed::skin` in assets' rig.rs does on the CPU. Joints past the skin's
 // are left out, and a corner weighted to nothing stays where it is.
-fn pose_corner(index: u32, skin: vec2<u32>, position: vec3<f32>, normal: vec3<f32>,
+fn pose_corner(index: u32, skin: vec2<u32>, rest_position: vec3<f32>, rest_normal: vec3<f32>,
     tangent: vec3<f32>) -> Posed {
-    var posed = Posed(position, normal, tangent);
-    if skin.y == 0u {
+    var posed = morph_corner(index, skin, Posed(rest_position, rest_normal, tangent));
+    let joints = skin_joint_count(skin);
+    if joints == 0u {
         return posed;
     }
+    let position = posed.position;
+    let normal = posed.normal;
     let corner = skin_corners[index];
     var matrix = mat4x4<f32>();
     var normal_matrix = mat3x3<f32>();
@@ -109,7 +170,7 @@ fn pose_corner(index: u32, skin: vec2<u32>, position: vec3<f32>, normal: vec3<f3
     for (var i = 0u; i < 4u; i += 1u) {
         let weight = corner.weights[i];
         let joint = corner.joints[i];
-        if weight <= 0.0 || joint >= skin.y {
+        if weight <= 0.0 || joint >= joints {
             continue;
         }
         let moved = frame_joints[skin.x + joint];
@@ -787,9 +848,24 @@ struct MotionOut {
     @location(2) @interpolate(flat) fade: f32,
 }
 
-// Corner `index` posed by last frame's joints (`pose_corner`'s position).
-fn previous_corner(index: u32, skin: vec2<u32>, position: vec3<f32>) -> vec3<f32> {
-    if skin.y == 0u {
+// Corner `index` posed by last frame's joints and shape weights
+// (`pose_corner`'s position).
+fn previous_corner(index: u32, skin: vec2<u32>, rest: vec3<f32>) -> vec3<f32> {
+    var position = rest;
+    let weights = skin_weight_count(skin);
+    let joints = skin_joint_count(skin);
+    if weights > 0u {
+        let first = skin.x + joints;
+        let range = morph_ranges[index];
+        for (var i = range.x; i < range.x + range.y; i += 1u) {
+            let delta = morph_deltas[i];
+            if delta.shape < weights {
+                position += delta.position
+                    * weight_in(previous_joints[first + delta.shape / 16u], delta.shape);
+            }
+        }
+    }
+    if joints == 0u {
         return position;
     }
     let corner = skin_corners[index];
@@ -798,7 +874,7 @@ fn previous_corner(index: u32, skin: vec2<u32>, position: vec3<f32>) -> vec3<f32
     for (var i = 0u; i < 4u; i += 1u) {
         let weight = corner.weights[i];
         let joint = corner.joints[i];
-        if weight <= 0.0 || joint >= skin.y {
+        if weight <= 0.0 || joint >= joints {
             continue;
         }
         matrix += previous_joints[skin.x + joint].position * weight;
