@@ -172,6 +172,28 @@ pub fn show(
             {
                 edit = Some(Edit::FlattenTerrainAlong);
             }
+            if !playing && instance.class() == ClassName::TerrainPath {
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button(theme::with_icon(icons::MOUNTAINS, "Apply to Terrain"))
+                        .on_hover_text(
+                            "Flatten the ground under its Spline to the curve (with Flatten) and paint its Layer, Width wide, blending into the ground over Falloff. One undo step.",
+                        )
+                        .clicked()
+                    {
+                        edit = Some(Edit::ApplyTerrainPath);
+                    }
+                    if ui
+                        .button(theme::with_icon(icons::PATH, "Route"))
+                        .on_hover_text(
+                            "Lay the Spline's points over the terrain from its first point to its last, climbing no steeper than Max Grade: round a hill or up it in bends. One undo step.",
+                        )
+                        .clicked()
+                    {
+                        edit = Some(Edit::RouteTerrainPath);
+                    }
+                });
+            }
             let has_mesh = instance
                 .property("MeshId")
                 .and_then(Value::as_str)

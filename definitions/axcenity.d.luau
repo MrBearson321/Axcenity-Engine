@@ -615,6 +615,8 @@ declare extern type UserGameSettings with
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
 	--- Ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, the rays are traced in software instead: slower (Low suits it), with leaves' holes guessed. Only a GPU without compute shaders keeps the bakes (or real-time GI, as set).
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
+	--- Hardware ray traced reflections on glossy surfaces: Off, Low (surfaces smoother than 0.15 roughness, traced at half size), Medium (smoother than 0.3) or High (smoother than 0.5). Off at every preset. On, a smooth part mirrors what's around it, even off the screen, fading into the reflection probes as it gets rougher; see-through parts, water and terrain keep the probes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only the reflection probes are used.
+	RayTracedReflections: EnumRayTracedReflections
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1394,6 +1396,18 @@ declare extern type EnumRayTracedGlobalIlluminationItems with
 	High: EnumRayTracedGlobalIllumination
 end
 
+--- One choice of `Enum.RayTracedReflections`.
+declare extern type EnumRayTracedReflections extends EnumItem with
+end
+
+--- The choices of `Enum.RayTracedReflections`.
+declare extern type EnumRayTracedReflectionsItems with
+	Off: EnumRayTracedReflections
+	Low: EnumRayTracedReflections
+	Medium: EnumRayTracedReflections
+	High: EnumRayTracedReflections
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1447,6 +1461,7 @@ declare extern type EnumLibrary with
 	ParticleFlipbookMode: EnumParticleFlipbookModeItems
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusionItems
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIlluminationItems
+	RayTracedReflections: EnumRayTracedReflectionsItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -5871,6 +5886,62 @@ declare extern type ScatterRule extends Instance with
 	[string]: any
 end
 
+--- Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). It covers ground where its height, slope and moisture settings hold, with soft edges (later biomes cover earlier ones), and wherever its GroundLayer is painted. Its GroundLayer is laid under the other layers' own rules there, and the ScatterRules inside it place only where it covers, thinning out at its edges. ScatterRules outside every Biome place anywhere.
+declare extern type Biome extends Instance with
+	--- If false, the biome covers nothing and the rules inside it place nothing. True by default.
+	Enabled: boolean
+	--- The name of the TerrainLayer that covers the biome's ground. Painting that layer in the Terrain Studio paints the biome too. Empty for none.
+	GroundLayer: string
+	--- If true (the default), the biome covers ground by itself wherever its height, slope and moisture settings hold; if false, only where its GroundLayer is painted.
+	AutoEnabled: boolean
+	--- Studs above the terrain's bottom where the biome starts. 0 by default.
+	MinHeight: number
+	--- Studs above the terrain's bottom where the biome ends. 10000 by default.
+	MaxHeight: number
+	--- Studs over which each height edge fades. 8 by default.
+	HeightFade: number
+	--- Degrees from flat where the biome starts. 0 by default.
+	MinSlope: number
+	--- Degrees from flat where the biome ends. 90 by default.
+	MaxSlope: number
+	--- Degrees over which each slope edge fades. 5 by default.
+	SlopeFade: number
+	--- 0 (dry) to 1 (wet): the driest ground the biome covers. Moisture is noise over the terrain, the same for every biome with the same MoistureScale. 0 by default.
+	MinMoisture: number
+	--- 0 to 1: the wettest ground the biome covers. 1 by default.
+	MaxMoisture: number
+	--- How much of the moisture range each moisture edge fades over. 0.1 by default.
+	MoistureFade: number
+	--- Studs across one dry or wet patch. 400 by default.
+	MoistureScale: number
+	--- 0 to 1: breaks the biome's edges up with noise. 0.3 by default.
+	EdgeNoise: number
+	--- Studs across the edge noise's patches. 48 by default.
+	NoiseScale: number
+	[string]: any
+end
+
+--- Inside a Spline: a road or path on the terrain (procedural worlds PW4), Width studs across along the Spline's curve. ScatterRules keep off it (ClearScatter) wherever it goes, on every device, without changing the terrain. In the editor, Apply to Terrain flattens the ground under it to the curve and paints its Layer, blending in over Falloff (one undo step), and Route lays the Spline's points over the terrain from its first point to its last, no stretch climbing more than MaxGrade degrees, so a road winds round or up a hill (one undo step). Put a SplineMesh in the same Spline for the road's surface.
+declare extern type TerrainPath extends Instance with
+	--- If false, scatter rules don't keep off it and the editor's Apply and Route do nothing. True by default.
+	Enabled: boolean
+	--- Studs across the road or path. Apply flattens and paints this strip fully. 8 by default.
+	Width: number
+	--- Studs past each edge over which Apply's flattening and paint blend into the ground around. 4 by default.
+	Falloff: number
+	--- If true (the default), Apply levels the strip to the height of its Spline's curve.
+	Flatten: boolean
+	--- The name of the TerrainLayer Apply paints the strip with. Empty (the default) paints nothing.
+	Layer: string
+	--- If true (the default), the terrain's ScatterRules place nothing within Width / 2 + ClearMargin studs of the curve, seen from above. They keep off it as soon as it's there and wherever its points move, on every device.
+	ClearScatter: boolean
+	--- Studs past each edge that scatter rules keep clear, so trees don't stand on the verge. 1 by default.
+	ClearMargin: number
+	--- The steepest the editor's Route lets the road climb, in degrees. 8 by default.
+	MaxGrade: number
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -6014,6 +6085,8 @@ declare extern type InstanceLibrary with
 		& ((className: "ObjectValue") -> ObjectValue)
 		& ((className: "DataLayer") -> DataLayer)
 		& ((className: "ScatterRule") -> ScatterRule)
+		& ((className: "Biome") -> Biome)
+		& ((className: "TerrainPath") -> TerrainPath)
 		& ((className: string) -> Instance)
 end
 
