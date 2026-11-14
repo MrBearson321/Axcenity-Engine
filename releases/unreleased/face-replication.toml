@@ -1,7 +1,7 @@
 category = "feature"
 subsystem = "animation"
 title = "Faces play the same on every player's screen"
-details = "In multiplayer, the expressions, overrides, layer settings and lip sync a server script sets on a FaceControls now reach players' devices, which blend towards them themselves and keep a lip sync within a tenth of a second of the server's. ReplicateExpressions, ReplicateOverrides and ReplicateLipSync choose which parts go (a part that doesn't is left to each device's LocalScripts), and ReplicationRate (10 a second) how often at most. The network protocol is now 15."
+details = "In multiplayer, the expressions, overrides, layer settings and lip sync a server script sets on a FaceControls now reach players' devices, which blend towards them themselves and keep a lip sync within a tenth of a second of the server's. ReplicateExpressions, ReplicateOverrides and ReplicateLipSync choose which parts go (a part that doesn't is left to each device's LocalScripts), and ReplicationRate (10 a second) how often at most. The network protocol is now 16."
 features = ["animation.facial"]
 fixes = []
 introduces_issues = []
