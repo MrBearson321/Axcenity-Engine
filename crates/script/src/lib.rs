@@ -141,7 +141,7 @@ pub use debugger::{
 };
 pub use definitions::{
     API_DOCS_PATH, ApiEntry, ApiKind, DEFINITIONS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_example,
-    api_markdown, api_reference, api_summary, lua_definitions, property_description,
+    api_examples, api_markdown, api_reference, api_summary, lua_definitions, property_description,
     with_api_summary,
 };
 pub use edit::EditRuntime;

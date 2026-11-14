@@ -1970,11 +1970,20 @@ impl EditorApp {
         if self.learn_open && self.project.is_some() {
             let folder = self.project.as_ref().map(|project| project.folder.clone());
             let playing = self.playing();
+            self.start.set_insert_target(self.tabs.insert_target());
             if let Some(sample) =
                 self.start
                     .learn_window(ctx, &mut self.learn_open, folder.as_deref(), playing)
             {
                 self.request_and_go_ahead(ctx, Discard::OpenSample(sample));
+            }
+            // The API Reference's Insert button (scripting P2 PR 5).
+            if let Some(code) = self.start.take_insert()
+                && let Some(path) = self.tabs.insert_lines(&code)
+            {
+                let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                self.output
+                    .info(format!("Inserted the example into {name}"));
             }
         }
         if self.about_open
