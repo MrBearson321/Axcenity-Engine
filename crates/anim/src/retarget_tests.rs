@@ -102,7 +102,7 @@ fn mixamo() -> Vec<Bone> {
 
 /// [`BODY`] 1.2 times as big, Z up instead of Y (turned by `world_turn`),
 /// and every bone's own axes turned some other way.
-fn unreal(world_turn: Quat) -> Rig {
+pub(crate) fn unreal(world_turn: Quat) -> Rig {
     let names: Vec<String> = UNREAL.iter().map(|name| (*name).to_owned()).collect();
     let world: Vec<(Vec3, Quat)> = BODY
         .iter()
