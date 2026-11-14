@@ -102,6 +102,9 @@ pub struct ImportDialog {
     /// The model file being imported, outside the project.
     pub file: PathBuf,
     pub objects: Vec<ModelObject>,
+    /// How many blend shapes (morph targets) the model has, once it's
+    /// loaded for the preview.
+    blend_shapes: usize,
     /// One per object. Only the ticks of objects with meshes matter; a
     /// group shows its contents' ticks.
     ticked: Vec<bool>,
@@ -165,6 +168,7 @@ impl ImportDialog {
             package: None,
             tab: Tab::Objects,
             preview: None,
+            blend_shapes: 0,
             previewing: 0,
             buttons: None,
             import_button: None,
@@ -202,6 +206,7 @@ impl ImportDialog {
     /// Adds a preview of the file's `model` (as loaded from it), playing
     /// clips made from its `takes`.
     pub fn with_preview(mut self, model: Model, takes: Vec<Take>) -> Self {
+        self.blend_shapes = model.morph_targets.len();
         self.preview = Some(ImportPreview::new(&self.file, model, takes));
         self
     }
@@ -364,6 +369,9 @@ impl ImportDialog {
                 parts.push(format!("{} triangles", thousands(triangles)));
             }
             parts.push(plural(self.materials.len(), "material"));
+            if self.blend_shapes > 0 {
+                parts.push(plural(self.blend_shapes, "blend shape"));
+            }
         }
         if let Some(animation) = &self.animation {
             if !animation.bones.is_empty() {

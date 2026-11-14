@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Scatter rules place plants, props and models over a whole terrain by height, slope and material"
+details = "Terrain Studio > Scatter Rules adds ScatterRule objects inside a Terrain (the Forest set of three, Forest Trees, Undergrowth, Meadow Flowers, Grass Tufts, or an empty Scatter Rule). Each places what its Models list names, picked from the Assets panel, wherever its spacing, density, height and slope windows, material layer, clumping and distance from earlier rules allow, with random turn and size. The layout follows sculpting and painting as you work, is the same for the same seed on every device, and isn't saved: it's made again when the world loads. Bake turns it into painted foliage you can brush and erase. A 2,048-stud forest of 348,000 plants is placed in about a tenth of a second."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -1,5 +1,6 @@
 //! Procedural content along splines (Phase 74), like a small version of
-//! Unreal's procedural tools.
+//! Unreal's procedural tools, and over terrains: what a Terrain's
+//! ScatterRules place ([`terrain_scatter`], procedural worlds PW1).
 //!
 //! A **SplineMesh** in a Spline bends a model along the curve, repeated to
 //! fill it ([`bend`]); a **SplineScatter** places models along it or inside
@@ -18,6 +19,9 @@ mod flatten;
 mod rng;
 mod scatter;
 mod surface;
+pub mod terrain_scatter;
+#[cfg(test)]
+mod terrain_scatter_tests;
 #[cfg(test)]
 mod tests;
 
@@ -48,6 +52,7 @@ pub struct Generators {
     /// standing on its pieces are made again after it.
     meshes_made: u64,
     assets: Option<Assets>,
+    terrain_scatter: terrain_scatter::TerrainScatter,
 }
 
 struct Made {
@@ -85,6 +90,9 @@ impl Generators {
                 forget(assets, &made.models);
             }
         }
+        // Terrain scatter rules first: what they place is foliage, which
+        // scatters don't stand on, so the order only saves a frame.
+        self.terrain_scatter.update(world);
         let terrains = terrain_signature(world);
         let mut problems = Vec::new();
         for id in generators {

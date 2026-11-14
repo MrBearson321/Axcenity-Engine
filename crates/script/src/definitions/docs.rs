@@ -2683,6 +2683,106 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Studs across the rule's noise patches.",
     ),
     (
+        ClassName::ScatterRule,
+        "Enabled",
+        "If false, the rule places nothing. True by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Models",
+        "What it places, separated by `;`: model files such as \"assets/models/pine.glb\", or the built-in plants and props as \"plant:Tree\", \"plant:Bush\", \"plant:Flower\", \"plant:Grass\" and \"prop:Crate\". Each spot picks one. In the editor, select the rule and click props or models in the Assets panel to add or take them out.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Seed",
+        "Which random layout it makes: the same seed, terrain and settings give the same layout on every device. 1 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Spacing",
+        "About how far apart two of its spots are, in studs (at least 1): the terrain is cut into squares this wide, each with one spot that's used or not. 8 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Density",
+        "How many it places per 100 square studs where the ground suits it, at most one per Spacing square. 1 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "MinHeight",
+        "Nothing lower than this, in studs above the terrain's bottom. 0 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "MaxHeight",
+        "Nothing higher than this, in studs above the terrain's bottom (a tree line). 10000 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "HeightFade",
+        "Studs over which it thins out at MinHeight and MaxHeight. 4 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "MinSlope",
+        "Nothing on ground flatter than this, in degrees. 0 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "MaxSlope",
+        "Nothing on ground steeper than this, in degrees. 35 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "SlopeFade",
+        "Degrees over which it thins out at MinSlope and MaxSlope. 5 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Layer",
+        "The name of a TerrainLayer of the same terrain: it places only where that layer covers at least LayerThreshold of the ground. Empty (the default) for any ground; a name the terrain doesn't have places nothing.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "LayerThreshold",
+        "0 to 1: how much of Layer the ground must have. 0.5 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Clumping",
+        "0 to 1: 0 spreads it evenly, 1 gathers it into clumps ClumpSize studs across with gaps between. 0 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "ClumpSize",
+        "Studs across its clumps. 48 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "AvoidRadius",
+        "Studs it keeps from anything the ScatterRules before it (above it in the terrain) placed, such as bushes keeping clear of trees. 0 by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "Underwater",
+        "If true, it may place under the terrain's water too. False by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "RotationRange",
+        "Each is turned round its up by a random number of degrees between X and Y. (0, 360) by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "ScaleRange",
+        "Each is its own size times a random number between X and Y. (0.85, 1.15) by default.",
+    ),
+    (
+        ClassName::ScatterRule,
+        "CanCollide",
+        "If true, parts and characters bump into what it places, as into painted foliage marked solid. False by default.",
+    ),
+    (
         ClassName::ThirdPersonController,
         "Movement",
         "\"Walk\", \"Run\" or \"Crouch\", or any other name for a custom mode: the controller stops moving the character, and scripts and blocks move it. Set \"\" to clear a custom mode; the controller puts back the built-in mode it had. Set and read from a script or the set-property and property blocks.",
@@ -5343,6 +5443,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::DataLayerService => {
             "The service that holds the project's DataLayers (roadmap R16). Every level shares them. In a game, a switched-off layer's Instances are set aside inside the layer: not simulated, drawn or sent to players. SetLayerActive (Scripts only) switches a layer, IsLayerActive reads it and LayerChanged reports it on every device. A loaded level's own members of a switched-off layer are set aside too, and save slots keep each layer's state."
+        }
+        ClassName::ScatterRule => {
+            "Inside a Terrain: places plants, props or models (Models) over the ground by itself, where its height, slope, layer and water settings allow, about Spacing studs apart at Density, gathered into clumps by Clumping and keeping AvoidRadius from what the rules before it placed. Rules work in order, like TerrainLayers. What they place is made again on every device whenever the ground or the rules change (only the parts of the terrain that changed), and is never saved; Bake in the Terrain Studio keeps it as painted foliage."
         }
         ClassName::DataLayer => {
             "A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag."

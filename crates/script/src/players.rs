@@ -257,6 +257,58 @@ pub(crate) fn top_of(world: &World, spawn: InstanceId) -> Vector3 {
     Vector3::new(position.x, position.y + size.y * 0.5, position.z)
 }
 
+/// How close another player's character may stand to a spawn spot before
+/// the spot counts as taken, in studs across the ground.
+const SPAWN_ROOM: f32 = 3.0;
+
+/// Where on `spawn`'s top `player`'s character stands: the middle, unless
+/// another player's character stands there, then the first free spot on
+/// rings around it within the top, else the spot furthest from them all.
+/// Two characters made in one place would push each other apart on their
+/// devices, further than the server lets a character move.
+pub(crate) fn free_spot(world: &World, spawn: InstanceId, player: InstanceId) -> Vector3 {
+    let top = top_of(world, spawn);
+    let others: Vec<Vector3> = players(world)
+        .into_iter()
+        .filter(|&other| other != player)
+        .filter_map(|other| instance_property(world, other, "Character"))
+        .filter_map(|character| feet(world, character))
+        .collect();
+    let size = vector(world, spawn, "Size").unwrap_or_default();
+    // Rings fit inside the top however the SpawnLocation is turned.
+    let reach = (size.x.min(size.z) * 0.5 - 1.0).max(0.0);
+    let mut spots = vec![top];
+    for ring in [reach * 0.5, reach] {
+        if ring < 1.0 {
+            continue;
+        }
+        for step in 0..8 {
+            let angle = step as f32 * std::f32::consts::FRAC_PI_4;
+            spots.push(Vector3::new(
+                top.x + ring * angle.cos(),
+                top.y,
+                top.z + ring * angle.sin(),
+            ));
+        }
+    }
+    let nearest = |spot: &Vector3| {
+        others
+            .iter()
+            .map(|other| (other.x - spot.x).hypot(other.z - spot.z))
+            .fold(f32::INFINITY, f32::min)
+    };
+    spots
+        .iter()
+        .find(|spot| nearest(spot) >= SPAWN_ROOM)
+        .or_else(|| {
+            spots
+                .iter()
+                .max_by(|a, b| nearest(a).total_cmp(&nearest(b)))
+        })
+        .copied()
+        .unwrap_or(top)
+}
+
 /// Copies `template` and everything in it, noting each copied script for
 /// the runtime to start once the copy is in the Workspace.
 fn copy_of(lua: &Lua, world: &mut World, template: InstanceId) -> Option<InstanceId> {
@@ -339,7 +391,7 @@ pub fn load_character(lua: &Lua, player: InstanceId) -> mlua::Result<InstanceId>
         let spawn = pick_spawn(lua, &world, player);
         match spawn {
             Some(spawn) => {
-                let top = top_of(&world, spawn);
+                let top = free_spot(&world, spawn, player);
                 stand_at(&mut world, character, top);
             }
             // A copy of a placed character stands where that one was.

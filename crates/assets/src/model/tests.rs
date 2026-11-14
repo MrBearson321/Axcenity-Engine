@@ -498,3 +498,136 @@ fn the_same_embedded_texture_in_two_models_is_one_image() {
     drop((image, found));
     assert!(shared_embedded(shared).is_none());
 }
+
+/// Writes `face.bin` into `folder` and returns a glTF file using it: two
+/// meshes, `Skin` (a 2×2 square in the XY plane, facing +Z) and `Lash` (a
+/// triangle above it), with blend shapes named as Blender writes them
+/// (`extras.targetNames`). `Blink_Left` lifts the square's corner 2 by 1
+/// along Z and moves the lash down 1 along Y; `Smile` moves the square's
+/// corner 1 right by 1 and turns its normal, and rests at 0.25.
+pub(super) fn blinking_face(folder: &Path) -> &'static str {
+    let _ = std::fs::remove_dir_all(folder);
+    std::fs::create_dir_all(folder).unwrap();
+    #[rustfmt::skip]
+    let floats: Vec<f32> = vec![
+        // 0: square positions (4).
+        -1.0, -1.0, 0.0,  1.0, -1.0, 0.0,  1.0, 1.0, 0.0,  -1.0, 1.0, 0.0,
+        // 48: square normals.
+        0.0, 0.0, 1.0,  0.0, 0.0, 1.0,  0.0, 0.0, 1.0,  0.0, 0.0, 1.0,
+        // 96: square Blink_Left moves.
+        0.0, 0.0, 0.0,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0,  0.0, 0.0, 0.0,
+        // 144: square Smile moves.
+        0.0, 0.0, 0.0,  1.0, 0.0, 0.0,  0.0, 0.0, 0.0,  0.0, 0.0, 0.0,
+        // 192: square Smile normal changes.
+        0.0, 0.0, 0.0,  0.6, 0.0, -0.2,  0.0, 0.0, 0.0,  0.0, 0.0, 0.0,
+        // 240: lash positions (3).
+        -1.0, 1.5, 0.0,  1.0, 1.5, 0.0,  0.0, 2.0, 0.0,
+        // 276: lash Blink_Left moves.
+        0.0, -1.0, 0.0,  0.0, -1.0, 0.0,  0.0, -1.0, 0.0,
+    ];
+    let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+    let mut bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+    bytes.extend(indices.iter().flat_map(|i| i.to_le_bytes()));
+    std::fs::write(folder.join("face.bin"), &bytes).unwrap();
+    r#"{
+        "asset": { "version": "2.0" },
+        "buffers": [ { "uri": "face.bin", "byteLength": 324 } ],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": 0, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 48, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 96, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 144, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 192, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 240, "byteLength": 36 },
+            { "buffer": 0, "byteOffset": 276, "byteLength": 36 },
+            { "buffer": 0, "byteOffset": 312, "byteLength": 12 }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3",
+              "min": [-1, -1, 0], "max": [1, 1, 0] },
+            { "bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC3" },
+            { "bufferView": 2, "componentType": 5126, "count": 4, "type": "VEC3",
+              "min": [0, 0, 0], "max": [0, 0, 1] },
+            { "bufferView": 3, "componentType": 5126, "count": 4, "type": "VEC3",
+              "min": [0, 0, 0], "max": [1, 0, 0] },
+            { "bufferView": 4, "componentType": 5126, "count": 4, "type": "VEC3" },
+            { "bufferView": 5, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [-1, 1.5, 0], "max": [1, 2, 0] },
+            { "bufferView": 6, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0, -1, 0], "max": [0, -1, 0] },
+            { "bufferView": 7, "componentType": 5123, "count": 6, "type": "SCALAR" }
+        ],
+        "meshes": [
+            { "name": "Skin",
+              "primitives": [ {
+                "attributes": { "POSITION": 0, "NORMAL": 1 },
+                "indices": 7,
+                "targets": [ { "POSITION": 2 }, { "POSITION": 3, "NORMAL": 4 } ]
+              } ],
+              "weights": [0, 0.25],
+              "extras": { "targetNames": ["Blink_Left", "Smile"] } },
+            { "name": "Lash",
+              "primitives": [ {
+                "attributes": { "POSITION": 5 },
+                "targets": [ { "POSITION": 6 } ]
+              } ],
+              "extras": { "targetNames": ["Blink_Left"] } }
+        ],
+        "nodes": [ { "name": "Skin", "mesh": 0 }, { "name": "Lash", "mesh": 1 } ],
+        "scenes": [ { "nodes": [0, 1] } ],
+        "scene": 0
+    }"#
+}
+
+#[test]
+fn a_gltf_files_blend_shapes_are_read_and_shared_by_name() {
+    let folder = std::env::temp_dir().join(format!("axcenity-gltf-face-{}", std::process::id()));
+    let gltf = blinking_face(&folder);
+    let model = load_model(gltf.as_bytes(), &folder, ModelFormat::Gltf).unwrap();
+    let names: Vec<&str> = model
+        .morph_targets
+        .iter()
+        .map(|target| target.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["Blink_Left", "Smile"],
+        "one Blink_Left for both meshes"
+    );
+    assert_eq!(model.morph_targets[1].default_weight, 0.25);
+    // The model is 2 wide and 3 tall (the lash reaches y = 2), flat in Z.
+    assert_eq!(model.size, [2.0, 3.0, 0.0]);
+    let skin = &model.primitives[0];
+    let lash = &model.primitives[1];
+    assert_eq!(skin.morphs.len(), 2);
+    let blink = &skin.morphs[0];
+    assert_eq!(blink.target, 0);
+    assert_eq!(blink.corners, vec![2]);
+    // Z is flat, so it isn't scaled: the lift stays 1.
+    assert_eq!(blink.positions, vec![[0.0, 0.0, 1.0]]);
+    let smile = &skin.morphs[1];
+    assert_eq!(smile.corners, vec![1]);
+    // X is fitted from 2 wide to 1, so the move halves.
+    assert_eq!(smile.positions, vec![[0.5, 0.0, 0.0]]);
+    assert!(
+        Vec3::from(smile.normals[0]).length() > 0.1,
+        "the file's normal change is kept"
+    );
+    assert_eq!(lash.morphs.len(), 1);
+    assert_eq!(lash.morphs[0].target, 0);
+    assert_eq!(lash.morphs[0].corners, vec![0, 1, 2]);
+    // Y is fitted from 3 tall to 1.
+    let down = lash.morphs[0].positions[0][1];
+    assert!((down + 1.0 / 3.0).abs() < 1e-6, "{down}");
+
+    // Leaning toward Blink_Left moves both meshes, before skinning.
+    let mut posed = model.rest_posed();
+    assert_eq!(posed.morph_weights(), [0.0, 0.25]);
+    posed.set_morph_weights(&[1.0, 0.0]);
+    let lifted = posed.primitive(&model, 0, 0);
+    assert_eq!(lifted.positions[2][2], skin.positions[2][2] + 1.0);
+    assert_eq!(lifted.positions[1], skin.positions[1], "Smile is off");
+    let lowered = posed.primitive(&model, 1, 0);
+    assert!((lowered.positions[0][1] - (lash.positions[0][1] + down)).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(&folder);
+}

@@ -229,6 +229,7 @@ impl EditorApp {
         let scripts = project.scripts.len();
         let show_splash = project.manifest.show_splash;
         let developer_console = project.manifest.developer_console;
+        let ray_traced_by_default = project.manifest.ray_traced_by_default;
         let loading_screen = project.manifest.loading_screen.clone();
         let branding = project.manifest.branding.clone();
         self.profiler.set_budget(project.manifest.memory_budget);
@@ -355,6 +356,7 @@ impl EditorApp {
             level,
             show_splash,
             developer_console,
+            ray_traced_by_default,
             loading_screen,
             branding,
             input_map: project.input_map,

@@ -65,4 +65,5 @@ A heightfield has one height per spot, so it can't have an overhang, a cave or a
 
 ## Progress
 
-Nothing is built yet. PW1 is next.
+- **PW1 Scatter rules: done** (PR after #344). `ScatterRule` class, per-chunk hash-grid placement in `procedural/src/terrain_scatter.rs`, generated foliage in `TerrainData` (not saved), per-chunk drawing in `scene`, physics, navigation and preload reading `all_foliage`, the Terrain Studio's Scatter Rules section with presets, Assets picking and Bake. A 2,048-stud forest of 348,428 plants: 0.12 s to place in release, 0.06 ms a frame idle, 2.4 ms to remake the 16 chunks a sculpt stroke touches.
+- PW2 Biomes is next.

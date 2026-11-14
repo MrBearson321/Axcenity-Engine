@@ -713,3 +713,68 @@ fn an_fbx_col_object_is_a_collision_piece_not_drawn() {
         model.collision[0]
     );
 }
+
+/// [`pyramid_fbx`] (Y up, 4 wide and 3 tall) with one blend shape, `Lift`
+/// in a Maya-style `blendShape1.Lift` channel resting at 40%, that raises
+/// the apex (vertex 4) by 3.
+fn lifting_pyramid_fbx() -> String {
+    let shape = "\tGeometry: 1100, \"Geometry::Lift\", \"Shape\" {\n\
+         \t\tVersion: 100\n\
+         \t\tIndexes: *1 {\n\t\t\ta: 4\n\t\t}\n\
+         \t\tVertices: *3 {\n\t\t\ta: 0,3,0\n\t\t}\n\
+         \t\tNormals: *3 {\n\t\t\ta: 0,0,0\n\t\t}\n\
+         \t}\n\
+         \tDeformer: 1200, \"Deformer::Morpher\", \"BlendShape\" {\n\
+         \t\tVersion: 100\n\
+         \t}\n\
+         \tDeformer: 1300, \"SubDeformer::blendShape1.Lift\", \"BlendShapeChannel\" {\n\
+         \t\tVersion: 100\n\
+         \t\tDeformPercent: 40\n\
+         \t\tFullWeights: *1 {\n\t\t\ta: 100\n\t\t}\n\
+         \t}\n\
+         \tMaterial: 3000";
+    pyramid_fbx(false, None)
+        .replacen("\tMaterial: 3000", shape, 1)
+        .replacen(
+            "\tC: \"OO\",1000,2000\n",
+            "\tC: \"OO\",1000,2000\n\tC: \"OO\",1200,1000\n\tC: \"OO\",1300,1200\n\tC: \"OO\",1100,1300\n",
+            1,
+        )
+}
+
+#[test]
+fn an_fbx_blend_shape_is_read_without_its_deformers_prefix() {
+    let folder = temp_folder("blend-shape");
+    let model = load_fbx(&lifting_pyramid_fbx(), &folder).unwrap();
+    assert_eq!(model.morph_targets.len(), 1, "{:?}", model.morph_targets);
+    assert_eq!(model.morph_targets[0].name, "Lift");
+    assert!((model.morph_targets[0].default_weight - 0.4).abs() < 1e-6);
+    let primitive = &model.primitives[0];
+    assert_eq!(primitive.morphs.len(), 1);
+    let morph = &primitive.morphs[0];
+    // Every corner at the apex rises, and nothing else.
+    let apex = primitive
+        .positions
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p[1] > 0.49)
+        .map(|(corner, _)| corner as u32)
+        .collect::<Vec<_>>();
+    assert!(!apex.is_empty());
+    assert_eq!(morph.corners, apex);
+    for delta in &morph.positions {
+        // 3 of the model's 3 studs of height: 1 in the fitted cube.
+        assert!((delta[1] - 1.0).abs() < 1e-4, "{delta:?}");
+        assert!(delta[0].abs() < 1e-6 && delta[2].abs() < 1e-6);
+    }
+    // The file's normal offsets are all zero, so they're worked out: the
+    // sides tip, and the apex's corners' normals turn with them.
+    assert!(
+        morph
+            .normals
+            .iter()
+            .any(|normal| glam::Vec3::from(*normal).length() > 1e-3),
+        "{:?}",
+        morph.normals
+    );
+}

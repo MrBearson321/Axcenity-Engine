@@ -14,7 +14,16 @@
 //! The grid is split into square chunks of [`CHUNK_CELLS`] cells. Each chunk
 //! counts its edits (`height_version`, `paint_version`), so whatever draws
 //! or collides with the terrain only rebuilds the chunks that changed.
+//!
+//! Besides the painted foliage, each chunk can hold **generated** foliage:
+//! what the terrain's ScatterRules place there (procedural worlds PW1). It's
+//! made from the rules and the ground on every device, so it's never saved
+//! (`foliage()` is only the painted list); each chunk keeps the key of the
+//! inputs it was made from, so only chunks whose inputs changed are made
+//! again. [`TerrainData::all_foliage`] is both lists, for drawing and
+//! colliding.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::Vector3;
@@ -300,6 +309,15 @@ pub struct TerrainRegion {
     pub foliage: Vec<FoliageInstance>,
 }
 
+/// What a terrain's scatter rules placed in one chunk, and the key of the
+/// inputs it was made from (0: never made). Shared, so copying a terrain
+/// doesn't copy every generated plant.
+#[derive(Clone, Debug, Default)]
+struct GeneratedChunk {
+    key: u64,
+    instances: Arc<[FoliageInstance]>,
+}
+
 /// One Terrain's heightfield and paint. See the module docs.
 #[derive(Debug)]
 pub struct TerrainData {
@@ -312,6 +330,11 @@ pub struct TerrainData {
     /// Per chunk, row by row: bumped each time its heights or paint change.
     height_versions: Vec<u64>,
     paint_versions: Vec<u64>,
+    /// Per chunk, row by row: what the scatter rules placed there.
+    generated: Vec<GeneratedChunk>,
+    /// Bumped each time generated foliage changes (it isn't saved, so it
+    /// doesn't bump `revision`).
+    generated_version: u64,
     /// Bumped by every change, to tell whether the terrain needs saving.
     revision: u64,
     /// The generator settings (JSON) of the last generated landscape, saved
@@ -331,6 +354,8 @@ impl Clone for TerrainData {
             foliage: self.foliage.clone(),
             height_versions: self.height_versions.clone(),
             paint_versions: self.paint_versions.clone(),
+            generated: self.generated.clone(),
+            generated_version: self.generated_version,
             revision: self.revision,
             generation: self.generation.clone(),
         }
@@ -404,6 +429,8 @@ impl TerrainData {
             foliage: Vec::new(),
             height_versions: vec![1; chunks],
             paint_versions: vec![1; chunks],
+            generated: vec![GeneratedChunk::default(); chunks],
+            generated_version: 0,
             revision: 0,
             generation: None,
         })
@@ -445,6 +472,71 @@ impl TerrainData {
     pub fn foliage_mut(&mut self) -> &mut Vec<FoliageInstance> {
         self.revision += 1;
         &mut self.foliage
+    }
+
+    /// What the scatter rules placed, chunk by chunk (never saved).
+    pub fn generated_foliage(&self) -> impl Iterator<Item = &FoliageInstance> {
+        self.generated
+            .iter()
+            .flat_map(|chunk| chunk.instances.iter())
+    }
+
+    /// What the scatter rules placed, one shared list per chunk (row by
+    /// row), for whatever keeps work per chunk: a list that's the same
+    /// `Arc` as before hasn't changed.
+    pub fn generated_chunks(&self) -> impl Iterator<Item = &Arc<[FoliageInstance]>> {
+        self.generated.iter().map(|chunk| &chunk.instances)
+    }
+
+    /// How many plants, props and models the scatter rules placed.
+    pub fn generated_count(&self) -> usize {
+        self.generated
+            .iter()
+            .map(|chunk| chunk.instances.len())
+            .sum()
+    }
+
+    /// The painted foliage, then the generated: everything drawn and
+    /// collided on this terrain.
+    pub fn all_foliage(&self) -> impl Iterator<Item = &FoliageInstance> {
+        self.foliage.iter().chain(self.generated_foliage())
+    }
+
+    /// The key of the inputs chunk (`cx`, `cz`)'s generated foliage was
+    /// made from, or 0 if it never was.
+    pub fn generated_key(&self, cx: usize, cz: usize) -> u64 {
+        let (chunks_x, _) = self.chunk_counts();
+        self.generated[cz * chunks_x + cx].key
+    }
+
+    /// What chunk (`cx`, `cz`)'s generated foliage is, made from inputs
+    /// with this `key`. Doesn't count as an edit (it isn't saved).
+    pub fn set_generated(
+        &mut self,
+        cx: usize,
+        cz: usize,
+        key: u64,
+        instances: Vec<FoliageInstance>,
+    ) {
+        let (chunks_x, _) = self.chunk_counts();
+        self.generated[cz * chunks_x + cx] = GeneratedChunk {
+            key,
+            instances: instances.into(),
+        };
+        self.generated_version += 1;
+    }
+
+    /// Forgets all generated foliage (it's made again when next asked).
+    pub fn clear_generated(&mut self) {
+        if self.generated.iter().any(|chunk| chunk.key != 0) {
+            self.generated.fill(GeneratedChunk::default());
+            self.generated_version += 1;
+        }
+    }
+
+    /// Changes each time generated foliage does.
+    pub fn generated_version(&self) -> u64 {
+        self.generated_version
     }
 
     /// Puts loaded foliage on this terrain without counting as an edit.
@@ -568,6 +660,8 @@ impl TerrainData {
         let next = self.newest_version() + 1;
         self.height_versions = vec![next; chunks];
         self.paint_versions = vec![next; chunks];
+        self.generated = vec![GeneratedChunk::default(); chunks];
+        self.generated_version += 1;
         self.revision += 1;
     }
 

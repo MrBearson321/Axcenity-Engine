@@ -20,6 +20,7 @@
 mod presets;
 
 mod layers;
+pub(crate) mod scatter;
 mod tool_settings;
 mod water;
 
@@ -48,6 +49,7 @@ use crate::widgets::{self, Role};
 
 pub use axcenity_editor_tools::terrain_tool::TerrainTool;
 pub use presets::{LayerPreset, layers_for};
+pub use scatter::{RulePreset, scatter_rules};
 
 /// A TerrainLayer's map properties, with what the studio calls them.
 pub const LAYER_MAPS: [(&str, &str); 6] = [
@@ -146,6 +148,12 @@ pub enum TerrainAction {
     CancelJob,
     /// Take away all hand-painted materials.
     ClearPaint,
+    /// Add ScatterRules from these presets to the end, as one undo step
+    /// with this label.
+    AddScatterRules(Vec<RulePreset>, String),
+    /// Turn what the scatter rules placed into painted foliage and switch
+    /// the rules off, as one undo step.
+    BakeScatter,
     /// Change the terrain's resolution (samples along X).
     Resample(usize),
     ImportHeightmap,
@@ -345,7 +353,7 @@ pub fn terrain_of(world: &World, id: InstanceId) -> Option<InstanceId> {
     let instance = world.get(id)?;
     match instance.class() {
         ClassName::Terrain => Some(id),
-        ClassName::TerrainLayer => instance
+        ClassName::TerrainLayer | ClassName::ScatterRule => instance
             .parent()
             .filter(|&parent| world.get(parent).map(|p| p.class()) == Some(ClassName::Terrain)),
         _ => None,
@@ -428,6 +436,7 @@ impl TerrainStudio {
                     let Some(tool) = self.tool else {
                         hint(ui, "Pick a tool to start shaping the terrain.");
                         self.layers_section(ui, cx, terrain, false, &mut actions);
+                        self.scatter_section(ui, cx, terrain, &mut actions);
                         self.water_section(ui, cx.world, terrain, &mut actions);
                         self.view_section(ui);
                         return;
@@ -453,6 +462,7 @@ impl TerrainStudio {
                     }
                     let painting = matches!(tool, TerrainTool::Paint | TerrainTool::Auto);
                     self.layers_section(ui, cx, terrain, painting, &mut actions);
+                    self.scatter_section(ui, cx, terrain, &mut actions);
                     self.water_section(ui, cx.world, terrain, &mut actions);
                     self.view_section(ui);
                     self.data_section(ui, cx.world, terrain, &mut actions);
