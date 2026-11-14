@@ -56,10 +56,18 @@ pub enum Message {
         /// The player's engine's [`class_defaults`] (roadmap M7); 0 from
         /// an engine before it.
         defaults: u64,
+        /// The rejoin key the host gave this player last time ([`Message::Welcome`]),
+        /// when it lost the connection and joins again; 0 otherwise or from
+        /// an engine before multiplayer readiness MP2. A host that knows the
+        /// key drops that player's stale connection and lets them back in.
+        rejoin: u64,
     },
     Welcome {
         you: Peer,
         players: Vec<Peer>,
+        /// A secret only this player and the host know, to rejoin with
+        /// after losing the connection (MP2).
+        rejoin: u64,
     },
     Refused {
         reason: String,
@@ -142,6 +150,8 @@ enum Greeting {
         user_id: u64,
         #[serde(default)]
         defaults: u64,
+        #[serde(default)]
+        rejoin: u64,
     },
     Refused {
         reason: String,
@@ -171,6 +181,7 @@ impl Message {
                 password,
                 user_id,
                 defaults,
+                rejoin,
             } => Some(Greeting::Hello {
                 protocol: *protocol,
                 game: game.clone(),
@@ -179,6 +190,7 @@ impl Message {
                 password: password.clone(),
                 user_id: *user_id,
                 defaults: *defaults,
+                rejoin: *rejoin,
             }),
             Message::Refused { reason } => Some(Greeting::Refused {
                 reason: reason.clone(),
@@ -208,6 +220,7 @@ impl Message {
                     password,
                     user_id,
                     defaults,
+                    rejoin,
                 } => Message::Hello {
                     protocol,
                     game,
@@ -216,6 +229,7 @@ impl Message {
                     password,
                     user_id,
                     defaults,
+                    rejoin,
                 },
                 Greeting::Refused { reason } => Message::Refused { reason },
             }),

@@ -70,6 +70,14 @@ TextLabel.Text: string
 
 The text to display. With a TextKey, this is the source text, shown when the string table has no value for it.
 
+```lua
+local label = script.Parent
+for seconds = 10, 0, -1 do
+	label.Text = "Starting in " .. seconds
+	task.wait(1)
+end
+```
+
 #### TextKey
 
 ```luau
