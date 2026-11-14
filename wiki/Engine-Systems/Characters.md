@@ -44,12 +44,13 @@ sequenceDiagram
 
 ## Testing
 
-`crates/character/src/tests.rs`, `tests/seat.rs`; player tests `seat_tests.rs`, `vehicle_tests.rs`, `spawn_tests.rs`, `humanoid_tests.rs`.
+`crates/character/src/tests.rs`, `tests/seat.rs`; player tests `seat_tests.rs`, `vehicle_tests.rs`, `spawn_tests.rs`, `humanoid_tests.rs`, `default_humanoid_tests.rs` (the default humanoid asset).
 
 ## Development guidance
 
 - Never change physics settings from here; fall by `physics::gravity(world)`.
 - A new movement feature works in both controllers (only `Eye` and `pose_camera` differ).
+- The default rig is still six welded blocks. The skinned default humanoid (`assets/characters/humanoid`, `examples/hello-humanoid`) replaces it in stage HD3 of `docs/research/default-humanoid.md`: its collision is an invisible root part apart from the visuals, since a MeshPart in an A-pose would make the body's radius (from its parts' extent) far too wide.
 
 ## Related documentation
 
