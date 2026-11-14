@@ -92,7 +92,13 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 
 R16's plan for regions and data layers is `docs/research/world-regions-r16.md`: data layers are `DataLayer` objects in a `DataLayerService`, each gathering the Instances with its name as a tag; showing, locking and setting regions aside in the editor is per person; the editor can stream around the camera; and `DataLayerService` parks inactive layers in games (stages R16.2–R16.4, after the Streaming overlay #280). Built: data layers in the editor (#328), Stream While Editing (#331), regions (#333) and data layers in games (#336, `DataLayerService:SetLayerActive`); only PC hand checks are left.
 
+Procedural world creation (Paul's Priority 3 of 2026-11-14) is planned in `docs/research/procedural-worlds.md`: scatter rules inside a Terrain that place plants and props live per chunk on every device (PW1), biomes (PW2), world presets (PW3), roads and paths (PW4), terrain and objects (PW5) and procedural buildings (PW6); mesh terrain for cliffs, caves and overhangs is a proposal awaiting Paul's choice (PW7–PW8). **Planned**, none built yet.
+
 R15 is built: sculpt brushes and the Mesh Filter (#317), masks saved (#322), `_COL` collision pieces (#319) and the Collision fold that makes them (#334), the Levels of detail fold (#320) and Edit in Blender (#321).
+
+## Import formats and extensibility (Paul's priority 7, 2026-11-14)
+
+`docs/research/import-formats-and-plugins.md`: OBJ read directly through `ufbx` (P7.1), USD converted to `.glb` on import by an editor-only `convert` crate ([ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md), P7.2), mesh import presets (P7.3), plugin API 3 (P7.4); Alembic deferred until a geometry-cache workflow needs it (P7.5), USD animation later (P7.6), native extensions deferred.
 
 ## Feature plan (unified plan, Phases 1–93)
 

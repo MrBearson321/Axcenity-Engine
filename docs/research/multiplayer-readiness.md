@@ -1,0 +1,97 @@
+# Multiplayer readiness: the plan for public hosting
+
+Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
+
+- **Status:** MP0 (this plan) written. MP1–MP7 not started.
+- **Date:** 2026-11-14
+- **Engine:** `main` at `f6d5427`
+- **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
+
+## 1. Summary
+
+- The netcode is server-authoritative already: the server owns the world, replicates by comparison, budgets motion per player and checks each player's character ([networking.md](../architecture/networking.md)). Nothing is rewritten. The work adds what a server on the open internet needs around it.
+- **Order:** measure first (bots and the scale run), then make the server hard to break (operational tests, validation), then make it reachable safely (secure connections, NAT and relay), then prediction and rollback, which is the largest and most open piece.
+- **Paul's machines** are needed for the 16–32 client run (PC and Mac, LAN and Tailscale) and the cross-network NAT checks. Everything else is built and tested in the cloud container with real UDP sockets on one machine.
+
+## 2. Where things stand
+
+| Item | What exists (main `f6d5427`) | Gap |
+|---|---|---|
+| Scale testing | `axcenity-server --bench <frames> --bench-clients <n>`: n loopback players in the server's process (M7: S10k with 8 players, 1.02 MB snapshot, 5.06 ms network send). Editor Play with up to 8 clients. | No client that runs as its own process over real UDP, so no test with players on other machines. No per-player numbers over time (round trip, corrections, bytes) from a long run. `MaxPlayers` defaults to 8. |
+| Secure connections | `renet_netcode` runs `ServerAuthentication::Unsecure` (`transport.rs`): packets are neither encrypted nor signed, and anyone who knows the address can connect. A password is checked in `Hello`, which travels in the clear. | Encryption, connect tokens, a server identity the player can check. |
+| NAT traversal and relay | Direct address, LAN discovery (UDP 47801). Collaborate uses Tailscale (C3), games don't. | A host behind a home router can't be reached without a forwarded port. No port mapping, hole punching, relay or join code. |
+| Prediction and rollback | A player's device moves its own character and owned assemblies with no delay; the server checks and corrects them (`ownership.rs`). Others are shown 0.1 s behind, smoothed (`motion.rs`). Server raycasts can be lag compensated, and replays record the replication stream (Phase 81). | No input-driven simulation, so no rewind and resimulate: an owned assembly is trusted within 60 studs, a correction snaps, and a game can't predict anything else (a projectile, a door, a vehicle the server drives). |
+| Server-authoritative validation | `CharacterCheck` (speed, jump height, 30-stud teleports), owned assemblies within 60 studs, remote messages from a player are theirs and must name a RemoteEvent outside server-only services, chat trimmed to 200 characters, console commands only for `AllowedUserIds`. | No rate or size budgets per connection (a client can fill the 5 MiB reliable channel with RemoteEvent calls), no check that a character moved through walls or kept flying, owned assemblies' speed unchecked, no strike count or kick for repeated failures, nothing a game's Scripts can read about failed checks. |
+| Operational testing | `crates/server/tests/headless.rs` starts the real binary; LAN discovery has a two-computer hand test. | No tests for a server crash and restart, players reconnecting, many joins and leaves (leaks), floods and exhaustion, or recovery. A client never reconnects by itself. |
+
+## 3. Decisions
+
+Recorded in [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) where they touch connections. Each can be changed by Paul; the phases below follow them until he does.
+
+### D1. Secure connections are netcode connect tokens that the game server issues itself
+
+renet's secure mode needs a connect token per player, made with a private key the server knows, and delivered to the player privately (the token carries the keys that encrypt the connection). Netcode leaves "who hands out tokens" to the game. Options:
+
+| Option | For | Against |
+|---|---|---|
+| **A. The server issues tokens itself over TLS, pinned by its certificate's fingerprint** | No account service or website. The same model as Collaborate (C3/C10: self-signed certificate, fingerprint in the link). Works for a listen server and `axcenity-server` alike. | A typed address with no fingerprint has to trust the first certificate it sees (as SSH does). |
+| B. A separate token service (web back end) | The standard netcode setup; lets accounts decide who may join. | Infrastructure the policy rules out, and an account system (R19) that doesn't exist. |
+| C. Encrypt in Axcenity's own layer over unsecured netcode | No token exchange. | Hand-rolled cryptography; netcode's secure mode already does this properly. |
+
+**Chosen: A.** A player first opens a TLS connection (rustls, already used by Collaborate) to the server's **token port**, TCP on the same number as the game's UDP port (47800), sends who they are, and gets a connect token valid for 30 seconds. Then netcode connects with it, encrypted. The `Hello` handshake runs as before inside the encrypted connection, so refusals keep their wording. The fingerprint comes from a join link or server list entry (`axcenity://join/<host:port>#<fingerprint>`); a typed address remembers the first fingerprint per address in the player's data folder and refuses a changed one with why. A password is checked at the token port, so a wrong password never gets a token. LAN play, the editor's Play and the loopback stay unsecured (nothing crosses a network, or the user chose LAN): `--host --lan` and LAN discovery keep today's behaviour. B stays possible later: the token format is netcode's, so an account service could issue the same tokens with the server's key.
+
+### D2. Reaching a host: direct, then port mapping, then hole punching, then a relay
+
+| Step | What it does | Needs |
+|---|---|---|
+| Direct | As today: an address and port the player can reach. | A public address or a forwarded port. |
+| Port mapping | The host asks the router to forward its game and token ports (UPnP IGD, then NAT-PMP/PCP), and drops the mapping when it stops. | A router that allows it (Paul's doesn't have UPnP, 2026-11-12). |
+| Hole punching | Host and player both reach a rendezvous service, learn each other's public addresses and send UDP to each other at once. | A rendezvous service both can reach; fails on symmetric NAT. |
+| Relay | The relay forwards UDP between player and host; netcode's encryption (D1) means it can't read or alter the game. | A relay both can reach. |
+
+**Chosen:** all four, tried in that order and reported in the join's log. The rendezvous and relay are one self-hostable binary, `axcenity-relay`, in the repository: a host registers with it and gets a short **join code**; a player joins by code. Axcenity runs no public relay (policy: no infrastructure); a game, or Paul, runs one wherever they like. Tailscale stays a supported path: an address on the tailnet is just a direct address.
+
+### D3. Prediction and rollback without cross-machine determinism
+
+The policy rules out deterministic lockstep (no `enhanced-determinism`, no fixed-point). Rollback here is **client-side prediction with server reconciliation**: the server stays the authority and simulates from the inputs players send; a player's device simulates its own inputs at once, and when the server's state for an earlier tick arrives it rewinds what it predicts to that state and replays its inputs since. Because the two machines' floats can differ, the replayed state is close but not equal; the leftover error is smoothed away over a few frames instead of snapping. This needs:
+
+1. Ticks: a numbered fixed step shared by server and players (physics already steps at a fixed 60 Hz).
+2. Input streams per tick from each player (movement, look, Run, jump, and game-defined actions), sent redundantly on the unreliable channel.
+3. Physics state save and restore for the predicted bodies (rapier's sets can be cloned), and stepping only those bodies again.
+4. A server mode where characters are moved by the server from inputs (`Players.CharacterAuthority = "Server"`), next to today's client-moved characters (`"Client"`, the default, unchanged).
+
+Stages: MP6a input-driven server characters with prediction and reconciliation; MP6b predicted physics bodies (owned assemblies, projectiles) through the same rewind; MP6c a Lua API for a game's own predicted state if real games ask for it. Each stage is measured (rollback cost per frame, correction size under emulated 100–200 ms and loss) before the next.
+
+### D4. Validation: budgets per connection, checks per kind, strikes
+
+- **Budgets.** Every message kind from a player gets a rate and size budget (token bucket), as Collaborate's `limits.rs` does: remote calls, chat, console lines, stream requests, owned-part packets. Going over drops the message and counts a strike. A RemoteEvent argument tree has limits on depth, table entries and bytes.
+- **Movement.** `CharacterCheck` also refuses passing through anchored solid parts and Terrain (a ray from the last accepted place to the new one) and hovering above the ground for longer than a jump takes. Owned assemblies get the same speed check as characters, from their own velocity limits.
+- **Strikes.** Each failed check is logged on the server with the player and why. A game reads them in Scripts (`Players.PlayerFlagged(player, reason)`) and decides; past a threshold per minute (a server setting, 0 off) the server kicks the player with a plain reason.
+
+### D5. Operational tests run real processes
+
+Operational tests start the real `axcenity-server` and real bot processes over UDP on one machine, inject the failure (kill the server, cut a bot's packets, flood), and check the outcome: players back in after a restart, memory and Instance counts back to where they started after churn, the server still at frame rate under a flood. Short versions run with `cargo test`; long soaks are `--ignored` and run by hand. Players' devices learn to **reconnect**: when the connection is lost (not when kicked or refused), the player tries again for 60 seconds with back-off, and the server takes the same UserId back in place of a stale connection.
+
+## 4. What stays Paul's call
+
+- Running a public `axcenity-relay` or any hosted service (the policy's rule 1; costs money).
+- Whether `axcenity-server` on a public address may run unsecured at all (the plan: it may, with `--insecure` and a warning).
+- Raising `Players.MaxPlayers`' default above 8 once the scale run shows how far it goes.
+- MP6b and MP6c, after MP6a's measurements.
+
+## 5. Phases
+
+One PR per phase against `main`, opened in merge order. Each updates `docs/architecture/networking.md`, `wiki/Engine-Systems/Networking.md` and this file's status.
+
+| Phase | What | Tested where |
+|---|---|---|
+| MP0 | This plan and ADR-0026 | — |
+| MP1 | **Bots and the scale harness.** `axcenity-bots <address> --count <n>`: headless players as their own process over real UDP, each with a replica world, moving its character on a path and firing a RemoteEvent if the game has one; per-player round trip, join time, bytes and corrections, printed every few seconds and as a summary. `axcenity-server --stats <seconds>`: frame times and per-player bandwidth while serving. `scripts/net-scale.py` runs server and bots and writes a report. A test joins 32 bots over UDP on one machine. | Cloud (32 bots on one machine); then **Paul's PC and Mac** (16–32 bots split across them, LAN and Tailscale) for G13 |
+| MP2 | **Operational tests and reconnecting.** Players reconnect after a lost connection; the server replaces a stale connection with the same UserId; tests for a server killed and restarted (saves kept, bots back in), churn (bots joining and leaving for minutes, no leak), floods (connection requests, oversized and many messages) and recovery. | Cloud |
+| MP3 | **Validation.** D4's budgets, argument limits, wall and flight checks, owned-assembly speed, strikes, `Players.PlayerFlagged`, kick threshold. Tests with a "modified client" bot mode for each cheat. | Cloud |
+| MP4 | **Secure connections.** D1: token port over TLS, the server's certificate kept in its data folder, connect tokens, encrypted netcode, fingerprints in join links and remembered per address, password at the token port, `--insecure`. | Cloud; then a PC–Mac join over Tailscale |
+| MP5 | **NAT traversal and relay.** `axcenity-relay` (rendezvous, join codes, relaying), port mapping on the host, hole punching, fallback order and log. | Cloud (relay and NAT emulated with network namespaces where the container allows); **Paul's machines** for a real cross-network join |
+| MP6a | **Prediction and rollback, stage 1.** D3's ticks, input streams, server-moved characters with prediction and reconciliation, error smoothing; measured under emulated latency and loss. | Cloud (loopback with emulated network); hand check on the PC |
+| MP7 | **Scale run report.** G13's numbers from Paul's machines, with what they change (MaxPlayers default, budgets). | Paul's machines |
+
+MP6b, MP6c and anything hosted wait for Paul.

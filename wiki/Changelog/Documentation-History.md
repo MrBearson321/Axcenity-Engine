@@ -12,6 +12,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 
 | Date | Pages | Change | By |
 |---|---|---|---|
+| 2026-11-14 | ADR-0027, ADR index, roadmap | P7 investigation: USD, Alembic and OBJ import, convert-on-import, mesh import presets, plugin API 3 (`docs/research/import-formats-and-plugins.md`) | Claude |
 | 2026-11-14 | Lighting and atmosphere, roadmap | Runtime lighting parity audit (`docs/research/runtime-lighting-parity.md`): what played games get of ray tracing, items RL1–RL5 | Claude |
 | 2026-11-13 | Rendering, lighting and atmosphere | Volumetric fog: own light by openness, 8 shadow samples a cell, dust boxes (FogEffect `Density`); ray traced shadows through cut-outs' holes (`ray_cut_outs.rs`) | Claude |
 | 2026-11-12 | Roadmap | Cohesion pass CP9: final validation done (CP7 and CP9 marked done) | Claude |

@@ -88,10 +88,10 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 
 | Date | Page | Change |
 |---|---|---|
+| 2026-11-14 | ADR-0027, roadmap | Import formats and plugins (P7): USD converted on import, OBJ, mesh import presets, plugin API 3 |
 | 2026-11-14 | Lighting and atmosphere, roadmap | What played games get of ray tracing, and the plan to close the gaps (RL1–RL5) |
 | 2026-11-13 | Rendering, lighting and atmosphere | Sun shafts in rooms: dust in a GraphicsVolume, volumetric fog that stays dark indoors, leaf-shaped ray traced shadows |
 | 2026-11-12 | Roadmap | Cohesion pass CP9: final checks done, the pass is complete |
 | 2026-11-12 | Project and serialization, roadmap | Cohesion pass CP8: your game's own icon and banner, in the player and every build |
-| 2026-11-12 | System inventory, roadmap | Cohesion pass CP7: a Team Projects start page, the host asked before someone joins, narrower listening, firewall checks |
 
 Keep the five newest rows here; the full list is [Documentation history](Changelog/Documentation-History.md).
