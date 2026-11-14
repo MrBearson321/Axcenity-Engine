@@ -643,6 +643,19 @@ impl Context {
         });
     }
 
+    /// `Players.PlayerFlagged(player, reason)` (multiplayer readiness MP3).
+    pub fn fire_player_flagged(&self, world: &mut World, player: InstanceId, reason: &str) {
+        let players = world.players();
+        with_world(&self.lua, world, || {
+            events::fire(
+                &self.lua,
+                events::Owner::Instance(players),
+                "PlayerFlagged",
+                (instance::LuaInstance(player), reason.to_owned()),
+            );
+        });
+    }
+
     /// `player:LoadCharacter()` from the runtime (server): a join or a
     /// respawn. Its events wait in [`Self::take_spawned`].
     pub fn load_character(&self, world: &mut World, player: InstanceId) {

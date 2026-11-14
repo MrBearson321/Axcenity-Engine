@@ -151,7 +151,7 @@ pub use lent::{WorldMut, WorldRef, world as lent_world, world_mut as lent_world_
 pub use levels::Levels;
 pub use network::{LanGame, NetworkRequest};
 pub use prompt::ShownPrompt;
-pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
+pub use remote::{Loopback, MAX_TABLE_DEPTH, Message, MessageKind, RemoteValue, Transport};
 pub use replay::{MAX_BUFFER_SECONDS, ReplayRequest};
 pub use sandbox::{SyntaxError, find_syntax_error};
 pub use sequence::sound_actions as sequence_sound_actions;
