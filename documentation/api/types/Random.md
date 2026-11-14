@@ -56,3 +56,10 @@ Random.new(seed: number?): Random
 
 A generator. The same `seed` gives the same numbers on every run and platform; left out, each generator is different.
 
+```lua
+local random = Random.new()
+local x = random:NextNumber(-50, 50)
+local coins = random:NextInteger(1, 6)
+print(x, coins)
+```
+

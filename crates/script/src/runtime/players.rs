@@ -264,6 +264,17 @@ impl ScriptRuntime {
 
     /// Fires `NetworkService.ConnectionFailed(reason)` on both sides:
     /// hosting or joining failed, a join was refused or a connection lost.
+    /// Fires `Players.PlayerFlagged(player, reason)` in Scripts: the server
+    /// caught what `player`'s device sent breaking a rule (multiplayer
+    /// readiness MP3). The host decides how often.
+    pub fn fire_player_flagged(&mut self, world: &mut World, player: InstanceId, reason: &str) {
+        self.fire_changes(world);
+        self.context(Side::Server)
+            .fire_player_flagged(world, player, reason);
+        self.collect(Side::Server);
+        self.fire_changes(world);
+    }
+
     pub fn fire_connection_failed(&mut self, world: &mut World, reason: &str) {
         self.fire_changes(world);
         for side in [Side::Server, Side::Client] {
