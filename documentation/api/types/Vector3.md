@@ -40,6 +40,13 @@ Vector3.Magnitude: number
 
 The length of the vector.
 
+```lua
+local offset = workspace.Player.Position - workspace.Goal.Position
+if offset.Magnitude < 10 then
+	print("Almost there!")
+end
+```
+
 #### Unit
 
 ```luau
@@ -47,6 +54,11 @@ Vector3.Unit: Vector3
 ```
 
 The same direction with length 1 (the zero vector stays zero).
+
+```lua
+local direction = (workspace.Target.Position - workspace.Cannon.Position).Unit
+workspace.Ball.AssemblyLinearVelocity = direction * 80
+```
 
 #### zero
 
@@ -98,6 +110,14 @@ Vector3:Dot(other: Vector3): number
 
 The dot product: the lengths multiplied, times the cosine of the angle between them.
 
+```lua
+local door = workspace.Door
+local toPlayer = (workspace.Player.Position - door.Position).Unit
+if door.CFrame.LookVector:Dot(toPlayer) > 0 then
+	print("The player is in front of the door")
+end
+```
+
 #### Cross
 
 ```luau
@@ -113,6 +133,12 @@ Vector3:Lerp(goal: Vector3, alpha: number): Vector3
 ```
 
 The point `alpha` of the way from this vector to `goal` (0 is this one, 1 is `goal`).
+
+```lua
+local from = Vector3.new(0, 5, 0)
+local to = Vector3.new(20, 5, 0)
+workspace.Platform.Position = from:Lerp(to, 0.5) -- halfway
+```
 
 #### Angle
 

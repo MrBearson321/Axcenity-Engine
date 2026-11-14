@@ -112,6 +112,15 @@ Camera:WorldToScreenPoint(point: Vector3): (Vector3, boolean)
 
 `CurrentCamera` only: where `point` shows, in pixels from the view's top left (Z: studs in front of the camera, negative behind it), and whether it's on screen. Put a UI element there with `UDim2.fromOffset(at.X, at.Y)`.
 
+```lua
+-- In a LocalScript: where the treasure is on screen.
+local camera = workspace.CurrentCamera
+local point, visible = camera:WorldToScreenPoint(workspace.Treasure.Position)
+if visible then
+	print("The treasure is at", point.X, point.Y)
+end
+```
+
 #### WorldToViewportPoint
 
 ```luau
