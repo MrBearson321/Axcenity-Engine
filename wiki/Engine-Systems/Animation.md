@@ -55,6 +55,7 @@ flowchart LR
 - Format 1 clip files still read (converted).
 - Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
 - No GPU posing (state machines and IK run on the CPU each frame).
+- No motion matching: proposal only (`docs/research/motion-matching.md`, MM1–MM6; inertialization and a controller trajectory first, the database when there's a licensed dataset).
 - Blend shapes (morph targets) are imported (F1: `Model::morph_targets`, sparse `Primitive::morphs`, applied by `Posed::primitive` on the CPU) but not yet drawn morphed on the GPU (F2), and there is no facial animation yet. Plan: `docs/research/facial-animation.md` (F1–F7, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)).
 - Retargeting has rig definitions, fingers (AP1) and profiles (AP2: rest-pose matching, hips travel, planted feet and hand IK, per-role weight and offset). Twist isn't matched between rest poses (only bone directions), and planted feet come from the take's foot travel, not from detected contacts. Bone maps and profiles are edited in the Animation tab's Retargeting section (AP3). Keyed clips have Cleanup tools (AP4, `anim/src/cleanup.rs`): mirror (by the humanoid map and side words, baked a frame apart), smooth, reduce keys, fix the loop seam, re-time a range; they work on keys only, so a linked clip is converted first. Plan: `docs/research/animation-production.md` (AP5-AP7).
 
