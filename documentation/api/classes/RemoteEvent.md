@@ -37,6 +37,13 @@ RemoteEvent.OnClientEvent: Signal
 
 Fires when a Script calls `FireClient` or `FireAllClients`. The handler gets the arguments. LocalScripts only.
 
+```lua
+-- In a LocalScript.
+game.ReplicatedStorage.ShowMessage.OnClientEvent:Connect(function(text)
+	print("The server says:", text)
+end)
+```
+
 ### Functions
 
 #### FireServer
@@ -60,6 +67,14 @@ RemoteEvent:FireClient(player: Player, ...: any): ()
 ```
 
 Sends the arguments to one player, where `OnClientEvent` fires. Scripts only.
+
+```lua
+-- On the server: tell one player's device to show a message.
+local message = game.ReplicatedStorage.ShowMessage
+game:GetService("Players").PlayerAdded:Connect(function(player)
+	message:FireClient(player, "Welcome!")
+end)
+```
 
 #### FireAllClients
 
