@@ -44,7 +44,7 @@ D3 in the plan named fixed numbered ticks shared by server and players. The engi
 
 ## Consequences
 
-- The network protocol changes (`PROTOCOL_VERSION` 15).
+- The network protocol changes (`PROTOCOL_VERSION` 16).
 - Other players are drawn in the past on a device, so collisions with moving players cost corrections; moving platforms aren't rewound.
 - Seats, `MoveTo` and `MoveDirection` don't drive a remote player's character under `"Server"` yet; owned assemblies stay client-moved until MP6b.
 - Revisit if physics bodies need prediction (MP6b): those step at physics' fixed rate and would need rapier state saved and restored.
