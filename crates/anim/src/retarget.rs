@@ -409,4 +409,4 @@ fn leg_length(world: &[Mat4], map: &HumanoidMap) -> Option<f32> {
 
 #[cfg(test)]
 #[path = "retarget_tests.rs"]
-mod tests;
+pub(crate) mod tests;
