@@ -36,6 +36,7 @@ mod cleanup;
 mod clip;
 mod controller;
 mod easing;
+mod face;
 mod feet;
 pub mod files;
 pub mod ik;
@@ -64,6 +65,10 @@ pub use controller::{
     holds,
 };
 pub use easing::{DEFAULT_BEZIER, Easing, EasingDirection, EasingStyle, cubic_bezier, ease};
+pub use face::{
+    BUILT_IN_FACE_PROFILES, FaceBoneRole, FaceProblem, FaceRig, built_in_face_profile, check_face,
+    choose_face_profile,
+};
 pub use feet::{GroundHit, GroundProbe};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendSpace, BlendSpaceChild, BlendTree,
@@ -84,6 +89,8 @@ pub use retarget::{
 };
 pub use threads::{MAX_THREADS as ANIM_MAX_THREADS, ThreadTimes};
 
+#[cfg(test)]
+mod face_tests;
 #[cfg(test)]
 mod ik_control_tests;
 #[cfg(test)]

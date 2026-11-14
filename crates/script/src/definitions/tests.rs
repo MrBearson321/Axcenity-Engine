@@ -76,6 +76,11 @@ fn every_property_has_a_description() {
     let described: BTreeSet<_> = PROPERTY_DOCS
         .iter()
         .map(|(c, p, _)| (c.as_str(), *p))
+        .chain(
+            axcenity_core::face::FACE_CONTROLS
+                .iter()
+                .map(|control| (ClassName::FaceControls.as_str(), control.name)),
+        )
         .collect();
     assert_eq!(
         in_core, described,

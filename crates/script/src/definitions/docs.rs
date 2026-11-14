@@ -3073,6 +3073,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The name of the Animator's state to play (with no blend of its own) when Enabled turns false, such as a getting-up clip, or empty to carry on with the state playing.",
     ),
     (
+        ClassName::FaceControls,
+        "Enabled",
+        "If false, the face rests: the model's own blend shape values, and the eyes and jaw as the body's pose has them.",
+    ),
+    (
+        ClassName::FaceControls,
+        "Profile",
+        "The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`\"axcenity\"`, `\"arkit\"` or `\"vroid\"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.",
+    ),
+    (
         ClassName::IKControl,
         "Type",
         "How it turns the bones: `\"Position\"` puts EndEffector at the Target, `\"Rotation\"` turns it as the Target is turned from the MeshPart, `\"Transform\"` does both, and `\"LookAt\"` faces it at the Target.",
@@ -5513,6 +5523,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::VehicleSeat => {
             "A Seat that drives the car it's welded into: the body made of every part welded to it, the chassis. While someone sits on it, the Move action sets Throttle and Steer, and the camera follows the car until they get out with Jump. The car rides on the VehicleWheels parented to its parts. Everything a Seat has, and MaxSpeed, Torque, TurnSpeed, SteerAngle, Throttle, Steer and HandBrake."
+        }
+        ClassName::FaceControls => {
+            "The face of the MeshPart it's in: one number property per standard facial control, 0 to 1 (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Jaw_Open …). After the Animator and before drawing, its face profile turns them into the model's blend shape weights and turns its eye and jaw bones. Scripts and TweenService animate a face by setting these properties."
         }
         ClassName::IKControl => {
             "Inverse kinematics during the game, for the skinned MeshPart it's in (or its Animator). After the Animator and before drawing, it turns the bones from ChainRoot down to EndEffector toward its Target, by its Type. Weight and Enabled fade in and out over SmoothTime."

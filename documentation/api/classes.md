@@ -106,6 +106,7 @@ Instance classes: everything that can be in the tree.
 | [VehicleWheel](classes/VehicleWheel.md) | A wheel of the car whose part it's parented to: a spring and a ray to the ground, so no wheel collider touches it. |
 | [Ragdoll](classes/Ragdoll.md) | A ragdoll for the skinned MeshPart it's in: a capsule Part per main bone, named after the bone, and a BallSocketConstraint per joint, which Build (in its Properties) makes from the skeleton with a humanoid preset's limits. |
 | [IKControl](classes/IKControl.md) | Inverse kinematics during the game, for the skinned MeshPart it's in (or its Animator). |
+| [FaceControls](classes/FaceControls.md) | The face of the MeshPart it's in: one number property per standard facial control, 0 to 1 (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Jaw_Open …). |
 | [Fracture](classes/Fracture.md) | Breaks the Part or MeshPart it's in into pieces. |
 | [Health](classes/Health.md) | How much a Model can take: Health out of MaxHealth, put in any Model. |
 | [ProximityPrompt](classes/ProximityPrompt.md) | A prompt to do something, under a part or an Attachment. |
