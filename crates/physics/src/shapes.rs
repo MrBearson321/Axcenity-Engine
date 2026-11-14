@@ -805,3 +805,18 @@ fn foliage_ground(data: &TerrainData, size: Vec3, x: f32, z: f32) -> Option<Vec3
 fn to_vec3(v: Vector3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
 }
+
+/// A triangle mesh collider from flat vertex and index lists, such as a
+/// terrain volume chunk's surface (the PW8 spike). `None` for an empty or
+/// broken mesh.
+pub fn triangle_mesh(positions: &[[f32; 3]], indices: &[u32]) -> Option<ColliderBuilder> {
+    if indices.len() < 3 {
+        return None;
+    }
+    let vertices = positions.iter().map(|&p| Vec3::from_array(p)).collect();
+    let triangles = indices
+        .chunks_exact(3)
+        .map(|t| [t[0], t[1], t[2]])
+        .collect();
+    ColliderBuilder::trimesh(vertices, triangles).ok()
+}

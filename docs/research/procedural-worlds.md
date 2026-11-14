@@ -63,6 +63,42 @@ A heightfield has one height per spot, so it can't have an overhang, a cave or a
 
 **Paul chose A, then a spike of B (14 Nov 2026).** PW7 is holes plus cliff and cave pieces. PW8 starts as a spike (one volume, surface nets, a carve brush, collision and a benchmark on Paul's PC), and whether to build volumes fully is decided from its numbers. Option C isn't planned.
 
+## PW8 voxel spike: what's built and how it's decided
+
+The spike is the engine half of Option B, in `terrain/src/volume.rs` (tests `volume_tests.rs`) and `physics/src/volume_tests.rs`. It isn't an Instance: nothing saves, draws, sends or edits it in the editor yet. Those are the full build, if the numbers say so.
+
+- **Storage.** `VolumeData`: samples on a grid `spacing` studs apart (1 stud in the benchmark), each the distance to the surface in voxels, negative in rock, as an `i8` in sixteenths of a voxel. The range is ±7.9 voxels, which is all a surface needs. A sample is never exactly 0, so no two vertices meet. Chunks are 32³ samples. A chunk that is all air or all deep rock is one byte. One the surface passes through is 32 KB. Outside the box is air, so the surface closes at the edges. Each chunk has a version, bumped when a sample changes.
+- **Brushes.** `sphere(center, radius, carve)` adds or carves a ball by min/max of distances. It changes samples up to 8 voxels past the ball and returns the chunks it touched. `fill` starts a volume from a distance function, for example rock up to a heightfield.
+- **Mesher.** `mesh_chunk` uses surface nets:
+  - Each crossed cell gets one vertex, at the average of its edge crossings, with a normal from the gradient across the cell.
+  - Each crossed edge gets one quad, wound out of the rock.
+  - A chunk owns the edges that start on its own samples (the first chunk along an axis also owns the edges from the air before it), and reads one sample past each side. Neighbouring chunks therefore meet without gaps or doubled faces.
+  - Tests check that every edge is used as often each way: a ball across eight chunks, ground against the box, a tunnel, an arch, and a cave landscape.
+  - Surface nets can pinch where two pieces of surface share a cell: an edge used by four or six triangles. That is still closed, and both drawing and collision handle it. Dual contouring would keep sharp edges, at more cost.
+- **Collision.** `physics::triangle_mesh` makes a parry trimesh from a chunk's mesh. A ball dropped into a carved tunnel rests on its floor under 13 studs of rock, and the hilltop above holds a second ball.
+- **Benchmarks, set up but not run** (Paul's rule: no benchmarks until the Priority threads are done):
+  - `bench_volume_spike` (terrain) builds a cave landscape of 512 × 128 × 512 samples: fbm ground plus worms of carved balls. It prints chunk counts, sample memory, triangles, time to mesh everything and per surface chunk, and a 20-ball carve stroke with its chunks remeshed.
+  - `bench_volume_colliders` (physics) times building every chunk's collider.
+  - Both run in release: `cargo test --release -p axcenity-terrain -- --ignored --nocapture bench_volume_spike`, and the same with `-p axcenity-physics` and `bench_volume_colliders`.
+  - `AXCENITY_VOLUME_SIZE` sets the size. `AXCENITY_VOLUME_OBJ=<file>` writes the surface as an OBJ file to look at.
+  - A debug smoke run at 160 × 64 × 160 gave 50 chunks, 1.6 MB and about 169,000 triangles. That run checks the bench works, not the timings.
+
+**Build volumes fully if, on Paul's PC in release:**
+- meshing takes 2 ms or less per surface chunk;
+- a carve stroke with its chunks remeshed takes 8 ms or less;
+- a chunk's collider builds in 3 ms or less;
+- a 512 × 128 × 512 cave landscape's samples take 64 MB or less.
+
+Most of the samples' memory is chunks the surface crosses: about 16 MB for that landscape, by its chunk count. Otherwise keep holes plus pieces (PW7) and revisit.
+
+**The full build would add:**
+- a `TerrainVolume` Instance with its data in `World` beside `TerrainData`, and a data folder file;
+- chunk meshes drawn through `render::MeshSource` (as terrain chunks are), triplanar layers, and levels of detail with seams (Transvoxel-style skirts or stitching);
+- an editor brush with undo by chunk (the `Arc` copy of touched chunks);
+- navmesh input from the chunk meshes;
+- Collaborate and Play sync by chunk;
+- streaming like terrain chunks.
+
 ## Progress
 
 - **PW1 Scatter rules: done** (PR after #344). `ScatterRule` class, per-chunk hash-grid placement in `procedural/src/terrain_scatter.rs`, generated foliage in `TerrainData` (not saved), per-chunk drawing in `scene`, physics, navigation and preload reading `all_foliage`, the Terrain Studio's Scatter Rules section with presets, Assets picking and Bake. A 2,048-stud forest of 348,428 plants: 0.12 s to place in release, 0.06 ms a frame idle, 2.4 ms to remake the 16 chunks a sculpt stroke touches.
@@ -72,4 +108,4 @@ A heightfield has one height per spot, so it can't have an overhang, a cave or a
 - **PW5 Terrain and objects: done.** ScatterRules' `AvoidParts` and `PartMargin` (anchored, colliding parts within 12 studs of the ground clear their spots; `procedural/src/obstacles.rs`, a part's hash in the key of the chunks it reaches), `AlignToSlope` and `SinkDepth` (`FoliageInstance::lean` and `sink`, drawn and collided alike), and Conform to Terrain and Blend into Terrain in the Solid Modeling group (Blend paints the Terrain Studio's Paint layer). Conform moves straight down onto the ground under a footprint's middle rather than tilting with it: buildings stay upright, and Blend levels the ground instead.
 - **PW6 Procedural buildings: done.** `BuildingGenerator` (`procedural/src/building.rs`): a footprint from its own box (moved, turned and sized with the handles) or a Spline's corners, floors of window, wall and door bays from built-in parts or module models, a flat or gable roof, varied by `Seed`; generated, never saved, Bake keeps it; `examples/hello-buildings` is a street of them. A footprint that isn't a rectangle gets slabs of wedge pairs and a flat roof.
 - **PW7 Holes and cave pieces: done.** A hole mask in `TerrainData` (optional `holes.png`), left out of the drawn chunks, the collider, the navmesh, raycasts and scatter rules; the Holes tool (Shift fills) and `terrain_edit`'s `hole` and `fill`; built-in `Cliff` and `Rock` props with the Cliff Rocks and Boulders rule presets (Alpine gets Cliff Rocks). `examples/hello-caves` is a cave mouth walked into, with a game test that fails without the hole. Two refinements: cliff pieces lean only a little with the slope (0.35), since a slab square to a cliff sticks straight out of it; and an arch or cave-mouth piece isn't a built-in prop, because solid foliage collides as its box, which would close the opening: the mouth is parts (or a model placed by hand), which rules keep clear of.
-- PW8 Voxel spike is next.
+- **PW8 Voxel spike: built, waiting on its benchmark.** Storage, brushes, the surface-nets mesher and trimesh collision (see "PW8 voxel spike" above); the benchmarks run on Paul's PC once the Priority threads are done, and their numbers decide the full build.
