@@ -9,10 +9,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axcenity_anim::{
-    Clip, ClipEvent, ClipFile, EvaluatedProperty, PropertyName, PropertyTrack, TakeLink,
-    bone_from_numbers, bone_numbers, bone_paths, find_bone, take_bones,
+    Clip, ClipEvent, ClipFile, EvaluatedProperty, PropertyName, PropertyTrack, RetargetProfile,
+    TakeLink, bone_from_numbers, bone_numbers, bone_paths, find_bone, read_retarget_profile,
+    take_bones,
 };
-use axcenity_assets::{Assets, BoneTransform, Model, Rig, Take};
+use axcenity_assets::{Assets, Bone, BoneTransform, Model, Rig, Take};
 use eframe::egui;
 
 use super::posing::Folds;
@@ -210,16 +211,55 @@ impl ClipDoc {
 
     /// Whether the clip's take moves the skeleton of the model `mesh_id`.
     fn fits(&self, assets: &Assets, mesh_id: &str) -> bool {
-        let Ok(takes) = &self.takes else {
+        if self.takes.is_err() {
             return false;
-        };
+        }
         let Some(model) = assets.model_blocking(mesh_id) else {
             return false;
         };
         let Some(rig) = &model.rig else {
             return false;
         };
-        Clip::bind(self.file.to_file(), Some(takes.clone()), Some(rig)).is_ok()
+        self.bind_on(assets, rig).is_ok()
+    }
+
+    /// Binds the clip to `rig` as Animators do: with the project's rig
+    /// definitions and its retarget profile, read now so edits to either
+    /// show at once.
+    pub fn bind_on(&self, assets: &Assets, rig: &Rig) -> Result<Clip, String> {
+        let takes = self.takes.clone()?;
+        let profile = self.profile(assets)?;
+        Clip::bind_with(
+            self.file.to_file(),
+            Some(takes),
+            Some(rig),
+            &assets.rig_definitions(),
+            profile.as_ref(),
+        )
+    }
+
+    /// The clip's retarget profile, read from its file, if it has one.
+    pub fn profile(&self, assets: &Assets) -> Result<Option<RetargetProfile>, String> {
+        match &self.file.retarget {
+            Some(path) => read_retarget_profile(assets, path)
+                .map(Some)
+                .map_err(|why| format!("its retarget profile `{path}` can't be read: {why}")),
+            None => Ok(None),
+        }
+    }
+
+    /// Forgets the clip bound to the preview, so it's bound again: after
+    /// its retarget profile or a rig definition changed.
+    pub fn rebind(&mut self) {
+        self.bound = None;
+        self.imported_for = None;
+    }
+
+    /// The skeleton its take was made for (empty if unknown).
+    pub fn take_skeleton(&self) -> Vec<Bone> {
+        self.take()
+            .map(|take| take.skeleton.to_vec())
+            .unwrap_or_default()
     }
 
     /// Previews on the model `mesh_id` (the object being animated) if the
@@ -323,13 +363,13 @@ impl ClipDoc {
             .rig
             .as_ref()
             .ok_or_else(|| format!("`{mesh_id}` has no skeleton"))?;
-        let takes = self.takes.clone()?;
+        self.takes.clone()?;
         let stale = self
             .bound
             .as_ref()
             .is_none_or(|(key, file, _)| *key != model.key() || *file != self.file);
         if stale {
-            let bound = Clip::bind(self.file.to_file(), Some(takes), Some(rig));
+            let bound = self.bind_on(assets, rig);
             self.bound = Some((model.key(), self.file.clone(), bound));
         }
         let Some((_, _, bound)) = &self.bound else {
@@ -357,6 +397,13 @@ impl ClipDoc {
 
     /// One per bone of `rig`: whether the take moves it.
     pub fn locked(&self, rig: &Rig) -> Vec<bool> {
+        // Bound to this skeleton, the clip knows the bones retargeting moves.
+        if let Some((_, file, Ok(clip))) = &self.bound
+            && *file == self.file
+            && clip.animated_bones().len() == rig.bones.len()
+        {
+            return clip.take_bones();
+        }
         self.take().map_or_else(
             || vec![false; rig.bones.len()],
             |take| take_bones(take, rig),
@@ -517,7 +564,19 @@ impl ClipDoc {
     pub fn converted(&self, assets: &Assets) -> Result<ClipFile, String> {
         let model = self.rigged_preview(assets)?;
         let rig = model.rig.as_deref().expect("a rigged preview");
-        axcenity_anim::convert_to_keys(&self.file.to_file(), self.takes.clone()?, rig)
+        self.convert_on(assets, rig)
+    }
+
+    /// Convert to keys on `rig`, retargeted as the preview plays it.
+    fn convert_on(&self, assets: &Assets, rig: &Rig) -> Result<ClipFile, String> {
+        let profile = self.profile(assets)?;
+        axcenity_anim::convert_to_keys_with(
+            &self.file.to_file(),
+            self.takes.clone()?,
+            rig,
+            &assets.rig_definitions(),
+            profile.as_ref(),
+        )
     }
 
     /// The keys Convert to keys would make for the bones the take moves,
@@ -525,8 +584,7 @@ impl ClipDoc {
     pub fn take_keys(&self, assets: &Assets) -> Result<ClipFile, String> {
         let model = self.rigged_preview(assets)?;
         let rig = model.rig.as_deref().expect("a rigged preview");
-        let mut file =
-            axcenity_anim::convert_to_keys(&self.file.to_file(), self.takes.clone()?, rig)?;
+        let mut file = self.convert_on(assets, rig)?;
         let locked = self.locked(rig);
         let paths = bone_paths(rig);
         file.tracks.retain(|track| {

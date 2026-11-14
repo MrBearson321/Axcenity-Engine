@@ -179,6 +179,28 @@ impl Clip {
         &self.animated
     }
 
+    /// One per bone of the rig it was bound to: whether its linked take
+    /// moves it (by name, or through retargeting). All false without a take.
+    pub fn take_bones(&self) -> Vec<bool> {
+        let mut moved = vec![false; self.animated.len()];
+        if let Some(take) = &self.take {
+            for bone in take.targets() {
+                if let Some(slot) = moved.get_mut(bone) {
+                    *slot = true;
+                }
+            }
+        }
+        moved
+    }
+
+    /// Whether its take plays through humanoid roles (retargeted) rather
+    /// than by bone names.
+    pub fn retargeted(&self) -> bool {
+        self.take
+            .as_ref()
+            .is_some_and(|take| take.retarget.is_some())
+    }
+
     /// How far through one pass `phase` is, from 0 to 1: a looping clip
     /// goes round, one that doesn't holds at its end.
     fn through(&self, phase: f64) -> f64 {

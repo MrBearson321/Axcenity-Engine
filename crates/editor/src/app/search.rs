@@ -460,6 +460,9 @@ fn command_description(command: &Command) -> String {
             "What a built game shows while it loads."
         }
         Command::DeveloperConsole => "Let players open the Developer Console (F9) in built games.",
+        Command::RayTracedByDefault => {
+            "Start built games with hardware ray tracing on GPUs that can ray trace."
+        }
         Command::OpenStylesheet => "Open a UI stylesheet to edit.",
         Command::NewStylesheet => "Make a new UI stylesheet.",
         Command::CheckAssets => {

@@ -68,7 +68,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G3 | Physics render interpolation | **Done** (#110) |
 | G4 | Script completion and diagnostics in the editor | **Done**: completion and signature hints (#145, merged with #153) and luau-lsp errors and lints in code tabs (#153); Go to Definition (#239); luau-lsp shipped in packages and downloaded by source builds (scripting priority 2) |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
-| G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; a coroutine the script made itself still can't pause |
+| G6 | Debugger stepping and watches | **Done** (#131): Step Over/Into/Out, watches, pause on error; scripts' own coroutines pause and step since scripting P2 PR 3 |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats); history, peaks and budgets | **Done** (#125, #126; history, peaks and budgets #241) |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
 | G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA: output-sized history, more jitter places, then RCAS) done (#277); a 9070 XT bench is still to run |
@@ -99,6 +99,8 @@ R15 is built: sculpt brushes and the Mesh Filter (#317), masks saved (#322), `_C
 ## Import formats and extensibility (Paul's priority 7, 2026-11-14)
 
 `docs/research/import-formats-and-plugins.md`: OBJ read directly through `ufbx` (P7.1), USD converted to `.glb` on import by an editor-only `convert` crate ([ADR-0027](../Architecture/Architecture-Decisions/ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md), P7.2), mesh import presets (P7.3), plugin API 3 (P7.4); Alembic deferred until a geometry-cache workflow needs it (P7.5), USD animation later (P7.6), native extensions deferred.
+
+`docs/research/facial-animation.md` (Paul's facial animation spec, 2026-11-14): blend shapes imported (F1) and morphed on the GPU (F2, [ADR-0028](../Architecture/Architecture-Decisions/ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md)), face profiles and `FaceControls` (F3), expressions, face layers, blinking and gaze (F4), lip sync (F5), Character Studio's Face workspace (F6), facial LOD, profiling and replication (F7). **Planned**; nothing built yet.
 
 ## Feature plan (unified plan, Phases 1–93)
 

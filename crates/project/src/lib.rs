@@ -239,6 +239,12 @@ pub struct Manifest {
     /// item 5, `memory_budget.rs`).
     #[serde(default, skip_serializing_if = "memory_budget::MemoryBudget::is_empty")]
     pub memory_budget: memory_budget::MemoryBudget,
+    /// The game's first start on a GPU that can ray trace uses the ray
+    /// traced look (hardware ray tracing, ray traced shadows and ambient
+    /// occlusion; runtime lighting parity RL2). Players can still turn it
+    /// off; their `graphics.json` wins after the first start.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ray_traced_by_default: bool,
 }
 
 fn default_show_splash() -> bool {
@@ -347,6 +353,12 @@ pub fn set_show_splash(folder: &Path, show: bool) -> Result<(), SaveError> {
 /// Stores whether the built game has the F9 Developer Console (Phase 71).
 pub fn set_developer_console(folder: &Path, on: bool) -> Result<(), SaveError> {
     update_manifest(folder, "developer_console", serde_json::Value::Bool(on))
+}
+
+/// Stores whether the game's first start on a GPU that can ray trace uses
+/// the ray traced look (`Manifest::ray_traced_by_default`).
+pub fn set_ray_traced_by_default(folder: &Path, on: bool) -> Result<(), SaveError> {
+    update_manifest(folder, "ray_traced_by_default", serde_json::Value::Bool(on))
 }
 
 /// Stores how the player's loading screen goes.
@@ -582,6 +594,7 @@ pub(crate) fn load_project_with(
                 engine: None,
                 branding: Default::default(),
                 memory_budget: Default::default(),
+                ray_traced_by_default: false,
             }
         }
     };

@@ -1,0 +1,12 @@
+category = "fix"
+subsystem = "networking"
+title = "Players who spawn on the same SpawnLocation no longer stand inside each other"
+details = "Each character now takes a free spot on the SpawnLocation's top. Before, characters made in the same place pushed each other apart on their devices, and the server moved them back every frame, or they fell through the floor. A character standing still is also never moved back for the network's rounding of its position."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
