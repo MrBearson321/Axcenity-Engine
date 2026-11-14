@@ -1690,6 +1690,8 @@ declare extern type Players extends Instance with
 	LeaderboardEnabled: boolean
 	--- How many players a hosted game takes, the host's own player among them. A player who joins a full game is refused, and their `NetworkService.ConnectionFailed` says the game is full.
 	MaxPlayers: number
+	--- Who moves players' characters in a hosted game. "Client" (the default): each device moves its own player's character at once and the server checks it. "Server": the server moves them from the keys players' devices send, and each device predicts its own character and is corrected when the server disagrees, so a modified client can't move it where the game wouldn't.
+	CharacterAuthority: string
 	--- The player on this device. LocalScripts only.
 	LocalPlayer: Player
 	--- Fires with the Player when someone joins, after they're put on a team and before their first character spawns.

@@ -15,7 +15,7 @@ use crate::replication_tests::{SECONDS, info};
 
 /// A floor reaching far toward -Z, and a car facing -Z on it: a chassis,
 /// a VehicleSeat welded on top and four wheels (the front ones steer).
-fn arena() -> World {
+pub(crate) fn arena() -> World {
     let mut world = World::new();
     let part = |world: &mut World, name: &str, position: Vector3, size: Vector3, anchored: bool| {
         let id = world.create(ClassName::Part).unwrap();
@@ -86,16 +86,18 @@ pub(crate) struct Device {
     pub(crate) world: World,
     pub(crate) scripts: ScriptRuntime,
     pub(crate) network: Network,
-    characters: Controllers,
+    pub(crate) characters: Controllers,
     physics: Physics,
     assets: Assets,
     pub(crate) log: Vec<String>,
 }
 
 impl Device {
-    fn frame(&mut self, input: MoveInput) {
+    pub(crate) fn frame(&mut self, input: MoveInput) {
         self.network
             .receive(&mut self.world, &mut self.scripts, SECONDS);
+        self.network
+            .step_characters(&mut self.world, &self.assets, &mut self.characters);
         self.log.extend(self.network.take_log());
         let following = self.network.is_following();
         let others = self.network.other_characters(&self.world, &self.scripts);
@@ -115,6 +117,8 @@ impl Device {
         }
         self.scripts.heartbeat(&mut self.world, SECONDS);
         self.network.set_running(input.run);
+        self.network
+            .record_move(&self.world, &self.scripts, &mut self.characters);
         self.network.send(&self.world, &mut self.scripts);
         self.log.extend(self.network.take_log());
     }
@@ -163,15 +167,28 @@ pub(crate) fn game_in(
     players: usize,
     latency: Duration,
 ) -> (Device, Vec<Device>) {
+    game_with(
+        make,
+        players,
+        Conditions {
+            latency,
+            ..Conditions::default()
+        },
+    )
+}
+
+/// [`game_in`] with the network's `conditions` (latency, jitter, loss).
+pub(crate) fn game_with(
+    make: fn() -> World,
+    players: usize,
+    conditions: Conditions,
+) -> (Device, Vec<Device>) {
     let mut world = make();
     let mut scripts = ScriptRuntime::new();
     scripts.set_dedicated();
     let mut network = Network::new(info()).with_discovery_port(47933);
     let first = network.host_in_memory(&mut world, &mut scripts, false);
-    network.emulate(Conditions {
-        latency,
-        ..Conditions::default()
-    });
+    network.emulate(conditions);
     let mut server = device(world, scripts, network);
     let mut devices = Vec::new();
     let mut first = Some(first);

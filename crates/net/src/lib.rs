@@ -33,6 +33,7 @@ mod motion;
 mod movement;
 mod ownership;
 mod port_map;
+mod predict;
 mod relayed;
 mod replay;
 mod replicate;
@@ -53,6 +54,7 @@ pub use ownership::{
     ASSEMBLY_SPEED, CharacterCheck, Owned, OwnedSender, Sender, TELEPORT_DISTANCE,
 };
 pub use port_map::{MapEvent, MapMethod, PortMapper, is_public};
+pub use predict::{AHEAD, Move, Moved, PredictionStats, SNAP};
 pub use relayed::{PUNCH_TIME, RelayEvent, Route};
 pub use replay::{
     BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
@@ -69,6 +71,10 @@ pub use secure::{
 pub use session::{HANDSHAKE_TIMEOUT, Host, HostSettings, Join, SessionEvent};
 pub use transport::{Channel, Client, Conditions, ConnectionId, LinkStats, Server, ServerEvent};
 pub use wire::{WireArg, WireKind, WireMessage, WireValue};
+
+// MP6a, kept apart from the list above so pull requests that add to it
+// don't conflict with this one.
+pub use game::server_moves_characters;
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
@@ -108,6 +114,8 @@ mod movement_tests;
 mod multiplayer_tests;
 #[cfg(test)]
 mod object_script_tests;
+#[cfg(test)]
+mod predict_tests;
 #[cfg(test)]
 mod rejoin_tests;
 #[cfg(test)]

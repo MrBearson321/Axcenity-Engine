@@ -1046,6 +1046,11 @@ impl HostIo for PlayHost<'_> {
         session
             .network
             .receive(&mut session.sim.world, &mut session.sim.scripts, seconds);
+        session.network.step_characters(
+            &mut session.sim.world,
+            &session.sim.assets,
+            &mut session.sim.characters,
+        );
         session.forward_network_log(self.output);
         session.forward_output(self.output);
         ControlFlow::Continue(())
@@ -1209,6 +1214,11 @@ impl HostIo for PlayHost<'_> {
     /// devices.
     fn net_send(&mut self) {
         let session = &mut *self.session;
+        session.network.record_move(
+            &session.sim.world,
+            &session.sim.scripts,
+            &mut session.sim.characters,
+        );
         session
             .network
             .send(&session.sim.world, &mut session.sim.scripts);

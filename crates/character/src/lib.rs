@@ -24,9 +24,11 @@ use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::{GRAVITY, QueryParams, RayHit, gravity, raycast};
 
+mod predict;
 pub mod rig;
 mod seat;
 
+pub use predict::{CharacterState, Drive};
 pub use seat::SeatChange;
 
 /// Gap left between the character and a wall or ceiling, in studs. Ground
@@ -335,6 +337,9 @@ pub struct Controllers {
     /// The Developer Console's `noclip` (Phase 71): the character that
     /// takes input flies through everything, Jump up and Crouch down.
     noclip: bool,
+    /// The last step of the character that takes input, for prediction
+    /// (MP6a, [`Controllers::take_drive`]).
+    driven: Option<(InstanceId, Drive)>,
 }
 
 impl Controllers {
@@ -478,6 +483,16 @@ impl Controllers {
         input: MoveInput,
         dt: f32,
     ) {
+        if let Some((yaw, _)) = view {
+            self.driven = Some((
+                id,
+                Drive {
+                    input,
+                    yaw,
+                    seconds: dt,
+                },
+            ));
+        }
         if self.seated.contains_key(&id) {
             // The seat holds it; the camera still turns and zooms.
             return;
@@ -503,6 +518,13 @@ impl Controllers {
         let settling = view.is_none() && !self.falls.contains_key(&id);
         let jump = (!settling && take_jump(world, id)) || input.jump;
         let crouch = wants_crouch(world, id) || input.crouch;
+        // What it was driven with, scripts' jump and crouch included.
+        if let Some((driven, drive)) = &mut self.driven
+            && *driven == id
+        {
+            drive.input.jump = jump;
+            drive.input.crouch = crouch;
+        }
         set_crouch(world, assets, id, &mut self.crouches, crouch);
         let Some(mut body) = Body::read(world, id) else {
             return;

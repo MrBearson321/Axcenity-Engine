@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5a (the relay with join codes, hole punching, the NAT lab) is built ([§6](#mp5a-relay-join-codes-and-hole-punching-cloud-container-2026-11-14)), and MP5b (port mapping on the host) too ([§6](#mp5b-port-mapping-on-the-host-cloud-container-2026-11-14)). MP6–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4's secure connections are built ([§6](#mp4-secure-connections-cloud-container-2026-11-14)); its PC–Mac join over Tailscale waits for Paul's machines. MP5a (the relay with join codes, hole punching, the NAT lab) is built ([§6](#mp5a-relay-join-codes-and-hole-punching-cloud-container-2026-11-14)), and MP5b (port mapping on the host) too ([§6](#mp5b-port-mapping-on-the-host-cloud-container-2026-11-14)). MP6a (server-moved characters with prediction) is built ([§6](#mp6a-server-moved-characters-and-prediction-cloud-container-2026-11-14)); MP6b and MP6c wait for Paul, MP7 for his machines.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -123,6 +123,42 @@ Fake routers in `port_map/tests.rs` cover what miniupnpd doesn't show: a chunked
 
 Left: a check on Paul's router, which has no UPnP (the log should say why nothing was forwarded) and on any router that does; IPv6 pinholes (PCP can open them) aren't asked for; a killed host leaves its mapping for up to 30 minutes.
 
+### MP6a: server-moved characters and prediction (cloud container, 2026-11-14)
+
+[networking.md](../architecture/networking.md#server-moved-characters-and-prediction), [ADR-0029](../../wiki/Architecture/Architecture-Decisions/ADR-0029-Server-Moved-Characters-And-Prediction.md). `Players.CharacterAuthority = "Server"` (or `axcenity-server --character-authority server`) has the server move players' characters from their input; their devices predict and reconcile. `"Client"` stays the default.
+
+**One change from D3:** no fixed ticks. Characters step with the frame's length, so a device numbers each step it takes (a `Move`: its length, the camera's turn, keys and stick) and the server takes the same steps with the same code (`Controllers::drive`). What a tick would have bounded, an allowance does: moves are paid from real time, saved up to half a second, so a device claiming longer moves than passed gets no further (`a_device_claiming_more_time_than_passed_moves_no_further_than_real_time_allows`). Physics state isn't saved or restored (D3's point 3): characters are ray probes, so their state is six numbers (`CharacterState`); rapier's sets wait for MP6b.
+
+Tests (`crates/net/src/predict_tests.rs`, in-process with the loopback's emulated latency, jitter and loss):
+
+| Test | Result |
+|---|---|
+| One player walking, running, jumping and turning beside a standing one, 150 ms | Moves at once on the device; 0 corrections; ends 0.000 studs from the server |
+| The same alone at 100 ms ±20 with 5% loss, and 200 ms ±40 with 10% loss | 0 corrections in both; ends where the server has it |
+| A modified client sending its character's parts | Ignored; the server's character stays where its moves put it, and the device snaps back to it |
+| A modified client claiming 1 s moves every frame | Moves no further than real time allows |
+| A server Script teleporting the character 30 studs | The device ends where the server has it |
+| `"Client"` authority | Unchanged: no moves sent, the old checks |
+
+Measurement (`prediction_cost`, release build, 8 players walking, running and jumping for about 4 s each; per device):
+
+| Conditions | Players apart (12 studs) | Players in a crowd (spawn ring, jumping onto each other) |
+|---|---|---|
+| 100 ms ±20, 2% loss | 0 corrections | 0–58 corrections a player (mean 0.4–1.2 studs, largest 14 studs, 7 snaps of 2,080 moves) |
+| 200 ms ±40, 5% loss | 0 corrections | 0–30 a player (mean 0.7–1.8 studs, largest 10 studs, 10 snaps) |
+| Replay cost | — | at most 0.94 ms in a frame (about 24 moves taken again); 13 ms over a whole run |
+
+Real processes over UDP on one machine (debug builds, `axcenity-server examples/hello-spawn --character-authority server` and `axcenity-bots`, which now print prediction counts):
+
+| Run | Result |
+|---|---|
+| 8 bots, 30 s | 13,979 moves; 156 answers differed (largest 1.03 studs), all while bots were joining and spawning beside each other; none in the last 10 s; 23 ms taking moves again in all |
+| 24 bots, 40 s | 33,429 moves; 991 differed, 933 of them in the first 20 s while 24 bots spawned on one ring (largest 4 studs); one of 53 studs later, most likely a respawn from the map's Lava (not traced); no flags |
+
+So the prediction is exact when nothing else moves near the character: the device's step and the server's are the same function on the same input. Corrections come from other players, who are drawn about a round trip plus 0.1 s in the past: a crowd jumping together lands on heads on one side and not the other, and a character standing on another rides it (Phase 73's carry treats a character's anchored parts as a platform), so their differences grow until the answer arrives.
+
+Left: other players in the past (the usual fix is to rewind them too, as lag compensation does for raycasts; worth it only if games with crowds ask); moving platforms aren't rewound; seats, `MoveTo` and `MoveDirection` don't drive a server-moved character, and a device Script's `Jump` can be lost in a replay; Paul's hand check on the PC over a real network.
+
 ## 4. What stays Paul's call
 
 - Running a public `axcenity-relay` or any hosted service (the policy's rule 1; costs money).
@@ -142,7 +178,7 @@ One PR per phase against `main`, opened in merge order. Each updates `docs/archi
 | MP3 | **Validation.** D4's budgets, argument limits, wall and flight checks, owned-assembly speed, strikes, `Players.PlayerFlagged`, kick threshold. Tests with a "modified client" bot mode for each cheat. | Cloud |
 | MP4 | **Secure connections.** D1: token port over TLS, the server's certificate kept in its data folder, connect tokens, encrypted netcode, fingerprints in join links and remembered per address, password at the token port, `--insecure`. | Cloud; then a PC–Mac join over Tailscale |
 | MP5 | **NAT traversal and relay.** `axcenity-relay` (rendezvous, join codes, relaying), port mapping on the host, hole punching, fallback order and log. | Cloud (relay and NAT emulated with network namespaces where the container allows); **Paul's machines** for a real cross-network join |
-| MP6a | **Prediction and rollback, stage 1.** D3's ticks, input streams, server-moved characters with prediction and reconciliation, error smoothing; measured under emulated latency and loss. | Cloud (loopback with emulated network); hand check on the PC |
+| MP6a | **Prediction and rollback, stage 1.** D3's ticks (numbered moves instead, see results), input streams, server-moved characters with prediction and reconciliation, error smoothing; measured under emulated latency and loss. | Cloud (loopback with emulated network); hand check on the PC |
 | MP7 | **Scale run report.** G13's numbers from Paul's machines, with what they change (MaxPlayers default, budgets). | Paul's machines |
 
 MP6b, MP6c and anything hosted wait for Paul.

@@ -22,6 +22,9 @@ use crate::ownership::{
     CharacterCheck, OWNED_TAG, Owned, OwnedSender, Sender, character_of, character_parts,
 };
 use crate::port_map::{MapEvent, PortMapper, is_public};
+use crate::predict::{
+    Driven, MOVED_TAG, MOVES_TAG, Moved, PredictionStats, Predictor, moves_from_bytes,
+};
 use crate::relayed::{RelayEvent, Route};
 use crate::replay::{BufferPlay, Replay, Replays};
 use crate::replicate::{LevelState, Replicator, Update, apply};
@@ -135,6 +138,11 @@ pub struct Network {
     smoother: Smoother,
     /// Hosting: each player's character check, by their id (Phase 66).
     checks: BTreeMap<u32, CharacterCheck>,
+    /// Hosting with `Players.CharacterAuthority` "Server": each player's
+    /// moves, by their id (MP6a).
+    driven: BTreeMap<u32, Driven>,
+    /// Joined with "Server": this device's moves and its prediction.
+    predictor: Predictor,
     /// Hosting: the parts each player moves besides their character, as
     /// last worked out and sent them.
     owned_by: BTreeMap<u32, BTreeSet<InstanceId>>,
@@ -234,6 +242,8 @@ impl Network {
             sent_levels: None,
             smoother: Smoother::default(),
             checks: BTreeMap::new(),
+            driven: BTreeMap::new(),
+            predictor: Predictor::default(),
             owned_by: BTreeMap::new(),
             owned: BTreeSet::new(),
             owned_sender: OwnedSender::default(),
@@ -318,6 +328,88 @@ impl Network {
     /// server allows their character `RunSpeed`.
     pub fn set_running(&mut self, running: bool) {
         self.running = running;
+    }
+
+    /// With `Players.CharacterAuthority` "Server" (MP6a), right after
+    /// [`receive`](Self::receive): hosting, takes each player's moves
+    /// that arrived with their character's controller; joined, compares
+    /// the server's newest answer with this device's prediction, takes
+    /// its moves again from where the server had the character when they
+    /// differ, and eases what's shown toward it.
+    pub fn step_characters(
+        &mut self,
+        world: &mut World,
+        assets: &axcenity_assets::Assets,
+        controllers: &mut axcenity_character::Controllers,
+    ) {
+        if !server_moves_characters(world) {
+            return;
+        }
+        match &self.session {
+            Session::Offline => {}
+            Session::Hosting(_) => {
+                for (&peer, &player) in &self.players {
+                    let Some(controller) = controller_of(world, player) else {
+                        continue;
+                    };
+                    self.driven.entry(peer).or_default().step(
+                        world,
+                        assets,
+                        controllers,
+                        controller,
+                        self.seconds,
+                    );
+                }
+            }
+            Session::Joined(_) => {
+                self.predictor
+                    .reconcile(world, assets, controllers, self.seconds as f32);
+            }
+        }
+    }
+
+    /// After the frame's character step, before [`send`](Self::send):
+    /// joined with "Server", the step this device took of its own
+    /// character is a move for the server (MP6a).
+    pub fn record_move(
+        &mut self,
+        world: &World,
+        scripts: &ScriptRuntime,
+        controllers: &mut axcenity_character::Controllers,
+    ) {
+        let Some((id, drive)) = controllers.take_drive() else {
+            return;
+        };
+        if !matches!(self.session, Session::Joined(_)) || !server_moves_characters(world) {
+            return;
+        }
+        let own = scripts
+            .local_player()
+            .and_then(|me| controller_of(world, me));
+        if own == Some(id) {
+            self.predictor.record(world, controllers, id, drive);
+        }
+    }
+
+    /// Joined: how this device's prediction went (MP6a).
+    pub fn prediction(&self) -> PredictionStats {
+        self.predictor.stats()
+    }
+
+    /// Joined: starts the prediction counts again.
+    #[cfg(test)]
+    pub(crate) fn reset_prediction(&mut self) {
+        self.predictor.reset_stats();
+    }
+
+    /// Joined: sends `bytes` to the server on the unreliable channel as
+    /// they are (tests of modified clients).
+    #[cfg(test)]
+    pub(crate) fn send_raw(&mut self, bytes: Vec<u8>) {
+        if let Session::Joined(join) = &mut self.session {
+            join.send_datagram(bytes);
+            join.flush();
+        }
     }
 
     /// Whether this device follows a server it joined.
@@ -1034,6 +1126,8 @@ impl Network {
         self.script_requests.clear();
         self.finished_requests.clear();
         self.checks.clear();
+        self.driven.clear();
+        self.predictor = Predictor::default();
         self.owned_by.clear();
         self.owned.clear();
         self.owned_sender = OwnedSender::default();
@@ -1230,13 +1324,26 @@ impl Network {
                 }
                 self.owned_by
                     .retain(|peer, _| self.players.contains_key(peer));
+                let server_moved = server_moves_characters(world);
                 for (&peer, &player) in &self.players {
+                    // A server-moved character's device hears where it is
+                    // in the answers to its moves instead (MP6a).
+                    if server_moved {
+                        if let Some(answer) =
+                            self.driven.get_mut(&peer).and_then(Driven::take_answer)
+                        {
+                            host.send_datagram(peer, answer.to_bytes());
+                        }
+                        continue;
+                    }
                     let check = self.checks.entry(peer).or_default();
                     if let Some(update) = check.correction(world, player, self.clock) {
                         host.send_to(peer, &Message::Correction { update });
                     }
                 }
                 self.checks
+                    .retain(|peer, _| self.players.contains_key(peer));
+                self.driven
                     .retain(|peer, _| self.players.contains_key(peer));
                 for peer in std::mem::take(&mut self.need_snapshot) {
                     let Some(&you) = self.players.get(&peer) else {
@@ -1326,7 +1433,21 @@ impl Network {
                 // smoothed from what the server sends back.
                 if scripts.is_client_only() && join.you().is_some() {
                     self.smoother.set_owned(mine.clone());
-                    let mine: Vec<InstanceId> = mine.into_iter().collect();
+                    let mut mine: Vec<InstanceId> = mine.into_iter().collect();
+                    // A server-moved character goes as moves (MP6a), never
+                    // as where it is.
+                    if server_moves_characters(world) {
+                        let character: BTreeSet<InstanceId> = scripts
+                            .local_player()
+                            .map(|me| character_parts(world, me))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect();
+                        mine.retain(|id| !character.contains(id));
+                        if let Some(packet) = self.predictor.packet(self.seconds) {
+                            join.send_datagram(packet);
+                        }
+                    }
                     let seat = own_seat(world, scripts);
                     if let Some(owned) = self.owned_sender.frame(
                         world,
@@ -1478,10 +1599,26 @@ impl Network {
             SessionEvent::Remote { from, message } => self.deliver(world, scripts, from, &message),
             SessionEvent::Datagram { from, bytes } => {
                 if self.is_hosting() {
-                    if bytes.first() == Some(&OWNED_TAG)
-                        && let Some(owned) = Owned::from_bytes(&bytes)
+                    if bytes.first() == Some(&MOVES_TAG) {
+                        if server_moves_characters(world)
+                            && self.players.contains_key(&from)
+                            && let Some(moves) = moves_from_bytes(&bytes)
+                        {
+                            self.driven.entry(from).or_default().receive(moves);
+                        }
+                    } else if bytes.first() == Some(&OWNED_TAG)
+                        && let Some(mut owned) = Owned::from_bytes(&bytes)
                         && let Some(&player) = self.players.get(&from)
                     {
+                        // The server moves a server-moved character: where
+                        // its device says it is doesn't count (MP6a).
+                        if server_moves_characters(world) {
+                            let character = character_parts(world, player);
+                            owned
+                                .motion
+                                .parts
+                                .retain(|(id, _)| !character.contains(&InstanceId::from_bits(*id)));
+                        }
                         let assemblies = self.owned_by.get(&from).cloned().unwrap_or_default();
                         let characters: Vec<InstanceId> = self
                             .players
@@ -1503,6 +1640,10 @@ impl Network {
                         if let Some(reason) = flagged {
                             self.flag(world, scripts, from, reason);
                         }
+                    }
+                } else if scripts.is_client_only() && bytes.first() == Some(&MOVED_TAG) {
+                    if let Some(moved) = Moved::from_bytes(&bytes) {
+                        self.predictor.heard(moved);
                     }
                 } else if scripts.is_client_only()
                     && let Some(motion) = Motion::from_bytes(&bytes)
@@ -1581,6 +1722,7 @@ impl Network {
                 self.session = Session::Offline;
                 self.owned.clear();
                 self.owned_sender = OwnedSender::default();
+                self.predictor = Predictor::default();
                 self.log.push(format!(
                     "warning: Lost the connection to the server: {reason} Trying to rejoin for {} seconds.",
                     self.rejoin_seconds
@@ -1971,4 +2113,23 @@ fn local_name(world: &World, scripts: &ScriptRuntime) -> String {
         .and_then(|player| world.get(player))
         .map(|player| player.name().to_owned())
         .unwrap_or_else(|| "Player".to_owned())
+}
+
+/// Whether players' characters are moved by the server from their input
+/// (`Players.CharacterAuthority` "Server", MP6a), not by their devices.
+pub fn server_moves_characters(world: &World) -> bool {
+    world
+        .get(world.players())
+        .and_then(|players| players.property("CharacterAuthority"))
+        .and_then(Value::as_str)
+        .is_some_and(|authority| authority.trim().eq_ignore_ascii_case("server"))
+}
+
+/// The character controller of `player`'s character.
+fn controller_of(world: &World, player: InstanceId) -> Option<InstanceId> {
+    let character = character_of(world, player)?;
+    world
+        .all_below(character, ClassName::is_character_controller)
+        .into_iter()
+        .next()
 }

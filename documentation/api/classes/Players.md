@@ -46,6 +46,14 @@ Players.MaxPlayers: number
 
 How many players a hosted game takes, the host's own player among them. A player who joins a full game is refused, and their `NetworkService.ConnectionFailed` says the game is full.
 
+#### CharacterAuthority
+
+```luau
+Players.CharacterAuthority: string
+```
+
+Who moves players' characters in a hosted game. "Client" (the default): each device moves its own player's character at once and the server checks it. "Server": the server moves them from the keys players' devices send, and each device predicts its own character and is corrected when the server disagrees, so a modified client can't move it where the game wouldn't.
+
 #### LocalPlayer
 
 ```luau

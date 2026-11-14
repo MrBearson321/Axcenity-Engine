@@ -1,0 +1,12 @@
+category = "breaking"
+subsystem = "networking"
+title = "Network protocol 16: players on this version can't join games on older ones"
+details = "Players gains CharacterAuthority, and devices and servers exchange moves and their answers for server-moved characters (multiplayer readiness MP6a), so a player on an older version is told to update when they join."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

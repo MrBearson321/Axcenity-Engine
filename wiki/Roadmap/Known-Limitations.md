@@ -36,7 +36,8 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 ## Networking
 
 - **Game connections trust a typed address on first use** (MP4; a join link pins the fingerprint); a bare join code trusts the relay. Port mapping (MP5b) can't get past a provider's router (carrier-grade NAT; a relay can), and a killed host leaves its mapping until the 30-minute lease ends.
-- No matchmaking or public relay (anyone can run `axcenity-relay`, MP5a), and no input-driven prediction and rollback yet (MP6; lag compensation and replays exist, Phase 81). Multiplayer has been measured with 16 bots across emulated home routers and 32 on one machine; a 16–32 client run on real machines (G13, MP7) is planned. All of it is planned in `docs/research/multiplayer-readiness.md` (MP1–MP7).
+- No matchmaking or public relay (anyone can run `axcenity-relay`, MP5a), and prediction covers only characters (MP6a, under `Players.CharacterAuthority = "Server"`; physics bodies are MP6b; lag compensation and replays exist, Phase 81). Multiplayer has been measured with 16 bots across emulated home routers and 32 on one machine; a 16–32 client run on real machines (G13, MP7) is planned. All of it is planned in `docs/research/multiplayer-readiness.md` (MP1–MP7).
+- **Server-moved characters** (MP6a): other players are drawn in the past on a device, so walking into a moving player costs a correction; moving platforms aren't rewound; seats, `MoveTo` and `MoveDirection` don't drive a remote player's character, and a device Script's `Jump` can be lost in a replay.
 - Editor Play can't host or join a real network game.
 
 ## Editor
