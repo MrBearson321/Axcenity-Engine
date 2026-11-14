@@ -47,4 +47,4 @@ Since LE4 (the 2026-11-13 lighting audit) a Terrain can flood its hollows: `scen
 
 ## Related documentation
 
-`docs/terrain.md`; [Specialized editors](../Editor/Specialized-Editors.md#terrain-studio); [Splines and procedural](Splines-and-Procedural.md) (Flatten Terrain Along)
+`docs/terrain.md`; [Specialized editors](../Editor/Specialized-Editors.md#terrain-studio); [Splines and procedural](Splines-and-Procedural.md) (Flatten Terrain Along); the procedural worlds plan (scatter rules, biomes, presets, roads, buildings, mesh terrain proposal): `docs/research/procedural-worlds.md`
