@@ -556,7 +556,21 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 51] = [
+    /// Every enum, in the order of `LIST`. It's built from `LIST` so that
+    /// no count needs keeping up to date: pull requests that each added an
+    /// enum changed that one number, and two of them merged to a wrong one.
+    pub const ALL: [EnumType; EnumType::LIST.len()] = {
+        let mut all = [EnumType::Material; EnumType::LIST.len()];
+        let mut i = 0;
+        while i < all.len() {
+            all[i] = EnumType::LIST[i];
+            i += 1;
+        }
+        all
+    };
+
+    /// Every enum; `ALL` is this list as an array.
+    const LIST: &[EnumType] = &[
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
