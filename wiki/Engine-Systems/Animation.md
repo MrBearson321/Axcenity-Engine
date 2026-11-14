@@ -14,13 +14,13 @@ tags: [system/animation]
 # Animation
 
 > [!summary]
-> `anim` plays **one clip type** (`*.anim.json`: property tracks, bone keys, an optional linked FBX take) through **Animators** running **state machines** (`*.statemachine.json`) with transitions, 1D blend trees, 2D blend spaces (Delaunay), layers with masks, root motion and events; then **AnimationTracks** over them, **runtime IK** (`IKControl`, foot placement), and **ragdolls** blending in and out. Posing is on the CPU; skinning is on the **GPU** (graphics Phase 14). Cutscene **sequences** share `SequenceRun::apply` between the editor preview and the Sequence Instance. **Implemented.**
+> `anim` plays **one clip type** (`*.anim.json`: property tracks, bone keys, an optional linked take from an FBX or glTF file) through **Animators** running **state machines** (`*.statemachine.json`) with transitions, 1D blend trees, 2D blend spaces (Delaunay), layers with masks, root motion and events; then **AnimationTracks** over them, **runtime IK** (`IKControl`, foot placement), and **ragdolls** blending in and out. Posing is on the CPU; skinning is on the **GPU** (graphics Phase 14). Cutscene **sequences** share `SequenceRun::apply` between the editor preview and the Sequence Instance. **Implemented.**
 
 ## Execution flow
 
 ```mermaid
 flowchart LR
-  F[FBX rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig<br/>by name, or by humanoid role: retarget.rs]
+  F[FBX or glTF rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig<br/>by name, or by humanoid role: retarget.rs]
   SM[statemachine.json] --> M[Compiled machine + layers]
   subgraph AN["Animators::update (frame step: animators)"]
     R1[runner per animated thing] --> R2[state machine: transitions,<br/>blend tree / blend space, layers]
