@@ -145,6 +145,7 @@ def check_payload(folder: Path, host: str, players: dict) -> None:
             print(f"  players/{os_name}: not in this local package (no {os_name} player given)")
     for name in ("LICENSE", "NOTICE", "INSTALL.txt", "install.json"):
         need((folder / name).is_file(), f"`{name}` is missing from `{folder}`")
+    check_luau_lsp(folder, host)
     marker = folder / "install.json"
     if marker.is_file():
         kinds = ("windows-setup", "linux-tarball", "appimage", "deb", "rpm", "pacman", "macos-dmg")
@@ -153,6 +154,21 @@ def check_payload(folder: Path, host: str, players: dict) -> None:
         except ValueError:
             kind = None
         need(kind in kinds, f"`{marker}` doesn't name an install kind: {kind!r}")
+
+
+def check_luau_lsp(folder: Path, host: str) -> None:
+    """`tools/luau-lsp`, the version `packaging/luau-lsp.toml` pins, runs."""
+    import tomllib
+
+    program = folder / "tools" / exe(host, "luau-lsp")
+    check_binary(program, host)
+    need((folder / "tools" / "luau-lsp-LICENSE.txt").is_file(), "luau-lsp's license is missing")
+    with open(ROOT / "packaging" / "luau-lsp.toml", "rb") as file:
+        version = tomllib.load(file)["version"]
+    if HOST == host:
+        printed = subprocess.run([program, "--version"], capture_output=True, text=True).stdout.strip()
+        need(printed == version, f"`{program} --version` printed {printed!r}, not {version}")
+        print(f"  tools/luau-lsp: {printed}")
 
 
 # ------------------------------------------------------- Build Game smoke

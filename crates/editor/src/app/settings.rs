@@ -429,6 +429,13 @@ impl EditorApp {
         found(ui, &row, "Show the view cube");
         let row = ui
             .checkbox(
+                &mut self.ray_badge,
+                theme::with_icon(icons::SUN, "Show the ray tracing badge"),
+            )
+            .on_hover_text(RAY_BADGE_HINT);
+        found(ui, &row, "Show the ray tracing badge");
+        let row = ui
+            .checkbox(
                 &mut self.move_guide,
                 theme::with_icon(icons::ARROWS_OUT_CARDINAL, "Show the movement guide"),
             )
@@ -628,6 +635,67 @@ impl EditorApp {
                  MeshParts using it reload, and the Model Studio offers to load it again. \
                  Nothing is installed into Blender.",
             )
+            .color(palette.text_weak),
+        );
+        ui.add_space(space::L);
+        self.language_server_section(ui);
+    }
+
+    /// The Luau language server script tabs type-check with
+    /// (`luau_lsp.rs`): which one is used, and downloading the pinned one
+    /// for a build that doesn't ship it.
+    fn language_server_section(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Luau language server");
+        let palette = theme::palette(ui.ctx());
+        let pinned = crate::luau_lsp::pinned();
+        let row = ui.label(theme::with_icon(icons::CODE, "Luau language server"));
+        found(ui, &row, "Luau language server");
+        // Looked for now, so the page says what the tabs will use.
+        self.luau.look();
+        match &self.luau.found {
+            Some((program, source)) => {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Uses {} ({}).",
+                        program.display(),
+                        source.describe()
+                    ))
+                    .color(palette.text_weak),
+                );
+            }
+            None => {
+                ui.colored_label(
+                    palette.warning,
+                    "Not found, so scripts get only the editor's own checks (syntax errors and \
+                     names the API doesn't have).",
+                );
+            }
+        }
+        if let Some(download) = &self.luau.download {
+            ui.add(
+                egui::ProgressBar::new(download.progress.fraction())
+                    .desired_width(240.0)
+                    .show_percentage(),
+            );
+        } else if self.luau.can_download() {
+            if ui
+                .button(format!("Download luau-lsp {}", pinned.version))
+                .on_hover_text("Into the editor's data folder, checked against the version's hash.")
+                .clicked()
+            {
+                self.luau.start_download();
+            }
+            if let Some(reason) = &self.luau.download_failed {
+                ui.colored_label(palette.error, format!("The download failed: {reason}"));
+            }
+        }
+        ui.label(
+            egui::RichText::new(format!(
+                "Script tabs underline type errors and lints from luau-lsp, checked against the \
+                 engine's API as you type. Packages include luau-lsp {}; an editor built from \
+                 source can download the same version here. AXCENITY_LUAU_LSP names another one.",
+                pinned.version
+            ))
             .color(palette.text_weak),
         );
     }

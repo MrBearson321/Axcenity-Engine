@@ -39,6 +39,8 @@ Decisions with long-term consequences, so later work doesn't silently reverse th
 | [ADR-0023](ADR-0023-Scripts-Keep-State-Across-Hot-Reload.md) | Saved scripts keep their top-level locals across a reload in Play (s&box-style); engine hot-patching removed | Accepted | 2026-11-12 |
 | [ADR-0024](ADR-0024-Shared-Editor-Foundations-For-The-Cohesion-Pass.md) | The cohesion pass extends existing foundations (kit, two scripting IRs with one node catalogue, physics `api` module boundary, Collaborate trust layer, shared preview canvas) instead of building parallel ones | Accepted | 2026-11-12 |
 | [ADR-0025](ADR-0025-Optional-Ray-Tracing-Through-Ray-Queries.md) | Hardware ray tracing is an optional tier built on wgpu's ray queries: a BLAS per mesh and a TLAS only while an effect traces rays, each effect its own setting, off at every preset | Accepted | 2026-11-12 |
+| [ADR-0026](ADR-0026-Secure-Game-Connections-And-Relay.md) | Game servers issue their own netcode connect tokens over TLS pinned by fingerprint (LAN and Play stay unsecured); reaching a host goes direct, port mapping, hole punching, then a self-hostable `axcenity-relay` | Accepted | 2026-11-14 |
+| [ADR-0027](ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md) | Model formats the runtime doesn't read (USD first) are converted to `.glb` by the editor-only `convert` crate on import; OBJ stays direct through `ufbx` | Proposed | 2026-11-14 |
 
 ## Superseded and changed decisions found in the plans
 

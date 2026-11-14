@@ -46,6 +46,7 @@ mod orphaned;
 mod probe;
 mod references;
 mod reload;
+mod rig_definition;
 mod sky_image;
 mod texture_pack;
 mod texture_set;
@@ -121,6 +122,10 @@ pub use references::{
     read_asset_index, split_reference,
 };
 pub use reload::Reload;
+pub use rig_definition::{
+    RIG_EXTENSION, RIGS_FOLDER, RigDefinition, RigDefinitions, is_rig_definition,
+    read_rig_definitions, write_rig_definition,
+};
 pub use sky_image::{
     HDR_SKY_EXTENSIONS, MAX_SKY_WIDTH, SKY_IMAGE_EXTENSIONS, SkyImage, decode_sky_image,
     is_hdr_sky_file, read_sky_image,
@@ -214,6 +219,9 @@ struct Shared {
     gate: Option<loading::LoadGate>,
     /// The project's font files, read the first time they're asked for.
     fonts: Option<Arc<Vec<FontFile>>>,
+    /// The project's rig definitions, read the first time they're asked
+    /// for (see [`Assets::rig_definitions`]).
+    rigs: Option<Arc<RigDefinitions>>,
     /// Each model and texture file's stamp when it was read, so
     /// [`Assets::reload`] skips one that hasn't changed since (such as a
     /// model the editor just imported).
@@ -812,6 +820,9 @@ impl Assets {
         shared.palettes.remove(file);
         shared.takes.remove(file);
         shared.tables.remove(file);
+        if is_rig_definition(file) {
+            shared.rigs = None;
+        }
         forget_materials_using(&mut shared, file);
         loading::reread_loads(&mut shared, |key| {
             key.file() == file || key.kind == Kind::Material
@@ -861,6 +872,33 @@ impl Assets {
             },
         )
         .unwrap_or_default()
+    }
+
+    /// The project's rig definitions (`assets/rigs/**/*.rig.json`), read
+    /// the first time they're asked for and again after
+    /// [`forget`](Self::forget) or [`reload`](Self::reload) is told about
+    /// one. Files that can't be read are reported once through
+    /// [`take_errors`](Self::take_errors). Empty with no project.
+    pub fn rig_definitions(&self) -> Arc<RigDefinitions> {
+        let folder = {
+            let shared = self.lock();
+            if let Some(rigs) = &shared.rigs {
+                return rigs.clone();
+            }
+            shared.folder.clone()
+        };
+        // Read with the lock released; they're small, so two readers at
+        // once just both read them.
+        let read = Arc::new(folder.map_or_else(RigDefinitions::default, |folder| {
+            read_rig_definitions(&folder)
+        }));
+        let mut shared = self.lock();
+        if let Some(rigs) = &shared.rigs {
+            return rigs.clone();
+        }
+        shared.errors.extend(read.problems.iter().cloned());
+        shared.rigs = Some(read.clone());
+        read
     }
 
     /// Reads the project's fonts again next time, after one was added,

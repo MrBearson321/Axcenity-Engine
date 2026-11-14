@@ -30,6 +30,14 @@ pub(crate) struct LuauChecks {
     reported: HashMap<String, u64>,
     /// A failed run was reported in Output (once).
     failed: bool,
+    /// The luau-lsp in use and where it came from, once looked for.
+    pub(crate) found: Option<(std::path::PathBuf, luau_check::Source)>,
+    /// Downloading the pinned luau-lsp (`luau_lsp.rs`), while it runs.
+    pub(crate) download: Option<crate::luau_lsp::Download>,
+    /// Why the last download failed, until another starts.
+    pub(crate) download_failed: Option<String>,
+    /// The bar above script tabs offering the download was closed.
+    pub(crate) offer_dismissed: bool,
 }
 
 impl Default for LuauChecks {
@@ -44,6 +52,10 @@ impl Default for LuauChecks {
             seen: HashMap::new(),
             reported: HashMap::new(),
             failed: false,
+            found: None,
+            download: None,
+            download_failed: None,
+            offer_dismissed: false,
         }
     }
 }
@@ -58,6 +70,60 @@ impl LuauChecks {
     }
 }
 
+impl LuauChecks {
+    /// Looks for luau-lsp, once (again after a download), and starts
+    /// checking with it when checks are on.
+    pub(crate) fn look(&mut self) {
+        if self.looked {
+            return;
+        }
+        self.looked = true;
+        self.found = luau_check::find();
+        self.checker = self
+            .found
+            .as_ref()
+            .filter(|_| self.enabled)
+            .and_then(|(program, _)| Checker::start(program.clone()).ok());
+    }
+
+    /// Starts downloading the luau-lsp packages ship, into the editor's
+    /// data folder, unless one is already downloading.
+    pub(crate) fn start_download(&mut self) {
+        if self.download.is_some() {
+            return;
+        }
+        let Some(data) = crate::luau_lsp::data_folder() else {
+            self.download_failed = Some("the editor has no data folder".to_owned());
+            return;
+        };
+        self.download_failed = None;
+        self.download = Some(crate::luau_lsp::Download::start(data));
+    }
+
+    /// Whether type checking is waiting on luau-lsp being downloaded: none
+    /// was found, and this computer has a pinned build to download.
+    pub(crate) fn can_download(&self) -> bool {
+        self.looked && self.found.is_none() && crate::luau_lsp::pinned().asset().is_some()
+    }
+
+    /// What the bar above a script tab says about the language server, if
+    /// anything: offered while it's missing (until closed), with progress
+    /// while it downloads.
+    pub(crate) fn note(&self) -> Option<crate::scripts::ServerNote> {
+        use crate::scripts::ServerNote;
+        if let Some(download) = &self.download {
+            return Some(ServerNote::Downloading(download.progress.fraction()));
+        }
+        if !self.enabled || !self.can_download() || self.offer_dismissed {
+            return None;
+        }
+        Some(match &self.download_failed {
+            Some(reason) => ServerNote::Failed(reason.clone()),
+            None => ServerNote::Missing,
+        })
+    }
+}
+
 impl EditorApp {
     /// Sends code tabs that have changed and gone quiet to luau-lsp, and
     /// takes in what it found. True while a check is waiting or running,
@@ -67,10 +133,27 @@ impl EditorApp {
         if !checks.enabled {
             return false;
         }
-        if !checks.looked {
-            checks.looked = true;
-            checks.checker = luau_check::find().and_then(|program| Checker::start(program).ok());
+        if let Some(download) = &checks.download
+            && let Some(result) = download.finished()
+        {
+            checks.download = None;
+            match result {
+                Ok(program) => {
+                    self.output
+                        .info(format!("Downloaded luau-lsp to {}.", program.display()));
+                    // Looked for again, so the new one is used.
+                    checks.looked = false;
+                    checks.failed = false;
+                    checks.asked.clear();
+                }
+                Err(reason) => {
+                    self.output
+                        .warning(format!("Couldn't download luau-lsp: {reason}"));
+                    checks.download_failed = Some(reason);
+                }
+            }
         }
+        checks.look();
 
         let mut waiting = false;
         let mut answered = Vec::new();
@@ -130,7 +213,8 @@ impl EditorApp {
             }
             waiting = true;
         }
-        waiting
+        // A download's progress is drawn as it goes.
+        waiting || self.luau.download.is_some()
     }
 }
 
@@ -215,7 +299,7 @@ mod tests {
 
     #[test]
     fn a_tab_is_checked_once_its_code_goes_quiet_and_saved_errors_go_to_output() {
-        let Some(program) = luau_check::find() else {
+        let Some((program, _)) = luau_check::find() else {
             eprintln!("skipped: no luau-lsp");
             return;
         };
