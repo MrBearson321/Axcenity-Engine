@@ -32,6 +32,7 @@ mod motion;
 mod movement;
 mod ownership;
 mod port_map;
+mod predict;
 mod relayed;
 mod replay;
 mod replicate;
@@ -42,7 +43,7 @@ mod transport;
 mod wire;
 
 pub use discovery::{HostInfo, LanAnswerer, LanSearch, SEARCH_TIME};
-pub use game::{Network, PeerStats, ScriptCode};
+pub use game::{Network, PeerStats, ScriptCode, server_moves_characters};
 pub use handshake::{GameInfo, Message, Peer, Refusal, class_defaults};
 pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
@@ -51,6 +52,7 @@ pub use ownership::{
     ASSEMBLY_SPEED, CharacterCheck, Owned, OwnedSender, Sender, TELEPORT_DISTANCE,
 };
 pub use port_map::{MapEvent, MapMethod, PortMapper, is_public};
+pub use predict::{AHEAD, Move, Moved, PredictionStats, SNAP};
 pub use relayed::{PUNCH_TIME, RelayEvent, Route};
 pub use replay::{
     BufferPlay, KEYFRAME_SECONDS, MAX_BUFFER_SECONDS, Playback, REPLAY_VERSION, Recorder, Replay,
@@ -70,7 +72,7 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 /// A chat message as sent on: trimmed, at most 200 characters, and not
 /// empty, whatever a modified client sends.
 pub(crate) fn chat_text(text: &str) -> Option<String> {
@@ -104,6 +106,8 @@ mod movement_tests;
 mod multiplayer_tests;
 #[cfg(test)]
 mod object_script_tests;
+#[cfg(test)]
+mod predict_tests;
 #[cfg(test)]
 mod rejoin_tests;
 #[cfg(test)]

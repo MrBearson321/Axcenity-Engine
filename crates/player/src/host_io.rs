@@ -17,6 +17,13 @@ impl HostIo for App {
     fn net_receive(&mut self, seconds: f64) -> ops::ControlFlow<()> {
         self.network
             .receive(&mut self.sim.world, &mut self.sim.scripts, seconds);
+        // Server-moved characters (MP6a): the host takes players' moves,
+        // a joined device checks its prediction.
+        self.network.step_characters(
+            &mut self.sim.world,
+            &self.sim.assets,
+            &mut self.sim.characters,
+        );
         print_network_log(&mut self.network);
         print_output(&mut self.sim.scripts);
         // `Player:Kick` on this device's player ends the game.
@@ -326,6 +333,8 @@ impl HostIo for App {
 
     /// After the frame's scripts, physics and UI layout, before rendering.
     fn net_send(&mut self) {
+        self.network
+            .record_move(&self.sim.world, &self.sim.scripts, &mut self.sim.characters);
         self.network.send(&self.sim.world, &mut self.sim.scripts);
         // A script's `ReplayService:PlayBuffer()`: the kill cam shows from
         // the next frame (Phase 81).

@@ -43,13 +43,14 @@ use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 mod stats;
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--relay <address:port>] [--no-port-map] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--relay <address:port>] [--no-port-map] [--character-authority client|server] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800\n\
                      The server is secured: players get a connect token from TCP on the same port, \
                      and every packet is encrypted. --insecure turns that off (LAN only); \
                      --data is where its certificate is kept (the engine's data folder unless given). \
                      --relay also takes players through an axcenity-relay, which gives the game a join code. \
-                     The server asks the router to forward its port (UPnP, PCP or NAT-PMP); --no-port-map doesn't.";
+                     The server asks the router to forward its port (UPnP, PCP or NAT-PMP); --no-port-map doesn't. \
+                     --character-authority sets Players.CharacterAuthority for this run: server moves players' characters from their input.";
 
 /// Each frame is this long.
 const FRAME: Duration = Duration::from_micros(16_667);
@@ -81,6 +82,9 @@ struct Arguments {
     relay: Option<String>,
     /// `--no-port-map`: don't ask the router to forward the port (MP5b).
     no_port_map: bool,
+    /// `--character-authority client|server`: instead of the game's
+    /// `Players.CharacterAuthority` (MP6a).
+    character_authority: Option<String>,
 }
 
 impl Arguments {
@@ -168,6 +172,22 @@ impl Arguments {
                 }
                 "--insecure" => parsed.insecure = true,
                 "--no-port-map" => parsed.no_port_map = true,
+                "--character-authority" => {
+                    let authority = arguments
+                        .next()
+                        .map(|a| a.to_string_lossy().to_ascii_lowercase())
+                        .filter(|a| a == "client" || a == "server");
+                    let Some(authority) = authority else {
+                        bail!(
+                            "--character-authority takes client (players' devices move their characters) or server\n\n{USAGE}"
+                        );
+                    };
+                    parsed.character_authority = Some(if authority == "server" {
+                        "Server".to_owned()
+                    } else {
+                        "Client".to_owned()
+                    });
+                }
                 "--relay" => {
                     let Some(relay) = arguments.next() else {
                         bail!(
@@ -282,6 +302,14 @@ fn main() -> Result<()> {
         print_output(&mut scripts);
     }
 
+    if let Some(authority) = &arguments.character_authority {
+        let players = world.players();
+        let _ = world.set_property(
+            players,
+            "CharacterAuthority",
+            axcenity_core::Value::String(authority.clone()),
+        );
+    }
     if let Some(max) = arguments.max_players {
         let players = world.players();
         let _ = world.set_property(
@@ -403,8 +431,16 @@ impl HostIo for Server {
     }
 
     fn net_receive(&mut self, seconds: f64) -> ControlFlow<()> {
-        let Sim { world, scripts, .. } = &mut self.sim;
+        let Sim {
+            world,
+            scripts,
+            assets,
+            characters,
+            ..
+        } = &mut self.sim;
         self.network.receive(world, scripts, seconds);
+        // Players' moves, when the server moves their characters (MP6a).
+        self.network.step_characters(world, assets, characters);
         // With no screen, a player here has nothing to load (Phase 80).
         for (request, _) in self.network.take_viewer_requests() {
             scripts.finish_stream_around(world, request);
@@ -609,11 +645,20 @@ mod tests {
                 data: None,
                 relay: None,
                 no_port_map: false,
+                character_authority: None,
             }
         );
         let insecure = parse(&["castle", "--insecure", "--data", "keys"]).unwrap();
         assert!(insecure.insecure);
         assert!(parse(&["castle", "--no-port-map"]).unwrap().no_port_map);
+        assert_eq!(
+            parse(&["castle", "--character-authority", "SERVER"])
+                .unwrap()
+                .character_authority
+                .as_deref(),
+            Some("Server")
+        );
+        assert!(parse(&["castle", "--character-authority", "both"]).is_err());
         assert_eq!(insecure.data, Some(PathBuf::from("keys")));
         assert!(parse(&["castle", "--data"]).is_err());
     }

@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Servers can move players' characters, with prediction on their devices"
+details = "Players.CharacterAuthority = \"Server\" (or axcenity-server --character-authority server) has the server move each player's character from the keys their device sends, so a modified client can't move it anywhere the game wouldn't. The player's own device still moves its character at once and checks it against the server's answers; when they differ it puts the character where the server has it, takes the steps since again and slides the difference away. \"Client\", the default, keeps today's behavior. Other players' characters, seats and moving platforms can still cost small corrections (multiplayer readiness MP6a)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

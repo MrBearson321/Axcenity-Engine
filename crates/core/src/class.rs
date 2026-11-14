@@ -1082,6 +1082,11 @@ impl ClassName {
                 // How many players a hosted game takes, the host's own
                 // player among them (Phase 63).
                 ("MaxPlayers", Value::Number(8.0)),
+                // Who moves each player's character (multiplayer readiness
+                // MP6a): "Client", their device, which the server checks;
+                // or "Server", the server from their device's input, which
+                // the device predicts.
+                ("CharacterAuthority", Value::String("Client".to_owned())),
             ],
             ClassName::StarterPlayer => vec![
                 // The prefab each player's character is a copy of, such as

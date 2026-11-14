@@ -42,6 +42,7 @@ Decisions with long-term consequences, so later work doesn't silently reverse th
 | [ADR-0026](ADR-0026-Secure-Game-Connections-And-Relay.md) | Game servers issue their own netcode connect tokens over TLS pinned by fingerprint (LAN and Play stay unsecured); reaching a host goes direct, port mapping, hole punching, then a self-hostable `axcenity-relay` | Accepted | 2026-11-14 |
 | [ADR-0027](ADR-0027-Convert-New-Model-Formats-To-glTF-On-Import.md) | Model formats the runtime doesn't read (USD first) are converted to `.glb` by the editor-only `convert` crate on import; OBJ stays direct through `ufbx` | Proposed | 2026-11-14 |
 | [ADR-0028](ADR-0028-Facial-Animation-Morph-Targets-On-GPU-And-FaceControls.md) | Blend shapes morphed on the GPU before skinning (sparse deltas per mesh, weights per item); faces driven by a `FaceControls` Instance of standard controls, mapped to shapes and bones by `*.face.json` profiles found by fit (Axcenity, ARKit, VRM, Oculus visemes) | Accepted | 2026-11-14 |
+| [ADR-0029](ADR-0029-Server-Moved-Characters-And-Prediction.md) | With `Players.CharacterAuthority = "Server"`, the server moves players' characters from numbered moves paid from a real-time allowance; devices predict, rewind to the server's answer and take later moves again (no fixed ticks, no determinism) | Accepted | 2026-11-14 |
 
 ## Superseded and changed decisions found in the plans
 

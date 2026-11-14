@@ -275,6 +275,7 @@ impl Bot {
         };
         self.busy = Duration::ZERO;
         self.frames = 0;
+        let prediction = self.network.prediction();
         BotSample {
             bot: self.index,
             joined_after: self.joined_after,
@@ -295,6 +296,10 @@ impl Bot {
             script_errors: self.script_errors,
             frame_ms,
             instances: self.sim.world.len(),
+            predicted: prediction.moves,
+            predict_corrections: prediction.corrections,
+            predict_largest: f64::from(prediction.largest),
+            replay_ms: prediction.replay_seconds * 1000.0,
             ..BotSample::default()
         }
     }
@@ -331,8 +336,15 @@ impl HostIo for Bot {
     }
 
     fn net_receive(&mut self, seconds: f64) -> ControlFlow<()> {
-        let Sim { world, scripts, .. } = &mut self.sim;
+        let Sim {
+            world,
+            scripts,
+            assets,
+            characters,
+            ..
+        } = &mut self.sim;
         self.network.receive(world, scripts, seconds);
+        self.network.step_characters(world, assets, characters);
         let mut failure = None;
         for line in self.network.take_log() {
             log::info!("Bot{}: {line}", self.index + 1);
@@ -426,6 +438,8 @@ impl HostIo for Bot {
                 root,
             );
         }
+        self.network
+            .record_move(&self.sim.world, &self.sim.scripts, &mut self.sim.characters);
         self.network.send(&self.sim.world, &mut self.sim.scripts);
     }
 }
