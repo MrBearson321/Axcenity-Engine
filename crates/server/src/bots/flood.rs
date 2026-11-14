@@ -8,12 +8,18 @@
 //!   server refuses it and drops it.
 //! - `spam`: joins properly, then sends as much junk as the connection
 //!   carries on both channels, every frame. The server must keep its frame
-//!   rate for everyone else.
+//!   rate for everyone else, and kicks it (MP3).
+//! - `deep`: joins, then sends a RemoteEvent message whose argument is
+//!   tables nested 200,000 deep (600 KB) every second. Before MP3 one of
+//!   these overflowed the server's stack.
 
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use axcenity_net::{Channel, Client, GameInfo, Message, PROTOCOL_VERSION, class_defaults};
+use axcenity_net::{
+    Channel, Client, GameInfo, Message, PROTOCOL_VERSION, WireArg, WireKind, WireMessage,
+    class_defaults,
+};
 
 use crate::stats::BotSample;
 
@@ -22,6 +28,7 @@ pub enum Flood {
     Silent,
     Junk,
     Spam,
+    Deep,
 }
 
 impl Flood {
@@ -30,7 +37,8 @@ impl Flood {
             "silent" => Flood::Silent,
             "junk" => Flood::Junk,
             "spam" => Flood::Spam,
-            _ => bail!("--flood takes silent, junk or spam, not `{text}`"),
+            "deep" => Flood::Deep,
+            _ => bail!("--flood takes silent, junk, spam or deep, not `{text}`"),
         })
     }
 }
@@ -55,6 +63,8 @@ pub struct FloodConnection {
     /// Seconds from starting until the server closed it.
     ended_after: Option<f64>,
     seed: u64,
+    /// `deep`: when to send the next.
+    next_deep: f64,
 }
 
 impl FloodConnection {
@@ -87,6 +97,7 @@ impl FloodConnection {
             ended: None,
             ended_after: None,
             seed: 0x9e37_79b9_7f4a_7c15 ^ index as u64,
+            next_deep: 0.0,
         })
     }
 
@@ -99,6 +110,28 @@ impl FloodConnection {
                 self.seed as u8
             })
             .collect()
+    }
+
+    /// A RemoteEvent message (to a remote that needn't exist) whose
+    /// argument is `depth` tables, each inside the last.
+    fn nested(depth: usize) -> Vec<u8> {
+        let shallow = Message::Remote {
+            message: WireMessage {
+                remote: 1,
+                player: 0,
+                kind: WireKind::Event,
+                args: vec![WireArg::Nil],
+            },
+        };
+        let mut bytes = shallow.to_bytes();
+        // Postcard: the Nil argument (0) is last; each table is its
+        // variant (9) and pair count (1), then its key (the next table)
+        // and value (nil).
+        bytes.pop();
+        bytes.extend(std::iter::repeat_n([9, 1], depth).flatten());
+        bytes.push(0);
+        bytes.extend(std::iter::repeat_n(0, depth));
+        bytes
     }
 
     pub fn frame(&mut self, seconds: f64) {
@@ -125,9 +158,18 @@ impl FloodConnection {
                     self.client.send(Channel::ReliableOrdered, junk);
                 }
                 Flood::Junk => {}
-                Flood::Spam if !self.said => {
+                Flood::Spam | Flood::Deep if !self.said => {
                     self.client
                         .send(Channel::ReliableOrdered, self.hello.to_bytes());
+                }
+                Flood::Deep => {
+                    let joined = self.joined_after.is_some();
+                    let elapsed = self.started.elapsed().as_secs_f64();
+                    if joined && elapsed >= self.next_deep {
+                        self.next_deep = elapsed + 1.0;
+                        self.client
+                            .send(Channel::ReliableOrdered, Self::nested(200_000));
+                    }
                 }
                 Flood::Spam => {
                     if self.joined_after.is_some() {

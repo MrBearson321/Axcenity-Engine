@@ -36,6 +36,7 @@ sequenceDiagram
 
 - **IDs**: replica Instances keep the server's IDs; device-local ones are numbered from 2³¹ (`InstanceId::is_local`). ServerScriptService and ServerStorage never leave the server.
 - **Reconnecting** (multiplayer readiness MP2): a device joined over UDP that loses its connection (`SessionEvent::Lost`) keeps its world and rejoins for 60 s (1, 2, 4, then every 8 s) before `ConnectionFailed`; its Hello carries the random rejoin key the last `Welcome` gave, so a server still holding the stale connection drops it and lets the player back in even when full, with the same name. Hosts restart physics and characters when `Network::follows` changes.
+- **Validation** (MP3a): per-player token buckets (`net::limits`) for bytes, remote calls, chat, console, stream requests and packets; unreadable, server-only and too-deep (over 32 tables, `MAX_TABLE_DEPTH`) messages dropped; each drop flags the player (once a second per reason), fires `Players.PlayerFlagged` and 5 flags in a minute kick (`--kick-flags`).
 - **Handshake** checks protocol (`PROTOCOL_VERSION`, 10 since M7, 12 since Phase 81, 14 since MP2's rejoin keys), class-defaults fingerprint, game name, version, password, `MaxPlayers` (8); `Hello`/`Refused` stay JSON forever so a newer engine can say why it refuses.
 - **Ownership** (Phase 66): `CharacterCheck` limits how far a character may move per packet (walk/run speed + 15%, jump height, never more than 30 studs across or up, falls aside; under 1/64 stud is the wire's rounding and free); owned assemblies are held still on the server and placed where the owner says.
 - **Lag compensation** (Phase 81, `script/src/lag.rs`): the host's send records a second of poses for parts that moved (`LagHistory`, by `motion_revision`) and each remote player's rewind (round trip + 0.1 s smoothing, at most 1 s). `workspace:Raycast` with `RaycastParams.CompensateFor`, or in a `LagCompensated` Tool's RemoteEvent handler before it waits, tests moving parts where the shooter saw them (`physics::raycast_rewound`); their own character stays where it is. Shape casts and overlaps aren't compensated.
@@ -57,7 +58,7 @@ sequenceDiagram
 
 ## Configuration
 
-Ports 47800 (game) and 47801 (LAN discovery). `--host [port]`, `--join addr:port`, `--password`; server `--port`, `--max-players n`, `--stats seconds`, `--bench-clients n`; `axcenity-bots <game> --join addr:port --count n` (MP1), `--churn s` and `--flood silent|junk|spam` (MP2). Hosts log with `net::LOG_FILTER` (`warn,renetcode=off`; renetcode logs every unreadable packet). `AXCENITY_NET_JSON=1` makes a sending end use JSON instead of postcard, for debugging.
+Ports 47800 (game) and 47801 (LAN discovery). `--host [port]`, `--join addr:port`, `--password`; server `--port`, `--max-players n`, `--stats seconds`, `--bench-clients n`; `axcenity-bots <game> --join addr:port --count n` (MP1), `--churn s` and `--flood silent|junk|spam|deep` (MP2, MP3); server `--kick-flags n` (MP3). Hosts log with `net::LOG_FILTER` (`warn,renetcode=off`; renetcode logs every unreadable packet). `AXCENITY_NET_JSON=1` makes a sending end use JSON instead of postcard, for debugging.
 
 ## Testing
 
@@ -66,7 +67,7 @@ Ports 47800 (game) and 47801 (LAN discovery). `--host [port]`, `--join addr:port
 ## Limitations
 
 - **Unsecured netcode**: no encryption or connect tokens; fine for direct-address and LAN play only ([ADR-0010](../Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md), development policy).
-- A connection that sends junk at renet's full rate costs other players about 20% packet loss until MP3's budgets drop it; silent connections can hold the spare slots for 10 s until MP4's connect tokens.
+- A connection that sends junk at renet's full rate costs other players some packets for the ~3 s until it's kicked; silent connections can hold the spare slots for 10 s until MP4's connect tokens.
 - No relay or matchmaking. Replays don't record animation poses, sounds, particles or screen GUIs, and the timeline isn't clickable. Lag compensation covers `workspace:Raycast` only, and a part's pose between two recorded frames is interpolated linearly.
 - A RemoteEvent message with no handler is dropped (Roblox queues it).
 

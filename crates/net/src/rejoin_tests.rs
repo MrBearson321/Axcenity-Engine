@@ -9,7 +9,7 @@ use crate::transport::Server;
 
 const FRAME: Duration = Duration::from_millis(16);
 
-fn game() -> GameInfo {
+pub(crate) fn game() -> GameInfo {
     GameInfo {
         name: "Castle".to_owned(),
         version: "1.0".to_owned(),
@@ -17,7 +17,7 @@ fn game() -> GameInfo {
 }
 
 /// A dedicated host for at most `max_players`.
-fn host(max_players: usize) -> Host {
+pub(crate) fn host(max_players: usize) -> Host {
     Host::new(
         Server::in_memory(),
         HostSettings {
@@ -30,7 +30,10 @@ fn host(max_players: usize) -> Host {
 }
 
 /// Steps the host and every join for a few frames; returns what each saw.
-fn frames(host: &mut Host, joins: &mut [&mut Join]) -> (Vec<SessionEvent>, Vec<Vec<SessionEvent>>) {
+pub(crate) fn frames(
+    host: &mut Host,
+    joins: &mut [&mut Join],
+) -> (Vec<SessionEvent>, Vec<Vec<SessionEvent>>) {
     let mut on_host = Vec::new();
     let mut on_joins = vec![Vec::new(); joins.len()];
     for _ in 0..10 {
@@ -140,6 +143,6 @@ fn losing_the_connection_after_joining_is_lost_not_failed() {
     );
 }
 
-fn host_client(host: &mut Host) -> crate::transport::Client {
+pub(crate) fn host_client(host: &mut Host) -> crate::transport::Client {
     host.server_mut().connect_loopback()
 }
