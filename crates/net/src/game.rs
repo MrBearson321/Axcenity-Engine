@@ -23,6 +23,7 @@ use crate::ownership::{
 };
 use crate::replay::{BufferPlay, Replay, Replays};
 use crate::replicate::{LevelState, Replicator, Update, apply};
+use crate::secure::{Secured, ServerCert, TokenRequest, TokenRules, Trust, short, split_join_link};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
 use crate::streaming::{PeerStream, Streams};
 use crate::transport::{Client, Conditions, LinkStats, Server};
@@ -44,6 +45,19 @@ pub const KICK_FLAGS: usize = 5;
 pub const REJOIN_SECONDS: f64 = 60.0;
 /// The longest wait between two tries, in seconds; the first is 1.
 const REJOIN_MOST_WAIT: f64 = 8.0;
+
+/// What a device joined over UDP, to rejoin the same server with.
+#[derive(Clone)]
+struct JoinedTo {
+    address: String,
+    password: Option<String>,
+    trust: Trust,
+}
+
+/// The file in the data folder with this install's server certificate.
+const CERT_FILE: &str = "server-certificate.json";
+/// The file in the data folder with the servers its player has joined.
+const KNOWN_SERVERS_FILE: &str = "known-servers.json";
 
 /// A device that lost its connection, trying to rejoin.
 struct Rejoining {
@@ -147,8 +161,16 @@ pub struct Network {
     /// Joined: how many times the server moved this device's character
     /// back (`Correction`), since the session started.
     corrections: u64,
-    /// Joined over UDP: the address and password, to rejoin with.
-    joined_to: Option<(String, Option<String>)>,
+    /// Joined over UDP: the address, password and trusted certificate, to
+    /// rejoin with.
+    joined_to: Option<JoinedTo>,
+    /// Hosting on the network: secured with connect tokens (MP4), unless
+    /// it's a LAN game or `--insecure`.
+    secure: bool,
+    /// Where this install keeps its server certificate and the servers its
+    /// player has joined (`None`: a new certificate each time, and any
+    /// server is trusted).
+    data_folder: Option<std::path::PathBuf>,
     /// The key the server gave this device to rejoin with.
     rejoin_key: u64,
     /// Lost the connection and trying to rejoin.
@@ -203,6 +225,8 @@ impl Network {
             join_name: None,
             corrections: 0,
             joined_to: None,
+            secure: true,
+            data_folder: None,
             rejoin_key: 0,
             rejoining: None,
             rejoin_seconds: REJOIN_SECONDS,
@@ -500,9 +524,24 @@ impl Network {
         self.disconnect(world, scripts);
         let max_players = max_players(world);
         let port = port.unwrap_or(DEFAULT_PORT);
-        let server = Server::listen(port, max_players + SPARE_CONNECTIONS)
-            .map_err(|err| format!("Can't host on port {port}: {err}."))?;
+        let server = if self.secure {
+            let rules = TokenRules {
+                game: self.game.clone(),
+                password: password.clone(),
+            };
+            Server::listen_secure(
+                port,
+                max_players + SPARE_CONNECTIONS,
+                Secured::new(self.certificate()),
+                rules,
+            )
+            .map_err(|err| format!("Can't host on port {port} (UDP and TCP): {err}."))?
+        } else {
+            Server::listen(port, max_players + SPARE_CONNECTIONS)
+                .map_err(|err| format!("Can't host on port {port}: {err}."))?
+        };
         let port = server.port().unwrap_or(port);
+        let fingerprint = server.fingerprint().map(str::to_owned);
         let own_player = own_player.then(|| local_name(world, scripts));
         let host = Host::new(
             server,
@@ -529,7 +568,91 @@ impl Network {
             "Hosting \"{}\" (version {}) on UDP port {port}, for {max_players} players.",
             self.game.name, self.game.version
         ));
+        match fingerprint {
+            Some(fingerprint) => self.log.push(format!(
+                "Secured: connect tokens on TCP port {port}, every packet encrypted. \
+                 Certificate {}; players join with \
+                 axcenity://join/<this computer's address>:{port}#{fingerprint}",
+                short(&fingerprint)
+            )),
+            None => self.log.push(
+                "warning: not secured (LAN hosting or --insecure): packets aren't encrypted \
+                 and anyone who can reach the port can try to join."
+                    .to_owned(),
+            ),
+        }
         Ok(port)
+    }
+
+    /// Hosts secured (the default) or not: LAN games and `--insecure`
+    /// aren't. Takes effect at the next [`host`](Self::host).
+    pub fn set_secure(&mut self, secure: bool) {
+        self.secure = secure;
+    }
+
+    /// Where this install keeps its server certificate (so players who
+    /// joined before still trust it) and the certificates of servers its
+    /// player joined: the engine's data folder, never a project.
+    pub fn set_data_folder(&mut self, folder: Option<std::path::PathBuf>) {
+        self.data_folder = folder;
+    }
+
+    /// While hosting secured: the certificate's fingerprint, which join
+    /// links carry.
+    pub fn fingerprint(&self) -> Option<String> {
+        match &self.session {
+            Session::Hosting(host) => host.server().fingerprint().map(str::to_owned),
+            _ => None,
+        }
+    }
+
+    /// While hosting secured: how many connect tokens were handed out.
+    pub fn tokens_issued(&self) -> usize {
+        match &self.session {
+            Session::Hosting(host) => host.server().tokens_issued(),
+            _ => 0,
+        }
+    }
+
+    /// This install's server certificate: the one in the data folder (made
+    /// there the first time), else a new one.
+    fn certificate(&mut self) -> ServerCert {
+        let Some(folder) = &self.data_folder else {
+            return ServerCert::generate();
+        };
+        let path = folder.join(CERT_FILE);
+        match ServerCert::load_or_make(&path) {
+            Ok(cert) => cert,
+            Err(err) => {
+                self.log.push(format!(
+                    "warning: can't use the server certificate at {} ({err}); using a new \
+                     one, so players who joined before are told it changed",
+                    path.display()
+                ));
+                ServerCert::generate()
+            }
+        }
+    }
+
+    /// Which certificate to accept from the server at `link`'s address: the
+    /// link's fingerprint, else the one remembered for the address.
+    fn trust_for(&self, fingerprint: Option<String>) -> Trust {
+        match (fingerprint, &self.data_folder) {
+            (Some(fingerprint), _) => Trust::Pinned(fingerprint),
+            (None, Some(folder)) => Trust::Remember(folder.join(KNOWN_SERVERS_FILE)),
+            (None, None) => Trust::Any,
+        }
+    }
+
+    /// A client joining `to`, secured when the server is.
+    fn client_for(&self, to: &JoinedTo) -> std::io::Result<Client> {
+        let game = self.game.clone();
+        let password = to.password.clone();
+        Client::join(
+            &to.address,
+            move |address| TokenRequest::new(&game, password, address),
+            to.trust.clone(),
+        )
     }
 
     /// Hosts with an in-memory server only loopback clients reach, and
@@ -556,8 +679,11 @@ impl Network {
         client
     }
 
-    /// Joins the game at `address` (`"host:port"`), or says why it can't
-    /// start. A refusal or failure later fires `ConnectionFailed`.
+    /// Joins the game at `address` (`"host:port"`, or a join link
+    /// `axcenity://join/host:port#fingerprint`), or says why it can't
+    /// start. A refusal or failure later fires `ConnectionFailed`. A
+    /// secured server's certificate must match the link's fingerprint, or
+    /// the one remembered for the address (MP4).
     pub fn join(
         &mut self,
         world: &mut World,
@@ -565,12 +691,19 @@ impl Network {
         address: &str,
         password: Option<String>,
     ) -> Result<(), String> {
-        let client =
-            Client::connect(address).map_err(|err| format!("Can't join {address}: {err}."))?;
-        self.join_through(world, scripts, client, password.clone());
-        self.joined_to = Some((address.to_owned(), password));
+        let (address, fingerprint) = split_join_link(address);
+        let to = JoinedTo {
+            address,
+            password,
+            trust: self.trust_for(fingerprint),
+        };
+        let client = self
+            .client_for(&to)
+            .map_err(|err| format!("Can't join {}: {err}.", to.address))?;
+        self.join_through(world, scripts, client, to.password.clone());
+        self.log.push(format!("Joining {}...", to.address));
+        self.joined_to = Some(to);
         self.rejoins = 0;
-        self.log.push(format!("Joining {address}..."));
         Ok(())
     }
 
@@ -638,18 +771,20 @@ impl Network {
         }
         rejoining.next_try = self.clock + rejoining.wait;
         rejoining.wait = (rejoining.wait * 2.0).min(REJOIN_MOST_WAIT);
-        let Some((address, password)) = self.joined_to.clone() else {
+        let Some(to) = self.joined_to.clone() else {
             return;
         };
-        match Client::connect(&address) {
+        match self.client_for(&to) {
             Ok(client) => {
                 let join = self
-                    .start_join(world, scripts, client, password)
+                    .start_join(world, scripts, client, to.password)
                     .rejoining(self.rejoin_key);
                 self.session = Session::Joined(Box::new(join));
-                self.log.push(format!("Rejoining {address}..."));
+                self.log.push(format!("Rejoining {}...", to.address));
             }
-            Err(err) => self.log.push(format!("Can't rejoin {address} yet: {err}.")),
+            Err(err) => self
+                .log
+                .push(format!("Can't rejoin {} yet: {err}.", to.address)),
         }
     }
 
@@ -715,7 +850,10 @@ impl Network {
         self.try_rejoin(world, scripts);
         let events = match &mut self.session {
             Session::Offline => Vec::new(),
-            Session::Hosting(host) => host.update(elapsed),
+            Session::Hosting(host) => {
+                self.log.extend(host.server().take_token_log());
+                host.update(elapsed)
+            }
             Session::Joined(join) => join.update(elapsed),
         };
         for event in events {

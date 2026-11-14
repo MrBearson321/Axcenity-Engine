@@ -37,6 +37,9 @@ pub struct Arguments {
     pub network: Option<NetworkStart>,
     /// `--password <text>`: the password a host asks for, or a join gives.
     pub password: Option<String>,
+    /// `--lan` with `--host`: a LAN game, not secured with connect tokens
+    /// (MP4).
+    pub lan: bool,
     /// `--dev`: the F9 Developer Console, even in a built game whose
     /// project setting has it off (Phase 71).
     pub dev: bool,
@@ -153,6 +156,8 @@ impl Arguments {
                     bail!("--replay takes the .replay file to watch\n\n{USAGE}");
                 };
                 parsed.replay = Some(PathBuf::from(file));
+            } else if argument == "--lan" {
+                parsed.lan = true;
             } else if argument == "--password" {
                 let Some(password) = arguments.next() else {
                     bail!("--password takes the game's password\n\n{USAGE}");
@@ -165,6 +170,9 @@ impl Arguments {
             } else {
                 bail!("only one game can be played at a time\n\n{USAGE}");
             }
+        }
+        if parsed.lan && !matches!(parsed.network, Some(NetworkStart::Host(_))) {
+            bail!("--lan goes with --host: it hosts a LAN game, not secured\n\n{USAGE}");
         }
         if parsed.replay.is_some() && parsed.network.is_some() {
             bail!("a replay is watched on its own, without --host or --join\n\n{USAGE}");
@@ -407,6 +415,16 @@ mod tests {
         }
         let err = parse(&["--quality", "Epic"]).unwrap_err();
         assert!(err.to_string().contains("--quality takes"), "{err}");
+    }
+
+    #[test]
+    fn lan_goes_with_host() {
+        let lan = parse(&["--host", "--lan", "examples/hello-part"]).unwrap();
+        assert!(lan.lan);
+        assert_eq!(lan.network, Some(NetworkStart::Host(None)));
+        assert!(!parse(&["--host", "examples/hello-part"]).unwrap().lan);
+        assert!(parse(&["--lan", "examples/hello-part"]).is_err());
+        assert!(parse(&["--join", "127.0.0.1:4000", "--lan"]).is_err());
     }
 
     #[test]

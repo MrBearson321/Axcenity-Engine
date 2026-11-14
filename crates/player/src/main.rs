@@ -92,14 +92,15 @@ const REGION_WAIT_SECONDS: f64 = 5.0;
 /// Touchpads scroll in pixels; this many is one mouse wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
-const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
+const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] [--lan] | --join address:port] \
                      [--password text] [--bench frames] [--size WxH] [--quality preset] [--graphics file.json] \
                      [--replay file] \
                      [project-folder | game.axgame]  (or --version [--json])\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
                      --dev turns on the F9 Developer Console in a built game\n\
-                     --host hosts the game (port 47800 unless given); --join joins one\n\
+                     --host hosts the game (port 47800 unless given), secured with connect \
+                     tokens unless --lan; --join joins one, by address or join link\n\
                      --bench measures that many frames' steps, prints them and quits\n\
                      --size sets the window's size in pixels, such as 2560x1440\n\
                      --quality draws with that preset (Low, Medium, High, Ultra) for this run only\n\
@@ -337,6 +338,11 @@ fn main() -> Result<()> {
     network.set_client_scripts(client_scripts(&world, &project.scripts));
     // `ReplayService:StopRecording` saves in the player's data (Phase 81).
     network.set_replay_folder(data_folder.as_ref().map(|data| data.join("replays")));
+    // This install's server certificate and the servers its player joined
+    // (MP4): the engine's data folder, the same for every game, never the
+    // project.
+    network.set_data_folder(axcenity_save::saves_folder());
+    network.set_secure(!arguments.lan);
     match arguments.network {
         Some(NetworkStart::Host(port)) => {
             let password = arguments.password.clone();

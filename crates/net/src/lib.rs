@@ -10,6 +10,8 @@
 //!   says why on both ends.
 //! - `session`: a [`Host`] admitting players and keeping everyone's roster,
 //!   and a [`Join`].
+//! - `secure`: MP4's connect tokens: a server's certificate and token
+//!   port, and fetching a token over TLS checked against a fingerprint.
 //! - `discovery`: LAN games found by broadcast.
 //! - `wire`: values and remote messages as plain data, Instances as
 //!   network IDs; `replicate`: the snapshot and each frame's changes.
@@ -26,6 +28,7 @@ mod movement;
 mod ownership;
 mod replay;
 mod replicate;
+mod secure;
 mod session;
 pub mod streaming;
 mod transport;
@@ -47,6 +50,10 @@ pub use replay::{
 pub use replicate::{
     Applied, LevelState, Op, Replicator, Update, WireAnimator, WireChange, WireInstance,
     WireParameter, apply, replicated_parts,
+};
+pub use secure::{
+    FetchError, Secured, ServerCert, TokenRequest, TokenRules, Trust, fingerprint_of, join_link,
+    short as short_fingerprint, split_join_link,
 };
 pub use session::{HANDSHAKE_TIMEOUT, Host, HostSettings, Join, SessionEvent};
 pub use transport::{Channel, Client, Conditions, ConnectionId, LinkStats, Server, ServerEvent};
@@ -94,6 +101,8 @@ mod rejoin_tests;
 mod replay_tests;
 #[cfg(test)]
 mod replication_tests;
+#[cfg(test)]
+mod secure_tests;
 #[cfg(test)]
 mod smoothing_tests;
 #[cfg(test)]

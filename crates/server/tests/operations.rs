@@ -2,7 +2,8 @@
 //! goes wrong on a public server, with `axcenity-bots` as its players, as
 //! separate processes over UDP. The server crashes and starts again (the
 //! players rejoin, their saves kept); players come and go for a while (no
-//! leak); connections misbehave (dropped, and real players still get in).
+//! leak); connections misbehave (dropped, and real players still get in);
+//! connections without a connect token never get a slot (MP4).
 
 mod common;
 
@@ -169,6 +170,38 @@ fn connections_that_never_say_who_they_are_are_dropped_and_players_get_in_after(
     let (ok, summary) = finish(running, &report);
     assert!(ok, "{summary}");
     assert_eq!(summary["joined"], 2, "{summary}");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn connections_without_a_token_hold_no_slot_on_a_secured_server() {
+    let folder = scratch("tokenless");
+    let game = example("hello-spawn");
+    let server = server_with(&game, 0, &["--max-players", "2"], &[]);
+    server.wait_for_all(&["Secured: connect tokens"], 10);
+    // Far more than the slots, the whole time the players join (MP4:
+    // before, these held every spare connection for ten seconds).
+    let flood = folder.join("flood.jsonl");
+    let flooding = bots(
+        &game,
+        server.port,
+        &flood,
+        &["--flood", "tokenless", "--count", "20", "--seconds", "8"],
+    );
+    std::thread::sleep(Duration::from_secs(1));
+    let report = folder.join("bots.jsonl");
+    let running = bots(
+        &game,
+        server.port,
+        &report,
+        &["--count", "2", "--seconds", "3", "--idle"],
+    );
+    let (ok, summary) = finish(running, &report);
+    assert!(ok, "{summary}");
+    assert_eq!(summary["joined"], 2, "{summary}");
+    let (_, summary) = finish(flooding, &flood);
+    assert_eq!(summary["joined"], 0, "{summary}");
+    assert_eq!(summary["connected"], 0, "{summary}");
     let _ = std::fs::remove_dir_all(&folder);
 }
 

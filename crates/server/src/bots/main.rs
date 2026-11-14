@@ -14,7 +14,7 @@
 //!
 //! Operational tests (MP2): `--churn <s>` has each bot leave after about
 //! that long and a new one (a new install) join in its place, for leak
-//! checks; `--flood silent|junk|spam|deep` opens misbehaving connections
+//! checks; `--flood tokenless|silent|junk|spam|deep` opens misbehaving connections
 //! instead of bots (`flood.rs`). A bot that loses its connection tries to
 //! rejoin for a minute, as a player's device does. MP3b: `--cheat
 //! speed|noclip|fly` makes every bot a modified client (`cheat.rs`).
@@ -42,7 +42,7 @@ use stats::{BotSample, Summary};
 
 const USAGE: &str = "usage: axcenity-bots <project-folder> --join <address:port> [--count <n>] [--seconds <s>] \
                      [--threads <n>] [--stagger <ms>] [--password <text>] [--no-scripts] [--idle] [--roam <studs>] \
-                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood silent|junk|spam|deep] [--cheat speed|noclip|fly]\n\
+                     [--report <s>] [--report-file <path>] [--user-id <first>] [--churn <s>] [--flood tokenless|silent|junk|spam|deep] [--cheat speed|noclip|fly]\n\
                      example: cargo run -p axcenity-server --bin axcenity-bots -- examples/hello-character --join 127.0.0.1:47800 --count 16";
 
 /// Each frame is this long.
@@ -344,6 +344,17 @@ fn main() -> Result<()> {
             }
             return Ok(());
         }
+        // A secured server must never have let one in.
+        Some(Flood::Tokenless) => {
+            if summary.joined > 0 {
+                bail!(
+                    "the server let {} of {} connections without a token in",
+                    summary.joined,
+                    summary.bots
+                );
+            }
+            return Ok(());
+        }
         Some(Flood::Spam | Flood::Deep) | None => {}
     }
     if summary.joined < summary.bots {
@@ -569,7 +580,8 @@ mod tests {
         assert_eq!(parsed.flood, Some(Flood::Silent));
         let err = parse(&["castle", "--flood", "loud"]).unwrap_err();
         assert!(
-            err.to_string().contains("silent, junk, spam or deep"),
+            err.to_string()
+                .contains("tokenless, silent, junk, spam or deep"),
             "{err}"
         );
         let parsed = parse(&["castle", "--cheat", "noclip"]).unwrap();

@@ -1,0 +1,12 @@
+category = "security"
+subsystem = "networking"
+title = "Games hosted on the network are encrypted, and only players who pass the password get in"
+details = "A dedicated server and a player's --host now hand out connect tokens over TLS from TCP on the game's port (47800), checking the game, version and password first, and every packet after is encrypted. Players check the server's certificate against the fingerprint in a join link (axcenity://join/address:port#fingerprint, printed by the host) or the one remembered for that address, and are told if it changed. The certificate is kept in the engine's data folder, never in a project. LAN games stay unsecured: player --host --lan, axcenity-server --insecure (multiplayer readiness MP4)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

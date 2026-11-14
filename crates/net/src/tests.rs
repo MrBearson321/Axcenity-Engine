@@ -464,3 +464,57 @@ fn released_format(name: &str) -> u32 {
 fn the_release_files_list_this_network_protocol() {
     assert_eq!(released_format("network_protocol"), PROTOCOL_VERSION);
 }
+
+#[test]
+fn a_secured_host_keeps_its_certificate_and_its_join_link_joins_it() {
+    let folder = std::env::temp_dir().join(format!("axcenity-net-cert-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    let mut host = Game::new("1.0", 47926);
+    host.network.set_data_folder(Some(folder.clone()));
+    let port = host.host_udp();
+    host.collect();
+    let fingerprint = host.network.fingerprint().expect("hosted secured");
+    assert!(host.said(&format!("#{fingerprint}")), "{:?}", host.output);
+
+    let mut joiner = Game::new("1.0", 47927);
+    let link = crate::join_link(&format!("127.0.0.1:{port}"), &fingerprint);
+    joiner
+        .network
+        .join(&mut joiner.world, &mut joiner.scripts, &link, None)
+        .unwrap();
+    run_until(&mut host, &mut joiner, "the secured join", |a, b| {
+        a.players().len() == 2 && b.players().len() == 2
+    });
+    assert_eq!(host.network.tokens_issued(), 1);
+
+    // Hosting again from the same data folder: the same certificate, so
+    // players who joined before still trust it.
+    host.network.disconnect(&mut host.world, &mut host.scripts);
+    host.host_udp();
+    assert_eq!(host.network.fingerprint(), Some(fingerprint));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_lan_host_is_not_secured_and_still_joins() {
+    let mut host = Game::new("1.0", 47928);
+    host.network.set_secure(false);
+    let port = host.host_udp();
+    host.collect();
+    assert!(host.network.fingerprint().is_none());
+    assert!(host.said("not secured"), "{:?}", host.output);
+    let mut joiner = Game::new("1.0", 47929);
+    joiner
+        .network
+        .join(
+            &mut joiner.world,
+            &mut joiner.scripts,
+            &format!("127.0.0.1:{port}"),
+            None,
+        )
+        .unwrap();
+    run_until(&mut host, &mut joiner, "the LAN join", |a, b| {
+        a.players().len() == 2 && b.players().len() == 2
+    });
+    assert_eq!(host.network.tokens_issued(), 0);
+}
