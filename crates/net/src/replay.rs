@@ -183,7 +183,7 @@ impl Recorder {
         profiling::scope!("Recorder::frame");
         self.clock += seconds.max(0.0);
         let first = self.last_keyframe.is_none();
-        let mut update = self.replicator.frame(world);
+        let mut update = self.replicator.frame_at(world, Some(self.clock));
         if first {
             // The snapshot below has all of it.
             update = Update::default();

@@ -2721,6 +2721,14 @@ impl ClassName {
                     // expressions, four times: not at all); 0 keeps it
                     // whole at any distance.
                     ("LodDistance", Value::Number(30.0)),
+                    // Multiplayer (F7b): which of what scripts set on the
+                    // face goes to players' devices (expressions; overrides
+                    // and layer settings; the lip sync playing), and at most
+                    // how many times a second (0: every frame).
+                    ("ReplicateExpressions", Value::Bool(true)),
+                    ("ReplicateOverrides", Value::Bool(true)),
+                    ("ReplicateLipSync", Value::Bool(true)),
+                    ("ReplicationRate", Value::Number(10.0)),
                 ];
                 properties.extend(
                     crate::face::FACE_CONTROLS
