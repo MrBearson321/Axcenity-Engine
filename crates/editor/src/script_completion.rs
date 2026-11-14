@@ -270,6 +270,40 @@ fn api() -> &'static Api {
     })
 }
 
+/// The API entry called `name` as the API Reference names it
+/// (`BasePart.Touched`, `task.wait`, `workspace`), for hover docs.
+pub fn api_entry(name: &str) -> Option<&'static ApiEntry> {
+    static BY_NAME: OnceLock<HashMap<String, ApiEntry>> = OnceLock::new();
+    BY_NAME
+        .get_or_init(|| {
+            axcenity_script::api_reference()
+                .into_iter()
+                .map(|entry| (entry.qualified_name(), entry))
+                .collect()
+        })
+        .get(name)
+}
+
+/// The name the byte `cursor` is in or just after, unless it's a keyword
+/// or inside a string or comment (F1 looks it up when it isn't the API's).
+pub fn word_at(source: &str, cursor: usize) -> Option<&str> {
+    let cursor = floor_char(source, cursor);
+    let start = source[..cursor]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_word(*c))
+        .last()
+        .map_or(cursor, |(at, _)| at);
+    let end = source[cursor..]
+        .char_indices()
+        .find(|(_, c)| !is_word(*c))
+        .map_or(source.len(), |(at, _)| cursor + at);
+    let word = &source[start..end];
+    let usable =
+        is_identifier(word) && !KEYWORDS.contains(&word) && !in_string_or_comment(source, start);
+    usable.then_some(word)
+}
+
 /// Where the name at byte `cursor` of `source` is defined (roadmap G4):
 /// its declaration in the script, the Instance a chain names, or the API
 /// entry of a member or global. `None` for a keyword, a string, a comment,
