@@ -26,6 +26,7 @@ pub mod materials;
 pub mod mesh;
 pub mod noise;
 pub mod raycast;
+pub mod volume;
 
 use axcenity_core::{ClassName, Instance, TerrainData, Value};
 use glam::{Vec2, Vec3};

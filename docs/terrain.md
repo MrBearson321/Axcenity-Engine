@@ -30,6 +30,7 @@ Water (LE4, `scene/src/terrain_water.rs`): a Terrain's `Water` switch floods eve
 | `materials` | Layers by height and slope, blended with paint |
 | `mesh` | Chunk meshes at several levels of detail |
 | `raycast` | Where a ray meets the surface |
+| `volume` | The PW8 voxel spike: a signed-distance volume in 32³ chunks, ball brushes and a surface-nets mesher (not an Instance yet; [research/procedural-worlds.md](research/procedural-worlds.md#pw8-voxel-spike-whats-built-and-how-its-decided)) |
 | `files` | PNG and JSON codecs (`heights.png`, paint maps, optional `foliage.json` and `holes.png`) |
 | `job` | Slow work on another thread, with progress and cancel |
 

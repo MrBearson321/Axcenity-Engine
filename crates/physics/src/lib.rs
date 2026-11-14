@@ -84,7 +84,7 @@ pub use query::{
     cast_ray_excluding, debug_colliders, inside_solids, part_solids, parts_in_box, parts_in_part,
     parts_in_radius, raycast, raycast_rewound, shapecast, solids, surface_hits,
 };
-pub use shapes::prepare_precise;
+pub use shapes::{prepare_precise, triangle_mesh};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -1194,6 +1194,9 @@ pub(crate) fn quat_to_orientation(rotation: Quat) -> Vector3 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod volume_tests;
 
 #[cfg(test)]
 mod sync_tests;
