@@ -56,6 +56,13 @@ CFrame.LookVector: Vector3
 
 The way its front faces (its -Z), one stud long.
 
+```lua
+local cannon = workspace.Cannon
+local ball = workspace.Ball
+ball.Position = cannon.Position + cannon.CFrame.LookVector * 4
+ball.AssemblyLinearVelocity = cannon.CFrame.LookVector * 100
+```
+
 #### RightVector
 
 ```luau
@@ -105,6 +112,13 @@ CFrame:ToWorldSpace(other: CFrame): CFrame
 ```
 
 `other`, given relative to this CFrame, in world space (`cf * other`).
+
+```lua
+local car = workspace.Car
+-- A point 2 studs above and 5 behind the car, wherever it faces.
+local behind = car.CFrame:ToWorldSpace(CFrame.new(0, 2, 5))
+workspace.Camera.CFrame = behind
+```
 
 #### ToObjectSpace
 
@@ -162,6 +176,12 @@ CFrame.new(x: (number | Vector3)?, y: number?, z: number?): CFrame
 
 A CFrame at a position with no turn: `CFrame.new()`, `CFrame.new(position)` or `CFrame.new(x, y, z)`.
 
+```lua
+-- A position, then a position looking at a point.
+workspace.Crate.CFrame = CFrame.new(0, 3, 0)
+workspace.Camera.CFrame = CFrame.new(Vector3.new(0, 10, 20), Vector3.new(0, 0, 0))
+```
+
 #### lookAt
 
 ```luau
@@ -182,6 +202,11 @@ CFrame.Angles(rx: number?, ry: number?, rz: number?): CFrame
 ```
 
 A turn by these angles in radians around X, then Y, then Z, such as `CFrame.Angles(0, math.rad(90), 0)`.
+
+```lua
+local part = workspace.Spinner
+part.CFrame = part.CFrame * CFrame.Angles(0, math.rad(45), 0)
+```
 
 #### fromEulerAnglesYXZ
 

@@ -141,7 +141,7 @@ pub use debugger::{
 };
 pub use definitions::{
     API_DOCS_PATH, ApiEntry, ApiKind, DEFINITIONS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_example,
-    api_markdown, api_reference, api_summary, lua_definitions, property_description,
+    api_examples, api_markdown, api_reference, api_summary, lua_definitions, property_description,
     with_api_summary,
 };
 pub use edit::EditRuntime;
@@ -153,7 +153,7 @@ pub use levels::Levels;
 pub use network::{LanGame, NetworkRequest};
 pub use profile::{FunctionCost, ScriptProfile, WorkCost, WorkKind};
 pub use prompt::ShownPrompt;
-pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
+pub use remote::{Loopback, MAX_TABLE_DEPTH, Message, MessageKind, RemoteValue, Transport};
 pub use replay::{MAX_BUFFER_SECONDS, ReplayRequest};
 pub use sandbox::{SyntaxError, find_syntax_error};
 pub use sequence::sound_actions as sequence_sound_actions;
