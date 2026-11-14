@@ -171,6 +171,15 @@ impl Assets {
             shared.fonts = None;
             return Reload::Reloaded;
         }
+        if crate::is_rig_definition(file) {
+            let mut shared = self.lock();
+            // Read again next time: rig definitions apply to any skeleton
+            // they fit, so a change can matter to any take.
+            return match shared.rigs.take() {
+                Some(_) => Reload::Reloaded,
+                None => Reload::Unused,
+            };
+        }
         let Some(folder) = self.folder() else {
             return Reload::Unused;
         };
