@@ -14,6 +14,8 @@ use axcenity_core::ClassName;
 use axcenity_core::input::InputEvent;
 use axcenity_net::{GameInfo, Network, ScriptCode};
 use axcenity_script::OutputKind;
+
+use crate::cheat::Cheat;
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 use crate::stats::BotSample;
@@ -33,6 +35,8 @@ pub struct BotSettings {
     pub roam: f32,
     /// The first bot's UserId; the others count up from it.
     pub first_user_id: u64,
+    /// A modified client's way of moving its character (`--cheat`).
+    pub cheat: Option<Cheat>,
 }
 
 /// Pixels of mouse look that turn a character half round: the controllers
@@ -137,6 +141,9 @@ pub struct Bot {
     brain: Brain,
     idle: bool,
     roam: f32,
+    cheat: Option<Cheat>,
+    /// This frame's seconds.
+    seconds: f64,
     /// Where its character first stood.
     home: Option<axcenity_core::Vector3>,
     started: Instant,
@@ -210,6 +217,8 @@ impl Bot {
             brain: Brain::new(index),
             idle: settings.idle,
             roam: settings.roam,
+            cheat: settings.cheat,
+            seconds: 0.0,
             home: None,
             started: Instant::now(),
             joined_after: None,
@@ -369,7 +378,8 @@ impl HostIo for Bot {
         }
     }
 
-    fn frame_input(&mut self, _seconds: f64) -> Vec<InputEvent> {
+    fn frame_input(&mut self, seconds: f64) -> Vec<InputEvent> {
+        self.seconds = seconds;
         self.sim.scripts.set_viewport_size(1280.0, 720.0);
         Vec::new()
     }
@@ -384,6 +394,27 @@ impl HostIo for Bot {
     }
 
     fn net_send(&mut self) {
+        if let Some(cheat) = self.cheat
+            && let Some(home) = self.home
+            && let Some(root) = self.character_position()
+            && let Some(player) = self.sim.scripts.local_player()
+            && let Some(character) = self
+                .sim
+                .world
+                .get(player)
+                .and_then(|p| p.property("Character"))
+                .and_then(axcenity_core::Value::as_instance)
+        {
+            let time = self.started.elapsed().as_secs_f64();
+            cheat.step(
+                &mut self.sim.world,
+                character,
+                self.seconds,
+                time,
+                home,
+                root,
+            );
+        }
         self.network.send(&self.sim.world, &mut self.sim.scripts);
     }
 }

@@ -7,7 +7,9 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+axcenity-assets.workspace = true
 axcenity-core.workspace = true
+axcenity-physics.workspace = true
 axcenity-script.workspace = true
 log.workspace = true
 postcard.workspace = true
@@ -21,10 +23,8 @@ profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]
-axcenity-assets.workspace = true
 axcenity-character.workspace = true
 axcenity-gameplay.workspace = true
-axcenity-physics.workspace = true
 
 [lints]
 workspace = true

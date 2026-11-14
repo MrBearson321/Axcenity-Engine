@@ -2,7 +2,7 @@
 
 Paul's priority 1 of 2026-11-14 is to make multiplayer ready for public hosting: scale tests with 16–32 real clients, secure connections, NAT traversal and a relay, general-purpose prediction and rollback, server-authoritative validation, and repeatable operational tests. The development policy deferred internet hosting and renet's secure mode (roadmap M11) "until the multiplayer systems are mature"; Paul's request lifts that deferral for the engine's own code. Running servers for other people (a public relay, matchmaking) is still infrastructure and stays Paul's call ([§4](#4-what-stays-pauls-call)).
 
-- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) is built; MP3b (wall and flight checks, owned-assembly speed) is next. MP4–MP7 not started.
+- **Status:** MP0 (this plan) written. MP1's bots and harness are built ([§6](#6-results)); its two-machine run is G13, on Paul's PC and Mac. MP2's reconnecting and operational tests are built ([§6](#mp2-crashes-churn-and-floods-cloud-container-2026-11-14)). MP3 is built in two parts: MP3a (budgets, argument limits, flags, `Players.PlayerFlagged`, the kick threshold) and MP3b (wall and flight checks, owned-assembly speed, strikes, `--cheat` bots). MP4–MP7 not started.
 - **Date:** 2026-11-14
 - **Engine:** `main` at `f6d5427`
 - **Relies on:** [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (listen servers, replicas, network IDs), [ADR-0026](../../wiki/Architecture/Architecture-Decisions/ADR-0026-Secure-Game-Connections-And-Relay.md) (this plan's connection decisions), the [development policy](../development-policy.md) (no cross-machine determinism, no infrastructure before it's needed), [networking.md](../architecture/networking.md).
@@ -147,4 +147,21 @@ The plan said the server replaces a stale connection "with the same UserId". A U
 | `--flood spam` (2 connections at ~3.5 MB/s each) beside 2 walking players | Both kicked in under 3 s; players stayed in (at most a correction or so from the packets lost meanwhile); server above 50 frames a second |
 
 Left: the junk a spammer sends before it's kicked still fills the server's socket for a moment; a larger socket receive buffer (needs `socket2`) would soften that.
+
+### MP3b: walls, flight and strikes (cloud container, 2026-11-14)
+
+[networking.md](../architecture/networking.md#validation). Found while building it: **two players spawned with no SpawnLocation stood at the same spot at the origin, and one was pushed into the floor and fell through it forever** (the old character test measured a falling character's walk). With the wall check the server held it back every frame; now characters at the origin spread out on rings as on a SpawnLocation. **Two more ways an honest character fell through the floor on its own device**, both found by the bots once the server refused it: a character pushed into another player's character, and one falling past a ledge and steered into its side below step height, had landing probes that started inside that part, found no ground and never landed. Now a falling foot inside a part lands on its top when that's within a step, and otherwise looks past it (`character::landing_hit`). With both fixed, 24 bots walked hello-spawn for 30 s without a refusal (six runs of seven).
+
+| Test | Result |
+|---|---|
+| Modified client walking through a 1-stud wall at `WalkSpeed` | Never past the wall on the server; moved back; flagged "through a wall" |
+| Modified client rising to 30 studs and hovering | Held under the top of a jump (about 10 studs over where it last stood); flagged "in the air" |
+| Honest player walking into a wall, then jumping along it, 80 ms latency | No corrections, no flags |
+| Owned part at 300 and 1,200 studs a second | 300 placed; 1,200 refused; flinging it on flags the player |
+| `--cheat speed`, `noclip` (through the floor), `fly` bots beside 2 walking players over UDP | Each kicked for its own reason within 20 s; the players had no corrections |
+| 24 honest bots on hello-spawn for 30 s, 7 runs | 6 runs with no refusals or corrections; one with 18 corrections and no flags, not traced (a respawn from the lava counts as a correction too) |
+
+The checks cost a ray per update for a moving character (a second only when the first meets a wall), and a ray down plus a ball cast when it's off the ground, each a walk of the Workspace's bounding balls (`physics::query`). At 32 players and S10k's 10,000 parts that's a few thousand walks a second; MP7's run on Paul's PC measures it.
+
+Left: a server Script that launches a character by moving its parts should give it a custom `Movement` while it flies; a moving anchored part that sweeps into a character on the server a moment before the device sees it moves can cost an honest player a correction.
 

@@ -19,7 +19,7 @@ use crate::discovery::{HostInfo, LanAnswerer, LanSearch};
 use crate::handshake::{GameInfo, Message};
 use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
 use crate::ownership::{
-    CharacterCheck, OWNED_TAG, Owned, OwnedSender, character_of, character_parts,
+    CharacterCheck, OWNED_TAG, Owned, OwnedSender, Sender, character_of, character_parts,
 };
 use crate::replay::{BufferPlay, Replay, Replays};
 use crate::replicate::{LevelState, Replicator, Update, apply};
@@ -1094,13 +1094,26 @@ impl Network {
                         && let Some(&player) = self.players.get(&from)
                     {
                         let assemblies = self.owned_by.get(&from).cloned().unwrap_or_default();
-                        self.checks.entry(from).or_default().receive(
-                            world,
+                        let characters: Vec<InstanceId> = self
+                            .players
+                            .values()
+                            .filter_map(|&player| character_of(world, player))
+                            .collect();
+                        let sender = Sender {
                             player,
-                            &assemblies,
+                            assemblies: &assemblies,
+                            characters: &characters,
+                        };
+                        let flagged = self.checks.entry(from).or_default().receive(
+                            world,
+                            &scripts.assets(),
+                            &sender,
                             &owned,
                             self.clock,
                         );
+                        if let Some(reason) = flagged {
+                            self.flag(world, scripts, from, reason);
+                        }
                     }
                 } else if scripts.is_client_only()
                     && let Some(motion) = Motion::from_bytes(&bytes)

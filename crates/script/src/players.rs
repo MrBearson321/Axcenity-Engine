@@ -267,16 +267,24 @@ const SPAWN_ROOM: f32 = 3.0;
 /// Two characters made in one place would push each other apart on their
 /// devices, further than the server lets a character move.
 pub(crate) fn free_spot(world: &World, spawn: InstanceId, player: InstanceId) -> Vector3 {
-    let top = top_of(world, spawn);
+    let size = vector(world, spawn, "Size").unwrap_or_default();
+    // Rings fit inside the top however the SpawnLocation is turned.
+    let reach = (size.x.min(size.z) * 0.5 - 1.0).max(0.0);
+    free_spot_around(world, top_of(world, spawn), reach, player)
+}
+
+/// How far from the origin characters with no SpawnLocation may stand,
+/// apart from each other: as on a 12-stud SpawnLocation.
+const ORIGIN_REACH: f32 = 5.0;
+
+/// [`free_spot`] around `top`, on rings up to `reach` studs from it.
+fn free_spot_around(world: &World, top: Vector3, reach: f32, player: InstanceId) -> Vector3 {
     let others: Vec<Vector3> = players(world)
         .into_iter()
         .filter(|&other| other != player)
         .filter_map(|other| instance_property(world, other, "Character"))
         .filter_map(|character| feet(world, character))
         .collect();
-    let size = vector(world, spawn, "Size").unwrap_or_default();
-    // Rings fit inside the top however the SpawnLocation is turned.
-    let reach = (size.x.min(size.z) * 0.5 - 1.0).max(0.0);
     let mut spots = vec![top];
     for ring in [reach * 0.5, reach] {
         if ring < 1.0 {
@@ -397,7 +405,8 @@ pub fn load_character(lua: &Lua, player: InstanceId) -> mlua::Result<InstanceId>
             // A copy of a placed character stands where that one was.
             None if starter.is_none() && placed.is_some() => {}
             None => {
-                stand_at(&mut world, character, Vector3::default());
+                let spot = free_spot_around(&world, Vector3::default(), ORIGIN_REACH, player);
+                stand_at(&mut world, character, spot);
                 warning = Some(format!(
                     "{name} has no enabled SpawnLocation to spawn on{}, so their character \
                      is at the origin. Insert > SpawnLocation (with Neutral on, or their \
