@@ -49,6 +49,10 @@ pub fn chunk_mesh(
     lod: u32,
 ) -> ChunkMesh {
     let rect = data.chunk_rect(cx, cz);
+    // A chunk with holes is always at full detail, so its holes keep
+    // their shape far away.
+    let holes = data.chunk_has_holes(cx, cz);
+    let lod = if holes { 0 } else { lod };
     let step = 1usize << lod.min(LOD_LEVELS - 1);
     // The samples used along each side: every `step`th, and always the last.
     let along = |start: usize, end: usize| {
@@ -87,14 +91,18 @@ pub fn chunk_mesh(
     }
     let columns = xs.len();
     let corner = |i: usize, j: usize| (j * columns + i) as u32;
-    for j in 0..zs.len() - 1 {
-        for i in 0..columns - 1 {
+    for (j, &z) in zs.iter().enumerate().take(zs.len() - 1) {
+        for (i, &x) in xs.iter().enumerate().take(columns - 1) {
             let (a, b, c, d) = (
                 corner(i, j),
                 corner(i, j + 1),
                 corner(i + 1, j),
                 corner(i + 1, j + 1),
             );
+            // A hole's cell isn't drawn (at full detail, a corner is a cell).
+            if holes && data.is_hole(x, z) {
+                continue;
+            }
             // Counter-clockwise from above, split from (x, z+1) to (x+1, z).
             mesh.indices.extend_from_slice(&[a, b, c, b, d, c]);
         }
@@ -208,6 +216,28 @@ mod tests {
             assert_eq!(left.positions[a], right.positions[b]);
             assert_eq!(left.normals[a], right.normals[b]);
         }
+    }
+
+    #[test]
+    fn a_hole_leaves_its_cells_out_at_full_detail_even_far_away() {
+        let (mut data, placement) = bumpy();
+        let (size_x, _) = data.size();
+        let rect = axcenity_core::SampleRect::new(40, 10, 43, 12);
+        let holes = data.holes_mut_in(rect);
+        for z in 10..12 {
+            for x in 40..43 {
+                holes[z * size_x + x] = true;
+            }
+        }
+        let cells = CHUNK_CELLS * CHUNK_CELLS;
+        let skirts = 4 * CHUNK_CELLS * 6;
+        // Chunk (1, 0) holds cells 32 to 63 along X: six are cut out, and
+        // asked for at a quarter of the detail it's still full.
+        let cut = chunk_mesh(&data, &placement, 1, 0, 2);
+        assert_eq!(cut.indices.len(), (cells - 6) * 6 + skirts);
+        // The chunk beside it is as it was.
+        let whole = chunk_mesh(&data, &placement, 0, 0, 0);
+        assert_eq!(whole.indices.len(), cells * 6 + skirts);
     }
 
     #[test]

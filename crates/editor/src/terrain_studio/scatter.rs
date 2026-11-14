@@ -15,6 +15,8 @@ pub struct RulePreset {
     pub models: &'static str,
     pub spacing: f64,
     pub density: f64,
+    /// Degrees: only steeper ground than this (cliff pieces).
+    pub min_slope: f64,
     pub max_slope: f64,
     /// Below this fraction of the height range (the tree line), if any.
     pub below: Option<f64>,
@@ -38,6 +40,7 @@ impl RulePreset {
             ("Models", Value::String(self.models.to_owned())),
             ("Spacing", Value::Number(self.spacing)),
             ("Density", Value::Number(self.density)),
+            ("MinSlope", Value::Number(self.min_slope)),
             ("MaxSlope", Value::Number(self.max_slope)),
             ("AvoidRadius", Value::Number(self.avoid)),
             ("Clumping", Value::Number(self.clumping)),
@@ -66,6 +69,7 @@ pub const FOREST_TREES: RulePreset = RulePreset {
     models: "plant:Tree",
     spacing: 9.0,
     density: 0.8,
+    min_slope: 0.0,
     max_slope: 30.0,
     below: Some(0.6),
     avoid: 0.0,
@@ -82,6 +86,7 @@ pub const UNDERGROWTH: RulePreset = RulePreset {
     models: "plant:Bush",
     spacing: 4.0,
     density: 1.5,
+    min_slope: 0.0,
     max_slope: 35.0,
     below: Some(0.65),
     avoid: 4.0,
@@ -98,6 +103,7 @@ pub const MEADOW_FLOWERS: RulePreset = RulePreset {
     models: "plant:Flower",
     spacing: 2.5,
     density: 4.0,
+    min_slope: 0.0,
     max_slope: 25.0,
     below: Some(0.5),
     avoid: 2.0,
@@ -114,6 +120,7 @@ pub const GRASS_TUFTS: RulePreset = RulePreset {
     models: "plant:Grass",
     spacing: 2.0,
     density: 10.0,
+    min_slope: 0.0,
     max_slope: 30.0,
     below: Some(0.6),
     avoid: 1.5,
@@ -125,12 +132,51 @@ pub const GRASS_TUFTS: RulePreset = RulePreset {
     lean: 0.7,
     sink: 0.0,
 };
+/// Rock faces on steep ground (PW7): upright slabs leaning a little with
+/// the slope and sunk into it, so slopes too steep for plants read as
+/// cliffs. Beside a hole cut with the Holes tool they frame a cave mouth.
+pub const CLIFF_ROCKS: RulePreset = RulePreset {
+    name: "Cliff Rocks",
+    models: "prop:Cliff",
+    spacing: 7.0,
+    density: 1.2,
+    min_slope: 38.0,
+    max_slope: 90.0,
+    below: None,
+    avoid: 0.0,
+    clumping: 0.0,
+    clump_size: 48.0,
+    scale: (0.8, 1.5),
+    collide: true,
+    seed: 61.0,
+    lean: 0.35,
+    sink: 2.5,
+};
+/// Boulders on gentle and middling slopes, in groups, leaning with them.
+pub const BOULDERS: RulePreset = RulePreset {
+    name: "Boulders",
+    models: "prop:Rock",
+    spacing: 10.0,
+    density: 0.25,
+    min_slope: 8.0,
+    max_slope: 40.0,
+    below: None,
+    avoid: 3.0,
+    clumping: 0.6,
+    clump_size: 40.0,
+    scale: (0.6, 1.6),
+    collide: true,
+    seed: 67.0,
+    lean: 0.8,
+    sink: 0.6,
+};
 /// No models yet: select it and click models or props in Assets.
 pub const YOUR_MODELS: RulePreset = RulePreset {
     name: "Scatter Rule",
     models: "",
     spacing: 8.0,
     density: 1.0,
+    min_slope: 0.0,
     max_slope: 35.0,
     below: None,
     avoid: 0.0,
@@ -144,11 +190,13 @@ pub const YOUR_MODELS: RulePreset = RulePreset {
 };
 
 /// The single rules the Add menu offers.
-pub const RULE_PRESETS: [RulePreset; 5] = [
+pub const RULE_PRESETS: [RulePreset; 7] = [
     FOREST_TREES,
     UNDERGROWTH,
     MEADOW_FLOWERS,
     GRASS_TUFTS,
+    CLIFF_ROCKS,
+    BOULDERS,
     YOUR_MODELS,
 ];
 

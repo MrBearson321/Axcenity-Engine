@@ -875,7 +875,8 @@ pub struct Solid {
     pub min: Vector3,
     pub max: Vector3,
     collider: rapier3d::prelude::Collider,
-    /// A Terrain's ground: solid all the way down from its surface.
+    /// A Terrain's ground: solid all the way down from its surface (unless
+    /// it has holes, which can lead into caves under it).
     open_below: bool,
 }
 
@@ -995,7 +996,12 @@ pub fn part_solids(world: &World, assets: &Assets, id: InstanceId) -> Vec<Solid>
     if state.can_collide {
         let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
         collider.set_position(pose);
-        add(collider, matches!(state.shape, Form::Terrain(_)));
+        // Ground is solid all the way down, unless it has holes: then
+        // there may be caves under it, so it's a sheet like a part.
+        add(
+            collider,
+            matches!(&state.shape, Form::Terrain(terrain) if !terrain.data.has_holes()),
+        );
     }
     if let Form::Terrain(terrain) = &state.shape {
         // Colliding foliage is solid even when the ground isn't.

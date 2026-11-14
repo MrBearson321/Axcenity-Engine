@@ -111,7 +111,7 @@ impl Placement {
     }
 
     /// The ground's height (world Y) under world (`x`, `z`), blended
-    /// between samples, or `None` off the terrain.
+    /// between samples, or `None` off the terrain or over a hole.
     pub fn ground_y(&self, data: &TerrainData, x: f32, z: f32) -> Option<f32> {
         let grid = self.to_grid(data, x, z);
         let (size_x, size_z) = data.size();
@@ -119,7 +119,8 @@ impl Placement {
             && grid.y >= 0.0
             && grid.x <= (size_x - 1) as f32
             && grid.y <= (size_z - 1) as f32;
-        inside.then(|| self.world_y(data.height_at(grid.x, grid.y)))
+        (inside && !data.hole_at(grid.x, grid.y))
+            .then(|| self.world_y(data.height_at(grid.x, grid.y)))
     }
 
     /// The surface's direction at sample (`x`, `z`), from its neighbours'

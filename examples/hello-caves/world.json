@@ -1,0 +1,400 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Terrain",
+        "name": "Terrain",
+        "properties": {
+          "DataFolder": "assets/terrain/Hill",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Size": [
+            128.0,
+            40.0,
+            128.0
+          ]
+        },
+        "children": [
+          {
+            "class": "TerrainLayer",
+            "name": "Grass",
+            "properties": {
+              "Color": [
+                0.3,
+                0.45,
+                0.24
+              ]
+            }
+          },
+          {
+            "class": "TerrainLayer",
+            "name": "Rock",
+            "properties": {
+              "Color": [
+                0.46,
+                0.44,
+                0.41
+              ],
+              "Triplanar": true,
+              "AutoEnabled": true,
+              "MinSlope": 35
+            }
+          },
+          {
+            "class": "ScatterRule",
+            "name": "Cliff Rocks",
+            "properties": {
+              "Models": "prop:Cliff",
+              "Seed": 61,
+              "Spacing": 7,
+              "Density": 1.2,
+              "MinSlope": 38,
+              "MaxSlope": 90,
+              "ScaleRange": [
+                0.8,
+                1.5
+              ],
+              "CanCollide": true,
+              "AlignToSlope": 0.35,
+              "SinkDepth": 2.5,
+              "PartMargin": 2
+            }
+          },
+          {
+            "class": "ScatterRule",
+            "name": "Boulders",
+            "properties": {
+              "Models": "prop:Rock",
+              "Seed": 67,
+              "Spacing": 10,
+              "Density": 0.25,
+              "MinSlope": 8,
+              "MaxSlope": 40,
+              "AvoidRadius": 3,
+              "Clumping": 0.6,
+              "ClumpSize": 40,
+              "ScaleRange": [
+                0.6,
+                1.6
+              ],
+              "CanCollide": true,
+              "AlignToSlope": 0.8,
+              "SinkDepth": 0.6
+            }
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "Cave",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Floor",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.36,
+                0.34,
+                0.32
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                0,
+                -0.5,
+                -27.5
+              ],
+              "Size": [
+                10,
+                1,
+                37
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "LeftWall",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                -4.5,
+                5,
+                -28
+              ],
+              "Size": [
+                1,
+                12,
+                36
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "RightWall",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                4.5,
+                5,
+                -28
+              ],
+              "Size": [
+                1,
+                12,
+                36
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Ceiling",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                0,
+                10.5,
+                -29.5
+              ],
+              "Size": [
+                10,
+                1,
+                33
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "BackWall",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                0,
+                5,
+                -46.5
+              ],
+              "Size": [
+                10,
+                12,
+                1
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "LeftPillar",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                8,
+                -4
+              ],
+              "Position": [
+                -5.5,
+                5,
+                -11.5
+              ],
+              "Size": [
+                3,
+                12,
+                5
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "RightPillar",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                0,
+                -6,
+                3
+              ],
+              "Position": [
+                5.5,
+                5,
+                -11.5
+              ],
+              "Size": [
+                3,
+                12,
+                5
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Lintel",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.45,
+                0.43,
+                0.4
+              ],
+              "Material": "Slate",
+              "Orientation": [
+                4,
+                0,
+                3
+              ],
+              "Position": [
+                0,
+                12.5,
+                -13.5
+              ],
+              "Size": [
+                15,
+                7,
+                5
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Lantern",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                1.0,
+                0.75,
+                0.4
+              ],
+              "Material": "Neon",
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                0,
+                3,
+                -44
+              ],
+              "Size": [
+                1,
+                1.4,
+                1
+              ]
+            },
+            "children": [
+              {
+                "class": "PointLight",
+                "name": "PointLight",
+                "properties": {
+                  "Brightness": 2,
+                  "Color": [
+                    1.0,
+                    0.7,
+                    0.4
+                  ],
+                  "Range": 24
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": false,
+              "CanCollide": true,
+              "Color": [
+                0.29,
+                0.45,
+                0.78
+              ],
+              "Position": [
+                0,
+                2.5,
+                20
+              ],
+              "Size": [
+                2,
+                5,
+                1
+              ]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController",
+            "properties": {}
+          }
+        ]
+      }
+    ]
+  }
+}

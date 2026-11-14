@@ -24,7 +24,7 @@ fn the_target_follows_the_selection_and_falls_back_to_the_first_terrain() {
 #[test]
 fn only_sculpting_and_painting_tools_brush_the_viewport() {
     let brushes: Vec<TerrainTool> = TerrainTool::all().filter(|t| t.is_brush()).collect();
-    assert_eq!(brushes.len(), 8);
+    assert_eq!(brushes.len(), 9);
     assert!(!TerrainTool::Generate.is_brush());
     let keys: Vec<_> = TerrainTool::all().filter_map(TerrainTool::key).collect();
     let mut unique = keys.clone();

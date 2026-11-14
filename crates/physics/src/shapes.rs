@@ -15,6 +15,7 @@ use axcenity_core::{
 use rapier3d::geometry::Array2;
 use rapier3d::glamx::{Quat, Vec3};
 use rapier3d::math::Pose;
+use rapier3d::parry::shape::{HeightField, HeightFieldCellStatus};
 use rapier3d::parry::transformation::vhacd::VHACDParameters;
 use rapier3d::parry::transformation::voxelization::FillMode;
 use rapier3d::prelude::{Collider, ColliderBuilder, SharedShape};
@@ -707,7 +708,20 @@ fn heightfield(data: &TerrainData, size: Vec3) -> ColliderBuilder {
         }
     }
     let scale = size.abs().max(Vec3::splat(MIN_SIZE));
-    ColliderBuilder::heightfield(Array2::new(size_z, size_x, heights), scale)
+    if !data.has_holes() {
+        return ColliderBuilder::heightfield(Array2::new(size_z, size_x, heights), scale);
+    }
+    // Holes (procedural worlds PW7): their cells are taken out, so things
+    // fall and walk through them.
+    let mut field = HeightField::new(Array2::new(size_z, size_x, heights), scale);
+    for z in 0..size_z.saturating_sub(1) {
+        for x in 0..size_x.saturating_sub(1) {
+            if data.is_hole(x, z) {
+                field.set_cell_status(z, x, HeightFieldCellStatus::CELL_REMOVED);
+            }
+        }
+    }
+    ColliderBuilder::new(SharedShape::new(field))
 }
 
 /// Solid colliders for colliding foliage, in the terrain body's local space.

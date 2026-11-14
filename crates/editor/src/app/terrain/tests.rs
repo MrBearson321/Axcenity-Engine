@@ -371,3 +371,38 @@ fn auto_settings_let_a_roughness_or_metalness_map_show_as_it_is() {
     assert!(settings.contains(&("Roughness", Value::Number(1.0))));
     assert!(settings.contains(&("Metalness", Value::Number(1.0))));
 }
+
+#[test]
+fn the_holes_brush_cuts_a_cave_mouth_that_saves_and_shift_fills_it() {
+    let (mut app, folder) = app_with_project("holes");
+    let terrain = create(&mut app);
+    app.terrain.tool = Some(TerrainTool::Holes);
+    app.terrain.brush.radius = 4.0;
+    let ground = |app: &EditorApp, x: f32| {
+        let placement = Placement::of(app.world.get(terrain).unwrap()).unwrap();
+        placement.ground_y(app.world.terrain(terrain).unwrap(), x, 0.0)
+    };
+    app.terrain_pointer(pointer(Vec3::ZERO, true, true, false));
+    app.terrain_pointer(pointer(Vec3::ZERO, false, false, true));
+    assert_eq!(app.history.undo_label(), Some("Cut Terrain Holes"));
+    assert!(ground(&app, 0.0).is_none(), "no ground over the hole");
+    assert!(ground(&app, 20.0).is_some(), "the rest stays");
+    // It saves with the terrain.
+    assert!(app.save());
+    let project = app.project.as_ref().unwrap().folder.clone();
+    let data_folder = project.join("assets/terrain/Terrain");
+    assert!(data_folder.join("holes.png").exists());
+    app.undo();
+    assert!(ground(&app, 0.0).is_some(), "one undo fills it");
+    app.redo();
+    assert!(ground(&app, 0.0).is_none());
+    // Shift fills it back in.
+    app.terrain_pointer(TerrainPointer {
+        modifiers: egui::Modifiers::SHIFT,
+        ..pointer(Vec3::ZERO, true, true, false)
+    });
+    app.terrain_pointer(pointer(Vec3::ZERO, false, false, true));
+    assert_eq!(app.history.undo_label(), Some("Fill Terrain Holes"));
+    assert!(!app.world.terrain(terrain).unwrap().has_holes());
+    std::fs::remove_dir_all(folder).unwrap();
+}

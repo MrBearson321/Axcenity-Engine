@@ -33,6 +33,7 @@ const DESERT_SCRUB: RulePreset = RulePreset {
     models: "plant:Bush",
     spacing: 14.0,
     density: 0.25,
+    min_slope: 0.0,
     max_slope: 20.0,
     below: None,
     avoid: 0.0,
@@ -72,11 +73,11 @@ fn built_in_worlds() -> Vec<BuiltInWorld> {
         },
         BuiltInWorld {
             name: "Alpine",
-            description: "A valley with forest low down, alpine turf above it and snowy peaks",
+            description: "A valley with forest low down, alpine turf above it, rock faces on the steep sides and snowy peaks",
             landscape: Preset::AlpineValley,
             layers: None,
             biomes: &[LOWLAND_FOREST, ALPINE],
-            rules: &[],
+            rules: &[super::scatter::CLIFF_ROCKS],
             water: None,
         },
         BuiltInWorld {

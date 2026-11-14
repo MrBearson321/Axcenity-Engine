@@ -261,6 +261,77 @@ const fn step(height: f32, y: f32, z: f32) -> Piece {
     }
 }
 
+/// A tilted block of stone, for the rocks.
+const fn stone(size: Vec3, position: Vec3, orientation: Vector3, shade: f32) -> Piece {
+    Piece {
+        shape: PartType::Block,
+        size,
+        position,
+        orientation,
+        color: [0.47 * shade, 0.45 * shade, 0.42 * shade],
+        metalness: 0.0,
+        roughness: 0.9,
+        glow: false,
+    }
+}
+
+/// A boulder: three blocks at odd angles.
+const ROCK: [Piece; 3] = [
+    stone(
+        Vec3::new(4.2, 2.4, 3.6),
+        Vec3::new(0.0, 1.1, 0.0),
+        Vector3::new(8.0, 20.0, -6.0),
+        1.0,
+    ),
+    stone(
+        Vec3::new(2.8, 1.8, 2.4),
+        Vec3::new(0.5, 2.5, -0.3),
+        Vector3::new(-12.0, 45.0, 10.0),
+        1.08,
+    ),
+    stone(
+        Vec3::new(2.0, 1.5, 1.8),
+        Vec3::new(-1.5, 0.7, 1.2),
+        Vector3::new(0.0, -30.0, 15.0),
+        0.9,
+    ),
+];
+
+/// A rock face for steep slopes: slabs stacked and leaning, wider than
+/// deep, so a rule that leans it with the slope covers a cliff.
+const CLIFF: [Piece; 5] = [
+    stone(
+        Vec3::new(7.5, 9.5, 3.4),
+        Vec3::new(0.0, 4.8, 0.0),
+        Vector3::new(6.0, 0.0, 4.0),
+        1.0,
+    ),
+    stone(
+        Vec3::new(4.6, 7.0, 3.0),
+        Vec3::new(-2.6, 3.6, 0.9),
+        Vector3::new(-8.0, 15.0, -6.0),
+        0.9,
+    ),
+    stone(
+        Vec3::new(4.0, 5.6, 2.8),
+        Vec3::new(2.9, 2.9, 0.8),
+        Vector3::new(10.0, -20.0, 8.0),
+        1.1,
+    ),
+    stone(
+        Vec3::new(6.0, 3.0, 3.8),
+        Vec3::new(0.2, 10.2, -0.2),
+        Vector3::new(12.0, 10.0, -5.0),
+        1.05,
+    ),
+    stone(
+        Vec3::new(3.0, 2.4, 2.6),
+        Vec3::new(3.0, 8.6, 0.4),
+        Vector3::new(-6.0, 35.0, 12.0),
+        0.95,
+    ),
+];
+
 fn pieces(source: &FoliageSource) -> &'static [Piece] {
     match source {
         FoliageSource::Plant(FoliagePlant::Grass) => &GRASS,
@@ -275,6 +346,8 @@ fn pieces(source: &FoliageSource) -> &'static [Piece] {
         FoliageSource::Prop(FoliageProp::Wall) => &WALL,
         FoliageSource::Prop(FoliageProp::Stairs) => &STAIRS,
         FoliageSource::Prop(FoliageProp::Ramp) => &RAMP,
+        FoliageSource::Prop(FoliageProp::Rock) => &ROCK,
+        FoliageSource::Prop(FoliageProp::Cliff) => &CLIFF,
         FoliageSource::Model(_) => &[],
     }
 }

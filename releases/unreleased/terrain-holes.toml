@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "terrain"
+title = "Terrain holes, cliff rocks and walk-in caves"
+details = "The Terrain Studio's Holes tool cuts holes in the ground (Shift fills them): you see, walk and fall through them, they save with the terrain, and one stroke is one undo step. Build a cave from parts under a hole in a hillside for a cave mouth you can walk into. New Cliff Rocks and Boulders scatter rules stand rock faces on steep slopes and rocks on gentler ones, and the Alpine world preset adds cliff rocks. The Hello Caves example is a hill with a cave in it."
+features = ["terrain.studio"]
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

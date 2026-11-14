@@ -112,12 +112,15 @@ pub fn save_terrain(folder: &Path, data_folder: &str, data: &TerrainData) -> Res
         fs::write(&temporary, bytes).map_err(SaveError::new(&path))?;
         fs::rename(&temporary, &path).map_err(SaveError::new(&path))?;
     }
-    // Foliage is an optional extra file: drop a leftover when this
-    // landscape has none, so undoing every plant and saving clears it.
-    if !encoded.iter().any(|(name, _)| *name == files::FOLIAGE_FILE) {
-        let leftover = disk.join(files::FOLIAGE_FILE);
-        if leftover.exists() {
-            fs::remove_file(&leftover).map_err(SaveError::new(&leftover))?;
+    // Foliage and holes are optional extra files: drop a leftover when
+    // this landscape has none, so undoing every plant or hole and saving
+    // clears it.
+    for optional in [files::FOLIAGE_FILE, files::HOLES_FILE] {
+        if !encoded.iter().any(|(name, _)| *name == optional) {
+            let leftover = disk.join(optional);
+            if leftover.exists() {
+                fs::remove_file(&leftover).map_err(SaveError::new(&leftover))?;
+            }
         }
     }
     Ok(())
@@ -212,6 +215,30 @@ mod tests {
         let data = loaded.terrain(id).unwrap();
         assert!((data.heights()[1000] - 0.75).abs() < 1e-4);
         assert_eq!(data.paint()[1000], [0, 200, 0, 0, 0, 0, 0, 55]);
+
+        // A hole saves and loads; filled again, its file goes.
+        let holes = folder.join("assets/terrain/Hills/holes.png");
+        let data = world.terrain_mut(terrain).unwrap();
+        data.holes_mut_in(all)[1000] = true;
+        save_terrain(
+            &folder,
+            "assets/terrain/Hills",
+            world.terrain(terrain).unwrap(),
+        )
+        .unwrap();
+        assert!(holes.exists());
+        let mut problems = Vec::new();
+        load_terrains(&folder, &mut loaded, &mut problems);
+        assert!(loaded.terrain(id).unwrap().holes()[1000]);
+        let data = world.terrain_mut(terrain).unwrap();
+        data.holes_mut_in(all)[1000] = false;
+        save_terrain(
+            &folder,
+            "assets/terrain/Hills",
+            world.terrain(terrain).unwrap(),
+        )
+        .unwrap();
+        assert!(!holes.exists());
         fs::remove_dir_all(folder).unwrap();
     }
 

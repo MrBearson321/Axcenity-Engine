@@ -13,6 +13,10 @@
 //! - `foliage.json`: painted plants, props, and models, with whether each
 //!   collides. Missing means none. An extra file, so older engines ignore
 //!   it and this engine does not bump the terrain format.
+//! - `holes.png`: the cells cut out of the surface (procedural worlds PW7),
+//!   8-bit greyscale, white at a cell's first corner where it's a hole.
+//!   Written only when there are holes; missing means none. An extra file
+//!   too (an older engine shows the holes filled in).
 
 use std::io::Cursor;
 
@@ -27,6 +31,7 @@ pub const MANIFEST_FILE: &str = "terrain.json";
 pub const HEIGHTS_FILE: &str = "heights.png";
 pub const PAINT_FILES: [&str; 2] = ["paint-1-4.png", "paint-5-8.png"];
 pub const FOLIAGE_FILE: &str = "foliage.json";
+pub const HOLES_FILE: &str = "holes.png";
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileError {
@@ -109,6 +114,23 @@ pub fn encode(data: &TerrainData) -> Vec<(&'static str, Vec<u8>)> {
     }
     if !data.foliage().is_empty() {
         files.push((FOLIAGE_FILE, encode_foliage(data.foliage())));
+    }
+    if data.has_holes() {
+        let pixels: Vec<u8> = data
+            .holes()
+            .iter()
+            .map(|&hole| if hole { 255 } else { 0 })
+            .collect();
+        files.push((
+            HOLES_FILE,
+            encode_png(
+                size_x,
+                size_z,
+                &pixels,
+                png::ColorType::Grayscale,
+                png::BitDepth::Eight,
+            ),
+        ));
     }
     files
 }
@@ -212,6 +234,15 @@ pub fn decode(mut read: impl FnMut(&str) -> Option<Vec<u8>>) -> Result<TerrainDa
         && let Ok(foliage) = decode_foliage(&bytes)
     {
         data.load_foliage(foliage);
+    }
+    if let Some(bytes) = read(HOLES_FILE) {
+        let image = decode_image(&bytes).map_err(invalid(HOLES_FILE))?;
+        if (image.width, image.height) != (manifest.size_x, manifest.size_z) {
+            return Err(invalid(HOLES_FILE)(
+                "its size doesn't match the heightmap".to_owned(),
+            ));
+        }
+        data.load_holes(image.values.iter().map(|&value| value > 0.5).collect());
     }
     Ok(data)
 }
@@ -373,6 +404,29 @@ mod tests {
         // Saving the loaded one gives the same files.
         let again: HashMap<&str, Vec<u8>> = encode(&loaded).into_iter().collect();
         assert_eq!(again, files);
+    }
+
+    #[test]
+    fn holes_save_only_when_there_are_some_and_load_the_same() {
+        let mut data = sample_terrain();
+        assert!(encode(&data).iter().all(|(name, _)| *name != HOLES_FILE));
+        let (size_x, _) = data.size();
+        let rect = axcenity_core::SampleRect::new(3, 4, 6, 5);
+        let holes = data.holes_mut_in(rect);
+        for x in 3..6 {
+            holes[4 * size_x + x] = true;
+        }
+        let files = encode(&data);
+        assert!(files.iter().any(|(name, _)| *name == HOLES_FILE));
+        let loaded = decode(|name| {
+            files
+                .iter()
+                .find(|(file, _)| *file == name)
+                .map(|(_, bytes)| bytes.clone())
+        })
+        .unwrap();
+        assert_eq!(loaded.holes(), data.holes());
+        assert!(loaded.is_hole(5, 4) && !loaded.is_hole(6, 4));
     }
 
     #[test]

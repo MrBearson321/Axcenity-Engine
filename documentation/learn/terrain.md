@@ -1,7 +1,7 @@
 ---
 description: Sculpt, paint, generate and erode landscapes with the Terrain Studio, and paint grass, plants and trees.
 icon: mountains
-samples: [hello-part]
+samples: [hello-part, hello-caves]
 ---
 
 # Terrain tools
@@ -22,6 +22,7 @@ On the **World** tab, the **Terrain** group opens the Terrain Studio panel; **Br
 | **4** | Sculpt | Push and pull freely |
 | **5** | Stamp | Press a shape into the ground |
 | **6** | Noise | Add natural roughness |
+| | Holes | Cut holes for cave mouths and tunnels; hold **Shift** to fill them |
 | **7** | Paint | Paint a material layer |
 | **8** | Auto Materials | Paint by height and slope rules: grass on flat ground, rock on cliffs |
 | **9** | Generate | Make a whole landscape from settings and a seed, or a preset |
@@ -58,6 +59,16 @@ A **world preset** sets up a whole landscape at once: its shape, materials, biom
 - **Solid Modeling ▸ To Terrain** turns a selected part into ground: the terrain under it is raised to its top and painted.
 - **Solid Modeling ▸ Conform to Terrain** sets the selected parts or models down on the ground (or up out of it), and **Blend into Terrain** levels the ground under them to their bottom and paints it with the Terrain Studio's Paint layer, fading into the slope around. Each is one undo step.
 
+## Caves and cliffs
+
+A terrain is one surface, so it can't bend back over itself. To make a cave, cut a hole in it and build the cave from parts:
+
+- Pick the **Holes** tool and paint over the spot: the ground there disappears, so you see, walk and fall through it. Hold **Shift** to fill it back in.
+- Build the cave under the hole from parts: a floor, walls and a ceiling. Rock parts round the opening hide its edges, and scatter rules keep clear of them.
+- Under **Scatter Rules**, **Add rule ▸ Cliff Rocks** stands rock faces on every slope steeper than 38 degrees, and **Boulders** scatters rocks over gentler slopes. The **Alpine** world preset includes cliff rocks.
+
+See the **hello-caves** sample: walk into the hill.
+
 ## Buildings
 
 - **Insert ▸ Building** puts a building in front of the camera. Its box is its footprint: drag, turn and stretch it with the Move, Rotate and Scale handles, and it's built again as you go. Inserted into a selected spline, the spline's points are its corners instead, for L-shaped or angled buildings.
@@ -66,4 +77,4 @@ A **world preset** sets up a whole landscape at once: its shape, materials, biom
 
 ## How it's saved
 
-A terrain's data is a folder of images and JSON (`heights.png`, paint maps and `foliage.json`) under `assets/terrain`, named by the Terrain's **DataFolder** property.
+A terrain's data is a folder of images and JSON (`heights.png`, paint maps, `foliage.json` and `holes.png`) under `assets/terrain`, named by the Terrain's **DataFolder** property.

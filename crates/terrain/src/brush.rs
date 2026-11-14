@@ -411,6 +411,11 @@ pub enum Operation {
         erase: bool,
         collide: bool,
     },
+    /// Cuts the cells under the brush out of the surface (procedural
+    /// worlds PW7), or fills them back in when `fill` is set.
+    Holes {
+        fill: bool,
+    },
 }
 
 impl Operation {
@@ -418,7 +423,10 @@ impl Operation {
     pub fn sculpts(&self) -> bool {
         !matches!(
             self,
-            Operation::Paint { .. } | Operation::Erase { .. } | Operation::Foliage { .. }
+            Operation::Paint { .. }
+                | Operation::Erase { .. }
+                | Operation::Foliage { .. }
+                | Operation::Holes { .. }
         )
     }
 }
@@ -538,6 +546,21 @@ fn apply_one(
         apply_foliage(
             data, placement, brush, rect, &weights, source, *density, *erase, *collide, center_xz,
         );
+        return rect;
+    }
+
+    if let Operation::Holes { fill } = operation {
+        // Every cell whose corner the brush reaches, whatever its strength.
+        let holes = data.holes_mut_in(rect);
+        let mut index = 0;
+        for z in rect.z0..rect.z1 {
+            for x in rect.x0..rect.x1 {
+                if weights[index] > 0.0 {
+                    holes[z * size_x + x] = !fill;
+                }
+                index += 1;
+            }
+        }
         return rect;
     }
 
@@ -678,9 +701,10 @@ fn apply_one(
                         }
                     }
                 }
-                Operation::Paint { .. } | Operation::Erase { .. } | Operation::Foliage { .. } => {
-                    height
-                }
+                Operation::Paint { .. }
+                | Operation::Erase { .. }
+                | Operation::Foliage { .. }
+                | Operation::Holes { .. } => height,
             };
             let new = match limits {
                 // Raising stops at the top limit and lowering at the bottom;

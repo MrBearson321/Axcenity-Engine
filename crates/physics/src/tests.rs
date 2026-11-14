@@ -580,6 +580,61 @@ fn parts_land_on_terrain_and_edits_to_it_are_felt() {
 }
 
 #[test]
+fn a_hole_in_terrain_lets_a_ball_fall_through_and_filling_it_catches_the_next() {
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    // Cells 126 to 129 (X and Z -4 to 4 studs) cut out of the flat ground.
+    let rect = axcenity_core::SampleRect::new(126, 126, 130, 130);
+    let data = world.terrain_mut(terrain).unwrap();
+    let holes = data.holes_mut_in(rect);
+    for z in 126..130 {
+        for x in 126..130 {
+            holes[z * 257 + x] = true;
+        }
+    }
+    let over_hole = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);
+    set(
+        &mut world,
+        over_hole,
+        "Shape",
+        Value::PartType(PartType::Ball),
+    );
+    set(&mut world, over_hole, "Size", vector(2.0, 2.0, 2.0));
+    let beside = part(&mut world, Vector3::new(12.0, 10.0, 0.0), false);
+    set(&mut world, beside, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, beside, "Size", vector(2.0, 2.0, 2.0));
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 2.0, 60.0);
+    assert!(
+        position(&world, over_hole).y < -5.0,
+        "{:?}",
+        position(&world, over_hole)
+    );
+    assert!((position(&world, beside).y - 1.0).abs() < 0.05);
+    // A ray straight down through the hole misses the terrain.
+    let ray = super::cast_ray(
+        &world,
+        &Assets::default(),
+        Vector3::new(1.0, 10.0, 1.0),
+        Vector3::new(0.0, -20.0, 0.0),
+    );
+    assert!(ray.is_none_or(|hit| hit.instance != terrain), "{ray:?}");
+    // Filled in again, it holds the next ball.
+    let data = world.terrain_mut(terrain).unwrap();
+    data.holes_mut_in(rect).fill(false);
+    let next = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);
+    set(&mut world, next, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, next, "Size", vector(2.0, 2.0, 2.0));
+    run(&mut physics, &mut world, 2.0, 60.0);
+    assert!(
+        (position(&world, next).y - 1.0).abs() < 0.05,
+        "{:?}",
+        position(&world, next)
+    );
+}
+
+#[test]
 fn a_raycast_hits_the_shape_a_part_collides_as_including_a_sensor() {
     let (world, floor) = world_with_floor();
     let hit = super::cast_ray(
