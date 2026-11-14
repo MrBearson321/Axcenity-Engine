@@ -357,6 +357,49 @@ mod sun_shadows {
     }
 
     #[test]
+    fn a_posed_character_casts_a_ray_traced_shadow_where_its_joints_put_it() {
+        let Some((device, queue)) = ray_test_device() else {
+            return skipped();
+        };
+        use super::super::skinning::{skin, square};
+        // The wall's blocker is a skinned square whose mesh rests 30 studs
+        // to the side: only posed does it stand between the wall and the sun.
+        let character = |posed: bool| {
+            let offset = Vec3::new(-30.0, 0.0, 0.0);
+            let mut item = square(0, posed.then(|| skin(1, offset)));
+            item.transform = Mat4::from_scale_rotation_translation(
+                Vec3::splat(2.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(4.0, 0.0, -6.0),
+            );
+            item.material = Default::default();
+            item
+        };
+        let mut list = shadowed_wall();
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&traced(RayTracedShadows::Low));
+
+        list.items[1] = character(false);
+        let lit = middle_of(&mut renderer, &list);
+        list.items[1] = character(true);
+        let shaded = middle_of(&mut renderer, &list);
+        let stats = renderer.stats().ray_tracing;
+        assert_eq!((stats.posed, stats.posed_left_out), (1, 0), "{stats:?}");
+        assert!(
+            lit[0] > shaded[0] + 40,
+            "posed {shaded:?} should shade the wall, rest pose {lit:?} not"
+        );
+
+        // A new pose moves the shadow with it, the next frame.
+        list.items[1] = DrawItem {
+            skin: Some(skin(1, Vec3::new(-20.0, 0.0, 0.0))),
+            ..character(true)
+        };
+        let moved = middle_of(&mut renderer, &list);
+        assert!(moved[0] > shaded[0] + 40, "{moved:?} vs {shaded:?}");
+    }
+
+    #[test]
     fn soft_ray_traced_shadows_have_soft_edges_and_hard_ones_do_not() {
         let Some((device, queue)) = ray_test_device() else {
             return skipped();
