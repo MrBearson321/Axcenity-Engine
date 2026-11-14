@@ -25,14 +25,14 @@ pub use draw_list::{
     AmbientLight, CURVE_ENTRIES, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
     DepthOfField, DrawItem, DrawList, Dust, DustBoxes, Edges, FilmGrain, Flipbook, FlipbookFrame,
     FlipbookMode, Fog, GridPlane, GridTint, ItemChunk, LensEffects, Light, LightProbeGrid,
-    LightProbeVolume, MAX_DUST_BOXES, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline,
-    ParticleCollision, ParticleCurves, ParticleEmitter, ParticleLook, PointShadows, PostProcessing,
-    ProbeImage, ProbeSky, RectArea, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape,
-    ShapeInOut, Skin, Sky, SkyImage, SpawnKind, SpawnShape, SpotShadows, Sprite, Sun, SunRays,
-    Sway, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow,
-    TextSpan, TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem,
-    UiImage, UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Vignette, Weather, curve_at,
-    is_turned, turn_point, turned_bounds,
+    LightProbeVolume, MAX_DUST_BOXES, MAX_PALETTE_COLORS, Material, MeshSource, MorphView,
+    NormalMap, Outline, ParticleCollision, ParticleCurves, ParticleEmitter, ParticleLook,
+    PointShadows, PostProcessing, ProbeImage, ProbeSky, RectArea, ReflectionProbe,
+    SURFACE_PARAMETERS, Shading, Shadows, Shape, ShapeInOut, Skin, Sky, SkyImage, SpawnKind,
+    SpawnShape, SpotShadows, Sprite, Sun, SunRays, Sway, TerrainLayer, TerrainLayers,
+    TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan, TextStroke, TextureMaps,
+    TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice,
+    UiText, VerticalAlign, Vignette, Weather, curve_at, is_turned, turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{

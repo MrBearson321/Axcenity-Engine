@@ -4,7 +4,7 @@ description: Every class, data type, enum, library and global the engine's scrip
 
 # API reference
 
-Everything Luau scripts can use: 137 classes, 46 data types and 2366 properties, events, functions and enum items, with what each does and 45 usage examples.
+Everything Luau scripts can use: every class, data type, property, event, function and enum item, with what each does and usage examples for the most used ones.
 
 These pages are generated from the engine's own API description, the one the editor's **API Reference** page and the VS Code definitions (`definitions/axcenity.d.luau`) come from, so they always match the engine. Don't edit them by hand: run `cargo run -p axcenity-script --bin lua-definitions` after changing the API.
 
