@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "A stylized default humanoid character with 41 face shapes and 32 starter animations"
+details = "assets/characters/humanoid has an original, faceted low-poly person (1.75 m, CC0) on a standard humanoid skeleton that retargets with no rig definition, four hair styles and swappable outfit parts, built by a Blender script, and 32 animations (idle, walk, run, jump, crouch, swim, climb, wave, dance and more). examples/hello-humanoid plays them."
+features = ["animation.clips"]
+fixes = []
+introduces_issues = []
+prs = [373]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"

@@ -1,0 +1,90 @@
+{
+  "format_version": 1,
+  "name": "ARKit",
+  "controls": {
+    "Blink_Left": "eyeBlinkLeft",
+    "Blink_Right": "eyeBlinkRight",
+    "Eye_Closed_Left": "eyeBlinkLeft",
+    "Eye_Closed_Right": "eyeBlinkRight",
+    "Eye_Squint_Left": "eyeSquintLeft",
+    "Eye_Squint_Right": "eyeSquintRight",
+    "Eye_Wide_Left": "eyeWideLeft",
+    "Eye_Wide_Right": "eyeWideRight",
+    "Eye_Look_Up": [
+      { "shape": "eyeLookUpLeft" },
+      { "shape": "eyeLookUpRight" }
+    ],
+    "Eye_Look_Down": [
+      { "shape": "eyeLookDownLeft" },
+      { "shape": "eyeLookDownRight" }
+    ],
+    "Eye_Look_Left": [
+      { "shape": "eyeLookOutLeft" },
+      { "shape": "eyeLookInRight" }
+    ],
+    "Eye_Look_Right": [
+      { "shape": "eyeLookInLeft" },
+      { "shape": "eyeLookOutRight" }
+    ],
+    "Brow_Raise_Left": [
+      { "shape": "browOuterUpLeft" },
+      { "shape": "browInnerUp", "weight": 0.5 }
+    ],
+    "Brow_Raise_Right": [
+      { "shape": "browOuterUpRight" },
+      { "shape": "browInnerUp", "weight": 0.5 }
+    ],
+    "Brow_Lower_Left": "browDownLeft",
+    "Brow_Lower_Right": "browDownRight",
+    "Brow_Inward_Left": [
+      { "shape": "browInnerUp", "weight": 0.5 },
+      { "shape": "browDownLeft", "weight": 0.3 }
+    ],
+    "Brow_Inward_Right": [
+      { "shape": "browInnerUp", "weight": 0.5 },
+      { "shape": "browDownRight", "weight": 0.3 }
+    ],
+    "Mouth_Smile_Left": "mouthSmileLeft",
+    "Mouth_Smile_Right": "mouthSmileRight",
+    "Mouth_Frown_Left": "mouthFrownLeft",
+    "Mouth_Frown_Right": "mouthFrownRight",
+    "Mouth_Open": [
+      { "shape": "mouthLowerDownLeft", "weight": 0.5 },
+      { "shape": "mouthLowerDownRight", "weight": 0.5 },
+      { "shape": "mouthUpperUpLeft", "weight": 0.3 },
+      { "shape": "mouthUpperUpRight", "weight": 0.3 }
+    ],
+    "Mouth_Wide": [
+      { "shape": "mouthStretchLeft" },
+      { "shape": "mouthStretchRight" }
+    ],
+    "Mouth_Narrow": "mouthFunnel",
+    "Mouth_Pucker": "mouthPucker",
+    "Mouth_Left": "mouthLeft",
+    "Mouth_Right": "mouthRight",
+    "Upper_Lip_Raise": [
+      { "shape": "mouthUpperUpLeft" },
+      { "shape": "mouthUpperUpRight" }
+    ],
+    "Lower_Lip_Lower": [
+      { "shape": "mouthLowerDownLeft" },
+      { "shape": "mouthLowerDownRight" }
+    ],
+    "Upper_Lip_Raise_Left": "mouthUpperUpLeft",
+    "Upper_Lip_Raise_Right": "mouthUpperUpRight",
+    "Lower_Lip_Lower_Left": "mouthLowerDownLeft",
+    "Lower_Lip_Lower_Right": "mouthLowerDownRight",
+    "Lip_Corner_Pull_Left": "mouthDimpleLeft",
+    "Lip_Corner_Pull_Right": "mouthDimpleRight",
+    "Cheek_Raise_Left": "cheekSquintLeft",
+    "Cheek_Raise_Right": "cheekSquintRight",
+    "Cheek_Puff": "cheekPuff",
+    "Nose_Sneer_Left": "noseSneerLeft",
+    "Nose_Sneer_Right": "noseSneerRight",
+    "Jaw_Open": "jawOpen",
+    "Jaw_Forward": "jawForward",
+    "Jaw_Left": "jawLeft",
+    "Jaw_Right": "jawRight",
+    "Tongue_Out": "tongueOut"
+  }
+}

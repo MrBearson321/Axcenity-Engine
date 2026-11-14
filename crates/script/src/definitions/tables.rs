@@ -1601,6 +1601,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "EnumRayTracedGlobalIllumination",
                 doc: "Ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, the rays are traced in software instead: slower (Low suits it), with leaves' holes guessed. Only a GPU without compute shaders keeps the bakes (or real-time GI, as set).",
             },
+            Field {
+                name: "RayTracedReflections",
+                ty: "EnumRayTracedReflections",
+                doc: "Hardware ray traced reflections on glossy surfaces: Off, Low (surfaces smoother than 0.15 roughness, traced at half size), Medium (smoother than 0.3) or High (smoother than 0.5). Off at every preset. On, a smooth part mirrors what's around it, even off the screen, fading into the reflection probes as it gets rougher; see-through parts, water and terrain keep the probes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only the reflection probes are used.",
+            },
         ],
         operators: &[],
         methods: &[],
@@ -3054,6 +3059,73 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             name: "ResetTrigger",
             doc: "Clears a Trigger that no transition has used yet.",
             params: &[("name", "string")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "SetExpression",
+            doc: "Shows the expression `name` (a built-in one such as `\"Happy\"`, `\"Sad\"` or `\"Sleepy\"`, or a `*.expression.json` file's name or path) at `intensity` (0 to 1, 1 if left out), blending in over `duration` seconds (the expression's own time if left out). `options` may set `Weight` (0 to 1, how much it counts over the expressions under it), `Priority` (higher goes over lower; equal ones go in the order they were set) and `Asymmetry` (-1 shows only the left side, 1 only the right). Setting a shown expression again changes it.",
+            params: &[
+                ("name", "string"),
+                ("intensity?", "number"),
+                ("duration?", "number"),
+                (
+                    "options?",
+                    "{ Weight: number?, Priority: number?, Asymmetry: number? }",
+                ),
+            ],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "ClearExpression",
+            doc: "Fades the expression `name` out over `duration` seconds (its own time if left out), or every expression if `name` is nil.",
+            params: &[("name?", "string"), ("duration?", "number")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "GetExpressions",
+            doc: "The expressions being shown, in the order they were set: each a table of `Name`, `Intensity`, `Weight`, `Priority` and `Asymmetry`.",
+            params: &[],
+            returns: "{ { Name: string, Intensity: number, Weight: number, Priority: number, Asymmetry: number } }",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "SetOverride",
+            doc: "Holds the control `control` (such as `\"Jaw_Open\"`) at `value` (0 to 1) over everything else on the Override layer, such as a character's mouth while eating; nil lets it go.",
+            params: &[("control", "string"), ("value?", "number")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "ClearOverrides",
+            doc: "Lets go of every control SetOverride holds.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::FaceControls,
+        Function {
+            name: "SetLayer",
+            doc: "Sets how the face layer `layer` (`\"Base\"`, `\"Expression\"`, `\"Dialogue\"`, `\"Procedural\"` or `\"Override\"`) goes over those under it: `weight` from 0 to 1 (1 if left out), `blend` `\"Override\"` (replaces, the default) or `\"Additive\"` (adds), and `mask`, the controls it may move: a group (`\"Eyes\"`, `\"Eyebrows\"`, `\"Mouth\"`, `\"CheeksAndNose\"`, `\"JawAndTongue\"`), a control, or a list of them; nil for all.",
+            params: &[
+                ("layer", "string"),
+                ("weight?", "number"),
+                ("blend?", "string"),
+                ("mask?", "string | { string }"),
+            ],
             returns: "()",
         },
     ),

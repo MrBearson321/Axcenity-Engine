@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [terrain, core, scene, physics, project, procedural]
-source: [crates/terrain/src/lib.rs, crates/terrain/src/brush.rs, crates/terrain/src/generate.rs, crates/terrain/src/erosion.rs, crates/terrain/src/mesh.rs, crates/terrain/src/files.rs, crates/terrain/src/job.rs, crates/core/src/terrain.rs, crates/scene/src/terrain.rs, crates/scene/src/foliage.rs, crates/procedural/src/terrain_scatter.rs, crates/project/src/terrain_files.rs]
+source: [crates/terrain/src/lib.rs, crates/terrain/src/brush.rs, crates/terrain/src/generate.rs, crates/terrain/src/erosion.rs, crates/terrain/src/mesh.rs, crates/terrain/src/files.rs, crates/terrain/src/job.rs, crates/core/src/terrain.rs, crates/scene/src/terrain.rs, crates/scene/src/foliage.rs, crates/procedural/src/terrain_scatter.rs, crates/procedural/src/paths.rs, crates/terrain/src/biomes.rs, crates/project/src/world_presets.rs, crates/project/src/terrain_files.rs]
 docs: [docs/terrain.md, crates/terrain/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -33,6 +33,12 @@ Since LE4 (the 2026-11-13 lighting audit) a Terrain can flood its hollows: `scen
 
 Since PW1 (procedural worlds, 2026-11-14) a Terrain can hold `ScatterRule`s that place foliage by height, slope, material layer, clumping and distance from other rules' spots. `procedural::terrain_scatter` places them per 32-sample chunk on a hash grid (one spot per `Spacing` cell from the seed and the cell's number), so chunks are made independently on every device and only those whose ground or rules changed are made again. The result lives in `TerrainData::generated_chunks` beside painted foliage; it is never saved or sent, and changing it bumps `generated_version` (which scene, physics, nav and preload keys include), not `revision`. Bake turns it into painted foliage.
 
+Since PW2, `Biome`s inside a Terrain split it into areas, each with a ground layer and its own ScatterRules. `terrain::biomes` weighs them by height, slope and shared moisture noise with soft edges; a biome's hand paint is its ground layer's paint, so nothing new is stored. `MaterialRules` carries the biomes, laying each ground layer under the layers' own rules, and a rule inside a Biome is scaled by that biome's weight.
+
+Since PW4, a `TerrainPath` inside a Spline keeps scatter rules off its strip (each strip's hash goes into the key of the chunks it reaches), and the editor's Apply flattens and paints under it and Route lays it over hills within a grade (`procedural/src/paths.rs`, `route.rs`; see Splines).
+
+Since PW3, world presets (`.axworld`, `project/src/world_presets.rs`) save and restore a whole setup: generator settings, the layers, biomes and rules (as prefab JSON, heights scaled to the target terrain) and the water. Six are built in (the editor makes them from its presets); a project's own live in `presets/`.
+
 ```mermaid
 flowchart LR
   SR[ScatterRule children] --> TS[procedural::terrain_scatter<br/>per chunk, hash grid]
@@ -48,7 +54,7 @@ flowchart LR
 
 ## Testing
 
-42 tests in `terrain`; `bench_terrain_with_foliage` (player, ignored). Scatter rules: 8 tests in `procedural/src/terrain_scatter_tests.rs`, `bench_forest_on_a_2048_stud_terrain` (ignored), scene foliage and editor `app/terrain/scatter_tests.rs`.
+42 tests in `terrain`; `bench_terrain_with_foliage` (player, ignored). Biomes: 6 tests in `terrain/src/biomes_tests.rs`, one in `procedural`, editor `app/terrain/biome_tests.rs` and a Terrain Studio drawing test. Scatter rules: 8 tests in `procedural/src/terrain_scatter_tests.rs`, `bench_forest_on_a_2048_stud_terrain` (ignored), scene foliage and editor `app/terrain/scatter_tests.rs`.
 
 ## Development guidance
 

@@ -426,3 +426,33 @@ fn target_paths_go_from_the_root() {
     assert_eq!(resolve_target(&world, door, &path), Some(panel));
     assert_eq!(target_path(&world, hinge, door), None);
 }
+
+#[test]
+fn a_face_control_track_reads_by_name_and_sets_the_face_controls() {
+    let text = r#"{
+        "format_version": 2,
+        "duration": 1,
+        "tracks": [ { "id": "jaw", "target": "FaceControls", "property": "Jaw_Open",
+            "keys": [ { "id": "a", "time": 0, "value": [0] },
+                      { "id": "b", "time": 1, "value": [0.8] } ] } ]
+    }"#;
+    let clip = PropertyClip::from_json(text).unwrap();
+    let track = &clip.file.tracks[0];
+    assert_eq!(track.property, PropertyName::face("Jaw_Open").unwrap());
+    assert!(clip.file.to_json().contains("\"property\": \"Jaw_Open\""));
+    assert!(PropertyName::keyable().count() > PropertyName::ALL.len() + 40);
+    let wrong = text.replace("Jaw_Open", "Jaw_Wide");
+    let error = PropertyClip::from_json(&wrong).unwrap_err().to_string();
+    assert!(error.contains("`Jaw_Wide` isn't a property"), "{error}");
+
+    let mut world = World::new();
+    let part = world.create(ClassName::MeshPart).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    let face = world.create(ClassName::FaceControls).unwrap();
+    world.set_parent(face, Some(part)).unwrap();
+    let mut applied = Applied::default();
+    apply_evaluated(&mut world, part, &clip.evaluate(0.5), &mut applied);
+    assert!(applied.missing.is_empty(), "{:?}", applied.missing);
+    let jaw = world.get(face).unwrap().property("Jaw_Open").cloned();
+    assert_eq!(jaw, Some(axcenity_core::Value::Number(0.4000000059604645)));
+}

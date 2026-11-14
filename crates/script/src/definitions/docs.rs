@@ -2783,6 +2783,121 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, parts and characters bump into what it places, as into painted foliage marked solid. False by default.",
     ),
     (
+        ClassName::Biome,
+        "Enabled",
+        "If false, the biome covers nothing and the rules inside it place nothing. True by default.",
+    ),
+    (
+        ClassName::Biome,
+        "GroundLayer",
+        "The name of the TerrainLayer that covers the biome's ground. Painting that layer in the Terrain Studio paints the biome too. Empty for none.",
+    ),
+    (
+        ClassName::Biome,
+        "AutoEnabled",
+        "If true (the default), the biome covers ground by itself wherever its height, slope and moisture settings hold; if false, only where its GroundLayer is painted.",
+    ),
+    (
+        ClassName::Biome,
+        "MinHeight",
+        "Studs above the terrain's bottom where the biome starts. 0 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MaxHeight",
+        "Studs above the terrain's bottom where the biome ends. 10000 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "HeightFade",
+        "Studs over which each height edge fades. 8 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MinSlope",
+        "Degrees from flat where the biome starts. 0 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MaxSlope",
+        "Degrees from flat where the biome ends. 90 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "SlopeFade",
+        "Degrees over which each slope edge fades. 5 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MinMoisture",
+        "0 (dry) to 1 (wet): the driest ground the biome covers. Moisture is noise over the terrain, the same for every biome with the same MoistureScale. 0 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MaxMoisture",
+        "0 to 1: the wettest ground the biome covers. 1 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MoistureFade",
+        "How much of the moisture range each moisture edge fades over. 0.1 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MoistureScale",
+        "Studs across one dry or wet patch. 400 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "EdgeNoise",
+        "0 to 1: breaks the biome's edges up with noise. 0.3 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "NoiseScale",
+        "Studs across the edge noise's patches. 48 by default.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "Enabled",
+        "If false, scatter rules don't keep off it and the editor's Apply and Route do nothing. True by default.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "Width",
+        "Studs across the road or path. Apply flattens and paints this strip fully. 8 by default.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "Falloff",
+        "Studs past each edge over which Apply's flattening and paint blend into the ground around. 4 by default.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "Flatten",
+        "If true (the default), Apply levels the strip to the height of its Spline's curve.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "Layer",
+        "The name of the TerrainLayer Apply paints the strip with. Empty (the default) paints nothing.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "ClearScatter",
+        "If true (the default), the terrain's ScatterRules place nothing within Width / 2 + ClearMargin studs of the curve, seen from above. They keep off it as soon as it's there and wherever its points move, on every device.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "ClearMargin",
+        "Studs past each edge that scatter rules keep clear, so trees don't stand on the verge. 1 by default.",
+    ),
+    (
+        ClassName::TerrainPath,
+        "MaxGrade",
+        "The steepest the editor's Route lets the road climb, in degrees. 8 by default.",
+    ),
+    (
         ClassName::ThirdPersonController,
         "Movement",
         "\"Walk\", \"Run\" or \"Crouch\", or any other name for a custom mode: the controller stops moving the character, and scripts and blocks move it. Set \"\" to clear a custom mode; the controller puts back the built-in mode it had. Set and read from a script or the set-property and property blocks.",
@@ -3071,6 +3186,81 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Ragdoll,
         "GetUpState",
         "The name of the Animator's state to play (with no blend of its own) when Enabled turns false, such as a getting-up clip, or empty to carry on with the state playing.",
+    ),
+    (
+        ClassName::FaceControls,
+        "Enabled",
+        "If false, the face rests: the model's own blend shape values, and the eyes and jaw as the body's pose has them.",
+    ),
+    (
+        ClassName::FaceControls,
+        "Profile",
+        "The face profile mapping the controls to the model's blend shapes and bones: a built-in one's name (`\"axcenity\"`, `\"arkit\"` or `\"vroid\"`), a `*.face.json` file's path, or empty for the one that names the most of the model's blend shapes.",
+    ),
+    (
+        ClassName::FaceControls,
+        "LayerOrder",
+        "The face layers' order, lowest first, as names separated by commas (`\"Base, Expression, Dialogue, Procedural, Override\"`): Base is these properties, Expression is `SetExpression`'s, Dialogue is lip sync, Procedural is blinking, gaze and idle motion, and Override is `SetOverride`'s. Layers left out keep their place after the named ones.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkEnabled",
+        "Whether the eyes blink by themselves, now and then.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkEyes",
+        "Which eyes blink by themselves: `\"Both\"`, `\"Left\"` or `\"Right\"`.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkIntervalMin",
+        "The fewest seconds between blinks; each wait is a random time from this to BlinkIntervalMax.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkIntervalMax",
+        "The most seconds between blinks.",
+    ),
+    (
+        ClassName::FaceControls,
+        "BlinkDuration",
+        "Seconds a blink takes, closing and opening.",
+    ),
+    (
+        ClassName::FaceControls,
+        "DoubleBlinkChance",
+        "How often a blink is followed straight away by another, from 0 (never) to 1 (always).",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeMode",
+        "What the eyes look at: `\"Animation\"` (only what the controls say), `\"Camera\"`, `\"Target\"` (GazeTarget) or `\"Position\"` (GazePosition). The eyes turn within the face profile's limits and look ahead again when the target is too far round.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeTarget",
+        "With GazeMode `\"Target\"`: the part, Attachment or character (a Model, looked at in its Head) to look at.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazePosition",
+        "With GazeMode `\"Position\"`: the point in the world to look at.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeSmoothing",
+        "About how many seconds the eyes take to catch up with a moving target; 0 follows at once.",
+    ),
+    (
+        ClassName::FaceControls,
+        "GazeWeight",
+        "How much the gaze counts over the eye controls, from 0 to 1.",
+    ),
+    (
+        ClassName::FaceControls,
+        "IdleMotion",
+        "Small movements a living face makes by itself (the eyes darting, the brows drifting), from 0 (none) to 1.",
     ),
     (
         ClassName::IKControl,
@@ -5452,6 +5642,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         ClassName::ScatterRule => {
             "Inside a Terrain: places plants, props or models (Models) over the ground by itself, where its height, slope, layer and water settings allow, about Spacing studs apart at Density, gathered into clumps by Clumping and keeping AvoidRadius from what the rules before it placed. Rules work in order, like TerrainLayers. What they place is made again on every device whenever the ground or the rules change (only the parts of the terrain that changed), and is never saved; Bake in the Terrain Studio keeps it as painted foliage."
         }
+        ClassName::Biome => {
+            "Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). It covers ground where its height, slope and moisture settings hold, with soft edges (later biomes cover earlier ones), and wherever its GroundLayer is painted. Its GroundLayer is laid under the other layers' own rules there, and the ScatterRules inside it place only where it covers, thinning out at its edges. ScatterRules outside every Biome place anywhere."
+        }
+        ClassName::TerrainPath => {
+            "Inside a Spline: a road or path on the terrain (procedural worlds PW4), Width studs across along the Spline's curve. ScatterRules keep off it (ClearScatter) wherever it goes, on every device, without changing the terrain. In the editor, Apply to Terrain flattens the ground under it to the curve and paints its Layer, blending in over Falloff (one undo step), and Route lays the Spline's points over the terrain from its first point to its last, no stretch climbing more than MaxGrade degrees, so a road winds round or up a hill (one undo step). Put a SplineMesh in the same Spline for the road's surface."
+        }
         ClassName::DataLayer => {
             "A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag."
         }
@@ -5518,6 +5714,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::VehicleSeat => {
             "A Seat that drives the car it's welded into: the body made of every part welded to it, the chassis. While someone sits on it, the Move action sets Throttle and Steer, and the camera follows the car until they get out with Jump. The car rides on the VehicleWheels parented to its parts. Everything a Seat has, and MaxSpeed, Torque, TurnSpeed, SteerAngle, Throttle, Steer and HandBrake."
+        }
+        ClassName::FaceControls => {
+            "The face of the MeshPart it's in: one number property per standard facial control, 0 to 1 (Blink_Left, Brow_Raise_Left, Mouth_Smile_Left, Jaw_Open …). After the Animator and before drawing, its face profile turns them into the model's blend shape weights and turns its eye and jaw bones. Scripts and TweenService animate a face by setting these properties."
         }
         ClassName::IKControl => {
             "Inverse kinematics during the game, for the skinned MeshPart it's in (or its Animator). After the Animator and before drawing, it turns the bones from ChainRoot down to EndEffector toward its Target, by its Type. Weight and Enabled fade in and out over SmoothTime."

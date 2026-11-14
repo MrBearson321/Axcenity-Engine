@@ -116,6 +116,19 @@ pub(super) const RAY_GI_SHADER: &str = concat!(
     include_str!("../ray_gi_hardware.wgsl"),
     include_str!("../ray_gi.wgsl")
 );
+/// Ray traced reflections' pass (`ray_reflections.wgsl`,
+/// renderer/ray_reflections.rs): ray queries turned on first, then the
+/// sky's colors, the fog and the shared lighting (for the frame's bindings,
+/// its sky and its probes), and cut-outs' holes.
+pub(super) const RAY_REFLECTIONS_SHADER: &str = concat!(
+    "enable wgpu_ray_query;\n",
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../ray_cut_outs.wgsl"),
+    include_str!("../ray_reflections.wgsl")
+);
 /// Ray traced GI's pass traced in software (RL3, renderer/ray_soft.rs) on
 /// a GPU without ray queries: the same, with its rays walking
 /// `ray_soft.wgsl`'s BVHs.
@@ -425,7 +438,8 @@ pub(super) fn create_frame_bind_group(
         joint_buffer,
         light_probe_buffer,
         ray_shadow_mask,
-    ]: [&wgpu::Buffer; 6],
+        ray_reflections,
+    ]: [&wgpu::Buffer; 7],
     [
         shadow_view,
         spot_shadow_view,
@@ -469,6 +483,10 @@ pub(super) fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: 17,
                 resource: ray_shadow_mask.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 18,
+                resource: ray_reflections.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,

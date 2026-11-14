@@ -30,6 +30,8 @@ pub enum FramePass {
     RayTracedShadows,
     /// Ray traced GI's batch of light probes, while it's on.
     RayTracedGi,
+    /// Ray traced reflections' rays, while they're on.
+    RayTracedReflections,
     /// The volumetric fog's grid, while it's on (its light is added to the
     /// scene as part of `Scene`).
     VolumetricFog,
@@ -44,7 +46,7 @@ pub enum FramePass {
 }
 
 impl FramePass {
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 12;
     pub const ALL: [FramePass; Self::COUNT] = [
         FramePass::AccelerationStructures,
         FramePass::Shadows,
@@ -52,6 +54,7 @@ impl FramePass {
         FramePass::AmbientOcclusion,
         FramePass::RayTracedShadows,
         FramePass::RayTracedGi,
+        FramePass::RayTracedReflections,
         FramePass::VolumetricFog,
         FramePass::Particles,
         FramePass::Scene,
@@ -67,6 +70,7 @@ impl FramePass {
             FramePass::AmbientOcclusion => "Ambient occlusion",
             FramePass::RayTracedShadows => "Ray traced shadows",
             FramePass::RayTracedGi => "Ray traced GI",
+            FramePass::RayTracedReflections => "Ray traced reflections",
             FramePass::VolumetricFog => "Volumetric fog",
             FramePass::Particles => "GPU particles",
             FramePass::Scene => "Scene",

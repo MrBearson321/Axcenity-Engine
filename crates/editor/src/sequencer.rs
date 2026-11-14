@@ -943,8 +943,7 @@ fn picked_focus(world: &World, picked: &Picked, by_tag: bool) -> Option<Focus> {
     let applied = axcenity_anim::Applied::default();
     let root = world.root();
     let path = axcenity_anim::target_path(world, root, picked.id)?;
-    let values: Vec<EvaluatedProperty> = PropertyName::ALL
-        .into_iter()
+    let values: Vec<EvaluatedProperty> = PropertyName::keyable()
         .filter(|p| *p != PropertyName::Bone)
         .filter_map(|property| {
             let value = axcenity_anim::current_numbers(world, root, &path, property, &applied)?;

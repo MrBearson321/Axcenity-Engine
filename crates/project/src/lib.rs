@@ -37,6 +37,7 @@ pub mod branding;
 mod build_profiles;
 mod collaborate_file;
 mod compat;
+mod default_humanoid;
 mod default_sky;
 mod duplicates;
 mod levels;
@@ -56,6 +57,7 @@ mod validate;
 mod versions;
 mod watch;
 mod world_file;
+mod world_presets;
 
 mod collision_groups;
 mod input_map;
@@ -68,6 +70,12 @@ mod user_templates;
 
 pub use collision_groups::{
     COLLISION_GROUPS_FILE, parse_collision_groups, save_collision_groups, write_collision_groups,
+};
+pub use default_humanoid::{
+    DEFAULT_CHARACTER_PREFAB_PATH, DEFAULT_HUMANOID_ANIMATIONS, DEFAULT_HUMANOID_ANIMATIONS_PATH,
+    DEFAULT_HUMANOID_CLIPS_FOLDER, DEFAULT_HUMANOID_MODEL, DEFAULT_HUMANOID_MODEL_PATH,
+    DEFAULT_HUMANOID_STATE_MACHINE_PATH, ROOT_PART_SIZE, STUDS_PER_METRE, add_default_humanoid,
+    default_character, default_humanoid_animation_files,
 };
 pub use default_sky::{
     DEFAULT_SKY, DEFAULT_SKY_CLOCK_TIME, DEFAULT_SKY_LATITUDE, DEFAULT_SKY_PATH, add_default_sky,
@@ -157,6 +165,11 @@ pub use watch::{Watched, Watcher, is_asset_path};
 pub use world_file::{
     WorldError, json_to_attribute, json_to_value, parse_prefab, parse_world, write_prefab,
     write_world,
+};
+pub use world_presets::{
+    WORLD_PRESET_EXTENSION, WORLD_PRESET_FORMAT, WORLD_PRESETS_FOLDER, WorldPreset,
+    WorldPresetError, list_world_presets, preset_objects, save_world_preset,
+    world_preset_file_name,
 };
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
