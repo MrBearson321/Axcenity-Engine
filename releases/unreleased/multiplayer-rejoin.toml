@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Players rejoin by themselves after losing the connection"
+details = "A player who joined a game over the network and loses the connection (the server crashed or restarted, or the network dropped) keeps playing what they see and tries to rejoin for a minute before ConnectionFailed fires. A server that hasn't noticed the old connection is gone lets them back in place of it, even when the game is full, with the same name. axcenity-bots gains --churn and --flood for operational tests, the server's --stats lines show its Instance count and Lua memory, and renetcode's error for every unreadable packet no longer floods the log (multiplayer readiness MP2)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"
