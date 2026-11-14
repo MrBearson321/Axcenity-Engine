@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "animation"
+title = "Characters can wear parts: hair and clothes inside a skinned MeshPart move with it"
+details = "A skinned MeshPart put inside a character's animated MeshPart follows its pose bone by bone and places itself, so the default humanoid's hair styles and clothes (HumanoidParts.glb) swap by changing a MeshId."
+features = ["animation.clips"]
+fixes = []
+introduces_issues = []
+prs = [386]
+commits = []
+stability = "stable"
+public = true
+evidence = "verified"
