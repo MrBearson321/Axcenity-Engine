@@ -90,6 +90,7 @@ struct MeshBvh {
 
 /// An item of the frame: its mesh, world-to-mesh matrix, mask, slot and
 /// whether it's a cut-out.
+#[derive(PartialEq)]
 struct Item {
     mesh: MeshKey,
     to_mesh: Mat4,
@@ -109,6 +110,8 @@ pub(super) struct SoftScene {
     mesh_words: Option<usize>,
     /// The items' part (the items and the top BVH) as last written.
     tail: Vec<Word>,
+    /// The items it was made from.
+    items: Vec<Item>,
     buffer: wgpu::Buffer,
     /// Its size in words.
     capacity: usize,
@@ -125,6 +128,7 @@ impl SoftScene {
             placed: FxHashMap::default(),
             mesh_words: None,
             tail: Vec::new(),
+            items: Vec::new(),
             buffer: scene_buffer(device, capacity),
             capacity,
             surfaces: Surfaces::new(device),
@@ -150,7 +154,8 @@ impl SoftScene {
     ) {
         // The most words the buffer may hold.
         let limits = device.limits();
-        let most_words = (u64::from(limits.max_storage_buffer_binding_size)
+        let most_words = (limits
+            .max_storage_buffer_binding_size
             .min(limits.max_buffer_size)
             / 16) as usize;
         let mut budget = TRIANGLES_PER_FRAME;
@@ -241,7 +246,13 @@ impl SoftScene {
             mesh_part = Some(words);
         }
         let tail_start = 1 + self.mesh_words.unwrap_or(0);
-        let tail = self.tail_words(&items, tail_start as u32);
+        // The same items over the same meshes keep their part as it is.
+        let unchanged = mesh_part.is_none() && items == self.items;
+        let tail = if unchanged {
+            std::mem::take(&mut self.tail)
+        } else {
+            self.tail_words(&items, tail_start as u32)
+        };
         let header: Word = if items.is_empty() {
             [0.0; 4]
         } else {
@@ -263,7 +274,6 @@ impl SoftScene {
             if mesh_part.is_none() {
                 mesh_part = Some(self.laid_out_meshes());
             }
-            self.tail.clear();
         }
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&header));
         if let Some(words) = &mesh_part
@@ -271,7 +281,7 @@ impl SoftScene {
         {
             queue.write_buffer(&self.buffer, 16, bytemuck::cast_slice(words));
         }
-        if (mesh_part.is_some() || tail != self.tail) && !tail.is_empty() {
+        if (mesh_part.is_some() || !unchanged) && !tail.is_empty() {
             queue.write_buffer(
                 &self.buffer,
                 16 * tail_start as u64,
@@ -279,9 +289,11 @@ impl SoftScene {
             );
         }
         self.tail = tail;
+        let item_count = items.len() as u32;
+        self.items = items;
         self.surfaces.write(device, queue, surfaces);
         self.stats = SoftStats {
-            items: items.len() as u32,
+            items: item_count,
             meshes: self.meshes.len() as u32,
             triangles: self
                 .meshes
