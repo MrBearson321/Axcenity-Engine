@@ -40,6 +40,9 @@ pub struct Arguments {
     /// `--lan` with `--host`: a LAN game, not secured with connect tokens
     /// (MP4).
     pub lan: bool,
+    /// `--relay <address:port>`: an `axcenity-relay` a host gets a join
+    /// code from, and join codes are looked up on (MP5).
+    pub relay: Option<String>,
     /// `--dev`: the F9 Developer Console, even in a built game whose
     /// project setting has it off (Phase 71).
     pub dev: bool,
@@ -158,6 +161,13 @@ impl Arguments {
                 parsed.replay = Some(PathBuf::from(file));
             } else if argument == "--lan" {
                 parsed.lan = true;
+            } else if argument == "--relay" {
+                let Some(relay) = arguments.next() else {
+                    bail!(
+                        "--relay takes the relay's address and port, such as relay.example.com:47810\n\n{USAGE}"
+                    );
+                };
+                parsed.relay = Some(relay.to_string_lossy().into_owned());
             } else if argument == "--password" {
                 let Some(password) = arguments.next() else {
                     bail!("--password takes the game's password\n\n{USAGE}");
@@ -425,6 +435,9 @@ mod tests {
         assert!(!parse(&["--host", "examples/hello-part"]).unwrap().lan);
         assert!(parse(&["--lan", "examples/hello-part"]).is_err());
         assert!(parse(&["--join", "127.0.0.1:4000", "--lan"]).is_err());
+        let code = parse(&["--join", "K7Q-M2P", "--relay", "relay.example.com:47810"]).unwrap();
+        assert_eq!(code.relay.as_deref(), Some("relay.example.com:47810"));
+        assert!(parse(&["--relay"]).is_err());
     }
 
     #[test]

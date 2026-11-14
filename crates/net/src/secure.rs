@@ -223,7 +223,9 @@ pub struct TokenRules {
 /// A server's token port: answers requests on threads of its own until
 /// dropped.
 pub struct TokenPort {
-    address: SocketAddr,
+    #[cfg(test)]
+    port: u16,
+    issuer: Arc<Issuer>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     issued: Arc<AtomicUsize>,
@@ -235,7 +237,7 @@ impl TokenPort {
     pub fn start(port: u16, secured: &Secured, rules: TokenRules) -> io::Result<TokenPort> {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))?;
         listener.set_nonblocking(true)?;
-        let address = listener.local_addr()?;
+        let port = listener.local_addr()?.port();
         let config = secured.cert.server_config()?;
         let stop = Arc::new(AtomicBool::new(false));
         let issued = Arc::new(AtomicUsize::new(0));
@@ -243,7 +245,7 @@ impl TokenPort {
         let shared = Arc::new(Issuer {
             config,
             key: secured.key,
-            port: address.port(),
+            port,
             rules,
             busy: AtomicUsize::new(0),
             recent: Recent::default(),
@@ -251,11 +253,14 @@ impl TokenPort {
             log: log.clone(),
         });
         let stopping = stop.clone();
+        let issuer = shared.clone();
         let thread = std::thread::Builder::new()
             .name("token port".to_owned())
             .spawn(move || accept(listener, shared, stopping))?;
         Ok(TokenPort {
-            address,
+            #[cfg(test)]
+            port,
+            issuer,
             stop,
             thread: Some(thread),
             issued,
@@ -263,8 +268,14 @@ impl TokenPort {
         })
     }
 
+    #[cfg(test)]
     pub fn port(&self) -> u16 {
-        self.address.port()
+        self.port
+    }
+
+    /// Answers token requests that come another way (through a relay).
+    pub(crate) fn handle(&self) -> TokenHandle {
+        TokenHandle(self.issuer.clone())
     }
 
     /// Tokens handed out so far.
@@ -287,6 +298,29 @@ impl Drop for TokenPort {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+/// A token port's answers, for requests through a relay (MP5).
+#[derive(Clone)]
+pub(crate) struct TokenHandle(Arc<Issuer>);
+
+impl TokenHandle {
+    /// Answers the request on `stream` from a player at `from`, on this
+    /// thread; false when too many are being answered already.
+    pub(crate) fn answer(&self, stream: TcpStream, from: SocketAddr) -> bool {
+        let issuer = &self.0;
+        if issuer.busy.fetch_add(1, Ordering::Relaxed) >= MOST_AT_ONCE {
+            issuer.busy.fetch_sub(1, Ordering::Relaxed);
+            return false;
+        }
+        let _ = answer(stream, from, issuer);
+        issuer.busy.fetch_sub(1, Ordering::Relaxed);
+        true
+    }
+
+    pub(crate) fn note(&self, line: String) {
+        self.0.note(line);
     }
 }
 
@@ -478,6 +512,17 @@ pub fn fetch_token(
             server.ip()
         ))
     })?;
+    token_over(stream, server, request, trust)
+}
+
+/// [`fetch_token`] over `stream`, which reaches the token port of the
+/// server known as `server` (directly, or spliced through a relay).
+pub(crate) fn token_over(
+    stream: TcpStream,
+    server: SocketAddr,
+    request: &TokenRequest,
+    trust: &Trust,
+) -> Result<ConnectToken, FetchError> {
     let io_error = |error: io::Error| {
         FetchError::Refused(format!(
             "The server's token port stopped answering: {error}."

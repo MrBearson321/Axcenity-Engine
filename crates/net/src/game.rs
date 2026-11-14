@@ -21,6 +21,7 @@ use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
 use crate::ownership::{
     CharacterCheck, OWNED_TAG, Owned, OwnedSender, Sender, character_of, character_parts,
 };
+use crate::relayed::{RelayEvent, Route};
 use crate::replay::{BufferPlay, Replay, Replays};
 use crate::replicate::{LevelState, Replicator, Update, apply};
 use crate::secure::{Secured, ServerCert, TokenRequest, TokenRules, Trust, short, split_join_link};
@@ -29,6 +30,7 @@ use crate::streaming::{PeerStream, Streams};
 use crate::transport::{Client, Conditions, LinkStats, Server};
 use crate::wire::{WireKind, WireMessage};
 use crate::{DEFAULT_PORT, DISCOVERY_PORT};
+use axcenity_relay::protocol::{display_code, normalize_code};
 
 /// Netcode takes this many connections beyond `MaxPlayers`, so a player
 /// who finds the game full is told so by the handshake.
@@ -49,7 +51,10 @@ const REJOIN_MOST_WAIT: f64 = 8.0;
 /// What a device joined over UDP, to rejoin the same server with.
 #[derive(Clone)]
 struct JoinedTo {
+    /// The address, or the relay's for a join by code.
     address: String,
+    /// The join code on that relay (MP5).
+    code: Option<String>,
     password: Option<String>,
     trust: Trust,
 }
@@ -171,6 +176,12 @@ pub struct Network {
     /// player has joined (`None`: a new certificate each time, and any
     /// server is trusted).
     data_folder: Option<std::path::PathBuf>,
+    /// The relay hosts register with and codes are joined through (MP5).
+    relay: Option<String>,
+    /// Joining by code: try a direct path first.
+    punch: bool,
+    /// Hosting through a relay: the game's join code.
+    join_code: Option<String>,
     /// The key the server gave this device to rejoin with.
     rejoin_key: u64,
     /// Lost the connection and trying to rejoin.
@@ -227,6 +238,9 @@ impl Network {
             joined_to: None,
             secure: true,
             data_folder: None,
+            relay: None,
+            punch: true,
+            join_code: None,
             rejoin_key: 0,
             rejoining: None,
             rejoin_seconds: REJOIN_SECONDS,
@@ -581,7 +595,63 @@ impl Network {
                     .to_owned(),
             ),
         }
+        self.start_relay();
         Ok(port)
+    }
+
+    /// Hosting secured with a relay set: registers with it for a join
+    /// code, which arrives in a later receive.
+    fn start_relay(&mut self) {
+        self.join_code = None;
+        let Some(relay) = self.relay.clone() else {
+            return;
+        };
+        if !self.secure {
+            self.log.push(format!(
+                "warning: a LAN game isn't put on the relay at {relay}; host secured to get a \
+                 join code"
+            ));
+            return;
+        }
+        let name = self.game.name.clone();
+        let Session::Hosting(host) = &mut self.session else {
+            return;
+        };
+        let started = crate::transport::resolve(&relay)
+            .and_then(|address| host.server_mut().start_relay(address, &name));
+        match started {
+            Ok(()) => self
+                .log
+                .push(format!("Asking the relay at {relay} for a join code...")),
+            Err(err) => self
+                .log
+                .push(format!("warning: can't use the relay at {relay}: {err}")),
+        }
+    }
+
+    /// Hosts register with, and players join codes through, the relay at
+    /// `relay` (`"host:port"`, MP5); `None` uses none.
+    pub fn set_relay(&mut self, relay: Option<String>) {
+        self.relay = relay;
+    }
+
+    /// Joining by code tries a direct path first (on by default; off
+    /// always goes through the relay, for tests).
+    pub fn set_punching(&mut self, punch: bool) {
+        self.punch = punch;
+    }
+
+    /// Hosting through a relay: the game's join code, once it has one.
+    pub fn join_code(&self) -> Option<&str> {
+        self.join_code.as_deref()
+    }
+
+    /// Joined: how this device reached the host.
+    pub fn route(&self) -> Option<Route> {
+        match &self.session {
+            Session::Joined(join) => join.route(),
+            _ => None,
+        }
     }
 
     /// Hosts secured (the default) or not: LAN games and `--insecure`
@@ -648,11 +718,55 @@ impl Network {
     fn client_for(&self, to: &JoinedTo) -> std::io::Result<Client> {
         let game = self.game.clone();
         let password = to.password.clone();
-        Client::join(
-            &to.address,
-            move |address| TokenRequest::new(&game, password, address),
-            to.trust.clone(),
-        )
+        let request = move |address| TokenRequest::new(&game, password, address);
+        match &to.code {
+            Some(code) => {
+                Client::join_code(&to.address, code, request, to.trust.clone(), self.punch)
+            }
+            None => Client::join(&to.address, request, to.trust.clone()),
+        }
+    }
+
+    /// What `text` joins: an address, a code on the relay set, or a link
+    /// with either (`axcenity://join/relay:port/CODE#fingerprint`).
+    fn join_target(&self, text: &str, password: Option<String>) -> Result<JoinedTo, String> {
+        let (address, fingerprint) = split_join_link(text);
+        let relayed = match address.rsplit_once('/') {
+            Some((relay, code)) => Some((relay.to_owned(), code.to_owned())),
+            None if !address.contains(':') && normalize_code(&address).is_some() => {
+                let Some(relay) = self.relay.clone() else {
+                    return Err(format!(
+                        "To join with the code {}, say which relay it's on (--relay \
+                         address:port), or join with the host's link.",
+                        address.trim()
+                    ));
+                };
+                Some((relay, address.clone()))
+            }
+            None => None,
+        };
+        Ok(match relayed {
+            Some((relay, code)) => {
+                let Some(code) = normalize_code(&code) else {
+                    return Err(format!("\"{code}\" isn't a join code, such as K7Q-M2P."));
+                };
+                JoinedTo {
+                    address: relay,
+                    code: Some(code),
+                    password,
+                    // A code is new each time a game is hosted, so there's
+                    // nothing to remember: a link pins the host, a bare
+                    // code trusts the relay.
+                    trust: fingerprint.map_or(Trust::Any, Trust::Pinned),
+                }
+            }
+            None => JoinedTo {
+                address,
+                code: None,
+                password,
+                trust: self.trust_for(fingerprint),
+            },
+        })
     }
 
     /// Hosts with an in-memory server only loopback clients reach, and
@@ -691,17 +805,19 @@ impl Network {
         address: &str,
         password: Option<String>,
     ) -> Result<(), String> {
-        let (address, fingerprint) = split_join_link(address);
-        let to = JoinedTo {
-            address,
-            password,
-            trust: self.trust_for(fingerprint),
-        };
+        let to = self.join_target(address, password)?;
         let client = self
             .client_for(&to)
             .map_err(|err| format!("Can't join {}: {err}.", to.address))?;
         self.join_through(world, scripts, client, to.password.clone());
-        self.log.push(format!("Joining {}...", to.address));
+        self.log.push(match &to.code {
+            Some(code) => format!(
+                "Joining {} through the relay at {}...",
+                display_code(code),
+                to.address
+            ),
+            None => format!("Joining {}...", to.address),
+        });
         self.joined_to = Some(to);
         self.rejoins = 0;
         Ok(())
@@ -802,6 +918,7 @@ impl Network {
             }
         }
         self.answerer = None;
+        self.join_code = None;
         self.joined_to = None;
         self.rejoining = None;
         self.replicator = Replicator::default();
@@ -852,6 +969,28 @@ impl Network {
             Session::Offline => Vec::new(),
             Session::Hosting(host) => {
                 self.log.extend(host.server().take_token_log());
+                for event in host.server().relay_events() {
+                    match event {
+                        RelayEvent::Hosted { code } => {
+                            let relay = self.relay.clone().unwrap_or_default();
+                            let link = match host.server().fingerprint() {
+                                Some(fingerprint) => crate::secure::join_link(
+                                    &format!("{relay}/{code}"),
+                                    fingerprint,
+                                ),
+                                None => format!("axcenity://join/{relay}/{code}"),
+                            };
+                            self.log.push(format!(
+                                "Join code {} on the relay at {relay}; players join with {link}",
+                                display_code(&code)
+                            ));
+                            self.join_code = Some(code);
+                        }
+                        RelayEvent::Trouble(trouble) => {
+                            self.log.push(format!("warning: {trouble}"));
+                        }
+                    }
+                }
                 host.update(elapsed)
             }
             Session::Joined(join) => join.update(elapsed),
@@ -1190,8 +1329,15 @@ impl Network {
                     self.rejoin_key = join.rejoin_key();
                 }
                 scripts.rename_local_player(world, &you.name);
-                self.log
-                    .push(format!("Joined \"{}\" as {}.", self.game.name, you.name));
+                let how = match self.route() {
+                    Some(Route::Punched(host)) => format!(", directly at {host}"),
+                    Some(Route::Relayed(relay)) => format!(", through the relay at {relay}"),
+                    _ => String::new(),
+                };
+                self.log.push(format!(
+                    "Joined \"{}\" as {}{how}.",
+                    self.game.name, you.name
+                ));
             }
             SessionEvent::Refused(why) => self.log.push(format!("warning: {why}")),
             SessionEvent::Snapshot { you, update } => {

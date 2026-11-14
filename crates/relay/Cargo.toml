@@ -1,0 +1,21 @@
+[package]
+name = "axcenity-relay"
+description = "A self-hostable rendezvous and relay for Axcenity games (multiplayer readiness MP5): hosts get join codes, players behind routers reach them by hole punching or through it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "axcenity-relay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

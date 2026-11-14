@@ -26,10 +26,12 @@ use renet::{
     ChannelConfig, ClientId, ConnectionConfig, DisconnectReason, RenetClient, RenetServer, SendType,
 };
 use renet_netcode::{
-    ClientAuthentication, ConnectToken, NetcodeClientTransport, NetcodeDisconnectReason,
-    NetcodeServerTransport, ServerAuthentication, ServerConfig,
+    ClientAuthentication, NetcodeClientTransport, NetcodeDisconnectReason, ServerAuthentication,
+    ServerConfig,
 };
 
+use crate::host_socket::{HostSocket, relayed_player};
+use crate::relayed::{Fetched, RelayEvent, RelayLink, Route, fetch_by_code};
 use crate::secure::{FetchError, Secured, TokenPort, TokenRequest, TokenRules, Trust, fetch_token};
 
 /// Netcode's id for every Axcenity game. It never changes: games and
@@ -225,9 +227,11 @@ const FIRST_LOOPBACK: ClientId = u64::MAX;
 /// only) and from loopback clients.
 pub struct Server {
     renet: RenetServer,
-    udp: Option<NetcodeServerTransport>,
+    udp: Option<HostSocket>,
     /// A secured server's token port and certificate fingerprint.
     tokens: Option<(TokenPort, String)>,
+    /// Its link to a relay (MP5).
+    relay: Option<RelayLink>,
     loopbacks: Vec<(ClientId, Rc<Pipe>)>,
     next_loopback: ClientId,
     /// What the loopback emulates.
@@ -250,7 +254,7 @@ impl Server {
             // out tokens: netcode's packets aren't encrypted.
             authentication: ServerAuthentication::Unsecure,
         };
-        let udp = NetcodeServerTransport::new(config, socket)?;
+        let udp = HostSocket::new(config, socket)?;
         Ok(Server {
             udp: Some(udp),
             ..Server::in_memory()
@@ -280,7 +284,7 @@ impl Server {
                 private_key: secured.key,
             },
         };
-        let udp = NetcodeServerTransport::new(config, socket)?;
+        let udp = HostSocket::new(config, socket)?;
         Ok(Server {
             udp: Some(udp),
             tokens: Some((tokens, secured.cert.fingerprint())),
@@ -293,6 +297,29 @@ impl Server {
         self.tokens
             .as_ref()
             .map(|(_, fingerprint)| fingerprint.as_str())
+    }
+
+    /// Also takes players through the relay at `relay` (MP5), which gives
+    /// the game a join code (see [`Self::relay_events`]). Only a secured
+    /// server: the relay passes on its token port's TLS.
+    pub fn start_relay(&mut self, relay: SocketAddr, game: &str) -> io::Result<()> {
+        let (Some(udp), Some((tokens, _))) = (&mut self.udp, &self.tokens) else {
+            return Err(io::Error::other(
+                "only a secured server on the network can use a relay",
+            ));
+        };
+        let link = RelayLink::start(relay, game.to_owned(), udp.socket_clone()?, tokens.handle())?;
+        udp.set_relay(Some(relay));
+        self.relay = Some(link);
+        Ok(())
+    }
+
+    /// What the relay link reported since the last call.
+    pub fn relay_events(&self) -> Vec<RelayEvent> {
+        self.relay
+            .as_ref()
+            .map(RelayLink::take_events)
+            .unwrap_or_default()
     }
 
     /// Tokens its token port handed out; 0 unsecured.
@@ -314,6 +341,7 @@ impl Server {
             renet: RenetServer::new(connection_config()),
             udp: None,
             tokens: None,
+            relay: None,
             loopbacks: Vec::new(),
             next_loopback: FIRST_LOOPBACK,
             conditions: Conditions::default(),
@@ -344,11 +372,7 @@ impl Server {
 
     /// The UDP port it listens on; `None` in memory.
     pub fn port(&self) -> Option<u16> {
-        let udp = self.udp.as_ref()?;
-        if let Some((tokens, _)) = &self.tokens {
-            return Some(tokens.port());
-        }
-        udp.addresses().first().map(SocketAddr::port)
+        self.udp.as_ref()?.local_port()
     }
 
     /// A client in this process, connected at once: the same interface as
@@ -363,6 +387,7 @@ impl Server {
             renet,
             link: Link::Loopback(pipe),
             secured: false,
+            route: None,
             ended: None,
         }
     }
@@ -441,9 +466,20 @@ impl Server {
         self.renet.disconnect(id);
     }
 
-    /// Where a UDP connection comes from; `None` for a loopback one.
+    /// Where a UDP connection comes from; `None` for a loopback one (a
+    /// relayed player's is its number at the relay, in `fd61:7872::/32`).
     pub fn address_of(&self, id: ConnectionId) -> Option<SocketAddr> {
         self.udp.as_ref()?.client_addr(id)
+    }
+
+    /// Where a connection comes from, for the log: its address, or "the
+    /// relay".
+    pub fn describe(&self, id: ConnectionId) -> Option<String> {
+        let address = self.address_of(id)?;
+        Some(match relayed_player(address) {
+            Some(player) => format!("the relay (player {player})"),
+            None => address.to_string(),
+        })
     }
 
     /// Closes every connection now, telling each, for a host that stops.
@@ -461,7 +497,7 @@ enum Link {
     Loopback(Rc<Pipe>),
     /// Getting a connect token from the server's token port on a thread.
     Fetching {
-        answer: Receiver<Result<ConnectToken, FetchError>>,
+        answer: Receiver<Result<Fetched, FetchError>>,
         server: SocketAddr,
         /// Connect unsecured if no token port answers.
         fallback: bool,
@@ -474,6 +510,8 @@ pub struct Client {
     link: Link,
     /// Encrypted with a connect token (or still getting one).
     secured: bool,
+    /// How it reached the server, once it has a token.
+    route: Option<Route>,
     /// Why the connection ended, once it has.
     ended: Option<String>,
 }
@@ -488,6 +526,7 @@ impl Client {
             renet: RenetClient::new(connection_config()),
             link: unsecured(server)?,
             secured: false,
+            route: None,
             ended: None,
         })
     }
@@ -513,7 +552,12 @@ impl Client {
         std::thread::Builder::new()
             .name("token fetch".to_owned())
             .spawn(move || {
-                let _ = send.send(fetch_token(server, &request, &trust));
+                let fetched = fetch_token(server, &request, &trust).map(|token| Fetched {
+                    token,
+                    socket: None,
+                    route: Route::Direct,
+                });
+                let _ = send.send(fetched);
             })?;
         Ok(Client {
             renet: RenetClient::new(connection_config()),
@@ -523,8 +567,47 @@ impl Client {
                 fallback,
             },
             secured: true,
+            route: None,
             ended: None,
         })
+    }
+
+    /// Starts joining the game with `code` on the relay at `relay`
+    /// (`"host:port"`, MP5): a direct path if one opens when `punch`,
+    /// otherwise through the relay; a connect token through the relay
+    /// either way.
+    pub fn join_code(
+        relay: &str,
+        code: &str,
+        request: impl FnOnce(SocketAddr) -> TokenRequest + Send + 'static,
+        trust: Trust,
+        punch: bool,
+    ) -> io::Result<Client> {
+        let relay = resolve(relay)?;
+        let code = code.to_owned();
+        let (send, answer) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("join by code".to_owned())
+            .spawn(move || {
+                let _ = send.send(fetch_by_code(relay, &code, request, &trust, punch));
+            })?;
+        Ok(Client {
+            renet: RenetClient::new(connection_config()),
+            link: Link::Fetching {
+                answer,
+                server: relay,
+                fallback: false,
+            },
+            secured: true,
+            route: None,
+            ended: None,
+        })
+    }
+
+    /// How it reached the server: `None` on the loopback, while getting a
+    /// token, and unsecured.
+    pub fn route(&self) -> Option<Route> {
+        self.route
     }
 
     /// Whether the connection is encrypted with a token (or still getting
@@ -552,7 +635,10 @@ impl Client {
             )),
         };
         let link = match got {
-            Ok(token) => secured(server, token),
+            Ok(fetched) => {
+                self.route = Some(fetched.route);
+                secured(fetched.token, fetched.socket)
+            }
             Err(FetchError::NoTokenPort(_)) if fallback => {
                 self.secured = false;
                 unsecured(server)
@@ -682,14 +768,18 @@ fn unsecured(server: SocketAddr) -> io::Result<Link> {
     udp_link(server, authentication)
 }
 
-/// A UDP link to `server` encrypted with `token`.
-fn secured(server: SocketAddr, token: ConnectToken) -> io::Result<Link> {
-    udp_link(
-        server,
-        ClientAuthentication::Secure {
-            connect_token: token,
-        },
-    )
+/// A UDP link encrypted with `token`, to the first address it lists, from
+/// `socket` (the one a hole was punched or a relay bound from) or a new one.
+fn secured(token: renet_netcode::ConnectToken, socket: Option<UdpSocket>) -> io::Result<Link> {
+    let server =
+        token.server_addresses[0].ok_or_else(|| io::Error::other("a token with no server"))?;
+    let authentication = ClientAuthentication::Secure {
+        connect_token: token,
+    };
+    match socket {
+        Some(socket) => udp_link_on(server, authentication, socket),
+        None => udp_link(server, authentication),
+    }
 }
 
 fn udp_link(server: SocketAddr, authentication: ClientAuthentication) -> io::Result<Link> {
@@ -697,14 +787,21 @@ fn udp_link(server: SocketAddr, authentication: ClientAuthentication) -> io::Res
         SocketAddr::V4(_) => (Ipv4Addr::UNSPECIFIED, 0).into(),
         SocketAddr::V6(_) => (Ipv6Addr::UNSPECIFIED, 0).into(),
     };
-    let socket = UdpSocket::bind(local)?;
+    udp_link_on(server, authentication, UdpSocket::bind(local)?)
+}
+
+fn udp_link_on(
+    server: SocketAddr,
+    authentication: ClientAuthentication,
+    socket: UdpSocket,
+) -> io::Result<Link> {
     let transport = NetcodeClientTransport::new(now(), authentication, socket)
         .map_err(|err| io::Error::other(err.to_string()))?;
     Ok(Link::Udp(Box::new(transport), server))
 }
 
 /// `"host:port"` as an address, IPv4 first (servers listen on IPv4).
-fn resolve(address: &str) -> io::Result<SocketAddr> {
+pub(crate) fn resolve(address: &str) -> io::Result<SocketAddr> {
     let found: Vec<SocketAddr> = address
         .to_socket_addrs()
         .map_err(|err| {

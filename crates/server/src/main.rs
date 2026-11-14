@@ -43,11 +43,12 @@ use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 mod stats;
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--max-players <n>] [--kick-flags <n>] [--insecure] [--data <folder>] [--relay <address:port>] [--stats <seconds> [--stats-file <path>]] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800\n\
                      The server is secured: players get a connect token from TCP on the same port, \
                      and every packet is encrypted. --insecure turns that off (LAN only); \
-                     --data is where its certificate is kept (the engine's data folder unless given).";
+                     --data is where its certificate is kept (the engine's data folder unless given). \
+                     --relay also takes players through an axcenity-relay, which gives the game a join code.";
 
 /// Each frame is this long.
 const FRAME: Duration = Duration::from_micros(16_667);
@@ -75,6 +76,8 @@ struct Arguments {
     insecure: bool,
     /// `--data <folder>`: where the server's certificate is kept.
     data: Option<PathBuf>,
+    /// `--relay <address:port>`: an `axcenity-relay` for a join code (MP5).
+    relay: Option<String>,
 }
 
 impl Arguments {
@@ -161,6 +164,14 @@ impl Arguments {
                     parsed.stats_file = Some(PathBuf::from(path));
                 }
                 "--insecure" => parsed.insecure = true,
+                "--relay" => {
+                    let Some(relay) = arguments.next() else {
+                        bail!(
+                            "--relay takes the relay's address and port, such as relay.example.com:47810\n\n{USAGE}"
+                        );
+                    };
+                    parsed.relay = Some(relay.to_string_lossy().into_owned());
+                }
                 "--data" => {
                     let Some(folder) = arguments.next() else {
                         bail!(
@@ -288,6 +299,7 @@ fn main() -> Result<()> {
     // engine's data folder (or `--data`), never in the game.
     network.set_secure(!arguments.insecure);
     network.set_data_folder(arguments.data.clone().or_else(axcenity_save::saves_folder));
+    network.set_relay(arguments.relay.clone());
     // `ReplayService:StopRecording` saves beside the server's saves (Phase 81).
     network.set_replay_folder(
         axcenity_save::game_folder(&project.manifest.name).map(|data| data.join("replays")),
@@ -588,6 +600,7 @@ mod tests {
                 stats_file: None,
                 insecure: false,
                 data: None,
+                relay: None,
             }
         );
         let insecure = parse(&["castle", "--insecure", "--data", "keys"]).unwrap();

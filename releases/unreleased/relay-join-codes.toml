@@ -1,0 +1,12 @@
+category = "feature"
+subsystem = "networking"
+title = "Players can join a game hosted behind a home router with a join code"
+details = "Run axcenity-relay on a computer with a public address (TCP and UDP port 47810) and host with --relay address:port: the host gets a six-letter join code and a link. Players join with --join CODE --relay address:port, or the link; they connect directly when a hole can be punched through both routers, and through the relay otherwise. The relay can't read the game or the password. Axcenity runs no public relay (multiplayer readiness MP5a)."
+features = []
+fixes = []
+introduces_issues = []
+prs = []
+commits = []
+stability = "experimental"
+public = true
+evidence = "verified"

@@ -37,6 +37,10 @@ pub struct BotSettings {
     pub first_user_id: u64,
     /// A modified client's way of moving its character (`--cheat`).
     pub cheat: Option<Cheat>,
+    /// The relay a bare join code is on (`--relay`, MP5).
+    pub relay: Option<String>,
+    /// Joining by code tries a direct path first (`--no-punch` doesn't).
+    pub punch: bool,
 }
 
 /// Pixels of mouse look that turn a character half round: the controllers
@@ -199,6 +203,8 @@ impl Bot {
             network.set_client_scripts(client_scripts(&world, &project.scripts));
         }
         network.set_join_name(format!("Bot{}", index + 1));
+        network.set_relay(settings.relay.clone());
+        network.set_punching(settings.punch);
         network
             .join(
                 &mut world,
@@ -279,6 +285,11 @@ impl Bot {
             sent_per_second: link.bytes_sent_per_second,
             received_per_second: link.bytes_received_per_second,
             corrections: self.network.corrections(),
+            route: self.network.route().map(|route| match route {
+                axcenity_net::Route::Direct => "direct",
+                axcenity_net::Route::Punched(_) => "punched",
+                axcenity_net::Route::Relayed(_) => "relayed",
+            }),
             rejoins: self.network.rejoins(),
             rejoining: self.network.is_rejoining(),
             script_errors: self.script_errors,

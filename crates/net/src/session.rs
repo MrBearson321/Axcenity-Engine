@@ -319,7 +319,7 @@ impl Host {
     fn greet(&mut self, id: ConnectionId, hello: Option<Message>) -> Vec<SessionEvent> {
         let from = self
             .server
-            .address_of(id)
+            .describe(id)
             .map(|address| format!(" from {address}"))
             .unwrap_or_default();
         // A player back after losing their connection, which the host
@@ -534,6 +534,11 @@ impl Join {
     /// Whether the connection is encrypted with a connect token (MP4).
     pub fn is_secured(&self) -> bool {
         self.client.is_secured()
+    }
+
+    /// How the connection reached the host (MP5).
+    pub fn route(&self) -> Option<crate::relayed::Route> {
+        self.client.route()
     }
 
     /// This player, once the host took them in.
