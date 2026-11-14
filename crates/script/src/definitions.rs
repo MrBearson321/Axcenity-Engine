@@ -29,7 +29,7 @@ mod tables;
 
 use crate::types::EnumType;
 use docs::*;
-pub use examples::api_example;
+pub use examples::{api_example, api_examples};
 pub use markdown::{
     API_DOCS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_markdown, api_summary, with_api_summary,
 };
@@ -603,7 +603,9 @@ fn function_type(library: &Library, function: &Function) -> String {
         .map(|class| format!("((className: \"{class}\") -> {class})"))
         .collect();
     overloads.push(format!("({plain})"));
-    overloads.join(" & ")
+    // One overload per line, so pull requests that add classes in different
+    // places don't all rewrite (and conflict on) one long line.
+    overloads.join("\n\t\t& ")
 }
 
 /// `doc`, saying where it works if `name` is a side-only API.

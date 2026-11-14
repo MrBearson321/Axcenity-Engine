@@ -613,7 +613,7 @@ declare extern type UserGameSettings with
 	RayTracedShadows: EnumRayTracedShadows
 	--- Hardware ray traced ambient occlusion: Off, Low (2 rays per pixel), Medium (4) or High (8). Off at every preset. On, ambient occlusion is drawn even with AmbientOcclusion off, and things off screen darken corners too. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but only AmbientOcclusion's screen-space occlusion is drawn.
 	RayTracedAmbientOcclusion: EnumRayTracedAmbientOcclusion
-	--- Hardware ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, it reads as chosen but the probes keep their bakes (or real-time GI, as set).
+	--- Ray traced global illumination: Off, Low (128 light probes a frame, 64 rays each), Medium (256, 128 rays) or High (512, 256 rays). Off at every preset. On, light probes are traced with rays each frame, so bounced light follows the sun, lamps and moving parts: a grid that follows the camera (so no LightProbeVolume is needed) and the world's LightProbeVolumes. With Hardware ray tracing off (the player's setting) or on a GPU that can't ray trace, the rays are traced in software instead: slower (Low suits it), with leaves' holes guessed. Only a GPU without compute shaders keeps the bakes (or real-time GI, as set).
 	RayTracedGlobalIllumination: EnumRayTracedGlobalIllumination
 end
 
@@ -1670,6 +1670,8 @@ declare extern type Players extends Instance with
 	PlayerAdded: Signal
 	--- Fires with the Player when someone leaves a hosted game, just before their Player (and character) are destroyed.
 	PlayerRemoving: Signal
+	--- Scripts only: fires with the Player and why (a string) when the server catches what their device sent breaking a rule, such as sending far more than a game client does or tables nested too deep. At most once a second for each reason. The server kicks a player flagged too often in a minute on its own (`axcenity-server --kick-flags`); a script may kick sooner or note it.
+	PlayerFlagged: Signal
 	[string]: any
 	--- Every Player in the game.
 	function GetPlayers(self): {Player}
@@ -5714,6 +5716,41 @@ declare extern type ScatterRule extends Instance with
 	[string]: any
 end
 
+--- Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). It covers ground where its height, slope and moisture settings hold, with soft edges (later biomes cover earlier ones), and wherever its GroundLayer is painted. Its GroundLayer is laid under the other layers' own rules there, and the ScatterRules inside it place only where it covers, thinning out at its edges. ScatterRules outside every Biome place anywhere.
+declare extern type Biome extends Instance with
+	--- If false, the biome covers nothing and the rules inside it place nothing. True by default.
+	Enabled: boolean
+	--- The name of the TerrainLayer that covers the biome's ground. Painting that layer in the Terrain Studio paints the biome too. Empty for none.
+	GroundLayer: string
+	--- If true (the default), the biome covers ground by itself wherever its height, slope and moisture settings hold; if false, only where its GroundLayer is painted.
+	AutoEnabled: boolean
+	--- Studs above the terrain's bottom where the biome starts. 0 by default.
+	MinHeight: number
+	--- Studs above the terrain's bottom where the biome ends. 10000 by default.
+	MaxHeight: number
+	--- Studs over which each height edge fades. 8 by default.
+	HeightFade: number
+	--- Degrees from flat where the biome starts. 0 by default.
+	MinSlope: number
+	--- Degrees from flat where the biome ends. 90 by default.
+	MaxSlope: number
+	--- Degrees over which each slope edge fades. 5 by default.
+	SlopeFade: number
+	--- 0 (dry) to 1 (wet): the driest ground the biome covers. Moisture is noise over the terrain, the same for every biome with the same MoistureScale. 0 by default.
+	MinMoisture: number
+	--- 0 to 1: the wettest ground the biome covers. 1 by default.
+	MaxMoisture: number
+	--- How much of the moisture range each moisture edge fades over. 0.1 by default.
+	MoistureFade: number
+	--- Studs across one dry or wet patch. 400 by default.
+	MoistureScale: number
+	--- 0 to 1: breaks the biome's edges up with noise. 0.3 by default.
+	EdgeNoise: number
+	--- Studs across the edge noise's patches. 48 by default.
+	NoiseScale: number
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -5734,7 +5771,130 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "SunRaysEffect") -> SunRaysEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "IKControl") -> IKControl) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: "DataLayer") -> DataLayer) & ((className: "ScatterRule") -> ScatterRule) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part)
+		& ((className: "MeshPart") -> MeshPart)
+		& ((className: "UnionOperation") -> UnionOperation)
+		& ((className: "NegateOperation") -> NegateOperation)
+		& ((className: "Seat") -> Seat)
+		& ((className: "VehicleSeat") -> VehicleSeat)
+		& ((className: "DamageZone") -> DamageZone)
+		& ((className: "ReverbZone") -> ReverbZone)
+		& ((className: "SpawnLocation") -> SpawnLocation)
+		& ((className: "Script") -> Script)
+		& ((className: "LocalScript") -> LocalScript)
+		& ((className: "ModuleScript") -> ModuleScript)
+		& ((className: "RemoteEvent") -> RemoteEvent)
+		& ((className: "RemoteFunction") -> RemoteFunction)
+		& ((className: "BindableEvent") -> BindableEvent)
+		& ((className: "BindableFunction") -> BindableFunction)
+		& ((className: "Model") -> Model)
+		& ((className: "Folder") -> Folder)
+		& ((className: "SurfaceAppearance") -> SurfaceAppearance)
+		& ((className: "ScreenGui") -> ScreenGui)
+		& ((className: "Frame") -> Frame)
+		& ((className: "TextLabel") -> TextLabel)
+		& ((className: "TextButton") -> TextButton)
+		& ((className: "ImageLabel") -> ImageLabel)
+		& ((className: "TextBox") -> TextBox)
+		& ((className: "PageLayout") -> PageLayout)
+		& ((className: "Table") -> Table)
+		& ((className: "ScrollingFrame") -> ScrollingFrame)
+		& ((className: "Slider") -> Slider)
+		& ((className: "Toggle") -> Toggle)
+		& ((className: "Dropdown") -> Dropdown)
+		& ((className: "ProgressBar") -> ProgressBar)
+		& ((className: "BillboardGui") -> BillboardGui)
+		& ((className: "Sound") -> Sound)
+		& ((className: "SoundGroup") -> SoundGroup)
+		& ((className: "ReverbSoundEffect") -> ReverbSoundEffect)
+		& ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect)
+		& ((className: "CompressorSoundEffect") -> CompressorSoundEffect)
+		& ((className: "EchoSoundEffect") -> EchoSoundEffect)
+		& ((className: "DistortionSoundEffect") -> DistortionSoundEffect)
+		& ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect)
+		& ((className: "LowPassSoundEffect") -> LowPassSoundEffect)
+		& ((className: "HighPassSoundEffect") -> HighPassSoundEffect)
+		& ((className: "PointLight") -> PointLight)
+		& ((className: "SpotLight") -> SpotLight)
+		& ((className: "RectLight") -> RectLight)
+		& ((className: "ReflectionProbe") -> ReflectionProbe)
+		& ((className: "LightProbeVolume") -> LightProbeVolume)
+		& ((className: "Atmosphere") -> Atmosphere)
+		& ((className: "Clouds") -> Clouds)
+		& ((className: "Weather") -> Weather)
+		& ((className: "OutlineEffect") -> OutlineEffect)
+		& ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect)
+		& ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect)
+		& ((className: "VignetteEffect") -> VignetteEffect)
+		& ((className: "FilmGrainEffect") -> FilmGrainEffect)
+		& ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect)
+		& ((className: "SharpenEffect") -> SharpenEffect)
+		& ((className: "SunRaysEffect") -> SunRaysEffect)
+		& ((className: "MotionBlurEffect") -> MotionBlurEffect)
+		& ((className: "GraphicsVolume") -> GraphicsVolume)
+		& ((className: "ExposureEffect") -> ExposureEffect)
+		& ((className: "FogEffect") -> FogEffect)
+		& ((className: "BloomEffect") -> BloomEffect)
+		& ((className: "ParticleEmitter") -> ParticleEmitter)
+		& ((className: "Animator") -> Animator)
+		& ((className: "Animation") -> Animation)
+		& ((className: "AnimationTrack") -> AnimationTrack)
+		& ((className: "Sequence") -> Sequence)
+		& ((className: "Spline") -> Spline)
+		& ((className: "SplinePoint") -> SplinePoint)
+		& ((className: "SplineFollower") -> SplineFollower)
+		& ((className: "SplineMesh") -> SplineMesh)
+		& ((className: "SplineScatter") -> SplineScatter)
+		& ((className: "Decal") -> Decal)
+		& ((className: "ProjectedDecal") -> ProjectedDecal)
+		& ((className: "Terrain") -> Terrain)
+		& ((className: "TerrainLayer") -> TerrainLayer)
+		& ((className: "ThirdPersonController") -> ThirdPersonController)
+		& ((className: "FirstPersonController") -> FirstPersonController)
+		& ((className: "NavigationAgent") -> NavigationAgent)
+		& ((className: "Checkpoint") -> Checkpoint)
+		& ((className: "Camera") -> Camera)
+		& ((className: "Attachment") -> Attachment)
+		& ((className: "VehicleWheel") -> VehicleWheel)
+		& ((className: "Ragdoll") -> Ragdoll)
+		& ((className: "IKControl") -> IKControl)
+		& ((className: "Fracture") -> Fracture)
+		& ((className: "Health") -> Health)
+		& ((className: "ProximityPrompt") -> ProximityPrompt)
+		& ((className: "ClickDetector") -> ClickDetector)
+		& ((className: "Tool") -> Tool)
+		& ((className: "Inventory") -> Inventory)
+		& ((className: "Humanoid") -> Humanoid)
+		& ((className: "Ability") -> Ability)
+		& ((className: "Effect") -> Effect)
+		& ((className: "ForceField") -> ForceField)
+		& ((className: "Team") -> Team)
+		& ((className: "WeldConstraint") -> WeldConstraint)
+		& ((className: "HingeConstraint") -> HingeConstraint)
+		& ((className: "BallSocketConstraint") -> BallSocketConstraint)
+		& ((className: "PrismaticConstraint") -> PrismaticConstraint)
+		& ((className: "CylindricalConstraint") -> CylindricalConstraint)
+		& ((className: "SpringConstraint") -> SpringConstraint)
+		& ((className: "RopeConstraint") -> RopeConstraint)
+		& ((className: "RodConstraint") -> RodConstraint)
+		& ((className: "LinearVelocity") -> LinearVelocity)
+		& ((className: "AngularVelocity") -> AngularVelocity)
+		& ((className: "VectorForce") -> VectorForce)
+		& ((className: "Torque") -> Torque)
+		& ((className: "AlignPosition") -> AlignPosition)
+		& ((className: "AlignOrientation") -> AlignOrientation)
+		& ((className: "IntValue") -> IntValue)
+		& ((className: "NumberValue") -> NumberValue)
+		& ((className: "StringValue") -> StringValue)
+		& ((className: "BoolValue") -> BoolValue)
+		& ((className: "Vector3Value") -> Vector3Value)
+		& ((className: "Color3Value") -> Color3Value)
+		& ((className: "CFrameValue") -> CFrameValue)
+		& ((className: "ObjectValue") -> ObjectValue)
+		& ((className: "DataLayer") -> DataLayer)
+		& ((className: "ScatterRule") -> ScatterRule)
+		& ((className: "Biome") -> Biome)
+		& ((className: string) -> Instance)
 end
 
 --- Creates Instances.

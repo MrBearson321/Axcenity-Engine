@@ -2783,6 +2783,81 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, parts and characters bump into what it places, as into painted foliage marked solid. False by default.",
     ),
     (
+        ClassName::Biome,
+        "Enabled",
+        "If false, the biome covers nothing and the rules inside it place nothing. True by default.",
+    ),
+    (
+        ClassName::Biome,
+        "GroundLayer",
+        "The name of the TerrainLayer that covers the biome's ground. Painting that layer in the Terrain Studio paints the biome too. Empty for none.",
+    ),
+    (
+        ClassName::Biome,
+        "AutoEnabled",
+        "If true (the default), the biome covers ground by itself wherever its height, slope and moisture settings hold; if false, only where its GroundLayer is painted.",
+    ),
+    (
+        ClassName::Biome,
+        "MinHeight",
+        "Studs above the terrain's bottom where the biome starts. 0 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MaxHeight",
+        "Studs above the terrain's bottom where the biome ends. 10000 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "HeightFade",
+        "Studs over which each height edge fades. 8 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MinSlope",
+        "Degrees from flat where the biome starts. 0 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MaxSlope",
+        "Degrees from flat where the biome ends. 90 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "SlopeFade",
+        "Degrees over which each slope edge fades. 5 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MinMoisture",
+        "0 (dry) to 1 (wet): the driest ground the biome covers. Moisture is noise over the terrain, the same for every biome with the same MoistureScale. 0 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MaxMoisture",
+        "0 to 1: the wettest ground the biome covers. 1 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MoistureFade",
+        "How much of the moisture range each moisture edge fades over. 0.1 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "MoistureScale",
+        "Studs across one dry or wet patch. 400 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "EdgeNoise",
+        "0 to 1: breaks the biome's edges up with noise. 0.3 by default.",
+    ),
+    (
+        ClassName::Biome,
+        "NoiseScale",
+        "Studs across the edge noise's patches. 48 by default.",
+    ),
+    (
         ClassName::ThirdPersonController,
         "Movement",
         "\"Walk\", \"Run\" or \"Crouch\", or any other name for a custom mode: the controller stops moving the character, and scripts and blocks move it. Set \"\" to clear a custom mode; the controller puts back the built-in mode it had. Set and read from a script or the set-property and property blocks.",
@@ -5209,6 +5284,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires with the Player when someone leaves a hosted game, just before their Player (and character) are destroyed.",
     ),
     (
+        ClassName::Players,
+        "PlayerFlagged",
+        "Scripts only: fires with the Player and why (a string) when the server catches what their device sent breaking a rule, such as sending far more than a game client does or tables nested too deep. At most once a second for each reason. The server kicks a player flagged too often in a minute on its own (`axcenity-server --kick-flags`); a script may kick sooner or note it.",
+    ),
+    (
         ClassName::Player,
         "CharacterAdded",
         "Fires with the character Model once it's in the Workspace: when the player first gets one, after each respawn and after `LoadCharacter`.",
@@ -5446,6 +5526,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ScatterRule => {
             "Inside a Terrain: places plants, props or models (Models) over the ground by itself, where its height, slope, layer and water settings allow, about Spacing studs apart at Density, gathered into clumps by Clumping and keeping AvoidRadius from what the rules before it placed. Rules work in order, like TerrainLayers. What they place is made again on every device whenever the ground or the rules change (only the parts of the terrain that changed), and is never saved; Bake in the Terrain Studio keeps it as painted foliage."
+        }
+        ClassName::Biome => {
+            "Inside a Terrain: an area of the ground, such as a forest or an alpine meadow (procedural worlds PW2). It covers ground where its height, slope and moisture settings hold, with soft edges (later biomes cover earlier ones), and wherever its GroundLayer is painted. Its GroundLayer is laid under the other layers' own rules there, and the ScatterRules inside it place only where it covers, thinning out at its edges. ScatterRules outside every Biome place anywhere."
         }
         ClassName::DataLayer => {
             "A data layer (roadmap R16): the Instances tagged with its Name (CollectionService), wherever they are in the tree. The editor's Layers panel shows, hides and locks them together; renaming the layer renames the tag."

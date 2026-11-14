@@ -224,6 +224,15 @@ TextBox.FocusLost: Signal
 
 Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
 
+```lua
+local box = script.Parent
+box.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		print("You typed:", box.Text)
+	end
+end)
+```
+
 #### MouseEnter
 
 ```luau

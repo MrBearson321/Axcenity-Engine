@@ -1797,14 +1797,18 @@ const SWAY_REACH: f32 = 0.25 * 1.35;
 /// 0.6 of one upward, about 1.2 together.
 const FLUTTER_REACH: f32 = 1.3;
 
-/// One pose of an animated mesh, for skinning on the GPU: where each joint
-/// moves the corners weighted to it.
+/// One pose of an animated mesh, for skinning on the GPU: how far it
+/// leans toward each of its blend shapes ([`MeshSource::morphs`]), then
+/// where each joint moves the corners weighted to it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Skin {
     joints: Vec<Mat4>,
     /// The matching turn for normals (each joint's inverse transpose), so
     /// they stay perpendicular to stretched surfaces.
     normals: Vec<Mat3>,
+    /// One weight per blend shape target ([`MorphView::target`] indexes
+    /// them), applied before the joints. Empty for none.
+    morph_weights: Vec<f32>,
 }
 
 impl Skin {
@@ -1816,7 +1820,23 @@ impl Skin {
             .iter()
             .map(|joint| Mat3::from_mat4(*joint).inverse().transpose())
             .collect();
-        Self { joints, normals }
+        Self {
+            joints,
+            normals,
+            morph_weights: Vec::new(),
+        }
+    }
+
+    /// Leans the mesh toward its blend shapes by `weights` (one per
+    /// target, [`MorphView::target`] order), before the joints move it.
+    /// A skin with weights and no joints only morphs.
+    pub fn set_morph_weights(&mut self, weights: &[f32]) {
+        self.morph_weights.clear();
+        self.morph_weights.extend_from_slice(weights);
+    }
+
+    pub fn morph_weights(&self) -> &[f32] {
+        &self.morph_weights
     }
 
     /// Changes this to another pose, reusing its buffers: `normals` are
@@ -1905,6 +1925,18 @@ pub trait MeshSource: Send + Sync {
     fn skin_weights(&self) -> &[[f32; 4]] {
         &[]
     }
+    /// How many blend shapes move this mesh's corners ([`MeshSource::morph`]).
+    /// A mesh with none keeps the default.
+    fn morph_count(&self) -> usize {
+        0
+    }
+    /// Blend shape `index` (below [`MeshSource::morph_count`]): the corners
+    /// it moves and how, at weight 1. An item's [`Skin`] says how far it
+    /// leans toward each target.
+    fn morph(&self, index: usize) -> Option<MorphView<'_>> {
+        let _ = index;
+        None
+    }
     /// Changes when the corners do (an animated, posed mesh), with the same
     /// key and indices: the renderer then rewrites its copy's corners in
     /// place. A mesh that never changes keeps the default.
@@ -1926,6 +1958,18 @@ pub trait MeshSource: Send + Sync {
         let _ = level;
         None
     }
+}
+
+/// One blend shape of a mesh, as the caller holds it: the corners it moves,
+/// in rising order, and how far each moves (and how its normal changes) at
+/// weight 1, in the mesh's own space.
+#[derive(Clone, Copy, Debug)]
+pub struct MorphView<'a> {
+    /// Which of the [`Skin::morph_weights`] leans the mesh toward it.
+    pub target: u16,
+    pub corners: &'a [u32],
+    pub positions: &'a [[f32; 3]],
+    pub normals: &'a [[f32; 3]],
 }
 
 /// An image the caller owns, to put on a surface ([`Material`]'s textures).

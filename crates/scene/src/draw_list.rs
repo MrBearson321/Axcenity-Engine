@@ -674,9 +674,12 @@ fn mesh_part_draw_items(
         .map(|color| [color.r, color.g, color.b]);
     // A pose of another model (the MeshId just changed) isn't used. Every
     // part of the model moves with the pose's joints, on the GPU.
+    // A model with blend shapes the file leans toward, and nothing posing
+    // it, is drawn leaning toward them.
     let skin = posed
         .filter(|posed| posed.model_key == model.key())
-        .map(|posed| meshes.skins.get(id, posed));
+        .map(|posed| meshes.skins.get(id, posed))
+        .or_else(|| meshes.skins.rest(model));
     // The model's meshes and file materials are made once and shared by
     // every MeshPart showing it, frame after frame (I8).
     for (primitive, piece) in model.primitives.iter().zip(pieces) {
@@ -846,6 +849,18 @@ impl MeshSource for ModelMesh {
     }
     fn skin_weights(&self) -> &[[f32; 4]] {
         &self.primitive().weights
+    }
+    fn morph_count(&self) -> usize {
+        self.primitive().morphs.len()
+    }
+    fn morph(&self, index: usize) -> Option<axcenity_render::MorphView<'_>> {
+        let morph = self.primitive().morphs.get(index)?;
+        Some(axcenity_render::MorphView {
+            target: morph.target,
+            corners: &morph.corners,
+            positions: &morph.positions,
+            normals: &morph.normals,
+        })
     }
     fn lod_count(&self) -> usize {
         self.copies.len()

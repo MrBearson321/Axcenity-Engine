@@ -7,7 +7,7 @@ Priority 7 of Paul's list of 2026-11-14: "investigate USD and Alembic support, i
 | Area | Today |
 |---|---|
 | Model formats | glTF 2.0 (`.gltf`, `.glb`) through the `gltf` crate, FBX (binary and ASCII, every version) through `ufbx` 0.11. Both are read at load time by `assets` (`model.rs`, `model/fbx.rs`), in the editor and in built games alike, into one `Model` (triangles fitted into the unit cube, materials and maps, rig, `_LOD`/`_COL` objects) |
-| Animation sources | FBX takes (baked per bone); glTF animation isn't read |
+| Animation sources | FBX takes (baked per bone); glTF animations (read as takes) |
 | Import | One Import… and drag and drop: the Import dialog (objects, Bring in as, Weld parts, materials and maps, clips and an Animator), copied into `assets/models/`, embedded textures copied out, one undo step |
 | Import presets | Texture presets only (R12, `assets/src/import_presets.rs`): compression and largest size, per file (sidecar) or per folder (`import-presets.json`). Nothing remembers how a model comes in |
 | Conversion | None: a file is read as the format it is, or refused |

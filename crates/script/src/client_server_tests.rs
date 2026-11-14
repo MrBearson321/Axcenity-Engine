@@ -426,10 +426,25 @@ fn sending_something_that_cannot_travel_is_an_error() {
         print(pcall(remote.FireAllClients, remote, loop))
         print(pcall(remote.FireAllClients, 5))
         print(pcall(remote.FireClient, remote, workspace, 1))
+        local function nested(depth)
+            local t = {}
+            for _ = 2, depth do
+                t = { t }
+            end
+            return t
+        end
+        print(pcall(remote.FireAllClients, remote, nested(32)))
+        print(pcall(remote.FireAllClients, remote, nested(33)))
         "#,
     );
     let output = lines(&mut runtime);
-    assert_eq!(output.len(), 4, "{output:?}");
+    assert_eq!(output.len(), 6, "{output:?}");
+    assert_eq!(output[4], "true");
+    assert!(
+        output[5].contains("can't send tables nested more than 32 deep"),
+        "{}",
+        output[5]
+    );
     assert!(
         output[0].starts_with("false\t") && output[0].contains("can't send a function"),
         "{}",
