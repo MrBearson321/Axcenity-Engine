@@ -380,6 +380,7 @@ impl ScenePipeline {
             no_ray_shadows,
             ray_ao: None,
             ray_gi: None,
+            soft_scene: None,
             #[cfg(feature = "debug-views")]
             debug_views: None,
             texture_bytes,
@@ -666,10 +667,16 @@ impl ScenePipeline {
                 // The probes traced while it was on give way to their bakes.
                 self.light_probes.restore_bakes();
             }
-        } else if self.ray_gi.is_none() {
+        } else if self
+            .ray_gi
+            .as_ref()
+            .is_none_or(|gi| gi.software != self.graphics.ray_traced_gi_in_software)
+        {
+            // Its rays are traced in hardware, or in software (RL3).
             self.ray_gi = Some(Box::new(ray_gi::RayGlobalIllumination::new(
                 &self.device,
                 &self.frame_entries,
+                self.graphics.ray_traced_gi_in_software,
             )));
             self.bind_frame();
         }
@@ -1348,6 +1355,24 @@ impl ScenePipeline {
             ),
             &draws,
         );
+        // Without ray queries, GI's rays walk a scene built in software.
+        if ray_gi_batch.is_some() && self.graphics.ray_traced_gi_in_software {
+            let soft = self
+                .soft_scene
+                .get_or_insert_with(|| Box::new(ray_soft::SoftScene::new(&self.device)));
+            soft.prepare(
+                (&self.device, &self.queue),
+                (
+                    self.frame,
+                    glam::Vec3::from_slice(&frame_uniform.camera_position[..3]),
+                    self.graphics.ray_tracing_distance,
+                ),
+                &draws,
+                |key| gpu_mesh_in(&self.meshes, &self.custom_meshes, key),
+            );
+        } else {
+            self.soft_scene = None;
+        }
         if let Some(scene) = &mut self.ray_scene {
             let [on, _, reach, _] = frame_uniform.ray_shadows;
             scene.stats.shadow_reach = if on > 0.5 { reach.round() as u32 } else { 0 };
@@ -1578,18 +1603,26 @@ impl ScenePipeline {
         mark(&mut encoder, FramePass::RayTracedGi);
         // The camera's probes move along with it first.
         self.light_probes.follow_camera(&mut encoder);
-        let ray_gi_drawn = if let (Some(gi), Some(batch), Some(rays)) =
-            (&mut self.ray_gi, &ray_gi_batch, &self.ray_scene)
-            && let Some(surfaces) = &rays.surfaces
+        let gi_scene = match (&self.ray_scene, &self.soft_scene) {
+            (Some(rays), _) => rays.surfaces.as_ref().map(|surfaces| {
+                ray_gi::GiScene::Hardware(rays.tlas(), &surfaces.buffer, &rays.cut_outs)
+            }),
+            (None, Some(soft)) => Some(ray_gi::GiScene::Software(
+                soft.buffer(),
+                &soft.surfaces.buffer,
+            )),
+            (None, None) => None,
+        };
+        let ray_gi_drawn = if let (Some(gi), Some(batch), Some(scene)) =
+            (&mut self.ray_gi, &ray_gi_batch, gi_scene)
         {
             gi.trace(
                 (&self.device, &self.queue),
                 &mut encoder,
-                (rays.tlas(), &surfaces.buffer, &rays.cut_outs),
+                scene,
                 batch,
                 &self.light_probes,
-            );
-            true
+            )
         } else {
             false
         };
@@ -2365,6 +2398,7 @@ impl ScenePipeline {
                 + self.probes.bytes()
                 + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
                 + self.ray_gi.as_ref().map_or(0, |gi| gi.bytes())
+                + self.soft_scene.as_ref().map_or(0, |soft| soft.bytes())
                 + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
                 + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum::<u64>()
