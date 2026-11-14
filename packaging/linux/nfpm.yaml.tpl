@@ -29,6 +29,12 @@ contents:
       mode: 0755
   - src: ${STAGE}/players
     dst: /opt/axcenity/players
+  - src: ${STAGE}/tools/luau-lsp
+    dst: /opt/axcenity/tools/luau-lsp
+    file_info:
+      mode: 0755
+  - src: ${STAGE}/tools/luau-lsp-LICENSE.txt
+    dst: /opt/axcenity/tools/luau-lsp-LICENSE.txt
   - src: ${STAGE}/LICENSE
     dst: /opt/axcenity/LICENSE
   - src: ${STAGE}/NOTICE

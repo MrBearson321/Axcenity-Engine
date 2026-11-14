@@ -11,6 +11,14 @@ glTF-Sample-Models repository, licensed under Creative Commons
 Attribution 4.0 International (CC BY 4.0).
 https://creativecommons.org/licenses/by/4.0/
 
+Bundled programs
+----------------
+The editor's packages include tools/luau-lsp (tools/luau-lsp.exe on
+Windows): luau-lsp, the Luau language server by JohnnyMorganz
+(https://github.com/JohnnyMorganz/luau-lsp), unmodified, so script tabs can
+type-check. It is licensed under the MIT License; its license is in
+tools/luau-lsp-LICENSE.txt beside it. Exported games don't include it.
+
 Third-party code
 ----------------
 crates/render/src/upscale.wgsl is adapted from AMD FidelityFX Super

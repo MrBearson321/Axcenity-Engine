@@ -17,7 +17,7 @@ wants() { [[ "$FORMATS" == *" $1 "* ]]; }
 # aren't there). The Windows player needs no mark.
 mark_executables() {
   local dir="$1" file
-  for file in axcenity-editor axcenity-player players/macos/axcenity-player players/linux/axcenity-player; do
+  for file in axcenity-editor axcenity-player tools/luau-lsp players/macos/axcenity-player players/linux/axcenity-player; do
     if [ -e "$dir/$file" ]; then chmod +x "$dir/$file"; fi
   done
 }

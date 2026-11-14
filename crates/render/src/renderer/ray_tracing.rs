@@ -16,8 +16,10 @@
 //!   only when a slot changed (an item moved, came or went). wgpu uploads
 //!   the instances from the lowest changed slot up, so a still scene costs
 //!   nothing after its first frame.
-//! - Posed (skinned) items are left out: their mesh is posed in the vertex
-//!   shader, so a BLAS of its corners would be the rest pose.
+//! - Posed (skinned) items are posed again in a compute pass each frame
+//!   into a copy of their own, built into a BLAS of their own
+//!   (`ray_sway.rs`, `ray_skin.wgsl`), within a budget, nearest first; one
+//!   past the budget is left out (its mesh's rest pose would be wrong).
 //! - Swaying plants in a wind get a bent copy of their mesh each frame, a
 //!   BLAS of their own (`ray_sway.rs`), within a budget, nearest first.
 
@@ -25,7 +27,7 @@ use glam::{Mat4, Vec3};
 use rustc_hash::FxHashMap;
 
 use super::ray_cut_outs::{CutOutRaw, CutOuts, has_holes};
-use super::ray_sway::{BENT_TRIANGLES, BentKey, BentMeshes, bending, bent_raw};
+use super::ray_sway::{BENT_TRIANGLES, BentKey, BentMeshes, POSED_TRIANGLES, bending, bent_raw};
 use super::scene::gpu_mesh_in;
 use super::{Draw, GpuMesh, MeshKey, ScenePipeline};
 use crate::draw_list::{DrawItem, Material};
@@ -67,6 +69,11 @@ pub struct RayTracingStats {
     pub path_traced_paths: u32,
     /// Swaying items bent by the wind into BLASes of their own this frame.
     pub bent: u32,
+    /// Posed (skinned) characters moved into BLASes of their own this
+    /// frame.
+    pub posed: u32,
+    /// Posed characters in reach left out for the per-frame budget.
+    pub posed_left_out: u32,
     /// How far ray traced sun shadows reach this frame, in studs (0 while
     /// they're off): the ray tracing distance or the world's
     /// `ShadowDistance`, whichever is nearer.
@@ -193,16 +200,20 @@ impl RayScene {
         let mut wanted_surfaces: Vec<SurfaceRaw> = Vec::new();
         for draw in draws {
             let item = draw.item;
-            // The copy fading out of a level-of-detail switch, and posed
-            // items (see the module's notes).
-            if draw.fade > 1.0 || item.skin.is_some() {
+            // The copy fading out of a level-of-detail switch.
+            if draw.fade > 1.0 {
                 continue;
             }
             let key = draw.mesh();
             let Some(gpu) = mesh(key) else {
                 continue;
             };
-            let (center, radius) = gpu.bounds.sphere(item.transform);
+            // A posed item is bounded by where its joints move it.
+            let bounds = match (&item.skin, &gpu.skin) {
+                (Some(skin), Some(gpu_skin)) => gpu_skin.bounds(skin),
+                _ => gpu.bounds,
+            };
+            let (center, radius) = bounds.sphere(item.transform);
             // Also leaves out an item whose bounds aren't a number.
             let within = center.distance(camera) - radius <= reach;
             if !within {
@@ -283,9 +294,9 @@ impl RayScene {
                     .is_some_and(|entry| entry.built)
             })
             .collect();
-        let bent = self.bend(
+        let (in_slots, bent, posed_left_out) = self.bend(
             (device, queue),
-            &in_slots,
+            in_slots,
             (&wanted, &wanted_items, &wanted_distances),
             clock,
             frame,
@@ -417,39 +428,94 @@ impl RayScene {
             rebuilt: changed,
             path_traced_paths: 0,
             bent: self.bent.as_ref().map_or(0, BentMeshes::bent_count),
+            posed: self.bent.as_ref().map_or(0, BentMeshes::posed_count),
+            posed_left_out,
             shadow_reach: 0,
         };
     }
 
-    /// Bends this frame's swaying items in the wind of `clock`, nearest
-    /// first within [`BENT_TRIANGLES`]: for each of `in_slots` (indices
-    /// into the wanted items), its bent copy, or `None` to keep its mesh's
-    /// rest pose.
+    /// Poses this frame's skinned items and bends its swaying ones in the
+    /// wind of `clock`, nearest first within [`POSED_TRIANGLES`] and
+    /// [`BENT_TRIANGLES`]. Returns `in_slots` (indices into the wanted
+    /// items) without the posed items past the budget, each one's bent or
+    /// posed copy (`None` to keep its mesh's rest pose), and how many posed
+    /// items were left out.
     fn bend(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
-        in_slots: &[usize],
+        in_slots: Vec<usize>,
         (wanted, items, distances): (&[Wanted<'_>], &[&DrawItem], &[f32]),
         clock: [f32; 4],
         frame: u64,
-    ) -> Vec<Option<BentKey>> {
+    ) -> (Vec<usize>, Vec<Option<BentKey>>, u32) {
         let mut bent = vec![None; in_slots.len()];
+        // Posed items first (a skinned mesh never also sways here), then
+        // swaying ones, each nearest first.
+        let posed_mesh = |index: usize| {
+            let gpu = wanted[index].1;
+            items[index].skin.as_ref().zip(gpu.skin.as_ref())
+        };
+        let mut posing: Vec<usize> = (0..in_slots.len())
+            .filter(|&slot| posed_mesh(in_slots[slot]).is_some())
+            .collect();
         let mut swaying: Vec<(usize, [f32; 4])> = in_slots
             .iter()
             .enumerate()
+            .filter(|&(_, &index)| posed_mesh(index).is_none())
             .filter_map(|(slot, &index)| Some((slot, bending(items[index], clock)?)))
             .collect();
-        if swaying.is_empty() {
+        if swaying.is_empty() && posing.is_empty() {
             if let Some(meshes) = &mut self.bent {
                 meshes.begin();
             }
-            return bent;
+            return (in_slots, bent, 0);
         }
-        swaying.sort_by(|a, b| distances[in_slots[a.0]].total_cmp(&distances[in_slots[b.0]]));
+        let nearest =
+            |a: &usize, b: &usize| distances[in_slots[*a]].total_cmp(&distances[in_slots[*b]]);
+        posing.sort_by(nearest);
+        swaying.sort_by(|a, b| nearest(&a.0, &b.0));
         let meshes = self.bent.get_or_insert_with(|| BentMeshes::new(device));
         meshes.begin();
-        let mut budget = BENT_TRIANGLES;
         let mut copies: FxHashMap<BlasKey, u32> = FxHashMap::default();
+        let mut copy_of = |blas_key: BlasKey| {
+            let copy = copies.entry(blas_key).or_default();
+            let key = (blas_key.0, blas_key.1, *copy);
+            *copy += 1;
+            key
+        };
+
+        let mut budget = POSED_TRIANGLES;
+        let mut left_out = vec![false; in_slots.len()];
+        let mut posed_left_out = 0;
+        for slot in posing {
+            let index = in_slots[slot];
+            let (blas_key, gpu, _, _) = wanted[index];
+            let triangles = u64::from(gpu.index_count / 3);
+            let Some((skin, gpu_skin)) = posed_mesh(index) else {
+                continue;
+            };
+            if triangles > budget {
+                left_out[slot] = true;
+                posed_left_out += 1;
+                continue;
+            }
+            budget -= triangles;
+            let key = copy_of(blas_key);
+            let joints: Vec<[[f32; 4]; 4]> =
+                skin.joints().iter().map(Mat4::to_cols_array_2d).collect();
+            meshes.pose(
+                (device, queue),
+                key,
+                gpu,
+                &gpu_skin.buffer,
+                size_of_mesh(gpu, blas_key.1),
+                &joints,
+                frame,
+            );
+            bent[slot] = Some(key);
+        }
+
+        let mut budget = BENT_TRIANGLES;
         for (slot, sway) in swaying {
             let index = in_slots[slot];
             let (blas_key, gpu, transform, _) = wanted[index];
@@ -458,9 +524,7 @@ impl RayScene {
                 continue;
             }
             budget -= triangles;
-            let copy = copies.entry(blas_key).or_default();
-            let key = (blas_key.0, blas_key.1, *copy);
-            *copy += 1;
+            let key = copy_of(blas_key);
             let raw = bent_raw(transform, sway, clock, gpu);
             meshes.bend(
                 (device, queue),
@@ -472,7 +536,18 @@ impl RayScene {
             );
             bent[slot] = Some(key);
         }
-        bent
+
+        if posed_left_out == 0 {
+            return (in_slots, bent, 0);
+        }
+        let (kept_slots, kept_bent) = in_slots
+            .into_iter()
+            .zip(bent)
+            .zip(left_out)
+            .filter(|(_, out)| !out)
+            .map(|(kept, _)| kept)
+            .unzip();
+        (kept_slots, kept_bent, posed_left_out)
     }
 }
 

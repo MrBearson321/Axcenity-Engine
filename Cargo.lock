@@ -798,6 +798,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "toml",
  "zip",
 ]
 

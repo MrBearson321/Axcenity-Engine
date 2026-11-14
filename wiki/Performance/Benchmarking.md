@@ -2,9 +2,9 @@
 title: Benchmarking
 type: performance
 status: current
-verified: 2026-11-11
-verified_commit: 19c7179d
-source: [crates/testing/src/s10k.rs, crates/testing/src/bench_check.rs, crates/core/src/bench.rs, crates/player/src/bench_tests.rs, benchmarks/baselines.json]
+verified: 2026-11-14
+verified_commit: f6d5427
+source: [crates/testing/src/s10k.rs, crates/testing/src/showcase.rs, benchmarks/features/README.md, crates/testing/src/bench_check.rs, crates/core/src/bench.rs, crates/player/src/bench_tests.rs, benchmarks/baselines.json]
 docs: [docs/benchmarks.md, docs/rendering/performance.md]
 tags: [perf, method]
 ---
@@ -18,8 +18,9 @@ How Axcenity is measured, and the rules that make a number trustworthy. Commands
 | Tool | Measures | Command (release) |
 |---|---|---|
 | **S10k scene** | The whole frame on every host: 10,000 parts (1,000 falling), 200 scripts, 50 sounds, 20 animated characters, 10 agents | `cargo run --release -p axcenity-testing -- --make-s10k target/s10k` |
+| **Showcase** (feature benchmark) | The newer rendering features on the owner's real assets: Overgrown Carriage (train, ferns, ivy, farmhouse trees, fog volume, particles, probes, wind) plus shadow-casting lamps, a pond with terrain water, clouds and sun rays; fixed views `interior`, `exterior`, `pond`, `tour` | `cargo run --release -p axcenity-testing -- --make-showcase <out> --from "<projects>/Overgrown Carriage" --view interior` (made on the machine that has the project) |
 | `--bench <frames>` | Any project on any host: 60-frame warm-up, fixed 1/60 s game time, per-step mean/median/p95/worst, first frame, worst warm-up frame, startup (player) and one JSON line | `axcenity-test`, `axcenity-server` (`--bench-clients n`), `axcenity-player`; editor via `bench_project_play` |
-| **`axcenity-bench-check`** | Regression check: reruns `benchmarks/baselines.json`'s scenes (S10k on every host, copies of the owner's projects) against this machine's numbers; `SLOWER` past 10% (frames) or 30% (startup) | `target/release/axcenity-bench-check --machine desktop-9950x3d`; `--update` records |
+| **`axcenity-bench-check`** | Regression check: reruns `benchmarks/baselines.json`'s scenes (S10k on every host and with 8 players, crowd, streaming, copies of the owner's projects, and the showcase through every preset and each ray traced effect via `--graphics benchmarks/features/<file>`) against this machine's numbers; `SLOWER` past 10% (frames) or 30% (startup) | `target/release/axcenity-bench-check --machine desktop-9950x3d`; `--update` records |
 | Render benchmarks | CPU and GPU per pass for built-in scenes (10k parts, 2,000 MeshParts, terrain + foliage, characters, decals) | `cargo test -p axcenity-player --release -- --ignored bench_ --nocapture --test-threads 1` |
 | `bench_project`, `shoot_project`, `bake_project_probes` | Your own project from its spawn and an overview; screenshots from named views | `AXCENITY_BENCH_PROJECT=<folder>` (+ `AXCENITY_SHOT_*`) |
 | Micro-benchmarks | Scheduler, connections, member access, script start, handler fire, native code, UI inventory, mesh builds | `cargo test -p <crate> --release -- --ignored bench_… --nocapture` |
@@ -36,6 +37,10 @@ How Axcenity is measured, and the rules that make a number trustworthy. Commands
 6. **Say what you measured**: host, scene, frames, rounds, commit, machine. Put the table in `docs/benchmarks.md` (or `docs/rendering/performance.md` for drawing), a summary in the [Optimization log](Optimization-Log.md), and a dated row in [Benchmark history](Benchmark-History.md).
 7. **A `SLOWER` from the check is a reason to measure properly**, not proof: rerunning the recorded build straight after recording came back within 6%.
 8. **Startup numbers need cooked projects** for the cooked path (`axcenity-editor --cook <copy>`); before PR #60, `bench_project`/`shoot_project` silently drew cooked textures uncooked.
+
+## Feature matrix
+
+`axcenity-player --graphics <file.json>` holds a run to a settings file (partial `graphics.json`; it also decides whether the GPU opens with hardware ray tracing). `benchmarks/features/` has Ultra plus: RT device only, RT shadows, RT AO, RT GI, all of them (with Ultra reflections, volumetric fog, sun rays) and all at 67% scale with TAA upscaling. A feature's cost is its showcase run's GPU frame minus `showcase-interior-ultra`'s. No numbers are recorded yet (2026-11-14): the owner asked for the first run only once the current feature threads are finished.
 
 ## Frame steps (names are stable)
 

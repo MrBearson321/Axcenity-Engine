@@ -138,6 +138,260 @@
       "host": "player",
       "name": "dry-patch-ultra-1440p",
       "scene": "project:Temperate Dry Patch"
+    },
+    {
+      "about": "The showcase's simulation alone (scripts, physics, particles' and animation's CPU side), headless.",
+      "frames": 300,
+      "host": "test",
+      "name": "showcase-test",
+      "scene": "showcase:interior"
+    },
+    {
+      "about": "The showcase (docs/benchmarks.md, 'Feature benchmark (showcase)'): the owner's Overgrown Carriage with lamps, a pond with water, clouds and sun rays, made from the projects folder. Interior runs go through every preset and then each ray traced effect at Ultra (benchmarks/features).",
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Low"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-low",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Medium"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-medium",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "High"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-high",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-ultra",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-device.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-rt-device",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-shadows.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-rt-shadows",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-ao.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-rt-ao",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-gi.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-rt-gi",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-all.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-rt-all",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-all-upscaled.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-interior-rt-all-upscaled",
+      "scene": "showcase:interior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-exterior-ultra",
+      "scene": "showcase:exterior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-all.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-exterior-rt-all",
+      "scene": "showcase:exterior"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-pond-ultra",
+      "scene": "showcase:pond"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-all.json"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "showcase-pond-rt-all",
+      "scene": "showcase:pond"
+    },
+    {
+      "about": "The camera tours interior, exterior, overview and pond in 12 s; 60 warm-up + 660 measured frames are one lap, so the TLAS, streaming and TAA history see a moving camera.",
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 660,
+      "host": "player",
+      "name": "showcase-tour-ultra",
+      "scene": "showcase:tour"
+    },
+    {
+      "args": [
+        "--size",
+        "2560x1440",
+        "--graphics",
+        "benchmarks/features/ultra-rt-all.json"
+      ],
+      "frames": 660,
+      "host": "player",
+      "name": "showcase-tour-rt-all",
+      "scene": "showcase:tour"
+    },
+    {
+      "frames": 600,
+      "host": "test",
+      "name": "crowd-test",
+      "scene": "crowd"
+    },
+    {
+      "about": "200 animated characters and 2,000 bodies in the graphics reference scene (unified Phase 93).",
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 300,
+      "host": "player",
+      "name": "crowd-player",
+      "scene": "crowd"
+    },
+    {
+      "about": "Phase 80's 4 x 4 km streaming world; the host's own screen while the tour moves its character.",
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 600,
+      "host": "player",
+      "name": "streaming-player",
+      "scene": "streaming"
+    },
+    {
+      "args": [
+        "--bench-clients",
+        "1"
+      ],
+      "frames": 600,
+      "host": "server",
+      "name": "streaming-server-1-player",
+      "scene": "streaming"
+    },
+    {
+      "about": "S10k replicated to 8 loopback players (M7).",
+      "args": [
+        "--bench-clients",
+        "8"
+      ],
+      "frames": 600,
+      "host": "server",
+      "name": "s10k-server-8-players",
+      "scene": "s10k"
     }
   ],
   "tolerance": {

@@ -156,7 +156,7 @@ impl HostIo for App {
     /// drawn from this frame.
     fn graphics_changed(&mut self) {
         if let Some(change) = self.sim.scripts.take_graphics_change()
-            && self.quality.is_none()
+            && self.fixed_graphics.is_none()
             && let Some(renderer) = &mut self.renderer
         {
             let capabilities = *renderer.capabilities();
